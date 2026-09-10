@@ -1,0 +1,6 @@
+.env
+certs/
+.venv/
+node_modules/
+__pycache__/
+evals/results/
