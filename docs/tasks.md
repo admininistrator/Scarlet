@@ -133,18 +133,18 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.1 — Khởi tạo repo và cấu trúc thư mục
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-H4 · **Ước lượng:** 1h
+- **Trạng thái:** ✅ · **Phụ thuộc:** T-H4 · **Ước lượng:** 1h
 - **KH:** §23
 - **Việc:**
-  - [ ] Tạo cây thư mục đúng §23 (kể cả thư mục rỗng, đặt `.gitkeep`)
-  - [ ] `.gitattributes`: `*.sh text eol=lf`, `*.py text eol=lf` (C39)
-  - [ ] `.gitignore`: `.env`, `certs/`, `.venv/`, `node_modules/`, `__pycache__/`, `evals/results/`
-  - [ ] `README.md` ngắn: cách chạy, trỏ tới `docs/`
-  - [ ] Chép `META-LAP-KE-HOACH.md`, `KE-HOACH.md`, `tasks.md`, `HUONG-DAN-AGENT.md` vào `docs/`
+  - [x] Tạo cây thư mục đúng §23 (kể cả thư mục rỗng, đặt `.gitkeep`)
+  - [x] `.gitattributes`: `*.sh text eol=lf`, `*.py text eol=lf` (C39)
+  - [x] `.gitignore`: `.env`, `certs/`, `.venv/`, `node_modules/`, `__pycache__/`, `evals/results/`
+  - [x] `README.md` ngắn: cách chạy, trỏ tới `docs/`
+  - [x] Chép `META-LAP-KE-HOACH.md`, `KE-HOACH.md`, `tasks.md`, `HUONG-DAN-AGENT.md` vào `docs/`
 - **Xong khi (DoD):**
-  - [ ] `pwd` bắt đầu bằng `/home/`, **không** phải `/mnt/c/` (C35)
-  - [ ] `git status` sạch sau khi tạo file `.env` thử → `.env` **không** xuất hiện
-  - [ ] `find . -type d -empty -not -path './.git/*'` trả về rỗng
+  - [x] `pwd` bắt đầu bằng `/home/`, **không** phải `/mnt/c/` (C35)
+  - [x] `git status` sạch sau khi tạo file `.env` thử → `.env` **không** xuất hiện
+  - [x] `find . -type d -empty -not -path './.git/*'` trả về rỗng
 - **Cạm bẫy:** C35 — repo ở `/mnt/c/` khiến mọi thứ sau này chậm 10–20× và bạn sẽ đổ lỗi nhầm cho Docker.
 
 ---
