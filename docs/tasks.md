@@ -1027,7 +1027,6 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 | B-13 | Import hội thoại từ ChatGPT/Claude export | Đối xứng với T-8.5/T-8.6 |
 | B-14 | So sánh hai model song song trong cùng một câu hỏi | — |
 | B-15 | `.env.example` **không `source` được bằng shell**: `MAIL_FROM=Scarlet <no-reply@...>` bị shell hiểu là redirect. Docker compose đọc bình thường, nhưng dev chạy backend ngoài Docker cần `scripts/load-env.sh` hoặc direnv | T-0.3 — chép nguyên KH Phụ lục B nên không tự sửa |
-| B-16 | KH Phụ lục C dùng `${POSTGRES_PASSWORD}` cho service `postgres` nhưng **biến này không có trong Phụ lục B**, nên cũng không có trong `.env.example`/`Settings`. Phải chốt ở T-0.4 | T-0.3 |
 | B-17 | KH §22.6 nhắc `CORS_ORIGINS` khi lên domain, nhưng biến này **không có trong Phụ lục B** | T-0.3 |
 | B-18 | `ValidationError` in kèm giá trị bị từ chối (`input_value='short'`) — một secret yếu sẽ lọt vào log lúc app từ chối boot. Cân nhắc bọc `Settings()` để in bản tóm tắt đã che giá trị | T-0.3 |
 
@@ -1060,6 +1059,7 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 | **NQ-05** | 2026-09-10 | Ba DoD "quan sát bằng mắt" ở KH §24.3 (P3) được thay bằng lighthouse + axe-core | Điểm yếu #3 trong rà soát §7.5: DoD không thể sai là DoD vô dụng |
 | **NQ-07** | 2026-09-10 | Bổ sung **R22** (mở rộng provider có endpoint tuỳ chỉnh), **S15**, **§9.8–9.10** và **T-0.12** | Người dùng hỏi lại và phát hiện thiếu sót: kiến trúc chịu được nhưng không có yêu cầu nào ghi ra, và S7 chỉ đo "thêm **model**" chứ không đo "thêm **provider**". Khả năng không được đo là khả năng sẽ mất |
 | **NQ-06** | 2026-09-10 | **Không cắt phạm vi** (đã đề nghị cắt 40%, bị từ chối) | Không có deadline. Đường lùi vẫn ghi ở §7.5 của báo cáo rà soát nếu sau này cần |
+| **NQ-08** | 2026-09-10 | `POSTGRES_PASSWORD` **vào `.env.example`** (bổ sung so với KH Phụ lục B) nhưng **không** vào `Settings`; `tests/test_settings_complete.py` miễn trừ nó qua danh sách `COMPOSE_ONLY`. Gỡ B-16 khỏi Backlog | Phương án (a) người dùng chốt. `.env.example` là hợp đồng với **người vận hành**, không chỉ với backend: compose cần biến này (KH Phụ lục C) nên nó phải hiện diện ở đó, còn backend không có việc gì đọc mật khẩu Postgres ngoài `DATABASE_URL`. Danh sách miễn trừ có test riêng chống mục ruỗng: tên nào không còn trong `.env.example` phải bị gỡ |
 
 ---
 
