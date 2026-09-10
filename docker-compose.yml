@@ -4,6 +4,57 @@ x-common: &common
   networks: [internal]
 
 services:
+  nginx:
+    <<: *common
+    image: nginx:1.27-alpine
+    # Hai lech so voi Phu luc C, ca hai do MOI TRUONG may nay ep, khong phai
+    # lua chon kien truc (xem B-37, B-38):
+    #  1. Publish IPv4 TUONG MINH thay vi dang rut gon "443:443": MITM server
+    #     cua 9Router giu [::]:443 tren host Windows, dang rut gon lam Docker
+    #     Desktop publish ca hai stack roi chet voi "ports are not available".
+    #  2. KHONG publish :80: project `infra` (WorldVoice) dang giu 0.0.0.0:80.
+    #     Nginx VAN nghe :80 trong container va van redirect 301 sang HTTPS —
+    #     chi la host chua map toi. Mo lai bang mot dong khi :80 duoc giai phong.
+    ports: ["0.0.0.0:443:443"]
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on: { api: { condition: service_healthy } }
+    healthcheck:
+      # Phu luc C khong dinh nghia healthcheck cho nginx, nhung DoD chung §15
+      # doi "docker compose ps - moi service healthy". Goi vao location health
+      # noi bo tren :80 (cong khong publish). Image nginx:alpine co busybox wget,
+      # khong co curl.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/_nginx_health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    profiles: [core]
+
+  api:
+    <<: *common
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    # §23: config/ MOUNTED, khong nam trong image. catalog.py doc
+    # parents[3]/config/model_catalog.json -> trong container la /config/.
+    # Bind-mount la dieu kien de §19.1 dung: sua catalog + POST
+    # /admin/catalog/reload co hieu luc ma KHONG phai build lai image.
+    volumes: ["./config:/config:ro"]
+    healthcheck:
+      # Phu luc C ghi curl, nhung image python:3.12-slim KHONG co curl
+      # -> healthcheck luon unhealthy va nginx (depends_on: service_healthy)
+      # se khong bao gio khoi dong. Cung ly do va cung cach vong nhu litellm
+      # ben duoi. Xem B-30.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      migrate:  { condition: service_completed_successfully }
+    profiles: [core]
+
   postgres:
     <<: *common
     image: postgres:17-alpine
