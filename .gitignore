@@ -3,4 +3,5 @@ certs/
 .venv/
 node_modules/
 __pycache__/
+*.egg-info/
 evals/results/

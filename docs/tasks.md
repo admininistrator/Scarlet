@@ -150,19 +150,19 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.2 — Backend skeleton + `.venv`
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-0.1 · **Ước lượng:** 2h
+- **Trạng thái:** ✅ · **Phụ thuộc:** T-0.1 · **Ước lượng:** 2h
 - **KH:** §23, `CLAUDE.md`
 - **Việc:**
-  - [ ] `backend/pyproject.toml`: fastapi, uvicorn[standard], sqlalchemy[asyncio], asyncpg, alembic, pydantic-settings, redis, arq, openai, argon2-cffi, python-magic, pillow, httpx, jinja2; group dev: pytest, pytest-asyncio, ruff, mypy
-  - [ ] `python -m venv .venv` **trong WSL**, `pip install -e ".[dev]"`
-  - [ ] `app/main.py`: FastAPI app, `GET /health` trả `{"status":"ok"}`
-  - [ ] `app/api/v1/__init__.py` với router tiền tố `/api/v1`
-  - [ ] `backend/Dockerfile` multi-stage, non-root user
+  - [x] `backend/pyproject.toml`: fastapi, uvicorn[standard], sqlalchemy[asyncio], asyncpg, alembic, pydantic-settings, redis, arq, openai, argon2-cffi, python-magic, pillow, httpx, jinja2; group dev: pytest, pytest-asyncio, ruff, mypy
+  - [x] `python -m venv .venv` **trong WSL**, `pip install -e ".[dev]"`
+  - [x] `app/main.py`: FastAPI app, `GET /health` trả `{"status":"ok"}`
+  - [x] `app/api/v1/__init__.py` với router tiền tố `/api/v1`
+  - [x] `backend/Dockerfile` multi-stage, non-root user
 - **Xong khi (DoD):**
-  - [ ] `cd backend && source .venv/bin/activate && python -c "import fastapi, arq, openai; print('ok')"` → in `ok`
-  - [ ] `uvicorn app.main:app` rồi `curl -s localhost:8000/health` → `{"status":"ok"}`
-  - [ ] `which python` trỏ vào `backend/.venv/bin/python`
-  - [ ] `docker build -t scarlet-api backend/` thành công
+  - [x] `cd backend && source .venv/bin/activate && python -c "import fastapi, arq, openai; print('ok')"` → in `ok`
+  - [x] `uvicorn app.main:app` rồi `curl -s localhost:8000/health` → `{"status":"ok"}`
+  - [x] `which python` trỏ vào `backend/.venv/bin/python`
+  - [x] `docker build -t scarlet-api backend/` thành công
 - **Cạm bẫy:** cài package vào Python hệ thống thay vì `.venv` — kiểm bằng `which python` chứ không tin cảm giác.
 
 ---
