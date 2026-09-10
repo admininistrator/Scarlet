@@ -205,20 +205,20 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.5 — Alembic + migration đầu tiên
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-0.4, T-0.3 · **Ước lượng:** 3h
+- **Trạng thái:** ✅ · **Phụ thuộc:** T-0.4, T-0.3 · **Ước lượng:** 3h
 - **KH:** §17, Phụ lục A, §22.2
 - **Việc:**
-  - [ ] `alembic init`, cấu hình async engine, đọc URL từ `settings`
-  - [ ] `alembic/versions/0001_initial.py` chép đúng DDL Phụ lục A
-  - [ ] Service `migrate` trong compose: chạy `alembic upgrade head` rồi thoát, `restart: "no"`
-  - [ ] `api` và `worker` `depends_on: migrate: service_completed_successfully`
-  - [ ] Seed hai tier `free`/`trusted`
+  - [x] `alembic init`, cấu hình async engine, đọc URL từ `settings`
+  - [x] `alembic/versions/0001_initial.py` chép đúng DDL Phụ lục A
+  - [x] Service `migrate` trong compose: chạy `alembic upgrade head` rồi thoát, `restart: "no"`
+  - [x] `api` và `worker` `depends_on: migrate: service_completed_successfully` — **lệch, xem mục 3 báo cáo**: hai service này chưa tồn tại trong compose (T-0.8 tạo `api`, T-1.5 tạo `worker`); chỉ tạo `migrate` ở task này, việc nối `depends_on` để lại cho hai task đó
+  - [x] Seed hai tier `free`/`trusted`
 - **Xong khi (DoD):**
-  - [ ] `docker compose run --rm migrate` → exit 0
-  - [ ] `psql -c "\dt"` liệt kê đủ 15 bảng ở §17.1
-  - [ ] `psql -c "\d messages"` cho thấy `parent_id` **nullable** và có FK tự trỏ
-  - [ ] `psql -c "\di"` có `ix_msg_streaming` là **partial index** (`WHERE status='streaming'`)
-  - [ ] `alembic downgrade base && alembic upgrade head` chạy sạch hai chiều
+  - [x] `docker compose run --rm migrate` → exit 0
+  - [x] `psql -c "\dt"` liệt kê đủ 15 bảng ở §17.1 (thực tế 16 — DDL Phụ lục A còn có `user_skills` mà bảng liệt kê ở §17.1 không ghi, xem Backlog B-21)
+  - [x] `psql -c "\d messages"` cho thấy `parent_id` **nullable** và có FK tự trỏ
+  - [x] `psql -c "\di"` có `ix_msg_streaming` là **partial index** (`WHERE status='streaming'`)
+  - [x] `alembic downgrade base && alembic upgrade head` chạy sạch hai chiều
 - **Cạm bẫy:** `conversations.active_leaf_id` tham chiếu `messages`, mà `messages` tham chiếu `conversations` — vòng tròn. Phải tạo bảng trước, `ALTER TABLE ADD CONSTRAINT` sau, đúng thứ tự trong Phụ lục A.
 
 ---
@@ -1031,6 +1031,9 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 | B-18 | `ValidationError` in kèm giá trị bị từ chối (`input_value='short'`) — một secret yếu sẽ lọt vào log lúc app từ chối boot. Cân nhắc bọc `Settings()` để in bản tóm tắt đã che giá trị | T-0.3 |
 | B-19 | `docker-compose.override.yml` chưa có phần "mount code" (bind-mount `./backend`, `./frontend` để hot-reload) vì service `api`/`worker` (T-0.5) và `web` (T-0.10) chưa tồn tại trong `docker-compose.yml` ở thời điểm T-0.4. Thêm volume mount khi các service đó được tạo | T-0.4 |
 | B-20 | **Chỉ quan sát khi thao tác qua đường dẫn UNC `\\wsl.localhost\...`:** `docker compose down`/`stop` **không kèm** `-p <project>` thoát mã 0 nhưng **không dừng container nào** (no-op lặng lẽ) — kể cả khi đã đặt `COMPOSE_PROJECT_NAME` trong `.env`. Chỉ `docker compose -p scarlet down` mới dừng đúng. Chưa xác nhận có tái hiện khi chạy từ một shell WSL gốc (`cd ~/scarlet`) hay không — cần người kiểm tra vì CLAUDE.md yêu cầu làm việc trong WSL, không qua UNC | T-0.4, quan sát trong phiên làm việc |
+| B-21 | Bảng §17.1 liệt kê 15 bảng nhưng DDL Phụ lục A có 16 bảng — thiếu `user_skills` (bảng nối user↔skill, được nhắc gián tiếp ở dòng "bật/tắt theo user" của `skills`). Không tự sửa KH (chỉ Backlog/Nhật ký quyết định của tasks.md được sửa) — cần chốt: thêm dòng `user_skills` vào bảng §17.1 hay coi đây là điều đã biết | T-0.5, phát hiện khi chạy DoD `\dt` |
+| B-22 | `docker-compose.override.yml` vẫn còn nguyên câu "chưa mount code vì `api`/`worker` (T-0.5) chưa tồn tại" (B-19) — T-0.5 **không** tạo hai service này (xem Nhật ký quyết định NQ-09), nên B-19 vẫn mở, chỉ đổi task chặn sang T-0.8 (`api`) và T-1.5 (`worker`) | T-0.5 |
+| B-23 | `wsl.exe -d Ubuntu -- bash -c '...; echo $?'` luôn in `0` bất kể lệnh trước thật sự thành công hay thất bại (tái hiện cả với `false; echo $?`) — nghi do cách `wsl.exe` tách các lệnh phân tách bằng `;` qua lớp interop, không do lỗi cấu hình repo. Không dùng mã thoát qua kênh này để quyết định DoD; dùng nội dung stdout thật hoặc chạy lệnh qua `docker compose` từ phía Windows (đường dẫn UNC) nơi `$?` phản ánh đúng | Quan sát trong phiên T-0.5 |
 
 ---
 
@@ -1062,6 +1065,7 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 | **NQ-07** | 2026-09-10 | Bổ sung **R22** (mở rộng provider có endpoint tuỳ chỉnh), **S15**, **§9.8–9.10** và **T-0.12** | Người dùng hỏi lại và phát hiện thiếu sót: kiến trúc chịu được nhưng không có yêu cầu nào ghi ra, và S7 chỉ đo "thêm **model**" chứ không đo "thêm **provider**". Khả năng không được đo là khả năng sẽ mất |
 | **NQ-06** | 2026-09-10 | **Không cắt phạm vi** (đã đề nghị cắt 40%, bị từ chối) | Không có deadline. Đường lùi vẫn ghi ở §7.5 của báo cáo rà soát nếu sau này cần |
 | **NQ-08** | 2026-09-10 | `POSTGRES_PASSWORD` **vào `.env.example`** (bổ sung so với KH Phụ lục B) nhưng **không** vào `Settings`; `tests/test_settings_complete.py` miễn trừ nó qua danh sách `COMPOSE_ONLY`. Gỡ B-16 khỏi Backlog | Phương án (a) người dùng chốt. `.env.example` là hợp đồng với **người vận hành**, không chỉ với backend: compose cần biến này (KH Phụ lục C) nên nó phải hiện diện ở đó, còn backend không có việc gì đọc mật khẩu Postgres ngoài `DATABASE_URL`. Danh sách miễn trừ có test riêng chống mục ruỗng: tên nào không còn trong `.env.example` phải bị gỡ |
+| **NQ-09** | 2026-09-10 | T-0.5 chỉ tạo service `migrate` trong compose. **Không** tạo `api`/`worker` dù checklist gốc ghi "api và worker depends_on: migrate" | Hai service đó chưa tồn tại lúc T-0.5 chạy — T-1.5 mới là task tạo `worker`, không task nào trước đó ghi rõ ai tạo `api`. Hỏi người dùng (G5/A10), được chọn phương án giữ đúng ranh giới từng task: chỉ thêm `migrate`; việc nối `depends_on: migrate` để T-0.8 và T-1.5 tự làm khi tạo service tương ứng |
 
 ---
 

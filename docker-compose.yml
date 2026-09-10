@@ -45,6 +45,14 @@ services:
       retries: 5
     profiles: [core]
 
+  migrate:                       # §22.2 — chạy một lần rồi thoát, KHÔNG chạy trong entrypoint của api
+    <<: *common
+    build: ./backend
+    command: alembic upgrade head
+    restart: "no"
+    depends_on: { postgres: { condition: service_healthy } }
+    profiles: [core]
+
 networks:
   internal: {}
   egress: {}

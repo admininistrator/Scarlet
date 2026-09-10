@@ -20,6 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /install /usr/local
 COPY --chown=scarlet:scarlet app /app/app
+COPY --chown=scarlet:scarlet alembic /app/alembic
+COPY --chown=scarlet:scarlet alembic.ini /app/alembic.ini
 
 WORKDIR /app
 USER scarlet
