@@ -168,20 +168,20 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.3 — Settings fail-fast ⭐
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-0.2 · **Ước lượng:** 2h
+- **Trạng thái:** ✅ · **Phụ thuộc:** T-0.2 · **Ước lượng:** 2h
 - **KH:** §19.2 (L2), §19.3 · **Tiêu chí:** S1
 - **Việc:**
-  - [ ] `app/config/settings.py`: lớp `Settings(BaseSettings)` đầy đủ biến ở Phụ lục B
-  - [ ] Biến bắt buộc **không có giá trị mặc định**; biến tuỳ chọn có default và có mặt trong `.env.example`
-  - [ ] Validator: `JWT_SECRET` và `MASTER_ENCRYPTION_KEY` ≥ 32 ký tự
-  - [ ] Cảnh báo lúc boot nếu `TURNSTILE_SECRET` rỗng
-  - [ ] `.env.example` chép nguyên Phụ lục B, có chú thích từng nhóm
-  - [ ] Đây là **nơi duy nhất** trong backend đọc `os.environ`
+  - [x] `app/config/settings.py`: lớp `Settings(BaseSettings)` đầy đủ biến ở Phụ lục B
+  - [x] Biến bắt buộc **không có giá trị mặc định**; biến tuỳ chọn có default và có mặt trong `.env.example`
+  - [x] Validator: `JWT_SECRET` và `MASTER_ENCRYPTION_KEY` ≥ 32 ký tự
+  - [x] Cảnh báo lúc boot nếu `TURNSTILE_SECRET` rỗng
+  - [x] `.env.example` chép nguyên Phụ lục B, có chú thích từng nhóm
+  - [x] Đây là **nơi duy nhất** trong backend đọc `os.environ`
 - **Xong khi (DoD):**
-  - [ ] `unset JWT_SECRET && python -c "from app.config.settings import settings"` → **raise**, thông điệp chứa đúng chuỗi `JWT_SECRET`
-  - [ ] `JWT_SECRET=short python -c "..."` → raise với thông điệp về độ dài
-  - [ ] `grep -rn "os.environ\|os.getenv" backend/app/ --include=*.py | grep -v "app/config/"` → **rỗng**
-  - [ ] Mọi biến trong `.env.example` đều xuất hiện trong `Settings`, và ngược lại (viết `tests/test_settings_complete.py` so hai tập hợp)
+  - [x] `unset JWT_SECRET && python -c "from app.config.settings import settings"` → **raise**, thông điệp chứa đúng chuỗi `JWT_SECRET`
+  - [x] `JWT_SECRET=short python -c "..."` → raise với thông điệp về độ dài
+  - [x] `grep -rn "os.environ\|os.getenv" backend/app/ --include=*.py | grep -v "app/config/"` → **rỗng**
+  - [x] Mọi biến trong `.env.example` đều xuất hiện trong `Settings`, và ngược lại (viết `tests/test_settings_complete.py` so hai tập hợp) — 61/61, lệch 0 cả hai chiều
 - **Cạm bẫy:** cám dỗ đặt `os.getenv("X", "gia-tri-mac-dinh")` cho secret. Một default ngầm nghĩa là app chạy được với cấu hình sai và bạn phát hiện ở production.
 
 ---
@@ -1026,6 +1026,10 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 | B-12 | Thống kê cá nhân cho user: model hay dùng, chi tiêu theo tháng | — |
 | B-13 | Import hội thoại từ ChatGPT/Claude export | Đối xứng với T-8.5/T-8.6 |
 | B-14 | So sánh hai model song song trong cùng một câu hỏi | — |
+| B-15 | `.env.example` **không `source` được bằng shell**: `MAIL_FROM=Scarlet <no-reply@...>` bị shell hiểu là redirect. Docker compose đọc bình thường, nhưng dev chạy backend ngoài Docker cần `scripts/load-env.sh` hoặc direnv | T-0.3 — chép nguyên KH Phụ lục B nên không tự sửa |
+| B-16 | KH Phụ lục C dùng `${POSTGRES_PASSWORD}` cho service `postgres` nhưng **biến này không có trong Phụ lục B**, nên cũng không có trong `.env.example`/`Settings`. Phải chốt ở T-0.4 | T-0.3 |
+| B-17 | KH §22.6 nhắc `CORS_ORIGINS` khi lên domain, nhưng biến này **không có trong Phụ lục B** | T-0.3 |
+| B-18 | `ValidationError` in kèm giá trị bị từ chối (`input_value='short'`) — một secret yếu sẽ lọt vào log lúc app từ chối boot. Cân nhắc bọc `Settings()` để in bản tóm tắt đã che giá trị | T-0.3 |
 
 ---
 
