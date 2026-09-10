@@ -53,6 +53,37 @@ services:
     depends_on: { postgres: { condition: service_healthy } }
     profiles: [core]
 
+  litellm:
+    # KHONG dung <<: *common — co chu y, lech voi Phu luc C. Hai ly do:
+    #  1. BAT BUOC: env_file: [.env] bom DATABASE_URL=postgresql+asyncpg://... (Phu luc B,
+    #     dung cho SQLAlchemy async) vao LiteLLM. LiteLLM validate scheme nay va CHET
+    #     -> restart loop, khong phai canh bao. Xem B-29.
+    #  2. LiteLLM khong co viec gi phai biet JWT_SECRET, MASTER_ENCRYPTION_KEY,
+    #     SMTP_PASSWORD hay MinIO key. Cung ly le voi "sandbox KHONG co env_file" (C27).
+    # Dang ${VAR:?} de thieu bien thi compose dung ngay va in dung ten bien — tinh than A4.
+    restart: unless-stopped
+    networks: [internal]
+    image: ghcr.io/berriai/litellm:main-latest
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    volumes: ["./config/litellm.config.yaml:/app/config.yaml:ro"]
+    environment:
+      LITELLM_MASTER_KEY:   ${LITELLM_MASTER_KEY:?thieu LITELLM_MASTER_KEY}
+      DEEPSEEK_API_KEY:     ${DEEPSEEK_API_KEY:?thieu DEEPSEEK_API_KEY}
+      ANTHROPIC_API_KEY:    ${ANTHROPIC_API_KEY:?thieu ANTHROPIC_API_KEY}
+      NINEROUTER_API_KEY:   ${NINEROUTER_API_KEY:?thieu NINEROUTER_API_KEY}
+      NINEROUTER_BASE_URL:  ${NINEROUTER_BASE_URL:?thieu NINEROUTER_BASE_URL}
+    extra_hosts: ["host.docker.internal:host-gateway"]   # <- C17
+    ports: ["4000:4000"]   # T-0.6 DoD goi truc tiep tu host; nginx chua proxy toi day (Phase 3)
+    healthcheck:
+      # Phu luc C ghi curl, nhung image ghcr.io/berriai/litellm KHONG co curl
+      # (chi co /app/.venv/bin/python3) -> healthcheck luon unhealthy va moi
+      # depends_on: service_healthy sau nay se treo. Xem B-30.
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    profiles: [core]
+
 networks:
   internal: {}
   egress: {}

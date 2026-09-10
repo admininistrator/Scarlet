@@ -224,23 +224,23 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.6 — LiteLLM + đường mạng tới 9Router 🔒⭐ **KHÔNG ĐƯỢC GỘP**
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-H2, T-H3, T-0.4 · **Ước lượng:** 2h
-- **KH:** ADR-03, §9.5, C17, Phụ lục E · **Mốc:** M1
-- **Rủi ro:** cao — nếu hướng này không chạy, ADR-03 phải viết lại và cả tầng provider đổi theo. **Đây là lý do task này đứng ở giờ thứ 8 chứ không phải giờ thứ 80.**
+- **Trạng thái:** ✅ (2026-09-10) · **Phụ thuộc:** T-H2, T-H3, T-0.4 · **Ước lượng:** 2h
+- **KH:** ADR-03, §9.5, C17, Phụ lục E · **Mốc:** M1 ✅ **ĐÃ ĐẠT**
 - **Việc:**
-  - [ ] `config/litellm.config.yaml` theo Phụ lục E
-  - [ ] Service `litellm` trong compose với `extra_hosts: ["host.docker.internal:host-gateway"]`
-  - [ ] Ba entry model: DeepSeek, Anthropic, 9Router
-  - [ ] `drop_params: true`, `num_retries: 2`, `request_timeout: 600`
+  - [x] `config/litellm.config.yaml` theo Phụ lục E
+  - [x] Service `litellm` trong compose với `extra_hosts: ["host.docker.internal:host-gateway"]`
+  - [x] Ba entry model: DeepSeek, Anthropic, 9Router — **model cụ thể do người dùng chốt**, xem NQ-10
+  - [x] `drop_params: true`, `num_retries: 2`, `request_timeout: 600`
 - **Xong khi (DoD):**
-  - [ ] `docker compose exec litellm curl -s http://host.docker.internal:20128/v1/models` → JSON có mảng model (**đây là M1**)
-  - [ ] `curl -s http://localhost:4000/v1/models -H "Authorization: Bearer $LITELLM_MASTER_KEY"` → liệt kê cả ba
-  - [ ] Gọi thử **từng** model một lượt non-streaming, cả ba trả về text
-  - [ ] Gọi thử **streaming** DeepSeek qua LiteLLM bằng `curl -N` → chunk chảy ra từng cái
-  - [ ] Tắt 9Router trên Windows → gọi model của nó trả lỗi **có mã**, và hai model kia **vẫn chạy**
+  - [x] Container → `host.docker.internal:20128/v1/models` → `http 200`, `data` là list 147 model (**M1 ĐẠT**). Dùng `python3` thay `curl` vì image LiteLLM không có `curl` — xem B-30
+  - [x] `GET localhost:4000/v1/models` từ host liệt kê đủ ba: `deepseek-flash`, `claude-haiku`, `nr-gemini-flash`
+  - [x] Non-streaming từng model một lượt — cả ba trả text
+  - [x] Streaming `deepseek-flash` bằng `curl -N` — chunk chảy ra từng cái
+  - [x] 9Router không với tới được → `nr-gemini-flash` lỗi **có mã** (`code=500`, `type=internal_server_error`), hai model kia **vẫn chạy**. Thực hiện bằng cách trỏ `NINEROUTER_BASE_URL` sang cổng chết thay vì kill tiến trình tray của người dùng — xem mục 3 báo cáo
 - **Cạm bẫy:**
   - C17 — `localhost` trong container là chính container. Trên Docker Desktop/WSL2 phải `host.docker.internal` + `extra_hosts`. Nếu vẫn không được, kiểm tường lửa Windows có chặn cổng 20128 với WSL không.
   - 9Router có thể **fallback sang model khác** với model đã yêu cầu (§9.5). Trong task này chỉ cần ghi nhận hiện tượng vào báo cáo, chưa xử lý — xử lý ở T-2.12.
+- **Ghi nhận §9.5 (số đo thật, dùng cho T-0.7/T-2.12):** cùng một prompt ~10 token, `prompt_tokens` báo về là 38 (deepseek) / 18 (anthropic) / **2167** (9Router). 9Router bơm thêm hệ thống prompt riêng ⇒ token báo về **không** phản ánh chi phí gốc, đúng như §9.5 cảnh báo. Body trả về chỉ ghi alias `nr-gemini-flash`, **không** lộ upstream thật ⇒ `usage_events.upstream_model_reported` phải lấy từ header, chưa tìm thấy header nào — xem B-32.
 
 ---
 
@@ -1034,6 +1034,16 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 | B-21 | Bảng §17.1 liệt kê 15 bảng nhưng DDL Phụ lục A có 16 bảng — thiếu `user_skills` (bảng nối user↔skill, được nhắc gián tiếp ở dòng "bật/tắt theo user" của `skills`). Không tự sửa KH (chỉ Backlog/Nhật ký quyết định của tasks.md được sửa) — cần chốt: thêm dòng `user_skills` vào bảng §17.1 hay coi đây là điều đã biết | T-0.5, phát hiện khi chạy DoD `\dt` |
 | B-22 | `docker-compose.override.yml` vẫn còn nguyên câu "chưa mount code vì `api`/`worker` (T-0.5) chưa tồn tại" (B-19) — T-0.5 **không** tạo hai service này (xem Nhật ký quyết định NQ-09), nên B-19 vẫn mở, chỉ đổi task chặn sang T-0.8 (`api`) và T-1.5 (`worker`) | T-0.5 |
 | B-23 | `wsl.exe -d Ubuntu -- bash -c '...; echo $?'` luôn in `0` bất kể lệnh trước thật sự thành công hay thất bại (tái hiện cả với `false; echo $?`) — nghi do cách `wsl.exe` tách các lệnh phân tách bằng `;` qua lớp interop, không do lỗi cấu hình repo. Không dùng mã thoát qua kênh này để quyết định DoD; dùng nội dung stdout thật hoặc chạy lệnh qua `docker compose` từ phía Windows (đường dẫn UNC) nơi `$?` phản ánh đúng | Quan sát trong phiên T-0.5 |
+| B-24 | **Docker Desktop tắt WSL integration cho `Ubuntu`.** Docker Desktop đang chạy (server 29.5.2, distro `docker-desktop` Running) nhưng distro `Ubuntu` không có `/var/run/docker.sock`. Socket proxy `/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock` là `root:root srwxr-xr-x` → user không connect được, dù `dmin` đã ở group `docker` (gid 1001). **Không tự đặt `DOCKER_HOST` trỏ vào socket đó để lách** — vá tạm ngoài phạm vi task, và quyền vẫn sai. Cách đúng: bật integration trong Settings. Nghi vấn cần người xác nhận: T-0.4/T-0.5 chạy docker được, nên integration bị tắt **sau** đó (Docker Desktop update? restart?) — nếu nó tự tắt lại thì mọi task sau đều gãy | T-0.6 |
+| B-25 | **Hyper-V firewall là nhánh thứ hai của C17, KH chưa mô tả cách sửa.** C17 chỉ dừng ở `host.docker.internal` + `extra_hosts`, và một câu "kiểm tường lửa". Thực tế trên máy này adapter tên `vEthernet (WSL (Hyper-V firewall))` và `Get-NetFirewallHyperVVMSetting` cho `DefaultInboundAction=Block`. Lệnh sửa (PowerShell **admin**): `New-NetFirewallHyperVRule -Name "9Router-20128" -DisplayName "9Router 20128 (WSL/Docker)" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts 20128 -Action Allow`. **Cần chốt:** có nên ghi lệnh này thành một dòng trong T-H2 của tasks.md (và/hoặc README vận hành) không — vì đây là bước bắt buộc để dựng lại máy dev, mà hiện không văn bản nào ghi | T-0.6 |
+| B-26 | **T-H3 bị đánh dấu xong nhưng `.env` thật vẫn rỗng ba key** (`DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `NINEROUTER_API_KEY`). Nguyên nhân gốc: `Settings` fail-fast (T-0.3, A4) **không** phủ các key provider, nên app vẫn boot với key rỗng và lỗi chỉ lộ ra lúc gọi model. **Cần chốt:** có đưa ba biến này vào danh sách bắt buộc của A4 không, hay để `catalog`/`provider layer` tự kiểm lúc khởi động (T-0.7/T-0.12) | T-0.6, phát hiện khi chuẩn bị DoD |
+| B-27 | **`model: openai/auto` trong Phụ lục E không tồn tại trên 9Router thật.** `GET /v1/models` trả **147** model, id có tiền tố provider (`gh/copilot-search-a`, `gh/gpt-5.6-luna`, `gh/mai-code-1-flash`…); **không có** id nào tên `auto`, chỉ có `gh/gpt-5.4-mini-free-auto` và `gh/gpt-5.6-luna-free-auto`. Chưa kiểm được `auto` có phải **từ khoá định tuyến** (không nằm trong `/v1/models`) hay không, vì `POST /v1/chat/completions` trả **401** khi không có key (mà key đang rỗng — B-26). **Cần người chốt** entry `nr-auto` trỏ vào đâu: (a) giữ `auto` nếu 9Router coi đó là từ khoá routing, (b) ghim một id thật. Lưu ý §9.5: nếu chọn (a) thì đúng là kịch bản "model trả lời khác model yêu cầu" → `pricing_mode: unmetered` là bắt buộc, không phải tuỳ chọn | T-0.6 |
+| B-28 | **Phụ lục E ghi `anthropic/claude-sonnet-4-5` — id đời cũ.** Model Sonnet hiện hành là `claude-sonnet-5`. File `config/litellm.config.yaml` đang để `claude-sonnet-5` (lệch có chủ ý so với KH, chưa nghiệm thu được vì `ANTHROPIC_API_KEY` rỗng). **Cần chốt:** sửa Phụ lục E của KE-HOACH cho khớp (agent không được sửa `docs/` ngoài Backlog/Nhật ký) hay giữ nguyên KH và coi đây là lệch đã ghi nhận | T-0.6 |
+| B-29 | **`env_file: [.env]` của Phụ lục C làm LiteLLM chết.** LiteLLM đọc `DATABASE_URL=postgresql+asyncpg://…` (đúng cho SQLAlchemy async, Phụ lục B) rồi từ chối boot → restart loop, **không phải cảnh báo**. Đã sửa: `litellm` không dùng `<<: *common` nữa, chỉ nhận 5 biến nó thật sự cần, dạng `${VAR:?}` để thiếu biến thì compose dừng ngay (tinh thần A4). Cùng lý lẽ với "sandbox KHÔNG có env_file" (C27). **Cần chốt:** có sửa Phụ lục C cho khớp không, và có nên áp cùng nguyên tắc "chỉ đưa biến cần thiết" cho `postgres`/`redis`/`minio` luôn không — hiện cả ba vẫn thấy toàn bộ `.env` gồm `JWT_SECRET`, `MASTER_ENCRYPTION_KEY`, `SMTP_PASSWORD` | T-0.6 |
+| B-30 | **Image `ghcr.io/berriai/litellm:main-latest` KHÔNG có `curl`** (chỉ có `/app/.venv/bin/python3`). Healthcheck của Phụ lục C dùng `curl` ⇒ container **vĩnh viễn `unhealthy`**, và mọi `depends_on: {litellm: {condition: service_healthy}}` sau này sẽ treo vô hạn. Đã đổi healthcheck sang `python3 urllib`. **Cần chốt:** sửa Phụ lục C. Cũng nên rà lại healthcheck `minio` (`mc ready local`) xem có thật sự tồn tại trong image không | T-0.6 |
+| B-31 | **`.env` có comment cuối dòng** (`KEY=value   # ghi chú`). Docker compose bóc comment đúng, nhưng script shell ngây thơ kiểu `grep '^KEY=' .env \| cut -d= -f2-` thì lấy cả comment — làm hỏng giá trị một cách im lặng (mất 20 phút debug "No connected db" trong phiên này, vì key dài 86 thay vì 35). Cùng họ với B-15. **Cần:** khi T-0.9 làm `scripts/load-env.sh` thì phải bóc cả comment cuối dòng lẫn quote | T-0.6 |
+| B-32 | **Chưa tìm được đường lấy `upstream_model_reported` từ 9Router.** Body response chỉ ghi alias LiteLLM (`nr-gemini-flash`), không ghi model thật đã trả lời. §9.5 yêu cầu ghi cột này để đối chiếu. **Cần:** T-2.12 kiểm xem 9Router có trả header riêng không (`x-9router-*`?), nếu không có thì §9.5 phải hạ yêu cầu xuống "không lấy được" và ghi rõ | T-0.6 |
+| B-33 | **`deepseek-flash` tiêu `max_tokens` cho reasoning trước.** Cùng prompt: `max_tokens=100` → trả `'hello world'` kèm `reasoning_tokens=58`; `max_tokens=60` → trả **chuỗi rỗng** mà vẫn `finish_reason=stop`. Stream trả `delta.reasoning_content` (không phải `delta.content`). Ảnh hưởng trực tiếp §7.4 (event `reasoning` riêng) và §9.6 (ngân sách token phải trừ hao reasoning). **Cần:** T-1.x đừng coi `content` rỗng là lỗi | T-0.6 |
 
 ---
 
@@ -1066,6 +1076,7 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 | **NQ-06** | 2026-09-10 | **Không cắt phạm vi** (đã đề nghị cắt 40%, bị từ chối) | Không có deadline. Đường lùi vẫn ghi ở §7.5 của báo cáo rà soát nếu sau này cần |
 | **NQ-08** | 2026-09-10 | `POSTGRES_PASSWORD` **vào `.env.example`** (bổ sung so với KH Phụ lục B) nhưng **không** vào `Settings`; `tests/test_settings_complete.py` miễn trừ nó qua danh sách `COMPOSE_ONLY`. Gỡ B-16 khỏi Backlog | Phương án (a) người dùng chốt. `.env.example` là hợp đồng với **người vận hành**, không chỉ với backend: compose cần biến này (KH Phụ lục C) nên nó phải hiện diện ở đó, còn backend không có việc gì đọc mật khẩu Postgres ngoài `DATABASE_URL`. Danh sách miễn trừ có test riêng chống mục ruỗng: tên nào không còn trong `.env.example` phải bị gỡ |
 | **NQ-09** | 2026-09-10 | T-0.5 chỉ tạo service `migrate` trong compose. **Không** tạo `api`/`worker` dù checklist gốc ghi "api và worker depends_on: migrate" | Hai service đó chưa tồn tại lúc T-0.5 chạy — T-1.5 mới là task tạo `worker`, không task nào trước đó ghi rõ ai tạo `api`. Hỏi người dùng (G5/A10), được chọn phương án giữ đúng ranh giới từng task: chỉ thêm `migrate`; việc nối `depends_on: migrate` để T-0.8 và T-1.5 tự làm khi tạo service tương ứng |
+| **NQ-10** | 2026-09-10 | **Ba model của T-0.6 do người dùng chốt, KHÁC Phụ lục E:** `deepseek-flash` (DeepSeek, có vision), `claude-haiku-4-5-20251001` (Anthropic), `ag/gemini-3.8-flash-low` (9Router). Alias LiteLLM đổi theo: `deepseek-flash`, `claude-haiku`, `nr-gemini-flash` | Phụ lục E ghi `deepseek-chat`, `claude-sonnet-4-5`, `nr-auto`. `claude-sonnet-4-5` là id đời cũ (B-28); `auto` **không tồn tại** trên 9Router thật — 147 model đều có tiền tố provider (B-27). Người dùng chốt ghim từng model cụ thể, thêm model khác sau. Giữ alias `claude-sonnet` mà trỏ vào Haiku sẽ là cái bẫy cho catalog T-0.7 và cho metering A7, nên alias đổi theo model thật |
 
 ---
 

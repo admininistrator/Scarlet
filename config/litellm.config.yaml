@@ -1,0 +1,33 @@
+# LiteLLM — cổng DUY NHẤT backend nói chuyện với model (ADR-03, A9).
+# Ba model dưới đây là ba model người dùng chốt ở T-0.6; thêm model mới thì
+# thêm entry ở đây, KHÔNG hardcode tên model trong .py/.tsx (A3).
+
+model_list:
+  # ─── DeepSeek — gọi thẳng, có vision ───
+  - model_name: deepseek-flash
+    litellm_params:
+      model: deepseek/deepseek-flash
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  # ─── Anthropic — gọi thẳng, LiteLLM chuẩn hoá sang OpenAI format (ADR-03 ②) ───
+  - model_name: claude-haiku
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ─── 9Router — OpenAI-compatible, chạy NGOÀI Docker trên Windows host (§9.5, C17).
+  #     Ghim một model cụ thể thay vì 'auto': để 9Router tự fallback theo tier thì
+  #     model trả lời có thể khác model yêu cầu ⇒ đo chi phí sai (§9.5). ───
+  - model_name: nr-gemini-flash
+    litellm_params:
+      model: openai/ag/gemini-3.8-flash-low
+      api_base: os.environ/NINEROUTER_BASE_URL
+      api_key: os.environ/NINEROUTER_API_KEY
+
+litellm_settings:
+  drop_params: true          # bỏ tham số provider không hỗ trợ thay vì lỗi 400
+  request_timeout: 600
+  num_retries: 2
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
