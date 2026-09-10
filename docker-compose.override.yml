@@ -1,0 +1,17 @@
+# Chỉ dùng khi dev cục bộ: docker compose --profile core --profile tools --profile dev up -d
+# Mount code (bind-mount backend/frontend cho hot-reload) sẽ thêm vào đây khi service
+# api/worker (T-0.5) và web (T-0.10) tồn tại trong docker-compose.yml.
+services:
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["8025:8025"]
+    networks: [internal]
+    profiles: [dev]
+
+  adminer:
+    image: adminer:latest
+    ports: ["8080:8080"]
+    networks: [internal]
+    profiles: [dev]
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres

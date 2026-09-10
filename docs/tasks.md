@@ -187,19 +187,19 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.4 — Compose: postgres, redis, minio
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-0.1 · **Ước lượng:** 2h
+- **Trạng thái:** ✅ · **Phụ thuộc:** T-0.1 · **Ước lượng:** 2h
 - **KH:** §22.1, §22.2, Phụ lục C
 - **Việc:**
-  - [ ] `docker-compose.yml` với ba service + healthcheck đúng Phụ lục C
-  - [ ] Redis: `--appendonly yes --maxmemory 512mb --maxmemory-policy volatile-lru` (C8)
-  - [ ] Hai network: `internal` và `egress`
-  - [ ] Volume có tên: `pgdata`, `redisdata`, `miniodata`
-  - [ ] `docker-compose.override.yml` cho dev: mount code, mailpit, adminer
+  - [x] `docker-compose.yml` với ba service + healthcheck đúng Phụ lục C
+  - [x] Redis: `--appendonly yes --maxmemory 512mb --maxmemory-policy volatile-lru` (C8)
+  - [x] Hai network: `internal` và `egress`
+  - [x] Volume có tên: `pgdata`, `redisdata`, `miniodata`
+  - [x] `docker-compose.override.yml` cho dev: mailpit, adminer (mount code — xem B-19)
 - **Xong khi (DoD):**
-  - [ ] `docker compose --profile core up -d` → `docker compose ps` cho thấy cả ba `healthy`
-  - [ ] `docker compose exec redis redis-cli config get appendonly` → `yes`
-  - [ ] `docker compose down && docker compose up -d` → dữ liệu Postgres còn nguyên (volume gắn đúng)
-  - [ ] `docker compose exec postgres psql -U scarlet -c "select 1"` chạy được
+  - [x] `docker compose --profile core up -d` → `docker compose ps` cho thấy cả ba `healthy`
+  - [x] `docker compose exec redis redis-cli config get appendonly` → `yes`
+  - [x] `docker compose down && docker compose up -d` → dữ liệu Postgres còn nguyên (volume gắn đúng)
+  - [x] `docker compose exec postgres psql -U scarlet -c "select 1"` chạy được
 - **Cạm bẫy:** healthcheck của MinIO dùng `mc ready local` — dùng `curl` vào `/minio/health/live` cũng được, nhưng phải có healthcheck thật, không để `depends_on` trần (service "up" không có nghĩa là "sẵn sàng nhận kết nối").
 
 ---
@@ -1029,6 +1029,8 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 | B-15 | `.env.example` **không `source` được bằng shell**: `MAIL_FROM=Scarlet <no-reply@...>` bị shell hiểu là redirect. Docker compose đọc bình thường, nhưng dev chạy backend ngoài Docker cần `scripts/load-env.sh` hoặc direnv | T-0.3 — chép nguyên KH Phụ lục B nên không tự sửa |
 | B-17 | KH §22.6 nhắc `CORS_ORIGINS` khi lên domain, nhưng biến này **không có trong Phụ lục B** | T-0.3 |
 | B-18 | `ValidationError` in kèm giá trị bị từ chối (`input_value='short'`) — một secret yếu sẽ lọt vào log lúc app từ chối boot. Cân nhắc bọc `Settings()` để in bản tóm tắt đã che giá trị | T-0.3 |
+| B-19 | `docker-compose.override.yml` chưa có phần "mount code" (bind-mount `./backend`, `./frontend` để hot-reload) vì service `api`/`worker` (T-0.5) và `web` (T-0.10) chưa tồn tại trong `docker-compose.yml` ở thời điểm T-0.4. Thêm volume mount khi các service đó được tạo | T-0.4 |
+| B-20 | **Chỉ quan sát khi thao tác qua đường dẫn UNC `\\wsl.localhost\...`:** `docker compose down`/`stop` **không kèm** `-p <project>` thoát mã 0 nhưng **không dừng container nào** (no-op lặng lẽ) — kể cả khi đã đặt `COMPOSE_PROJECT_NAME` trong `.env`. Chỉ `docker compose -p scarlet down` mới dừng đúng. Chưa xác nhận có tái hiện khi chạy từ một shell WSL gốc (`cd ~/scarlet`) hay không — cần người kiểm tra vì CLAUDE.md yêu cầu làm việc trong WSL, không qua UNC | T-0.4, quan sát trong phiên làm việc |
 
 ---
 
