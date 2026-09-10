@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "providers": {
+    "deepseek": {
+      "label": "DeepSeek AI",
+      "base_url": "https://api.deepseek.com/v1",
+      "availability": "always",
+      "byok_supported": true,
+      "cost_reporting": "exact",
+      "auth_style": "bearer",
+      "verify_path": "/models"
+    },
+    "anthropic": {
+      "label": "Anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "availability": "always",
+      "byok_supported": true,
+      "cost_reporting": "exact",
+      "auth_style": "bearer",
+      "verify_path": "/models"
+    },
+    "ninerouter": {
+      "label": "9Router (local)",
+      "base_url": "http://host.docker.internal:20128/v1",
+      "availability": "host-dependent",
+      "byok_supported": false,
+      "cost_reporting": "unreliable",
+      "health_path": "/models"
+    }
+  },
+  "models": [
+    {
+      "id": "deepseek-flash",
+      "display_name": "DeepSeek Flash",
+      "provider": "deepseek",
+      "upstream_model": "deepseek/deepseek-flash",
+      "capabilities": ["tools", "vision", "reasoning"],
+      "context_window": 128000,
+      "max_output": 8192,
+      "pricing": { "input_per_1m": 0.27, "output_per_1m": 1.10, "cached_input_per_1m": 0.07 },
+      "pricing_mode": "metered",
+      "enabled": true,
+      "default": true,
+      "order": 10,
+      "badge": "Mặc định · Rẻ"
+    },
+    {
+      "id": "claude-haiku",
+      "display_name": "Claude Haiku 4.5",
+      "provider": "anthropic",
+      "upstream_model": "anthropic/claude-haiku-4-5-20251001",
+      "capabilities": ["tools", "vision"],
+      "context_window": 200000,
+      "max_output": 8192,
+      "pricing": { "input_per_1m": 1.00, "output_per_1m": 5.00, "cached_input_per_1m": 0.10 },
+      "pricing_mode": "metered",
+      "enabled": true,
+      "default": false,
+      "order": 20,
+      "badge": null
+    },
+    {
+      "id": "nr-gemini-flash",
+      "display_name": "Gemini Flash (qua 9Router)",
+      "provider": "ninerouter",
+      "upstream_model": "openai/ag/gemini-3.8-flash-low",
+      "capabilities": ["tools"],
+      "context_window": 128000,
+      "max_output": 8192,
+      "pricing": null,
+      "pricing_mode": "unmetered",
+      "enabled": true,
+      "default": false,
+      "order": 30,
+      "badge": "9Router"
+    }
+  ]
+}

@@ -245,21 +245,22 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.7 — Model catalog + `GET /models` tối thiểu
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-0.6 · **Ước lượng:** 2h
+- **Trạng thái:** ✅ (2026-09-10) · **Phụ thuộc:** T-0.6 · **Ước lượng:** 2h
 - **KH:** §9.2, §9.3, ADR-12
 - **Việc:**
-  - [ ] `config/model_catalog.json` đúng schema §9.2, có 3 model thật đã kiểm ở T-0.6
-  - [ ] `app/config/catalog.py`: nạp, validate bằng pydantic, cache trong bộ nhớ, hàm `reload()`
-  - [ ] Validate: `provider` phải tồn tại trong `providers`; đúng **một** model có `default: true`; `pricing` bắt buộc khi `pricing_mode='metered'`
-  - [ ] `GET /api/v1/models` trả danh sách đã lọc, **không** kèm `base_url` và `pricing`
+  - [x] `config/model_catalog.json` đúng schema §9.2, có 3 model thật đã kiểm ở T-0.6
+  - [x] `app/config/catalog.py`: nạp, validate bằng pydantic, cache trong bộ nhớ, hàm `reload()`
+  - [x] Validate: `provider` phải tồn tại trong `providers`; đúng **một** model có `default: true`; `pricing` bắt buộc khi `pricing_mode='metered'`
+  - [x] `GET /api/v1/models` trả danh sách đã lọc, **không** kèm `base_url` và `pricing`
 - **Xong khi (DoD):**
-  - [ ] `curl -s localhost:8000/api/v1/models | jq '.[0]'` có `id`, `display_name`, `capabilities`, **không** có `base_url` hay `pricing`
-  - [ ] Sửa `display_name` trong file → `POST /api/v1/admin/catalog/reload` → `GET /models` phản ánh ngay, **không** restart container
-  - [ ] Đặt `provider: "khong-ton-tai"` → app **không** boot, log in đúng tên model sai
-  - [ ] Đặt hai model cùng `default: true` → validate raise
-  - [ ] `base_url` có dấu `/` ở cuối → loader tự chuẩn hoá, không sinh URL `//v1//chat` (C43)
-  - [ ] Provider thiếu `auth_style` → mặc định `bearer`; thiếu `verify_path` → BYOK lưu key mà không kiểm, có cảnh báo (C42, C44)
+  - [x] `curl -s localhost:8000/api/v1/models | jq '.[0]'` có `id`, `display_name`, `capabilities`, **không** có `base_url` hay `pricing`. `jq` không có sẵn trong WSL của máy này — dùng `python3 -m json.tool`/`json.dumps` tương đương, xem báo cáo
+  - [x] Sửa `display_name` trong file → `POST /api/v1/admin/catalog/reload` → `GET /models` phản ánh ngay, **không** restart container
+  - [x] Đặt `provider: "khong-ton-tai"` → app **không** boot, log in đúng tên model sai
+  - [x] Đặt hai model cùng `default: true` → validate raise
+  - [x] `base_url` có dấu `/` ở cuối → loader tự chuẩn hoá, không sinh URL `//v1//chat` (C43)
+  - [x] Provider thiếu `auth_style` → mặc định `bearer`; thiếu `verify_path` → BYOK lưu key mà không kiểm, có cảnh báo (C42, C44)
 - **Cạm bẫy:** cám dỗ để `GET /models` đọc file mỗi lần gọi. Cache và reload tường minh — nếu không, mỗi lần mở Model Picker là một lần đọc đĩa.
+- **Ghi nhận:** default model chốt theo yêu cầu người dùng đầu phiên: `deepseek-flash` (provider `deepseek`, nhãn "DeepSeek AI"). Capabilities của `deepseek-flash` gồm cả `vision` và `reasoning` theo đúng NQ-10/B-33 (T-0.6) — không phải suy đoán mới. `nr-gemini-flash` đặt `pricing_mode: "unmetered"` theo đúng §9.5/C16. `/admin/catalog/reload` **chưa có** `require_admin` vì hệ thống auth chưa tồn tại (Phase 2) — có chủ đích, xem B-34.
 
 ---
 
@@ -1044,6 +1045,8 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 | B-31 | **`.env` có comment cuối dòng** (`KEY=value   # ghi chú`). Docker compose bóc comment đúng, nhưng script shell ngây thơ kiểu `grep '^KEY=' .env \| cut -d= -f2-` thì lấy cả comment — làm hỏng giá trị một cách im lặng (mất 20 phút debug "No connected db" trong phiên này, vì key dài 86 thay vì 35). Cùng họ với B-15. **Cần:** khi T-0.9 làm `scripts/load-env.sh` thì phải bóc cả comment cuối dòng lẫn quote | T-0.6 |
 | B-32 | **Chưa tìm được đường lấy `upstream_model_reported` từ 9Router.** Body response chỉ ghi alias LiteLLM (`nr-gemini-flash`), không ghi model thật đã trả lời. §9.5 yêu cầu ghi cột này để đối chiếu. **Cần:** T-2.12 kiểm xem 9Router có trả header riêng không (`x-9router-*`?), nếu không có thì §9.5 phải hạ yêu cầu xuống "không lấy được" và ghi rõ | T-0.6 |
 | B-33 | **`deepseek-flash` tiêu `max_tokens` cho reasoning trước.** Cùng prompt: `max_tokens=100` → trả `'hello world'` kèm `reasoning_tokens=58`; `max_tokens=60` → trả **chuỗi rỗng** mà vẫn `finish_reason=stop`. Stream trả `delta.reasoning_content` (không phải `delta.content`). Ảnh hưởng trực tiếp §7.4 (event `reasoning` riêng) và §9.6 (ngân sách token phải trừ hao reasoning). **Cần:** T-1.x đừng coi `content` rỗng là lỗi | T-0.6 |
+| B-34 | **`POST /admin/catalog/reload` chưa có `require_admin`, không khoá được.** Hệ thống auth (JWT, role) chưa tồn tại tới Phase 2 (T-2.19 mới gắn `require_admin` cho `/admin/*`, xem dòng T-2.x §6). Bất kỳ ai gọi được cổng 8000 lúc dev đều reload được catalog — chấp nhận được cho môi trường dev cục bộ, **nhưng phải nhớ khoá lại trước M4** (mời người thật) | T-0.7 |
+| B-35 | **Giá (`pricing`) của `deepseek-flash` và `claude-haiku` trong `config/model_catalog.json` là số ước tính từ hiểu biết công khai, chưa đối chiếu hoá đơn/dashboard billing thật của DeepSeek/Anthropic.** Số của `deepseek-flash` (0.27 / 1.10 / 0.07 USD/1M) lấy nguyên từ ví dụ minh hoạ ở KH §9.2; số của `claude-haiku` (1.00 / 5.00 / 0.10 USD/1M) là ước tính riêng. Ảnh hưởng trực tiếp A7/S13 (snapshot giá dùng để tính `usage_events.cost_usd`). **Cần:** đối chiếu lại với trang giá chính thức của từng provider trước khi seed bảng `tiers` (T-2.11) hoặc trước khi số liệu chi phí được dùng để quyết định gì | T-0.7 |
 
 ---
 
