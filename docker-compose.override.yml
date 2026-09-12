@@ -28,3 +28,12 @@ services:
     profiles: [dev]
     environment:
       ADMINER_DEFAULT_SERVER: postgres
+
+  # Publish Postgres ra loopback CHỈ cho test tầng repository (T-1.1).
+  # `make test` chạy pytest từ WSL host, ngoài network `internal`, nên không có
+  # đường nào tới `postgres:5432`. Test DB dùng database RIÊNG `scarlet_test`
+  # trên cùng instance (xem tests/db/conftest.py) — không đụng `scarlet` của dev.
+  # Bind 127.0.0.1, không phải 0.0.0.0: cổng không lộ ra LAN.
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"

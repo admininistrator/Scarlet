@@ -1,0 +1,211 @@
+"""Hạ tầng cho test tầng DB: Postgres THẬT, database RIÊNG, schema từ migration.
+
+Vì sao không mock và không SQLite: thứ cần kiểm ở T-1.1 chính là những thứ chỉ
+Postgres có — kiểu ENUM `message_role`/`message_status`, FK tự trỏ của
+`messages.parent_id`, `gen_random_uuid()`, và (từ T-1.2) `IS NOT DISTINCT FROM`
+trong recursive CTE. Test chạy trên SQLite sẽ xanh trong khi production đỏ,
+đúng dòng "test đang mock chính thứ cần kiểm" của HUONG-DAN-AGENT §11.
+
+Cách nối (người dùng chốt ở T-1.1):
+
+- `docker-compose.override.yml` publish `postgres` ra **127.0.0.1:5432** (chỉ
+  loopback) vì `make test` chạy pytest từ WSL host, ngoài network `internal`.
+- Database **riêng** `scarlet_test` trên cùng instance, KHÔNG đụng `scarlet`
+  của dev. Fixture tự tạo nếu chưa có rồi chạy `alembic upgrade head` thật —
+  không `Base.metadata.create_all()`, vì như vậy sẽ kiểm một schema do ORM tự
+  nghĩ ra thay vì schema mà migration sinh ra.
+- Mỗi test chạy trong một transaction và bị **rollback** ở cuối, nên các test
+  không thấy dữ liệu của nhau và DB không phình ra.
+
+Biến `TEST_DATABASE_URL` đọc từ môi trường, không có thì đọc `.env` ở gốc repo
+(`make test` không nạp `.env`). Thiếu hẳn thì **nổ ngay** kèm tên biến, không
+`skip` — §15 cấm test skip không lý do, và một bộ test DB bị skip im lặng là
+cách tự lừa mình rẻ nhất.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import re
+import subprocess
+import sys
+import uuid
+from collections.abc import AsyncIterator
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+ENV_FILE = BACKEND_DIR.parent / ".env"
+URL_VAR = "TEST_DATABASE_URL"
+#: Database luôn tồn tại, dùng để chạy `CREATE DATABASE` cho database test.
+MAINTENANCE_DB = "postgres"
+_SAFE_DB_NAME = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _read_from_env_file(name: str) -> str | None:
+    """Đọc một biến từ `.env` gốc repo.
+
+    Cố tình thô sơ: chỉ cắt ở dấu `=` đầu tiên, KHÔNG cố hiểu chú thích cuối
+    dòng. Dòng `TEST_DATABASE_URL=` trong `.env`/`.env.example` được viết với
+    chú thích ở dòng RIÊNG — đúng bài học B-44, nơi một chú thích cuối dòng sau
+    giá trị rỗng biến thành chính giá trị đó.
+    """
+    if not ENV_FILE.is_file():
+        return None
+    for raw_line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line.startswith(f"{name}="):
+            return line.split("=", 1)[1].strip()
+    return None
+
+
+def _test_database_url() -> str:
+    url = os.environ.get(URL_VAR) or _read_from_env_file(URL_VAR)
+    if not url:
+        raise RuntimeError(
+            f"thiếu {URL_VAR}. Đặt nó trong môi trường hoặc trong {ENV_FILE} "
+            f"(mẫu ở .env.example), và bảo đảm `docker compose up -d postgres` "
+            f"đã publish cổng 127.0.0.1:5432"
+        )
+    return url
+
+
+def _database_name(url: str) -> str:
+    name = urlsplit(url).path.lstrip("/")
+    if not _SAFE_DB_NAME.match(name):
+        raise RuntimeError(f"tên database trong {URL_VAR} không hợp lệ: {name!r}")
+    return name
+
+
+def _with_database(url: str, name: str) -> str:
+    parts = urlsplit(url)
+    return urlunsplit(parts._replace(path=f"/{name}"))
+
+
+async def _create_database_if_missing(url: str) -> None:
+    name = _database_name(url)
+    # CREATE DATABASE không chạy được trong transaction ⇒ AUTOCOMMIT.
+    engine = create_async_engine(_with_database(url, MAINTENANCE_DB), isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as conn:
+            exists = await conn.scalar(
+                text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": name}
+            )
+            if not exists:
+                await conn.execute(text(f'CREATE DATABASE "{name}"'))
+    finally:
+        await engine.dispose()
+
+
+def _alembic_upgrade_head(url: str) -> None:
+    """Chạy migration THẬT vào database test.
+
+    Qua subprocess vì `alembic/env.py` đọc `settings.DATABASE_URL` lúc import —
+    cách sạch nhất để trỏ nó sang database khác là cho nó một môi trường khác.
+    """
+    result = subprocess.run(  # noqa: S603 - lệnh cố định, không có input từ ngoài
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND_DIR,
+        env={**os.environ, "DATABASE_URL": url},
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"alembic upgrade head thất bại (exit {result.returncode})\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+
+@pytest.fixture(scope="session")
+def migrated_database_url() -> str:
+    """Tạo database test (nếu chưa có) và đưa schema lên `head`. Chạy một lần.
+
+    Fixture này **đồng bộ** có chủ ý: phần async duy nhất được gói gọn trong
+    `asyncio.run()`, nên không có engine nào sống sót sang event loop của test.
+    Một engine session-scope dùng lại giữa nhiều event loop là nguồn lỗi
+    "attached to a different loop" kinh điển của pytest-asyncio.
+    """
+    url = _test_database_url()
+    asyncio.run(_create_database_if_missing(url))
+    _alembic_upgrade_head(url)
+    return url
+
+
+@pytest_asyncio.fixture
+async def connection(migrated_database_url: str) -> AsyncIterator[AsyncConnection]:
+    """Một kết nối, một transaction, rollback ở cuối mỗi test."""
+    engine = create_async_engine(migrated_database_url)
+    conn = await engine.connect()
+    transaction = await conn.begin()
+    try:
+        yield conn
+    finally:
+        await transaction.rollback()
+        await conn.close()
+        await engine.dispose()
+
+
+@pytest.fixture
+def session_factory(connection: AsyncConnection) -> async_sessionmaker[AsyncSession]:
+    """Nhà máy session gắn vào ĐÚNG kết nối của test.
+
+    `join_transaction_mode="create_savepoint"`: nếu có code nào gọi `commit()`,
+    nó chỉ giải phóng savepoint chứ không commit transaction ngoài — rollback
+    cuối test vẫn dọn sạch.
+
+    Có `session_factory` (chứ không chỉ `session`) vì nhiều phép kiểm cần một
+    session THỨ HAI: repository ghi bằng câu UPDATE thẳng, nên đọc lại bằng
+    chính session đã ghi có thể thấy object cũ trong identity map. Session mới
+    trên cùng transaction cho biết DB thực sự đang chứa gì.
+    """
+    return async_sessionmaker(
+        bind=connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+
+
+@pytest_asyncio.fixture
+async def session(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    async with session_factory() as db_session:
+        yield db_session
+
+
+async def _create_user(conn: AsyncConnection) -> uuid.UUID:
+    """Một user tối thiểu. `users` chưa có model (Phase 2) nên chèn bằng SQL thô.
+
+    `tier_name` để trống ⇒ dùng DEFAULT 'free', tier này do migration 0001 seed.
+    """
+    user_id = await conn.scalar(
+        text(
+            "INSERT INTO users (email, password_hash) VALUES (:email, :password_hash) RETURNING id"
+        ),
+        {"email": f"{uuid.uuid4().hex}@scarlet.test", "password_hash": "khong-phai-hash-that"},
+    )
+    assert isinstance(user_id, uuid.UUID)
+    return user_id
+
+
+@pytest_asyncio.fixture
+async def user_a(connection: AsyncConnection) -> uuid.UUID:
+    return await _create_user(connection)
+
+
+@pytest_asyncio.fixture
+async def user_b(connection: AsyncConnection) -> uuid.UUID:
+    """User thứ hai — dùng cho mọi phép kiểm IDOR (§20)."""
+    return await _create_user(connection)

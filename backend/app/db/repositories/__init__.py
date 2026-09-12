@@ -1,0 +1,22 @@
+"""Repository — chỗ DUY NHẤT viết câu SQL cho `conversations` và `messages`.
+
+Tầng api/worker không tự dựng `select()`: gom SQL về một chỗ là cách duy nhất
+để phép kiểm "có lọc `user_id` trong câu SQL không" (§20) rà được bằng mắt
+trong vài phút thay vì đi khắp repo.
+"""
+
+from app.db.repositories.conversations import ConversationRepository
+from app.db.repositories.errors import (
+    ConversationNotFoundError,
+    MessageNotInConversationError,
+    RepositoryError,
+)
+from app.db.repositories.messages import MessageRepository
+
+__all__ = [
+    "ConversationNotFoundError",
+    "ConversationRepository",
+    "MessageNotInConversationError",
+    "MessageRepository",
+    "RepositoryError",
+]

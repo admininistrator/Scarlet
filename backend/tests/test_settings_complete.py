@@ -26,6 +26,18 @@ _ASSIGNMENT = re.compile(r"^([A-Z][A-Z0-9_]*)=")
 #:   phải app Python
 COMPOSE_ONLY = frozenset({"POSTGRES_PASSWORD", "VITE_API_BASE_URL"})
 
+#: Biến chỉ dành cho pytest — backend KHÔNG đọc, docker compose cũng không.
+#: Cùng lý do tồn tại như COMPOSE_ONLY, khác nguồn đọc, nên tách set riêng để
+#: không làm nhoè nghĩa "biến của compose".
+#: - TEST_DATABASE_URL: tests/db/conftest.py (T-1.1) — database `scarlet_test`
+#:   riêng trên instance postgres của dev; đưa nó vào `Settings` sẽ là bắt app
+#:   production khai một biến chỉ có nghĩa lúc chạy test.
+TEST_ONLY = frozenset({"TEST_DATABASE_URL"})
+
+#: Hai nhóm trên gộp lại: những tên được phép có trong `.env.example` mà không
+#: có trong `Settings`.
+NGOAI_SETTINGS = COMPOSE_ONLY | TEST_ONLY
+
 
 def env_example_keys() -> set[str]:
     return {
@@ -46,7 +58,7 @@ def test_env_example_ton_tai() -> None:
 
 
 def test_moi_bien_trong_env_example_deu_co_trong_settings() -> None:
-    thieu = env_example_keys() - COMPOSE_ONLY - set(Settings.model_fields)
+    thieu = env_example_keys() - NGOAI_SETTINGS - set(Settings.model_fields)
     assert not thieu, f"có trong .env.example nhưng thiếu trong Settings: {sorted(thieu)}"
 
 
@@ -57,14 +69,14 @@ def test_moi_field_cua_settings_deu_co_trong_env_example() -> None:
 
 def test_danh_sach_compose_only_khong_muc_ruong() -> None:
     """Tên đã miễn trừ mà biến mất khỏi `.env.example` thì phải gỡ khỏi danh sách."""
-    thua = COMPOSE_ONLY - env_example_keys()
-    assert not thua, f"COMPOSE_ONLY còn tên không có trong .env.example: {sorted(thua)}"
+    thua = NGOAI_SETTINGS - env_example_keys()
+    assert not thua, f"danh sách miễn trừ còn tên không có trong .env.example: {sorted(thua)}"
 
 
 def test_compose_only_khong_lan_vao_settings() -> None:
-    """Biến của compose lọt vào `Settings` nghĩa là backend đang đọc thứ không phải của nó."""
-    lan = COMPOSE_ONLY & set(Settings.model_fields)
-    assert not lan, f"COMPOSE_ONLY trùng field của Settings: {sorted(lan)}"
+    """Biến của compose/pytest lọt vào Settings nghĩa là backend đọc thứ không phải của nó."""
+    lan = NGOAI_SETTINGS & set(Settings.model_fields)
+    assert not lan, f"danh sách miễn trừ trùng field của Settings: {sorted(lan)}"
 
 
 def test_co_it_nhat_mot_bien_bat_buoc() -> None:
