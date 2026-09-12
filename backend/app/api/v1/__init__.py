@@ -1,11 +1,12 @@
 from fastapi import APIRouter
 
-from app.api.v1 import admin, models
+from app.api.v1 import admin, health, models
 from app.config.settings import settings
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(models.router)
 router.include_router(admin.router)
+router.include_router(health.router)
 
 # §18.6 — `/_debug/*` CHỈ tồn tại khi DEBUG=true. Gắn router có điều kiện thay
 # vì kiểm `if settings.DEBUG` trong từng handler: đường dẫn không được đăng ký

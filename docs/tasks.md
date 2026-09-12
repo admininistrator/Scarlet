@@ -325,18 +325,19 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.11 — `/health/deep`
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-0.6, T-0.5 · **Ước lượng:** 1h
+- **Trạng thái:** ✅ (2026-09-12) · **Phụ thuộc:** T-0.6, T-0.5 · **Ước lượng:** 1h
 - **KH:** §18.6, §21.2
 - **Việc:**
-  - [ ] Kiểm song song: Postgres (`SELECT 1`), Redis (`PING`), MinIO (list bucket), LiteLLM (`/health/liveliness`), 9Router (`/v1/models`)
-  - [ ] Mỗi mục trả `{ok, latency_ms, error?}`; timeout riêng 2 s mỗi mục
-  - [ ] 9Router hỏng → tổng thể `degraded`, **không** phải `down`
+  - [x] Kiểm song song: Postgres (`SELECT 1`), Redis (`PING`), MinIO (list bucket), LiteLLM (`/health/liveliness`), 9Router (`/v1/models`)
+  - [x] Mỗi mục trả `{ok, latency_ms, error?}`; timeout riêng 2 s mỗi mục
+  - [x] 9Router hỏng → tổng thể `degraded`, **không** phải `down`
 - **Xong khi (DoD):**
-  - [ ] `curl -sk https://localhost/api/v1/health/deep | jq` → 5 mục, tất cả `ok: true`
-  - [ ] `docker compose stop redis` → mục redis `ok: false`, HTTP status `503`, các mục khác vẫn báo cáo
-  - [ ] Tắt 9Router → tổng thể `"status": "degraded"`, HTTP `200`
-  - [ ] Tổng thời gian phản hồi < 3 s ngay cả khi một phụ thuộc treo
+  - [x] `curl -sk https://localhost/api/v1/health/deep | jq` → 5 mục, tất cả `ok: true`
+  - [x] `docker compose stop redis` → mục redis `ok: false`, HTTP status `503`, các mục khác vẫn báo cáo
+  - [x] Tắt 9Router → tổng thể `"status": "degraded"`, HTTP `200`
+  - [x] Tổng thời gian phản hồi < 3 s ngay cả khi một phụ thuộc treo
 - **Cạm bẫy:** kiểm tuần tự sẽ khiến endpoint treo 10 s khi một service chết. Dùng `asyncio.gather` với timeout riêng từng mục.
+- **Ghi nhận:** §5.3/`check_hardcode.sh` cấm `app/api/` gọi `litellm`/`AsyncClient(` trực tiếp — đúng grep đó bắt luôn năm mục kiểm hạ tầng của task này dù đây không phải "gọi model sinh nội dung". Xử lý bằng cách tách toàn bộ lệnh gọi mạng sang `app/core/health_checks.py` (module mới, dùng đúng thư mục `app/core/` sẵn có), router trong `app/api/v1/health.py` chỉ gọi `run_checks()`. Không sửa `scripts/check_hardcode.sh`. Thêm `minio>=7.2` (SDK đồng bộ, gọi qua `asyncio.to_thread`) làm phụ thuộc mới vì chưa có client MinIO nào trong repo trước T-4.1 — dùng `list_buckets()` (không phải list objects trong bucket `scarlet`) vì bucket đó chưa được tạo (T-4.1 mới tạo). `LITELLM_BASE_URL` có hậu tố `/v1`; endpoint liveliness nằm ở gốc host nên phải tách lại scheme+netloc trước khi nối `/health/liveliness`.
 
 ### T-0.12 — Diễn tập thêm provider thứ tư ⭐
 - **Trạng thái:** ☐ · **Phụ thuộc:** T-0.7 · **Ước lượng:** 1.5h
