@@ -21,7 +21,10 @@ _ASSIGNMENT = re.compile(r"^([A-Z][A-Z0-9_]*)=")
 #: Biến chỉ dành cho docker compose, backend không đọc — NQ-08.
 #: Thêm vào đây là một quyết định, không phải cách vá test: mỗi tên ở đây phải
 #: chỉ ra được service nào trong `docker-compose.yml` dùng nó.
-COMPOSE_ONLY = frozenset({"POSTGRES_PASSWORD"})
+#: - POSTGRES_PASSWORD: service `postgres`
+#: - VITE_API_BASE_URL: service `web` (T-0.10) — Vite đọc lúc build/dev, không
+#:   phải app Python
+COMPOSE_ONLY = frozenset({"POSTGRES_PASSWORD", "VITE_API_BASE_URL"})
 
 
 def env_example_keys() -> set[str]:

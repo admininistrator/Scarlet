@@ -306,20 +306,20 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.10 — Frontend skeleton + theme tokens
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-0.1 · **Ước lượng:** 2h
+- **Trạng thái:** ✅ · **Phụ thuộc:** T-0.1 · **Ước lượng:** 2h
 - **KH:** §23, ADR-16, §19.1
 - **Việc:**
-  - [ ] `pnpm create vite` React + TS; Tailwind v4
-  - [ ] `src/styles/theme.css` với CSS variable cho màu/spacing/radius; **giá trị tạm**, T-HD1 sẽ thay
-  - [ ] Chuyển sáng/tối bằng `data-theme` trên `<html>`, đọc `prefers-color-scheme` làm mặc định
-  - [ ] `src/lib/api.ts`: wrapper fetch, base URL từ biến môi trường Vite
-  - [ ] `src/locales/vi.json` + hàm `t()` tối thiểu
-  - [ ] Service `web` trong compose, Nginx proxy `/` sang đó
+  - [x] `pnpm create vite` React + TS; Tailwind v4
+  - [x] `src/styles/theme.css` với CSS variable cho màu/spacing/radius; **giá trị tạm**, T-HD1 sẽ thay
+  - [x] Chuyển sáng/tối bằng `data-theme` trên `<html>`, đọc `prefers-color-scheme` làm mặc định
+  - [x] `src/lib/api.ts`: wrapper fetch, base URL từ biến môi trường Vite
+  - [x] `src/locales/vi.json` + hàm `t()` tối thiểu
+  - [x] Service `web` trong compose, Nginx proxy `/` sang đó
 - **Xong khi (DoD):**
-  - [ ] `https://localhost/` hiện trang có chữ, không lỗi console
-  - [ ] Đổi `--color-accent` trong `theme.css` → màu đổi sau khi lưu, **không** rebuild
-  - [ ] Chuyển sáng/tối đổi nền và chữ, không có chỗ nào chữ trùng màu nền
-  - [ ] `grep -rE "#[0-9a-fA-F]{6}" frontend/src/components/` → rỗng (§19.4)
+  - [x] `https://localhost/` hiện trang có chữ, không lỗi console
+  - [x] Đổi `--color-accent` trong `theme.css` → màu đổi sau khi lưu, **không** rebuild
+  - [x] Chuyển sáng/tối đổi nền và chữ, không có chỗ nào chữ trùng màu nền
+  - [x] `grep -rE "#[0-9a-fA-F]{6}" frontend/src/components/` → rỗng (§19.4)
 - **Cạm bẫy:** Tailwind v4 bỏ `tailwind.config.js` cho phần theme, dùng `@theme` trong CSS. Làm theo tài liệu v4, đừng chép cấu hình v3.
 
 ---
@@ -1032,7 +1032,7 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 | B-15 | `.env.example` **không `source` được bằng shell**: `MAIL_FROM=Scarlet <no-reply@...>` bị shell hiểu là redirect. Docker compose đọc bình thường, nhưng dev chạy backend ngoài Docker cần `scripts/load-env.sh` hoặc direnv | T-0.3 — chép nguyên KH Phụ lục B nên không tự sửa |
 | B-17 | KH §22.6 nhắc `CORS_ORIGINS` khi lên domain, nhưng biến này **không có trong Phụ lục B** | T-0.3 |
 | B-18 | `ValidationError` in kèm giá trị bị từ chối (`input_value='short'`) — một secret yếu sẽ lọt vào log lúc app từ chối boot. Cân nhắc bọc `Settings()` để in bản tóm tắt đã che giá trị | T-0.3 |
-| B-19 | `docker-compose.override.yml` chưa có phần "mount code" (bind-mount `./backend`, `./frontend` để hot-reload) vì service `api`/`worker` (T-0.5) và `web` (T-0.10) chưa tồn tại trong `docker-compose.yml` ở thời điểm T-0.4. Thêm volume mount khi các service đó được tạo | T-0.4 |
+| B-19 | `docker-compose.override.yml` chưa có phần "mount code" (bind-mount `./backend`, `./frontend` để hot-reload) vì service `api`/`worker` (T-0.5) và `web` (T-0.10) chưa tồn tại trong `docker-compose.yml` ở thời điểm T-0.4. Thêm volume mount khi các service đó được tạo. **Cập nhật T-0.10:** nửa `./frontend` → `web` đã thêm (bind-mount + volume ẩn danh `/app/node_modules` trong `docker-compose.override.yml`). Nửa `./backend` vẫn mở — xem B-22 (chờ `worker` ở T-1.5, và cần thêm `--reload` cho uvicorn) | T-0.4 |
 | B-20 | **Chỉ quan sát khi thao tác qua đường dẫn UNC `\\wsl.localhost\...`:** `docker compose down`/`stop` **không kèm** `-p <project>` thoát mã 0 nhưng **không dừng container nào** (no-op lặng lẽ) — kể cả khi đã đặt `COMPOSE_PROJECT_NAME` trong `.env`. Chỉ `docker compose -p scarlet down` mới dừng đúng. Chưa xác nhận có tái hiện khi chạy từ một shell WSL gốc (`cd ~/scarlet`) hay không — cần người kiểm tra vì CLAUDE.md yêu cầu làm việc trong WSL, không qua UNC | T-0.4, quan sát trong phiên làm việc |
 | B-21 | Bảng §17.1 liệt kê 15 bảng nhưng DDL Phụ lục A có 16 bảng — thiếu `user_skills` (bảng nối user↔skill, được nhắc gián tiếp ở dòng "bật/tắt theo user" của `skills`). Không tự sửa KH (chỉ Backlog/Nhật ký quyết định của tasks.md được sửa) — cần chốt: thêm dòng `user_skills` vào bảng §17.1 hay coi đây là điều đã biết | T-0.5, phát hiện khi chạy DoD `\dt` |
 | B-22 | `docker-compose.override.yml` vẫn còn nguyên câu "chưa mount code vì `api`/`worker` (T-0.5) chưa tồn tại" (B-19) — T-0.5 **không** tạo hai service này (xem Nhật ký quyết định NQ-09), nên B-19 vẫn mở, chỉ đổi task chặn sang T-0.8 (`api`) và T-1.5 (`worker`) | T-0.5 |
@@ -1090,6 +1090,7 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 | **NQ-10** | 2026-09-10 | **Ba model của T-0.6 do người dùng chốt, KHÁC Phụ lục E:** `deepseek-flash` (DeepSeek, có vision), `claude-haiku-4-5-20251001` (Anthropic), `ag/gemini-3.8-flash-low` (9Router). Alias LiteLLM đổi theo: `deepseek-flash`, `claude-haiku`, `nr-gemini-flash` | Phụ lục E ghi `deepseek-chat`, `claude-sonnet-4-5`, `nr-auto`. `claude-sonnet-4-5` là id đời cũ (B-28); `auto` **không tồn tại** trên 9Router thật — 147 model đều có tiền tố provider (B-27). Người dùng chốt ghim từng model cụ thể, thêm model khác sau. Giữ alias `claude-sonnet` mà trỏ vào Haiku sẽ là cái bẫy cho catalog T-0.7 và cho metering A7, nên alias đổi theo model thật |
 | **NQ-11** | 2026-09-10 | `location /` của T-0.8 trỏ tạm vào trang tĩnh của image nginx, **không** viết sẵn `proxy_pass http://web:5173` như Phụ lục D | Nginx từ chối khởi động khi upstream không phân giải được, mà `web` do T-0.10 tạo ⇒ viết đúng Phụ lục D thì cả stack không lên được. Ba phương án đưa cho người dùng (placeholder / giữ `proxy_pass` bằng `resolver` và chấp nhận 502 / tạo luôn service `web`), người dùng chốt **placeholder**: đủ cả 5 dòng DoD ngay trong task này mà vẫn giữ đúng ranh giới task, cùng tinh thần NQ-09. Việc thay để lại cho T-0.10, ghi B-36 |
 | **NQ-12** | 2026-09-10 | Thêm query param `?gap_s=` vào `GET /api/v1/_debug/sse` — **lệch §18.6**, vốn chỉ tả "1 dòng mỗi 200 ms trong 10 s" | DoD gốc đo C2 bằng `?seconds=90`. Negative control chứng minh phép đo đó **không thể hỏng**: `proxy_read_timeout` đo khoảng **im lặng giữa hai lần đọc** từ upstream, mà stream 200 ms/dòng không bao giờ chạm ngưỡng — hạ `proxy_read_timeout` xuống 60 s rồi xin 90 s vẫn về đủ 451 dòng. `?gap_s=75` tạo im lặng thật: với 3600 s thì qua, với 60 s thì `upstream timed out (110)` ở giây ~57, 0 dòng. Đây cũng đúng hình dạng tình huống thật ở Phase 1 (model nghĩ lâu trước token đầu). Người dùng chốt thêm `gap_s` thay vì chỉ ghi Backlog |
+| **NQ-14** | 2026-09-12 | T-0.10 hiện thực **khác Phụ lục D một dòng**: thêm `proxy_set_header Host $host;` vào `location /` (không có trong Phụ lục D). `web` **không** dùng `<<: *common` (không `env_file`). Thêm `VITE_API_BASE_URL` vào `.env`/`.env.example`, miễn trừ trong `COMPOSE_ONLY` của `tests/test_settings_complete.py` | (1) Thiếu `Host $host` → nginx gửi mặc định `Host: web` (`$proxy_host`) sang upstream; Vite 6 có `server.allowedHosts` chặn thẳng với "Blocked request... allowedHosts" vì host lạ khác `localhost`. Phát hiện khi chạy DoD `curl https://localhost/` ra 403. (2) `web` không cần bất kỳ secret nào trong `.env` (JWT_SECRET, MASTER_ENCRYPTION_KEY, SMTP_PASSWORD, MinIO key...) — cùng lý do NQ-08/C27 áp cho litellm/sandbox. (3) `VITE_API_BASE_URL` là biến Vite đọc lúc dev/build, backend không đọc — cùng hình dạng với `POSTGRES_PASSWORD` ở NQ-08 |
 | **NQ-13** | 2026-09-12 | T-0.9: `scripts/check_hardcode.sh` giới hạn lệnh grep secret vào file git đang theo dõi (`git ls-files -z \| xargs -0 grep ...`), gỡ B-41 khỏi Backlog. Chạy `ruff format` dọn `alembic/versions/0001_initial.py` và `app/config/catalog.py` (chỉ gộp dòng, không đổi hành vi), gỡ B-42 | Đúng như B-41/B-42 đã giao việc cho T-0.9. Quét cả cây thư mục sẽ báo động giả trên `.env` (gitignore, có key thật hợp lệ) mỗi lần chạy trên máy dev — đúng cạm bẫy "một lệnh kiểm tra bị tắt còn tệ hơn không có" mà task này cảnh báo |
 
 ---

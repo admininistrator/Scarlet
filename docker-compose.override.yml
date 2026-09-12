@@ -1,7 +1,20 @@
-# Chỉ dùng khi dev cục bộ: docker compose --profile core --profile tools --profile dev up -d
-# Mount code (bind-mount backend/frontend cho hot-reload) sẽ thêm vào đây khi service
-# api/worker (T-0.5) và web (T-0.10) tồn tại trong docker-compose.yml.
+# File này LUÔN được docker compose tự nạp cùng docker-compose.yml (không cần
+# cờ riêng). Muốn thêm mailpit/adminer thì mới cần: --profile core --profile
+# tools --profile dev.
+#
+# Bind-mount `./frontend` cho hot-reload (T-0.10): volumes là danh sách nên
+# compose NỐI THÊM vào volumes rỗng của `web` trong docker-compose.yml, không
+# thay thế. `/app/node_modules` là volume ẩn danh để node_modules cài trong
+# image (từ Dockerfile) không bị đè bởi bind-mount rỗng phía host.
+#
+# TODO (B-19): làm tương tự cho `./backend` khi thêm uvicorn --reload cho
+# api/worker — chưa làm ở đây vì ngoài phạm vi T-0.10.
 services:
+  web:
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
   mailpit:
     image: axllent/mailpit:latest
     ports: ["8025:8025"]
