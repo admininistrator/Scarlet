@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -33,6 +35,10 @@ AuthStyle = Literal["bearer", "x-api-key", "query"]
 Availability = Literal["always", "host-dependent"]
 CostReporting = Literal["exact", "unreliable"]
 PricingMode = Literal["metered", "unmetered", "flat"]
+
+#: Segment cuối của `base_url` phải là một phiên bản API (`/v1`, `/v2`,
+#: `/v1beta`). Xem `_base_url_co_phien_ban` bên dưới cho lý do (C43).
+_VERSION_SEGMENT = re.compile(r"^v\d+[a-z]*$")
 
 
 class Provider(BaseModel):
@@ -106,6 +112,29 @@ class Catalog(BaseModel):
             raise ValueError(
                 f"phải có đúng một model với default:true, tìm thấy {len(defaults)}: {defaults}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _base_url_co_phien_ban(self) -> Catalog:
+        """`base_url` phải là gốc API **đã bao gồm** phiên bản, ví dụ `/v1` (C43).
+
+        SDK `openai` và LiteLLM đều nối thẳng `/chat/completions` vào
+        `base_url`. Thiếu `/v1` thì upstream trả `404` dù dán URL vào trình
+        duyệt vẫn ra JSON — triệu chứng đánh lạc hướng nhất của C43. Dấu `/`
+        cuối đã bị `HttpUrlStr` cắt trước khi tới đây.
+
+        Chấp nhận `v<số>` kèm hậu tố chữ (`v1`, `v2`, `v1beta`) chứ không chỉ
+        đúng chuỗi `/v1`: KH C43 viết "đã bao gồm `/v1`" để nói *phải có phiên
+        bản*, và ghim cứng `v1` sẽ tự tạo ra một chỗ cứng mới cho provider đặt
+        API ở `/v1beta` — đúng loại chỗ cứng mà T-0.12 sinh ra để xoá.
+        """
+        for name, provider in self.providers.items():
+            last = urlsplit(provider.base_url).path.rsplit("/", 1)[-1]
+            if not _VERSION_SEGMENT.match(last):
+                raise ValueError(
+                    f"provider '{name}': base_url phải kết thúc bằng segment phiên bản "
+                    f"(ví dụ '/v1'), nhận được '{provider.base_url}' — C43"
+                )
         return self
 
     @model_validator(mode="after")

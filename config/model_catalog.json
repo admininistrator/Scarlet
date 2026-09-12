@@ -26,6 +26,15 @@
       "byok_supported": false,
       "cost_reporting": "unreliable",
       "health_path": "/models"
+    },
+    "ollama": {
+      "label": "Ollama (self-host)",
+      "base_url": "http://ollama:11434/v1",
+      "availability": "always",
+      "byok_supported": false,
+      "cost_reporting": "exact",
+      "auth_style": "bearer",
+      "verify_path": "/models"
     }
   },
   "models": [
@@ -73,6 +82,21 @@
       "default": false,
       "order": 30,
       "badge": "9Router"
+    },
+    {
+      "id": "ol-qwen-small",
+      "display_name": "Qwen2.5 0.5B (Ollama)",
+      "provider": "ollama",
+      "upstream_model": "openai/qwen2.5:0.5b",
+      "capabilities": [],
+      "context_window": 32768,
+      "max_output": 4096,
+      "pricing": null,
+      "pricing_mode": "unmetered",
+      "enabled": true,
+      "default": false,
+      "order": 40,
+      "badge": "Self-host"
     }
   ]
 }

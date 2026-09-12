@@ -119,12 +119,16 @@ services:
     image: ghcr.io/berriai/litellm:main-latest
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     volumes: ["./config/litellm.config.yaml:/app/config.yaml:ro"]
+    # T-0.12/NQ-15: key + endpoint cua provider nam trong .env.providers, KHONG
+    # liet ke tung bien o day nua. Truoc day moi provider moi la mot dong sua
+    # trong file nay -> trai S15 ("them provider = 0 dong code"). .env.providers
+    # chi chua bien cua provider, nen C27 (litellm khong thay JWT_SECRET,
+    # MinIO key...) va B-29 (khong thay DATABASE_URL) van duoc giu nguyen.
+    # Danh doi da biet truoc: mat fail-fast dang ${VAR:?} cho key provider —
+    # LiteLLM chi bao loi luc goi model. Buoc 5 cua RUNBOOK bat cho nay.
+    env_file: [.env.providers]
     environment:
       LITELLM_MASTER_KEY:   ${LITELLM_MASTER_KEY:?thieu LITELLM_MASTER_KEY}
-      DEEPSEEK_API_KEY:     ${DEEPSEEK_API_KEY:?thieu DEEPSEEK_API_KEY}
-      ANTHROPIC_API_KEY:    ${ANTHROPIC_API_KEY:?thieu ANTHROPIC_API_KEY}
-      NINEROUTER_API_KEY:   ${NINEROUTER_API_KEY:?thieu NINEROUTER_API_KEY}
-      NINEROUTER_BASE_URL:  ${NINEROUTER_BASE_URL:?thieu NINEROUTER_BASE_URL}
     extra_hosts: ["host.docker.internal:host-gateway"]   # <- C17
     ports: ["4000:4000"]   # T-0.6 DoD goi truc tiep tu host; nginx chua proxy toi day (Phase 3)
     healthcheck:
@@ -132,6 +136,25 @@ services:
       # (chi co /app/.venv/bin/python3) -> healthcheck luon unhealthy va moi
       # depends_on: service_healthy sau nay se treo. Xem B-30.
       test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    profiles: [core]
+
+  ollama:
+    # T-0.12 — provider thu tu, dung lam BAI DIEN TAP cho R22/S15 (khong phai
+    # mot tinh nang). Self-host nen KHONG co key nao: cung ly do voi `web` va
+    # `sandbox`, service nay khong <<: *common va khong co env_file (C27).
+    # base_url ma litellm dung la TEN SERVICE `http://ollama:11434/v1` — khong
+    # phai localhost, khong phai host.docker.internal (C45).
+    restart: unless-stopped
+    networks: [internal]
+    image: ollama/ollama:latest
+    volumes: ["ollamadata:/root/.ollama"]
+    healthcheck:
+      # Image ollama khong co curl/wget; CLI `ollama` co san va `list` goi
+      # dung API cuc bo, nen no kiem duoc ca tien trinh lan cong 11434.
+      test: ["CMD", "ollama", "list"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -159,4 +182,4 @@ networks:
   internal: {}
   egress: {}
 
-volumes: { pgdata: {}, redisdata: {}, miniodata: {} }
+volumes: { pgdata: {}, redisdata: {}, miniodata: {}, ollamadata: {} }

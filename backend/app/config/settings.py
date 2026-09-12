@@ -76,11 +76,13 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: SecretStr
     MINIO_BUCKET: str = Field(min_length=1)
 
-    # ═══ Provider keys (dùng bởi LiteLLM, không phải bởi app) ═══
-    DEEPSEEK_API_KEY: SecretStr = SecretStr("")
-    ANTHROPIC_API_KEY: SecretStr = SecretStr("")
-    NINEROUTER_BASE_URL: HttpUrlStr = "http://host.docker.internal:20128/v1"
-    NINEROUTER_API_KEY: SecretStr = SecretStr("")
+    # ═══ Provider keys — CỐ Ý KHÔNG CÓ Ở ĐÂY (NQ-15, B-26, T-0.12) ═══
+    # `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `NINEROUTER_*`, `OLLAMA_*`… sống
+    # trong `.env.providers` và chỉ service `litellm` đọc. Backend không gọi
+    # provider trực tiếp (A9: chỉ nói chuyện với LiteLLM), nên khai chúng ở đây
+    # vừa là biến chết, vừa buộc mỗi provider mới phải sửa file `.py` này —
+    # trái tiêu chí S15 ("thêm provider = 0 dòng code"). Thông tin cần cho
+    # backend về provider (base_url, health_path) nằm trong `model_catalog.json`.
 
     # ═══ Email ═══
     SMTP_HOST: str = "mailpit"

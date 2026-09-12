@@ -24,6 +24,14 @@ model_list:
       api_base: os.environ/NINEROUTER_BASE_URL
       api_key: os.environ/NINEROUTER_API_KEY
 
+  # ─── Ollama self-host trong compose (T-0.12) — provider thu tu, bai dien tap
+  #     cho R22/S15. api_base la TEN SERVICE, khong phai localhost (C45). ───
+  - model_name: ol-qwen-small
+    litellm_params:
+      model: openai/qwen2.5:0.5b
+      api_base: os.environ/OLLAMA_BASE_URL
+      api_key:  os.environ/OLLAMA_API_KEY
+
 litellm_settings:
   drop_params: true          # bỏ tham số provider không hỗ trợ thay vì lỗi 400
   request_timeout: 600

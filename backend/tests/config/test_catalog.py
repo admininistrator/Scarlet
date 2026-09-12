@@ -127,6 +127,33 @@ def test_base_url_co_dau_gach_cheo_cuoi_duoc_chuan_hoa() -> None:
     assert cat.providers["deepseek"].base_url == "https://api.deepseek.com/v1"
 
 
+def test_base_url_thieu_phien_ban_bi_tu_choi() -> None:
+    """C43 — `https://api.deepseek.com` (thiếu `/v1`) phải chết lúc nạp catalog."""
+    bad = deepcopy(VALID)
+    bad["providers"]["deepseek"]["base_url"] = "https://api.deepseek.com"
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    message = str(exc.value)
+    assert "deepseek" in message
+    assert "C43" in message
+
+
+def test_base_url_ket_thuc_bang_duong_dan_khac_bi_tu_choi() -> None:
+    """C43 — `/v1/chat/completions` cũng sai: base_url là GỐC API, không phải endpoint."""
+    bad = deepcopy(VALID)
+    bad["providers"]["deepseek"]["base_url"] = "https://api.deepseek.com/v1/chat/completions"
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    assert "C43" in str(exc.value)
+
+
+@pytest.mark.parametrize("base_url", ["http://ollama:11434/v1", "https://x.test/api/v1beta"])
+def test_base_url_co_phien_ban_duoc_chap_nhan(base_url: str) -> None:
+    ok = deepcopy(VALID)
+    ok["providers"]["deepseek"]["base_url"] = base_url
+    assert Catalog.model_validate(ok).providers["deepseek"].base_url == base_url
+
+
 def test_auth_style_thieu_mac_dinh_bearer() -> None:
     cat = Catalog.model_validate(VALID)
     assert cat.providers["anthropic"].auth_style == "bearer"

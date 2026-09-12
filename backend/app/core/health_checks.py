@@ -35,13 +35,17 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.config.catalog import get_catalog
 from app.config.settings import settings
 
 #: Timeout riêng cho mỗi mục kiểm (Việc cần làm, T-0.11).
 CHECK_TIMEOUT_S = 2.0
 
+#: Khoá của 9Router trong `model_catalog.json` — cũng là tên mục kiểm.
+NINEROUTER = "ninerouter"
+
 #: 9Router là phụ thuộc duy nhất mà hỏng chỉ hạ tổng thể xuống `degraded`.
-NON_CRITICAL_CHECKS = frozenset({"ninerouter"})
+NON_CRITICAL_CHECKS = frozenset({NINEROUTER})
 
 
 class CheckResult(BaseModel):
@@ -96,12 +100,16 @@ async def _check_litellm() -> None:
 
 
 async def _check_ninerouter() -> None:
-    headers = {}
-    key = settings.NINEROUTER_API_KEY.get_secret_value()
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
+    # `base_url` + `health_path` lấy từ catalog, KHÔNG từ biến môi trường:
+    # key và endpoint của provider là việc của LiteLLM (`.env.providers`), còn
+    # backend chỉ biết provider qua `model_catalog.json` — NQ-15/B-26, A3.
+    # Không gắn Authorization: `/v1/models` của 9Router trả 200 khi không có
+    # header, và health check không có lý do gì phải cầm key provider.
+    provider = get_catalog().providers[NINEROUTER]
+    if provider.health_path is None:
+        raise ValueError(f"provider '{NINEROUTER}' thiếu health_path trong model_catalog.json")
     async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{settings.NINEROUTER_BASE_URL}/models", headers=headers)
+        resp = await client.get(f"{provider.base_url}{provider.health_path}")
         resp.raise_for_status()
 
 
@@ -123,6 +131,6 @@ async def run_checks() -> dict[str, CheckResult]:
         _timed("redis", _check_redis()),
         _timed("minio", _check_minio()),
         _timed("litellm", _check_litellm()),
-        _timed("ninerouter", _check_ninerouter()),
+        _timed(NINEROUTER, _check_ninerouter()),
     )
     return dict(pairs)
