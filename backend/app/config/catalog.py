@@ -78,9 +78,7 @@ class ModelEntry(BaseModel):
     @model_validator(mode="after")
     def _pricing_bat_buoc_khi_metered(self) -> ModelEntry:
         if self.pricing_mode == "metered" and self.pricing is None:
-            raise ValueError(
-                f"model '{self.id}': pricing bắt buộc khi pricing_mode='metered'"
-            )
+            raise ValueError(f"model '{self.id}': pricing bắt buộc khi pricing_mode='metered'")
         return self
 
 

@@ -137,8 +137,7 @@ def upgrade() -> None:
     # ─────────────────────────── Hội thoại (CÂY) ───────────────────────────
     op.execute("CREATE TYPE message_role AS ENUM ('system','user','assistant','tool')")
     op.execute(
-        "CREATE TYPE message_status AS ENUM "
-        "('queued','streaming','completed','failed','cancelled')"
+        "CREATE TYPE message_status AS ENUM ('queued','streaming','completed','failed','cancelled')"
     )
 
     op.execute(
@@ -188,9 +187,7 @@ def upgrade() -> None:
     )
     op.execute("CREATE INDEX ix_msg_conv_parent ON messages(conversation_id, parent_id)")
     op.execute("CREATE INDEX ix_msg_parent ON messages(parent_id)")
-    op.execute(
-        "CREATE INDEX ix_msg_streaming ON messages(heartbeat_at) WHERE status = 'streaming'"
-    )
+    op.execute("CREATE INDEX ix_msg_streaming ON messages(heartbeat_at) WHERE status = 'streaming'")
 
     op.execute(
         """

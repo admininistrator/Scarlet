@@ -1,0 +1,28 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: backend/.venv/bin/ruff check --fix --exit-non-zero-on-fix
+        language: system
+        files: ^backend/.*\.py$
+
+      - id: ruff-format
+        name: ruff format
+        entry: backend/.venv/bin/ruff format
+        language: system
+        files: ^backend/.*\.py$
+
+      - id: check-hardcode
+        name: check-hardcode (KE-HOACH.md §19.4)
+        entry: bash scripts/check_hardcode.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: no-dotenv
+        name: chan commit file .env
+        entry: >-
+          bash -c 'echo "BLOCKED - khong duoc commit file .env"; exit 1'
+        language: system
+        files: (^|/)\.env$

@@ -288,19 +288,20 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-0.9 — Makefile, lint, pre-commit, check-hardcode
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-0.2 · **Ước lượng:** 1.5h
+- **Trạng thái:** ✅ · **Phụ thuộc:** T-0.2 · **Ước lượng:** 1.5h
 - **KH:** §19.4, §0
 - **Việc:**
-  - [ ] `Makefile`: `up`, `down`, `test`, `lint`, `fmt`, `migrate`, `check-hardcode`, `eval`, `logs`
-  - [ ] `scripts/check_hardcode.sh` chép đúng bốn lệnh grep ở §19.4
-  - [ ] `ruff` + `mypy` cấu hình trong `pyproject.toml`
-  - [ ] `.pre-commit-config.yaml`: ruff, check-hardcode, chặn commit `.env`
+  - [x] `Makefile`: `up`, `down`, `test`, `lint`, `fmt`, `migrate`, `check-hardcode`, `eval`, `logs`
+  - [x] `scripts/check_hardcode.sh` chép đúng bốn lệnh grep ở §19.4
+  - [x] `ruff` + `mypy` cấu hình trong `pyproject.toml`
+  - [x] `.pre-commit-config.yaml`: ruff, check-hardcode, chặn commit `.env`
 - **Xong khi (DoD):**
-  - [ ] `make check-hardcode` → exit 0 trên repo sạch
-  - [ ] Thêm tạm `MODEL = "claude-sonnet-4-5"` vào `app/llm/client.py` → `make check-hardcode` **exit ≠ 0** và in đúng số dòng
-  - [ ] Thêm tạm `import openai` vào `app/api/v1/health.py` → exit ≠ 0
-  - [ ] `git commit` với file `.env` trong staging → pre-commit **chặn**
+  - [x] `make check-hardcode` → exit 0 trên repo sạch
+  - [x] Thêm tạm `MODEL = "claude-sonnet-4-5"` vào `app/llm/client.py` → `make check-hardcode` **exit ≠ 0** và in đúng số dòng
+  - [x] Thêm tạm `import openai` vào `app/api/v1/health.py` → exit ≠ 0
+  - [x] `git commit` với file `.env` trong staging → pre-commit **chặn**
 - **Cạm bẫy:** grep phải loại trừ `tests/` và `app/config/`, nếu không nó sẽ báo động giả mỗi lần và bạn sẽ tắt nó đi — một lệnh kiểm tra bị tắt còn tệ hơn không có.
+- **Ghi nhận:** `app/llm/client.py` và `app/api/v1/health.py` chưa tồn tại (thuộc task sau) nên hai dòng DoD test được tạo tạm rồi xoá ngay sau khi xác nhận exit code, không để lại trong repo. Dọn nốt B-42 (`ruff format`) trên `alembic/versions/0001_initial.py` và `app/config/catalog.py` trong cùng commit này, đúng như ghi chú B-42 giao việc cho T-0.9. `.env` bắt buộc `git add -f` mới test được (đã gitignore từ T-0.1) — test bằng file `backend/.env` giả (nội dung `DUMMY=1`, không phải secret thật), `git commit` thật đã bị pre-commit chặn.
 
 ---
 
@@ -1053,8 +1054,6 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 | B-38 | **Cổng 80 của host bị `infra-nginx-1` chiếm** (project `infra` — WorldVoice, `C:\Users\Admin\Documents\GitHub\WorldVoice\infra`). Đã bỏ `80:80` khỏi `ports` của nginx; server block `:80` vẫn sống **trong container** và vẫn `301` sang HTTPS, chỉ là host chưa map tới. Mở lại bằng một dòng khi `:80` được giải phóng. **Cần chốt:** T-9.4 (lên domain) bắt buộc có `:80` cho ACME http-01 của Let's Encrypt — tới đó phải giải quyết xung đột này | T-0.8 |
 | B-39 | **Chứng chỉ mkcert hiện tại không dùng được cho `artifacts.localhost` khi verify thật.** SAN là `DNS:localhost, DNS:*.localhost, IP:127.0.0.1`; OpenSSL/curl **từ chối** wildcard chỉ có một nhãn sau dấu `*` (`*.localhost` bị xử như `*.com`) → `curl: (60) no alternative certificate subject name matches`. Có `-k` thì qua, nên DoD T-0.8 vẫn đạt, nhưng **T-5.6 render artifact trong iframe từ origin đó sẽ ăn cảnh báo chứng chỉ trên trình duyệt**. **Cần người làm (T-H1 nối dài):** chạy lại `mkcert localhost "*.localhost" artifacts.localhost 127.0.0.1` — thêm SAN tường minh — **trước** T-5.6 | T-0.8 |
 | B-40 | **`sed -i` phá bind-mount file lẻ.** `sed -i` ghi file tạm rồi `rename`, tạo **inode mới**; bind-mount một file đơn (`./config/nginx/nginx.conf:/etc/nginx/nginx.conf`) gắn theo inode nên container **vĩnh viễn thấy nội dung cũ** — không lỗi, không cảnh báo, `nginx -s reload` vẫn báo thành công. Mất ~15 phút trong phiên này vì một negative control cho kết quả sai. **Luật:** sửa file đang bind-mount phải ghi **tại chỗ** (`python write_text`, `cp`, `>`), hoặc `docker compose up -d --force-recreate <service>` sau khi lỡ dùng `sed -i`. Áp cho cả `config/litellm.config.yaml` và `config/model_catalog.json`. **Cần chốt:** ghi vào §22.5 và README vận hành (T-9.7) | T-0.8 |
-| B-41 | **Lệnh grep secret thứ 4 của §19.4 báo động giả trên `.env`.** `grep -rnE "sk-[a-zA-Z0-9]{20,}" --exclude-dir=node_modules .` khớp `.env` — file **đang gitignore** và chứa key thật một cách hợp lệ, nên `make check-hardcode` sẽ **luôn** exit ≠ 0 trên máy dev. Đúng cạm bẫy KH cảnh báo ở T-0.9 ("một lệnh kiểm tra bị tắt còn tệ hơn không có"). **T-0.9 phải** giới hạn lệnh này vào file git đang theo dõi (`git ls-files -z \| xargs -0 grep ...`) thay vì quét cây thư mục | T-0.8 |
-| B-42 | **`ruff format --check` muốn sửa 2 file của task khác**: `backend/alembic/versions/0001_initial.py` (T-0.5) và `backend/app/config/catalog.py` (T-0.7) — cả hai chỉ gộp dòng, không đổi hành vi. **Không sửa trong T-0.8** vì đây là task 🔒 một-commit-riêng. T-0.9 (cấu hình ruff + pre-commit) dọn một lượt | T-0.8 |
 | B-43 | **`.gitattributes` mới phủ `*.sh` và `*.py`, không phủ `*.md`/`*.yml`/`*.conf`.** Trong phiên T-0.8, sửa file bằng `python3` **của Windows** (Git Bash) làm `Path.write_text` dịch ký tự xuống dòng LF thành CRLF ⇒ `docs/tasks.md`, `docker-compose.yml`, `config/nginx/nginx.conf` bị CRLF-hoá toàn bộ, commit phình lên 1511+/1177- cho một thay đổi vài chục dòng. Đã sửa tay về LF. **Cần chốt:** thêm `* text=auto eol=lf` vào `.gitattributes` (cùng họ C39) — không tự sửa vì `.gitattributes` là sản phẩm của T-0.1. **Luật tạm cho agent:** mọi thao tác sửa file của repo chạy trong WSL, không chạy bằng `python3`/`sed` phía Windows | T-0.8 |
 
 ---
@@ -1091,6 +1090,7 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 | **NQ-10** | 2026-09-10 | **Ba model của T-0.6 do người dùng chốt, KHÁC Phụ lục E:** `deepseek-flash` (DeepSeek, có vision), `claude-haiku-4-5-20251001` (Anthropic), `ag/gemini-3.8-flash-low` (9Router). Alias LiteLLM đổi theo: `deepseek-flash`, `claude-haiku`, `nr-gemini-flash` | Phụ lục E ghi `deepseek-chat`, `claude-sonnet-4-5`, `nr-auto`. `claude-sonnet-4-5` là id đời cũ (B-28); `auto` **không tồn tại** trên 9Router thật — 147 model đều có tiền tố provider (B-27). Người dùng chốt ghim từng model cụ thể, thêm model khác sau. Giữ alias `claude-sonnet` mà trỏ vào Haiku sẽ là cái bẫy cho catalog T-0.7 và cho metering A7, nên alias đổi theo model thật |
 | **NQ-11** | 2026-09-10 | `location /` của T-0.8 trỏ tạm vào trang tĩnh của image nginx, **không** viết sẵn `proxy_pass http://web:5173` như Phụ lục D | Nginx từ chối khởi động khi upstream không phân giải được, mà `web` do T-0.10 tạo ⇒ viết đúng Phụ lục D thì cả stack không lên được. Ba phương án đưa cho người dùng (placeholder / giữ `proxy_pass` bằng `resolver` và chấp nhận 502 / tạo luôn service `web`), người dùng chốt **placeholder**: đủ cả 5 dòng DoD ngay trong task này mà vẫn giữ đúng ranh giới task, cùng tinh thần NQ-09. Việc thay để lại cho T-0.10, ghi B-36 |
 | **NQ-12** | 2026-09-10 | Thêm query param `?gap_s=` vào `GET /api/v1/_debug/sse` — **lệch §18.6**, vốn chỉ tả "1 dòng mỗi 200 ms trong 10 s" | DoD gốc đo C2 bằng `?seconds=90`. Negative control chứng minh phép đo đó **không thể hỏng**: `proxy_read_timeout` đo khoảng **im lặng giữa hai lần đọc** từ upstream, mà stream 200 ms/dòng không bao giờ chạm ngưỡng — hạ `proxy_read_timeout` xuống 60 s rồi xin 90 s vẫn về đủ 451 dòng. `?gap_s=75` tạo im lặng thật: với 3600 s thì qua, với 60 s thì `upstream timed out (110)` ở giây ~57, 0 dòng. Đây cũng đúng hình dạng tình huống thật ở Phase 1 (model nghĩ lâu trước token đầu). Người dùng chốt thêm `gap_s` thay vì chỉ ghi Backlog |
+| **NQ-13** | 2026-09-12 | T-0.9: `scripts/check_hardcode.sh` giới hạn lệnh grep secret vào file git đang theo dõi (`git ls-files -z \| xargs -0 grep ...`), gỡ B-41 khỏi Backlog. Chạy `ruff format` dọn `alembic/versions/0001_initial.py` và `app/config/catalog.py` (chỉ gộp dòng, không đổi hành vi), gỡ B-42 | Đúng như B-41/B-42 đã giao việc cho T-0.9. Quét cả cây thư mục sẽ báo động giả trên `.env` (gitignore, có key thật hợp lệ) mỗi lần chạy trên máy dev — đúng cạm bẫy "một lệnh kiểm tra bị tắt còn tệ hơn không có" mà task này cảnh báo |
 
 ---
 
