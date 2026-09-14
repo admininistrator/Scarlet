@@ -109,6 +109,15 @@ class Settings(BaseSettings):
     REAPER_STALE_S: int = Field(default=90, gt=0)
     MAX_CONCURRENT_STREAMS: int = Field(default=3, gt=0)
 
+    # ═══ Worker & hàng đợi (ADR-02, §5.2) ═══
+    #: Trần thời gian của MỘT job `generate`. Phải **lớn hơn**
+    #: `LLM_REQUEST_TIMEOUT_S`: hai timeout này lồng nhau, và cái trong phải nổ
+    #: trước. Nếu arq cắt job khi model vẫn đang sinh thì tiền vẫn mất mà worker
+    #: mất luôn quyền ghi `status`/`usage`/`XADD done` — message kẹt ở
+    #: `streaming` cho tới khi reaper §7.6 dọn. Đây là một *giới hạn* nên nó ở
+    #: đây chứ không phải hằng trong `app/workers/main.py` (A3, §19.2 L4).
+    GENERATE_TIMEOUT_S: int = Field(default=900, gt=0)
+
     # ═══ Quota (§10) ═══
     QUOTA_WINDOW_SHORT_S: int = Field(default=18000, gt=0)
     QUOTA_WINDOW_LONG_S: int = Field(default=604800, gt=0)

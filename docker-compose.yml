@@ -57,6 +57,33 @@ services:
       migrate:  { condition: service_completed_successfully }
     profiles: [core]
 
+  worker:
+    # T-1.5 — dung y nguyen dinh nghia cua Phu luc C, them hai thu ma Phu luc C
+    # khong noi toi (volumes + healthcheck), ly do ghi ngay duoi day.
+    <<: *common
+    build: ./backend
+    command: arq app.workers.main.WorkerSettings
+    # Cung ly do voi `api`: §19.1 dat catalog, gia va prompt trong config/
+    # MOUNTED, khong nam trong image. Worker la tien trinh doc ca hai thu do
+    # (T-1.6 goi app/llm/context.py -> /config/prompts/system.jinja, va
+    # model_meta den tu /config/model_catalog.json).
+    volumes: ["./config:/config:ro"]
+    healthcheck:
+      # Worker khong mo cong nao nen khong co gi de curl/wget — `arq --check`
+      # doc khoa `arq:queue:health-check` ma chinh worker ghi vao Redis moi
+      # WORKER_HEARTBEAT_S giay (TTL = nhip + 1 s). Mat khoa = vong lap chinh
+      # cua worker da dung, dung dinh nghia "con song" cua §7.6. Can healthcheck
+      # vi DoD chung §15 doi `docker compose ps` moi service healthy.
+      test: ["CMD", "arq", "app.workers.main.WorkerSettings", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      redis:   { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    profiles: [core]
+
   postgres:
     <<: *common
     image: postgres:17-alpine
