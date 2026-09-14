@@ -24,6 +24,17 @@ COPY --chown=scarlet:scarlet alembic /app/alembic
 COPY --chown=scarlet:scarlet alembic.ini /app/alembic.ini
 
 WORKDIR /app
+
+# Tiktoken (§9.6, T-1.4) TAI bang BPE ~3.6 MB tu openaipublic.blob.core.windows.net
+# o lan dem token dau tien. Nap san vao image thay vi de container tai luc dang
+# phuc vu: mot luot chat khong duoc phep treo — hay chet — vi blob store cua ben
+# thu ba. Phai dat TIKTOKEN_CACHE_DIR, neu khong tiktoken ghi vao thu muc tam va
+# cache bien mat theo tung container.
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken
+RUN mkdir -p "$TIKTOKEN_CACHE_DIR" \
+    && python -c "from app.llm.tokens import warm_cache; print('tiktoken:', warm_cache())" \
+    && chmod -R a+rX "$TIKTOKEN_CACHE_DIR"
+
 USER scarlet
 
 EXPOSE 8000

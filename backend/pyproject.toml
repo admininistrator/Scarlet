@@ -13,6 +13,7 @@ dependencies = [
     "redis>=5.0",
     "arq>=0.26",
     "openai>=1.50",
+    "tiktoken>=0.8",
     "argon2-cffi>=23.1",
     "python-magic>=0.4.27",
     "pillow>=10.4",
