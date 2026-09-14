@@ -437,3 +437,54 @@ async def test_enum_role_va_status_di_ve_dung_gia_tri_trong_postgres(
         )
     ).one()
     assert hang == ("assistant", "streaming")
+
+
+async def test_created_at_khac_nhau_giua_cac_message_cung_transaction(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """B-53: `created_at` phải sắp được các message ghi trong CÙNG một transaction.
+
+    Với `DEFAULT now()` (= `transaction_timestamp()`) cả ba message dưới đây có
+    cùng một mốc thời gian, và `ORDER BY created_at` của §8.3 trả về thứ tự tuỳ
+    ý — hỏng đúng chỗ `sibling_index`/`sibling_count` (C13). Migration 0002 đổi
+    default sang `clock_timestamp()`.
+
+    Cả ba message ở đây là ANH EM (cùng `parent_id`), tức đúng hình dạng dữ liệu
+    mà `get_siblings` của T-1.2 sẽ phải sắp.
+    """
+    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    messages = MessageRepository(session)
+
+    anh_em = [
+        await messages.create_message(
+            conversation_id=conversation.id,
+            user_id=user_a,
+            role=MessageRole.ASSISTANT,
+            parent_id=root.id,
+            content=f"lan thu {i}",
+        )
+        for i in range(3)
+    ]
+
+    moc = [m.created_at for m in anh_em]
+    assert len(set(moc)) == 3, f"ba message cùng transaction trùng created_at: {moc}"
+    assert moc == sorted(moc), f"created_at không tăng theo thứ tự tạo: {moc}"
+
+
+async def test_created_at_cua_messages_dung_clock_timestamp(
+    connection: AsyncConnection,
+) -> None:
+    """Chốt DEFAULT ở tầng schema, không chỉ ở hành vi.
+
+    Phép kiểm hành vi phía trên vẫn xanh nếu ai đó chuyển việc sinh mốc thời
+    gian lên Python; dòng này bắt đúng thứ mà migration 0002 đã đổi, và sẽ đỏ
+    nếu một migration sau vô tình đặt lại `now()`.
+    """
+    mac_dinh = await connection.scalar(
+        text(
+            "SELECT column_default FROM information_schema.columns "
+            "WHERE table_name = 'messages' AND column_name = 'created_at'"
+        )
+    )
+
+    assert mac_dinh == "clock_timestamp()"

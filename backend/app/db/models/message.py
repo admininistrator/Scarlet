@@ -94,8 +94,13 @@ class Message(Base):
     #: Chỉ có nghĩa khi `status='streaming'`; reaper so với `now()` (§7.6).
     heartbeat_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     raw_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    #: `clock_timestamp()` chứ KHÔNG phải `now()` — migration 0002, B-53.
+    #: `now()` là `transaction_timestamp()`, nên mọi message ghi trong cùng một
+    #: transaction sẽ có `created_at` bằng nhau và §8.3 không sắp được chúng.
+    #: Độ phân giải là micro-giây, vẫn trùng được khi ghi hàng loạt bằng MỘT câu
+    #: lệnh, nên **mọi truy vấn cây sắp theo `ORDER BY created_at, id`** (T-1.2).
     created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("clock_timestamp()")
     )
     #: Xoá mềm (C12). Mọi truy vấn của repository mặc định lọc `IS NULL`.
     deleted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
