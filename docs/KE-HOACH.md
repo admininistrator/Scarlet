@@ -628,12 +628,14 @@ conversation (active_leaf_id ──────────────┐)
 
 ```sql
 WITH RECURSIVE path AS (
-    SELECT * FROM messages WHERE id = :leaf_id
+    SELECT m.*, 0 AS depth FROM messages m WHERE m.id = :leaf_id
     UNION ALL
-    SELECT m.* FROM messages m JOIN path p ON m.id = p.parent_id
+    SELECT m.*, p.depth + 1 FROM messages m JOIN path p ON m.id = p.parent_id
 )
-SELECT * FROM path ORDER BY created_at;
+SELECT * FROM path ORDER BY depth DESC;   -- gốc trước, lá sau
 ```
+
+**Sắp theo `depth`, không sắp theo `created_at`.** Thứ tự của một đường đi do *cấu trúc cây* quyết định chứ không do đồng hồ: mỗi tầng có đúng một message, nên `depth` là khoá sắp xếp chính xác và không bao giờ hoà. Thời gian thì hoà được — xem NQ-18 trong `tasks.md`. (CTE vẫn phải lọc `deleted_at IS NULL` ở **cả hai** nhánh — C12.)
 
 Với hội thoại < 500 message, chi phí không đáng kể nếu có index trên `(parent_id)` và `(conversation_id, parent_id)`.
 
@@ -643,8 +645,10 @@ Với hội thoại < 500 message, chi phí không đáng kể nếu có index t
 SELECT id, created_at FROM messages
 WHERE conversation_id = :cid
   AND parent_id IS NOT DISTINCT FROM :parent_id
-ORDER BY created_at;
+ORDER BY created_at, id;
 ```
+
+Khoá phụ `id` để kết quả **xác định** khi hai anh em trùng `created_at`. `clock_timestamp()` chỉ phân giải tới micro-giây, nên một câu `INSERT ... SELECT generate_series` ghi hàng loạt vẫn tạo ra giá trị trùng (đo được: 500 dòng → 88 giá trị). Ứng dụng không bao giờ ghi message kiểu đó, nhưng script seed thì có — và `sibling_index` sai là C13.
 
 `IS NOT DISTINCT FROM` là bắt buộc: `parent_id = NULL` không bao giờ đúng trong SQL, mà message gốc thì `parent_id` **là** NULL.
 
@@ -1301,6 +1305,7 @@ DDL đầy đủ ở [Phụ lục A](#phụ-lục-a--ddl-đầy-đủ). Mục n�
 | `messages.status` | `queued / streaming / completed / failed / cancelled`. Client cần biết để hiển thị đúng; reaper cần để dọn (§7.6) |
 | `messages.heartbeat_at` | Chỉ có ý nghĩa khi `status='streaming'`; reaper so với `now()` (§7.6) |
 | `messages.content` | Ghi **một lần** khi xong. Trong lúc stream, nguồn sự thật là Redis. Đây là lý do C5 tồn tại |
+| `messages.created_at` mặc định `clock_timestamp()` | Cột `created_at` **duy nhất** trong schema không dùng `now()`. `now()` là bí danh của `transaction_timestamp()` — hằng số suốt một giao dịch — nên mọi message ghi trong cùng một transaction sẽ mang `created_at` **bằng nhau**, và `ORDER BY created_at` của §8.3 không sắp được chúng (C13). Đo trên Postgres 17: 3 INSERT rời rạc trong một transaction cho 1 giá trị với `now()`, 3 giá trị với `clock_timestamp()`. Sửa ở migration 0002; lý do đầy đủ và các phương án đã loại nằm ở NQ-18 trong `tasks.md` |
 | `messages.raw_response` JSONB | Giữ nguyên response cuối của provider để debug tool-call vỡ; TTL dọn sau `RAW_RESPONSE_KEEP_DAYS` |
 | `usage_events.price_snapshot` JSONB | A7 — đổi giá catalog không được sửa lịch sử |
 | `usage_events.cost_confidence` | `exact` / `low`. Model qua 9Router là `low` (§9.5) |
@@ -1930,7 +1935,7 @@ CREATE TABLE messages (
     completion_tokens INT,
     heartbeat_at    TIMESTAMPTZ,                    -- reaper (§7.6)
     raw_response    JSONB,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),  -- KHÔNG phải now(), §17.2
     deleted_at      TIMESTAMPTZ
 );
 CREATE INDEX ix_msg_conv_parent ON messages(conversation_id, parent_id);
