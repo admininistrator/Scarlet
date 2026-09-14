@@ -27,6 +27,13 @@ logger tên `arq`; logger `app.*` của chúng ta không có handler nào nên m
 dòng `logger.info` của worker rơi vào hư không. Tiến trình `api` không gặp
 chuyện này vì uvicorn dựng sẵn logging. Đây là chỗ duy nhất trong backend gọi
 `addHandler`, và nó chạy sau `dictConfig` của arq nên không bị ghi đè.
+
+**Vì sao `LLMClient` sống trong `ctx`, không phải biến toàn cục (T-1.6).**
+`AsyncOpenAI` mang theo một connection pool **gắn với event loop**, nên một
+instance ở tầng module sẽ được tạo trước khi arq dựng loop của nó. Dựng ở
+`on_startup` và đóng ở `on_shutdown` cho pool đúng một vòng đời bằng vòng đời
+tiến trình — xem docstring `adapters/system.py`. Cùng lý do với engine Postgres
+(`app/db/session.py` dựng lười, `dispose_engine()` gọi ở `on_shutdown`).
 """
 
 from __future__ import annotations
@@ -39,7 +46,9 @@ from arq.connections import RedisSettings
 from arq.worker import Function
 
 from app.config.settings import settings
-from app.workers.generate import generate
+from app.db.session import dispose_engine
+from app.llm.adapters.system import SystemAdapter
+from app.workers.generate import CTX_LLM_CLIENT, generate
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +92,10 @@ def _dung_logging() -> None:
 
 
 async def on_startup(ctx: dict[str, Any]) -> None:
-    """`PING` Redis rồi in đúng hai thứ DoD của T-1.5 đòi thấy trong log."""
+    """`PING` Redis, dựng `LLMClient` dùng chung, rồi in log DoD của T-1.5."""
     _dung_logging()
     await ctx["redis"].ping()
+    ctx[CTX_LLM_CLIENT] = SystemAdapter.from_settings()
     conn = redis_settings()
     # KHÔNG in `REDIS_URL` nguyên văn: DSN có chỗ chứa mật khẩu (§15 DoD chung
     # — "không log secret"). Host/port/db là đủ để biết mình nối vào đâu.
@@ -99,6 +109,16 @@ async def on_startup(ctx: dict[str, Any]) -> None:
 
 
 async def on_shutdown(ctx: dict[str, Any]) -> None:
+    """Đóng hai pool worker tự mở: HTTP tới LiteLLM và kết nối Postgres.
+
+    Không đóng thì tiến trình vẫn thoát, nhưng asyncio in một loạt cảnh báo
+    "Unclosed client session" che mất dòng log cuối cùng — đúng lúc người ta
+    đang đọc log để hiểu vì sao worker dừng.
+    """
+    client = ctx.pop(CTX_LLM_CLIENT, None)
+    if client is not None:
+        await client.close()
+    await dispose_engine()
     logger.info("worker: dung, khong nhan job moi")
 
 

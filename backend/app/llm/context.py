@@ -389,13 +389,13 @@ def _to_wire(message: Message) -> dict[str, Any] | None:
     đi sẽ để lại một `tool_call` không có ai trả lời — đúng nửa còn lại của
     C15 mà `_dong_khoi` phải đi dọn.
 
-    **Hợp đồng của cột `messages.tool_calls` (JSONB) được chốt ở đây:** nó lưu
-    **đúng** khối `tool_calls` của dây OpenAI —
+    **Hợp đồng của cột `messages.tool_calls` (JSONB)** — chốt ở NQ-22 (B-68):
+    nó lưu **đúng** khối `tool_calls` của dây OpenAI —
     ``[{"id":…, "type":"function", "function":{"name":…, "arguments":"<JSON thô>"}}]``
-    — và đi lên dây nguyên văn, không dựng lại. `arguments` giữ nguyên chuỗi
-    provider đã gửi (xem điểm 3 ở docstring của `client.py`): parse rồi
-    `json.dumps` lại có thể đổi thứ tự khoá, và vài provider so khớp chuỗi đó
-    với `tool_call_id` ở lượt sau. T-1.6 ghi cột này phải theo đúng hình dạng đó.
+    — và đi lên dây nguyên văn, không dựng lại. Bên **ghi** cột đó là worker
+    (T-1.6) và nó ghi bằng `ToolCall.to_wire()` của `app/llm/client.py`, tức
+    hình dạng này chỉ được viết ra ở đúng một chỗ trong cả backend. `arguments`
+    giữ nguyên chuỗi provider đã gửi (điểm 3+4 ở docstring của `client.py`).
     """
     if message.status not in USABLE_STATUSES:
         return None

@@ -11,13 +11,19 @@ from app.db.repositories.errors import (
     MessageNotInConversationError,
     RepositoryError,
 )
-from app.db.repositories.messages import MessageRepository, PathNode, path_statement
+from app.db.repositories.messages import (
+    MessageRepository,
+    OwnedMessage,
+    PathNode,
+    path_statement,
+)
 
 __all__ = [
     "ConversationNotFoundError",
     "ConversationRepository",
     "MessageNotInConversationError",
     "MessageRepository",
+    "OwnedMessage",
     "PathNode",
     "RepositoryError",
     "path_statement",

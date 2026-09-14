@@ -166,5 +166,16 @@ def get_catalog() -> Catalog:
     return _catalog
 
 
+def get_model(model_id: str) -> ModelEntry | None:
+    """Model theo `id`, hoặc `None` nếu không có / đã `enabled: false`.
+
+    Tắt một model trong catalog phải làm mọi lượt sinh dùng nó dừng lại có mã
+    lỗi, chứ không phải vẫn chạy được vì code chỉ đọc `id`: `enabled` là cái
+    công tắc §9.2 dành cho lúc một provider chết, và một công tắc chỉ ảnh hưởng
+    Model Picker mà không ảnh hưởng đường gọi thì không phải công tắc.
+    """
+    return next((m for m in _catalog.models if m.id == model_id and m.enabled), None)
+
+
 #: Nạp ngay lúc import — fail-fast (L2). Catalog sai schema → app không boot.
 _catalog = _read_and_validate(CATALOG_PATH)

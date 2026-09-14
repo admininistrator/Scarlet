@@ -488,3 +488,117 @@ async def test_created_at_cua_messages_dung_clock_timestamp(
     )
 
     assert mac_dinh == "clock_timestamp()"
+
+
+# ────────────── vòng đời lượt sinh (T-1.6, §7.2 ③) ──────────────
+
+
+async def test_get_message_for_worker_tra_ve_user_id_cua_chu_hoi_thoai(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """Worker không có `user_id` để lọc, nên nó phải NHẬN được đúng một.
+
+    Con số này đi thẳng vào `get_path` của `context.build`, tức mọi truy vấn
+    sau đó vẫn lọc quyền sở hữu trong câu SQL (§20).
+    """
+    _, root = await _tao_hoi_thoai_co_goc(session, user_a)
+
+    owned = await MessageRepository(session).get_message_for_worker(root.id)
+
+    assert owned is not None
+    assert owned.message.id == root.id
+    assert owned.user_id == user_a
+
+
+async def test_get_message_for_worker_khong_thay_message_da_xoa_mem(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    repo = MessageRepository(session)
+    _, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    await repo.soft_delete_message(root.id, user_id=user_a)
+
+    assert await repo.get_message_for_worker(root.id) is None
+
+
+async def test_get_message_for_worker_khong_thay_hoi_thoai_da_xoa_mem(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    await ConversationRepository(session).soft_delete_conversation(conversation.id, user_id=user_a)
+
+    assert await MessageRepository(session).get_message_for_worker(root.id) is None
+
+
+async def test_mark_streaming_chi_an_mot_lan(
+    session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], user_a: uuid.UUID
+) -> None:
+    """B-72: hai worker cùng nhận một job thì chỉ một cái đổi được trạng thái.
+
+    Không có `WHERE status = 'queued'` thì cả hai cùng sinh, cùng ghi đè
+    `content`, và người dùng trả tiền hai lần cho một câu hỏi.
+    """
+    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    repo = MessageRepository(session)
+    message = await repo.create_message(
+        conversation_id=conversation.id,
+        user_id=user_a,
+        role=MessageRole.ASSISTANT,
+        status=MessageStatus.QUEUED,
+    )
+
+    assert await repo.mark_streaming(message.id, model_id="mo-hinh-x") is True
+    assert await repo.mark_streaming(message.id, model_id="mo-hinh-x") is False
+
+    async with session_factory() as doc:
+        lai = await doc.get(Message, message.id)
+        assert lai is not None
+        assert lai.status is MessageStatus.STREAMING
+        assert lai.model_id == "mo-hinh-x"
+        assert lai.heartbeat_at is not None, "§7.6: NULL thì reaper không bao giờ dọn"
+
+
+async def test_touch_heartbeat_chi_cham_message_dang_streaming(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """Message đã xong mà còn nhích `heartbeat_at` là nói dối với reaper."""
+    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    repo = MessageRepository(session)
+    xong = await repo.create_message(
+        conversation_id=conversation.id,
+        user_id=user_a,
+        role=MessageRole.ASSISTANT,
+        status=MessageStatus.COMPLETED,
+    )
+
+    assert await repo.touch_heartbeat(xong.id) is False
+
+
+async def test_finish_generation_ghi_ca_duong_loi(
+    session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], user_a: uuid.UUID
+) -> None:
+    """Phần chữ đã sinh được giữ lại kể cả khi lượt sinh thất bại (§7.5, C19)."""
+    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    repo = MessageRepository(session)
+    message = await repo.create_message(
+        conversation_id=conversation.id,
+        user_id=user_a,
+        role=MessageRole.ASSISTANT,
+        status=MessageStatus.QUEUED,
+    )
+
+    assert (
+        await repo.finish_generation(
+            message.id,
+            status=MessageStatus.FAILED,
+            content="mot nua cau tra loi",
+            error_code="UPSTREAM_ERROR",
+        )
+        is True
+    )
+
+    async with session_factory() as doc:
+        lai = await doc.get(Message, message.id)
+        assert lai is not None
+        assert lai.status is MessageStatus.FAILED
+        assert lai.content == "mot nua cau tra loi"
+        assert lai.error_code == "UPSTREAM_ERROR"

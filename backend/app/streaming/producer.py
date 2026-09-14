@@ -1,0 +1,105 @@
+"""Ghi event vào Redis Stream `stream:{message_id}` (§7.2 ③, ADR-01, C8, C10).
+
+KH tham chiếu: §7.2, §7.4, ADR-01, C5, C8, C10 · CLAUDE.md A1.
+
+Đây là **nửa ghi** của cơ chế resume; nửa đọc là `consumer.py` (T-1.7). Cả hai
+nói chuyện qua đúng ba thứ, và cả ba đều khai ở file này để không đầu nào tự
+đoán: tên khoá (`stream_key`), hai tên trường của bản ghi (`FIELD_TYPE`,
+`FIELD_DATA`), và cách serialize (`json.dumps`).
+
+**Vì sao XADD chứ không Pub/Sub (ADR-01).** Pub/Sub không có lịch sử: client
+đứt mạng 2 giây là mất hẳn 2 giây chữ, và không có cursor nào để xin lại.
+Redis Stream cho mỗi bản ghi một ID tăng dần — chính là `Last-Event-ID` của
+SSE. **Và KHÔNG dùng consumer group** (C7): group giao mỗi bản ghi cho **một**
+consumer, nên mở hai tab thì một tab đói. Producer không cần biết điều đó,
+nhưng nó là lý do file này không gọi `XGROUP CREATE` bao giờ.
+
+**Vì sao payload luôn `json.dumps` (C10).** SSE dùng `\\n` làm dấu phân cách
+trường, nên một câu trả lời có xuống dòng — tức gần như mọi câu trả lời — sẽ
+cắt đôi khung `data:` nếu ghi chuỗi thô. `json.dumps` escape `\\n` thành `\\\\n`
+và không có đường nào đi vòng qua: `emit()` là hàm DUY NHẤT ghi vào stream.
+
+**Vì sao phải `EXPIRE` (C8).** Redis ở đây là bộ đệm, không phải nơi lưu trữ
+(C5) — nguồn sự thật là `messages.content` trong Postgres. Quên `EXPIRE` thì
+mỗi lượt chat để lại một khoá sống mãi, RAM Redis tăng đơn điệu trong vài
+tuần, và không ai nghĩ tới nguyên nhân này. `maxmemory-policy volatile-lru`
+trong compose chỉ cứu được các khoá **có TTL**, nên khoá quên TTL còn là khoá
+mà chính sách đó không đụng tới được.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from typing import TYPE_CHECKING
+
+from app.streaming.events import Event
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
+logger = logging.getLogger(__name__)
+
+#: Tiền tố khoá của §7.2. Consumer (T-1.7) và reaper (T-1.10) dùng lại
+#: `stream_key()` chứ không tự nối chuỗi — một chỗ gõ sai tiền tố là một
+#: stream không ai đọc, và nó không báo lỗi, nó chỉ im lặng.
+STREAM_KEY_PREFIX = "stream:"
+
+#: Hai trường của mỗi bản ghi. `type` → `event:` của SSE, `data` → `data:`.
+FIELD_TYPE = "type"
+FIELD_DATA = "data"
+
+
+def stream_key(message_id: uuid.UUID | str) -> str:
+    return f"{STREAM_KEY_PREFIX}{message_id}"
+
+
+class StreamProducer:
+    """Đầu ghi của MỘT message. Không dùng lại cho message khác.
+
+    Nhận sẵn một `Redis` thay vì tự mở kết nối: worker đã có `ctx["redis"]` của
+    arq (chính là `redis.asyncio.Redis`), và mở pool thứ hai cho mỗi lượt chat
+    là vứt đi một pool mỗi lượt. Cùng lý do với `SystemAdapter` (§9.1).
+    """
+
+    __slots__ = ("_redis", "_key", "_ttl_s")
+
+    def __init__(self, redis: Redis, message_id: uuid.UUID | str, *, ttl_s: int) -> None:
+        self._redis = redis
+        self._key = stream_key(message_id)
+        self._ttl_s = ttl_s
+
+    @property
+    def key(self) -> str:
+        return self._key
+
+    async def emit(self, event: Event) -> str:
+        """`XADD` một event, trả về Redis Stream ID của bản ghi vừa ghi.
+
+        ID trả về là thứ T-1.7 gửi làm `id:` của SSE, và là thứ client gửi lại
+        trong `Last-Event-ID` khi reconnect — nên nó phải là ID **thật** Redis
+        cấp, không phải một số đếm tự sinh.
+
+        `ensure_ascii=False`: tiếng Việt có dấu và emoji đi thẳng dưới dạng
+        UTF-8 thay vì `\\uXXXX`. `json.loads` đọc lại được cả hai dạng, nhưng
+        dạng này ngắn hơn ~3 lần cho tiếng Việt và đọc được bằng mắt khi debug
+        bằng `redis-cli XRANGE`.
+        """
+        raw = await self._redis.xadd(
+            self._key,
+            {
+                FIELD_TYPE: event.TYPE,
+                FIELD_DATA: json.dumps(event.data(), ensure_ascii=False),
+            },
+        )
+        return raw.decode() if isinstance(raw, bytes) else str(raw)
+
+    async def expire(self) -> bool:
+        """Đặt TTL cho stream — gọi NGAY sau event kết thúc (C8).
+
+        Đặt TTL ở đây chứ không đặt lúc `XADD` đầu tiên: stream phải sống đủ
+        lâu cho một lượt sinh dài (có thể hơn `STREAM_TTL_S` nếu model chậm),
+        và đồng hồ chỉ nên bắt đầu chạy khi đã có gì đó hoàn chỉnh để đọc lại.
+        """
+        return bool(await self._redis.expire(self._key, self._ttl_s))

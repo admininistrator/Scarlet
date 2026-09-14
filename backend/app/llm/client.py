@@ -25,8 +25,14 @@ module này:
 3. **`ToolCall.arguments` là CHUỖI JSON thô, chưa parse.** Lượt sau phải gửi
    lại nguyên chuỗi đó trong `messages[].tool_calls[].function.arguments`
    (§9.6 dựng context); parse rồi `json.dumps()` lại có thể đổi thứ tự khoá và
-   khoảng trắng. Tầng SSE (T-1.7) tự `json.loads` khi phát event `tool_call`
-   với `args` dạng object như §7.4 mô tả.
+   khoảng trắng. Tầng SSE (`streaming/events.py::ToolCallEvent`) tự `json.loads`
+   khi phát event `tool_call` với `args` dạng object như §7.4 mô tả.
+
+4. **`ToolCall.to_wire()` là nguồn sự thật DUY NHẤT cho hình dạng cột
+   `messages.tool_calls`** (NQ-22, B-68). Worker ghi cột đó bằng chính hàm này;
+   `llm/context.py::_to_wire` đọc lại nguyên văn ở lượt sau. Hai đầu ở hai file
+   khác nhau và hai task khác nhau, nên chỗ chống lệch phải là code dùng chung
+   — ghi lệch thì lượt **sau** mới vỡ, bằng `400 invalid request` không nói lý do.
 """
 
 from __future__ import annotations
@@ -52,6 +58,26 @@ class ToolCall:
     name: str
     #: Chuỗi JSON thô — xem điểm 3 ở docstring module.
     arguments: str
+
+    def to_wire(self) -> dict[str, Any]:
+        """Khối `tool_calls[i]` đúng hình dạng dây OpenAI — xem điểm 4.
+
+        ``{"id": …, "type": "function", "function": {"name": …, "arguments": …}}``
+
+        `type` luôn là `"function"`: đó là giá trị DUY NHẤT mà Chat Completions
+        định nghĩa cho phần tử của `tool_calls`, nên nó là hằng của protocol,
+        không phải một lựa chọn cấu hình (A3 nói về tên model, giá, giới hạn,
+        URL provider, màu sắc).
+
+        `arguments` đi qua **nguyên văn**, không `json.loads` rồi `json.dumps`
+        lại: vài provider so khớp chính chuỗi đó với `tool_call_id` ở lượt sau,
+        và một lần round-trip là đủ để đổi thứ tự khoá và khoảng trắng.
+        """
+        return {
+            "id": self.call_id,
+            "type": "function",
+            "function": {"name": self.name, "arguments": self.arguments},
+        }
 
 
 @dataclass(frozen=True, slots=True)

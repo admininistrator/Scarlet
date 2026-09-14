@@ -131,6 +131,13 @@ class Settings(BaseSettings):
     #: đọc. Đây là một *giới hạn*, nên nó ở đây chứ không phải hằng trong
     #: `adapters/system.py` (A3).
     LLM_REQUEST_TIMEOUT_S: int = Field(default=600, gt=0)
+    #: `temperature` gửi cho model. `LLMClient.stream()` (§9.1) đòi tham số này
+    #: nên phải có một giá trị; để nó thành hằng trong `workers/generate.py` là
+    #: chỗ cứng đúng loại A3 cấm. Mặc định **1.0** = giá trị mặc định của Chat
+    #: Completions, tức backend không áp ý kiến riêng lên model — và là giá trị
+    #: duy nhất mà các model reasoning không từ chối. Tuỳ chọn theo từng người
+    #: dùng thuộc `user_settings` (§18.4, Phase 2), không phải biến này.
+    LLM_TEMPERATURE: float = Field(default=1.0, ge=0.0, le=2.0)
 
     # ═══ Context & vision (§9.6, §15.3) ═══
     CONTEXT_WINDOW_CAP: int = Field(default=128000, gt=0)

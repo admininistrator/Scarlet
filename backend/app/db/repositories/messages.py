@@ -48,6 +48,19 @@ from app.db.repositories.errors import (
 
 
 @dataclass(frozen=True, slots=True)
+class OwnedMessage:
+    """Một message kèm `user_id` của chủ hội thoại chứa nó.
+
+    Tồn tại vì `messages` không có cột `user_id` (Phụ lục A) và worker cần con
+    số đó để mọi truy vấn sau của lượt sinh vẫn lọc được trong SQL. Xem
+    `MessageRepository.get_message_for_worker`.
+    """
+
+    message: Message
+    user_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True)
 class PathNode:
     """Một message trên đường đi, kèm vị trí của nó giữa các anh em (C13).
 
@@ -164,6 +177,132 @@ class MessageRepository:
                 Message.conversation_id.in_(owned_conversations),
             )
             .values(deleted_at=func.now())
+            .returning(Message.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    # ──────────────── vòng đời một lượt sinh (§7.2 ③, T-1.6) ────────────────
+
+    async def get_message_for_worker(self, message_id: uuid.UUID) -> OwnedMessage | None:
+        """Message + `user_id` của chủ hội thoại. **Chỉ worker được gọi.**
+
+        Đây là hàm duy nhất trong file không nhận `user_id` — và đó không phải
+        kẽ hở của §20. Worker chạy thay **hệ thống**, không thay một phiên đăng
+        nhập: nó nhận một `message_id` từ hàng đợi (§7.2 ①, do chính `api` đẩy
+        vào **sau** khi đã kiểm quyền), nên nó không có `user_id` nào để lọc.
+        Thay vì bỏ qua quyền sở hữu, hàm **trả về** `user_id` để mọi truy vấn
+        tiếp theo của lượt sinh — `get_path` của `context.build` — vẫn lọc
+        trong câu SQL đúng như luật.
+
+        Tầng `api` **không** được dùng hàm này: đường của nó là `get_message`,
+        nơi `user_id` là tham số bắt buộc và câu 404 là câu trả lời cho cả ba
+        ca "không có / đã xoá / của người khác".
+
+        `None` khi message không tồn tại, đã xoá mềm, hoặc hội thoại chứa nó đã
+        xoá mềm — cả ba đều là "không còn gì để sinh".
+        """
+        stmt = (
+            select(Message, Conversation.user_id)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Message.id == message_id,
+                Message.deleted_at.is_(None),
+                Conversation.deleted_at.is_(None),
+            )
+        )
+        row = (await self._session.execute(stmt)).first()
+        if row is None:
+            return None
+        message, user_id = row
+        return OwnedMessage(message=message, user_id=user_id)
+
+    async def mark_streaming(self, message_id: uuid.UUID, *, model_id: str) -> bool:
+        """`queued` → `streaming`, đặt `model_id` và mở đồng hồ `heartbeat_at`.
+
+        `WHERE status = 'queued'` chứ không chỉ `WHERE id = …`: hai worker cùng
+        nhận một `message_id` (arq giao lại sau SIGKILL — B-72) thì chỉ một
+        trong hai đổi được trạng thái, người thua trả `False` và bỏ lượt. Không
+        có điều kiện này thì cả hai cùng sinh, cùng ghi đè `content`, và người
+        dùng trả tiền hai lần cho một câu hỏi.
+
+        `heartbeat_at` đặt **ngay tại đây**, không đợi nhịp đầu tiên: reaper
+        (§7.6) so `heartbeat_at < now() - REAPER_STALE_S`, mà `NULL` thì phép
+        so đó không bao giờ đúng — một worker chết ngay sau khi đổi trạng thái
+        sẽ để message kẹt `streaming` vĩnh viễn.
+        """
+        stmt = (
+            update(Message)
+            .where(Message.id == message_id, Message.status == MessageStatus.QUEUED)
+            .values(
+                status=MessageStatus.STREAMING,
+                model_id=model_id,
+                heartbeat_at=func.now(),
+            )
+            .returning(Message.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def touch_heartbeat(self, message_id: uuid.UUID) -> bool:
+        """Nhịp "tôi còn sống" của §7.6, worker gọi mỗi `WORKER_HEARTBEAT_S`.
+
+        `clock_timestamp()` chứ không `now()`: `now()` là
+        `transaction_timestamp()`, đứng yên suốt một transaction — cùng cái bẫy
+        của NQ-18, và ở đây nó còn tệ hơn vì một heartbeat đứng yên là đúng
+        định nghĩa "worker đã chết" dưới mắt reaper.
+        """
+        stmt = (
+            update(Message)
+            .where(Message.id == message_id, Message.status == MessageStatus.STREAMING)
+            .values(heartbeat_at=func.clock_timestamp())
+            .returning(Message.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def finish_generation(
+        self,
+        message_id: uuid.UUID,
+        *,
+        status: MessageStatus,
+        content: str,
+        reasoning: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None,
+        finish_reason: str | None = None,
+        error_code: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+    ) -> bool:
+        """Ghi kết quả cuối của một lượt sinh — §7.2 ③, §17.2.
+
+        Đây là lần ghi **duy nhất** vào `messages.content`: trong lúc stream,
+        nguồn sự thật là Redis (§17.2, C5). Ghi từng delta xuống Postgres là
+        ~2000 `UPDATE` cho một câu trả lời dài, đúng phương án ADR-01 đã loại.
+
+        Gọi cho **cả** đường thành công lẫn đường lỗi: `status='failed'` vẫn
+        mang theo phần chữ đã sinh được. Người dùng đã nhìn thấy phần đó trên
+        màn hình, nên xoá nó đi sẽ làm màn hình và lịch sử nói hai chuyện khác
+        nhau — cùng lý lẽ với `cancelled` ở §7.5 và với `USABLE_STATUSES` của
+        `llm/context.py`.
+
+        **Không** đụng `heartbeat_at`: §17.2 nói cột đó chỉ có nghĩa khi
+        `status='streaming'`, và giữ lại dấu vết nhịp cuối cùng giúp đọc được
+        "nó chết lúc nào" khi soi một message `failed`.
+        """
+        stmt = (
+            update(Message)
+            .where(Message.id == message_id)
+            .values(
+                status=status,
+                content=content,
+                reasoning=reasoning,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
+                error_code=error_code,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
             .returning(Message.id)
             .execution_options(synchronize_session=False)
         )
