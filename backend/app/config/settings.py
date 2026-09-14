@@ -115,6 +115,14 @@ class Settings(BaseSettings):
     DAILY_ALERT_USD: Decimal = Field(default=Decimal("2.00"), ge=0)
     MONTHLY_BUDGET_USD: Decimal = Field(default=Decimal("30.00"), ge=0)
 
+    # ═══ Provider layer (§9.1) ═══
+    #: Timeout HTTP của chặng backend → LiteLLM. Phải ≥ `request_timeout` trong
+    #: `config/litellm.config.yaml` (chặng LiteLLM → provider), nếu không
+    #: backend cắt trước và LiteLLM vẫn sinh tiếp — vẫn tính tiền mà không ai
+    #: đọc. Đây là một *giới hạn*, nên nó ở đây chứ không phải hằng trong
+    #: `adapters/system.py` (A3).
+    LLM_REQUEST_TIMEOUT_S: int = Field(default=600, gt=0)
+
     # ═══ Context & vision (§9.6, §15.3) ═══
     CONTEXT_WINDOW_CAP: int = Field(default=128000, gt=0)
     RESERVE_TOKENS: int = Field(default=1000, ge=0)

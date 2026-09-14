@@ -1,0 +1,67 @@
+{
+  "recorded_at": "2026-09-14T15:00:26+00:00",
+  "via": "LiteLLM (ADR-03) — khoá KHÔNG ghi vào đây",
+  "max_tokens": 600,
+  "temperature": 0.0,
+  "stream_options": {
+    "include_usage": true
+  },
+  "entries": [
+    {
+      "file": "claude-haiku.text.jsonl",
+      "model": "claude-haiku",
+      "provider": "anthropic",
+      "case": "text",
+      "prompt": "Hãy viết một đoạn ngắn khoảng bốn câu bằng tiếng Việt có dấu, giới thiệu về phở Hà Nội. Không dùng danh sách gạch đầu dòng.",
+      "chunks": 135
+    },
+    {
+      "file": "claude-haiku.tools.jsonl",
+      "model": "claude-haiku",
+      "provider": "anthropic",
+      "case": "tools",
+      "prompt": "Thời tiết ở Hà Nội hôm nay thế nào? Hãy dùng công cụ để tra.",
+      "chunks": 9
+    },
+    {
+      "file": "deepseek-flash.text.jsonl",
+      "model": "deepseek-flash",
+      "provider": "deepseek",
+      "case": "text",
+      "prompt": "Hãy viết một đoạn ngắn khoảng bốn câu bằng tiếng Việt có dấu, giới thiệu về phở Hà Nội. Không dùng danh sách gạch đầu dòng.",
+      "chunks": 533
+    },
+    {
+      "file": "deepseek-flash.tools.jsonl",
+      "model": "deepseek-flash",
+      "provider": "deepseek",
+      "case": "tools",
+      "prompt": "Thời tiết ở Hà Nội hôm nay thế nào? Hãy dùng công cụ để tra.",
+      "chunks": 31
+    },
+    {
+      "file": "nr-gemini-flash.text.jsonl",
+      "model": "nr-gemini-flash",
+      "provider": "ninerouter",
+      "case": "text",
+      "prompt": "Hãy viết một đoạn ngắn khoảng bốn câu bằng tiếng Việt có dấu, giới thiệu về phở Hà Nội. Không dùng danh sách gạch đầu dòng.",
+      "chunks": 11
+    },
+    {
+      "file": "nr-gemini-flash.tools.jsonl",
+      "model": "nr-gemini-flash",
+      "provider": "ninerouter",
+      "case": "tools",
+      "prompt": "Thời tiết ở Hà Nội hôm nay thế nào? Hãy dùng công cụ để tra.",
+      "chunks": 4
+    },
+    {
+      "file": "ol-qwen-small.text.jsonl",
+      "model": "ol-qwen-small",
+      "provider": "ollama",
+      "case": "text",
+      "prompt": "Hãy viết một đoạn ngắn khoảng bốn câu bằng tiếng Việt có dấu, giới thiệu về phở Hà Nội. Không dùng danh sách gạch đầu dòng.",
+      "chunks": 602
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{"id": "chatcmpl--QuoapymOa23g8UPpfnqyA8", "object": "chat.completion.chunk", "created": 1789398020, "model": "nr-gemini-flash", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}
+{"id": "chatcmpl--QuoapymOa23g8UPpfnqyA8", "created": 1789398020, "model": "nr-gemini-flash", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"tool_calls": [{"id": "call_2048077", "function": {"arguments": "{\"city\":\"Hanoi\",\"unit\":\"c\"}", "name": "get_weather"}, "type": "function", "index": 0}]}}]}
+{"id": "chatcmpl--QuoapymOa23g8UPpfnqyA8", "object": "chat.completion.chunk", "created": 1789398020, "model": "nr-gemini-flash", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
+{"id": "chatcmpl--QuoapymOa23g8UPpfnqyA8", "created": 1789398020, "model": "nr-gemini-flash", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}}], "usage": {"completion_tokens": 23, "prompt_tokens": 2092, "total_tokens": 2115}}

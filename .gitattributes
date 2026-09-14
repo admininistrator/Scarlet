@@ -1,2 +1,5 @@
 *.sh text eol=lf
 *.py text eol=lf
+# Fixture chunk cua tang LLM (T-1.3): mot chunk mot dong. Checkout Windows
+# doi sang CRLF thi diff noi nao cung do va so hai ban ghi khong con nghia.
+*.jsonl text eol=lf

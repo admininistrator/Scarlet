@@ -1,0 +1,602 @@
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "Ph", "role": "assistant"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ở"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " Hà"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " Nội"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " là"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " một"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " món"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " ăn"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " truyền"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " thống"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " đặc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " trưng"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " của"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " thành"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " phố"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " Hà"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " Nội"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "."}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " D"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ưới"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " đây"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " là"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " một"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " số"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " điểm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nổi"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " bật"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " về"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " ph"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ở"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " Hà"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " Nội"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ":\n\n"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "1"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "."}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " M"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ón"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " ph"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ở"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " Hà"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " Nội"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " thường"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " được"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " làm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " từ"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " thịt"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " n"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ạc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " hoặc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " thịt"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ò"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " với"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nhiều"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " loại"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " gia"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " vị"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " khác"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nh"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "au"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " như"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tỏ"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "i"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " hành"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ột"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ì"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " đường"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắc"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " d"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ừa"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " m"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": "ắm"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " tiêu"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"finish_reason": "length", "index": 0, "delta": {}}]}
+{"id": "chatcmpl-12", "created": 1789398020, "model": "ol-qwen-small", "object": "chat.completion.chunk", "system_fingerprint": "fp_ollama", "choices": [{"index": 0, "delta": {}}], "usage": {"completion_tokens": 600, "prompt_tokens": 63, "total_tokens": 663, "completion_tokens_details": {"reasoning_tokens": 0}, "prompt_tokens_details": {"cached_tokens": 24}}}
