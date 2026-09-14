@@ -389,19 +389,20 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 ---
 
 ### T-1.2 — Truy vấn đường đi + đếm anh em ⭐
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-1.1 · **Ước lượng:** 3h
+- **Trạng thái:** ✅ (2026-09-14) · **Phụ thuộc:** T-1.1 · **Ước lượng:** 3h
 - **KH:** §8.3, C11, C13
 - **Việc:**
-  - [ ] `get_path(leaf_id)` bằng recursive CTE đúng §8.3
-  - [ ] `get_siblings(conversation_id, parent_id)` dùng `IS NOT DISTINCT FROM` (bắt buộc, xem §8.3)
-  - [ ] Trả kèm `sibling_index` và `sibling_count` cho **mỗi** message trong đường đi
-  - [ ] Lọc `deleted_at IS NULL` trong CTE
+  - [x] `get_path(leaf_id)` bằng recursive CTE đúng §8.3
+  - [x] `get_siblings(conversation_id, parent_id)` dùng `IS NOT DISTINCT FROM` (bắt buộc, xem §8.3)
+  - [x] Trả kèm `sibling_index` và `sibling_count` cho **mỗi** message trong đường đi
+  - [x] Lọc `deleted_at IS NULL` trong CTE
 - **Xong khi (DoD):**
-  - [ ] `pytest tests/db/test_tree.py` ≥ 15 case xanh
-  - [ ] Dựng cây 3 nhánh × 4 tầng; `get_path(leaf_nhánh_2)` trả **đúng 4** message, không có message nào của nhánh 1 hoặc 3
-  - [ ] Message gốc (`parent_id IS NULL`) có 3 anh em → `sibling_count == 3` (đây là case mà `parent_id = NULL` sẽ làm sai nếu viết `=` thay vì `IS NOT DISTINCT FROM`)
-  - [ ] Cây 500 message: `get_path` chạy < 50 ms (đo bằng `EXPLAIN ANALYZE`)
+  - [x] `pytest tests/db/test_tree.py` ≥ 15 case xanh — **24 case**, 3.17 s
+  - [x] Dựng cây 3 nhánh × 4 tầng; `get_path(leaf_nhánh_2)` trả **đúng 4** message, không có message nào của nhánh 1 hoặc 3
+  - [x] Message gốc (`parent_id IS NULL`) có 3 anh em → `sibling_count == 3` (đây là case mà `parent_id = NULL` sẽ làm sai nếu viết `=` thay vì `IS NOT DISTINCT FROM`)
+  - [x] Cây 500 message: `get_path` chạy < 50 ms (đo bằng `EXPLAIN ANALYZE`) — **10.0 ms** (Planning 0.9 ms)
 - **Cạm bẫy:** C11 là bug tốn tiền nhất của cả dự án — nếu dựng context bằng `WHERE conversation_id=... ORDER BY created_at` thì mọi nhánh bị bỏ đều được gửi lên model và bạn trả tiền cho chúng ở **mọi** lượt sau.
+- **Ghi nhận:** `get_path` là **một** câu lệnh duy nhất (recursive CTE + `CROSS JOIN LATERAL` đếm anh em), không phải đường đi rồi lặp Python — lặp là N+1 truy vấn với N = độ sâu hội thoại, và DoD `EXPLAIN ANALYZE` cũng chỉ đo được một câu lệnh. Câu lệnh đó tách thành hàm `path_statement()` để test đo đúng vật thật. Thêm **hai** điều kiện ngoài chữ của §8.3, cả hai đều là phòng thủ cho C11 chứ không đổi kết quả trên dữ liệu hợp lệ: ① nhánh đệ quy của CTE có `ancestor.conversation_id = path.conversation_id` (FK `parent_id` chỉ bảo đảm cha **tồn tại**, không bảo đảm cùng hội thoại); ② lateral đếm anh em có `sibling.conversation_id = path.conversation_id` (thiếu nó thì `parent_id IS NOT DISTINCT FROM NULL` đúng với gốc của **mọi** hội thoại). Mỗi điều kiện có một test riêng làm đỏ được. Năm phép kiểm ngược đã chạy: đổi `IS NOT DISTINCT FROM` → `=` cho **9** đỏ; bỏ `deleted_at IS NULL` ở nhánh đệ quy → 1 đỏ; bỏ điều kiện `conversation_id` khi đếm anh em → 1 đỏ; bỏ lọc `user_id` ở nhánh neo → 2 đỏ; bỏ điều kiện `conversation_id` ở nhánh đệ quy → 1 đỏ. **`sibling_index` đếm từ 0** (xem B-60), và plan đo được ở DoD là plan của bảng nhỏ, chưa chạm index nào của §17.4 (xem B-61).
 
 ---
 
@@ -1074,6 +1075,8 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 | B-57 | **15 bảng còn lại vẫn `DEFAULT now()`.** Đúng ở thời điểm này vì `messages` là bảng duy nhất mà thứ tự giữa các dòng sinh trong CÙNG một transaction mang ý nghĩa nghiệp vụ. Sẽ sai ngay khi có bảng thứ hai như vậy — ứng viên gần nhất: `attachments` (một lượt upload nhiều file rồi hiển thị theo thứ tự) và `artifacts` (§14.2 có phiên bản). **Cần:** khi tới P4/P5, kiểm lại bảng mình thêm dòng có bị sắp theo `created_at` không, nếu có thì áp đúng cách sửa của 0002 | T-1.1 |
 | ~~B-58~~ | **ĐÃ ĐÓNG 2026-09-14.** Người dùng thêm dòng *“Mọi lệnh docker compose chạy từ WSL”* vào mục Môi trường của `CLAUDE.md`. Nguyên bản: `docker compose run --rm migrate` gọi từ Git Bash phía Windows tạo lại cả stack và làm `web` hỏng bind-mount — `Restarting` với `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL × Command "dev" not found`, trong khi `docker inspect` vẫn hiện source đúng `/home/dmin/scarlet/frontend` vì đường dẫn đó được phân giải trong VM của Docker Desktop chứ không phải distro Ubuntu, nên `/app` rỗng. Sửa bằng `docker compose up -d --force-recreate web` chạy từ WSL. Cùng họ C35 | T-1.1 |
 | B-59 | **`docker compose run --rm migrate` KHÔNG áp migration mới mà vẫn exit 0.** Image `scarlet-migrate` **copy** `alembic/` lúc build (không bind-mount), nên file `0002_*.py` vừa thêm không có trong image: alembic chạy, in `Will assume transactional DDL.` rồi dừng — không dòng `Running upgrade`, không lỗi, `alembic_version` vẫn `0001`. Trông **y hệt** trường hợp "không có gì để migrate", đúng dạng xanh giả của B-47/B-49. Phải `docker compose run --rm --build migrate`. **Đề xuất:** bind-mount `./backend/alembic` cho service `migrate` trong `docker-compose.override.yml` (cùng lúc với B-19/B-22 ở T-1.5), hoặc thêm bước `--build` vào `make migrate` | T-1.1, khi áp migration 0002 |
+| B-60 | **`sibling_index` đếm từ 0, và chưa văn bản nào chốt điều đó.** §18.2 chỉ ghi "`sibling_index/count` mỗi message", C13 chỉ ghi "API trả sẵn hai trường này" — không nói mốc đếm. T-1.2 chọn **0-based** (`sibling_index + 1` mới là số hiện trên `‹ 2/3 ›`) vì đó là quy ước của một trường tên `index`, và ghi rõ trong docstring của `PathNode`. Rủi ro: T-1.13 (`GET /messages/{id}/siblings`) hoặc T-1.14 (`tree.ts`) mặc định 1-based thì FE lệch một nhánh **mà không báo lỗi** — đúng dạng C13. **Cần chốt:** giữ 0-based và ghi vào §18.2, hay đổi sang 1-based ngay bây giờ khi mới có một chỗ dùng | T-1.2 |
+| B-61 | **Con số "10.0 ms < 50 ms" của DoD T-1.2 đo trên một plan KHÔNG dùng index nào của §17.4.** `EXPLAIN ANALYZE` cho `Seq Scan on messages` ở cả nhánh đệ quy của CTE lẫn lateral đếm anh em, vì bảng `messages` trong `scarlet_test` chỉ chứa đúng 500 dòng của chính test đó (mỗi test một transaction rollback — NQ-17), nên với planner đây là bảng 12 trang và quét tuần tự thật sự rẻ hơn index. Hệ quả: `ix_msg_conv_parent` và `ix_msg_parent` — hai index mà §17.4 dựng riêng cho §8.3 — **chưa từng được chứng minh là có tác dụng**. Ngưỡng 50 ms vẫn đạt, nhưng nó đang đo một chế độ khác với production. Test cũng phải gọi `ANALYZE messages` trước khi đo, nếu không planner thấy `reltuples = 0` và chọn plan cho bảng rỗng. **Cần chốt:** có dựng một phép đo riêng trên database có sẵn vài chục nghìn message (seed một lần, không rollback) để kiểm hai index đó không, và nếu có thì đặt ở đâu — `make test` hay một target riêng | T-1.2 |
 
 
 ### 14.1 Điều chỉnh đề xuất cho P1 — từ tốc độ THẬT đo ở P0
