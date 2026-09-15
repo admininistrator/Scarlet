@@ -40,7 +40,10 @@ TEST_ONLY = frozenset({"TEST_DATABASE_URL"})
 #: - DEV_DATABASE_URL: `scripts/test_resume.py` (T-1.11) — database `scarlet`
 #:   của dev nhìn từ WSL host. Đưa vào `Settings` sẽ là bắt app production khai
 #:   một biến chỉ có nghĩa khi đo S3 trên máy dev.
-SCRIPT_ONLY = frozenset({"DEV_DATABASE_URL"})
+#: - DEV_LITELLM_BASE_URL: `scripts/bench_ttft.py` (T-1.12) — LiteLLM nhìn từ
+#:   WSL host, cho đường "baseline" gọi thẳng provider. Cùng lý lẽ: app đọc
+#:   LITELLM_BASE_URL (`litellm:4000`, chỉ sống trong network `internal`).
+SCRIPT_ONLY = frozenset({"DEV_DATABASE_URL", "DEV_LITELLM_BASE_URL"})
 
 #: Ba nhóm trên gộp lại: những tên được phép có trong `.env.example` mà không
 #: có trong `Settings`.

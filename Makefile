@@ -1,4 +1,4 @@
-.PHONY: up down test test-resume lint fmt migrate check-hardcode eval logs
+.PHONY: up down test test-resume bench lint fmt migrate check-hardcode eval logs
 
 COMPOSE := docker compose --profile core --profile tools
 
@@ -17,6 +17,13 @@ test:
 # target riêng chứ không nằm trong `pytest`.
 test-resume:
 	backend/.venv/bin/python scripts/test_resume.py
+
+# T-1.12 / S2 — TTFT p50/p95 theo từng model. CÙNG HỌ `test-resume`, không phải
+# `test`: cần cả stack đang chạy (`make up`) và gọi model THẬT 2 lần cho mỗi
+# lượt (một qua Scarlet, một thẳng LiteLLM làm baseline), nên nó tốn tiền và
+# tính bằng chục phút. Mã thoát ≠ 0 nếu có model trượt ngưỡng p95 của §2.3.
+bench:
+	backend/.venv/bin/python scripts/bench_ttft.py
 
 lint:
 	cd backend && .venv/bin/ruff check .
