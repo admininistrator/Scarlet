@@ -34,9 +34,17 @@ COMPOSE_ONLY = frozenset({"POSTGRES_PASSWORD", "VITE_API_BASE_URL"})
 #:   production khai một biến chỉ có nghĩa lúc chạy test.
 TEST_ONLY = frozenset({"TEST_DATABASE_URL"})
 
-#: Hai nhóm trên gộp lại: những tên được phép có trong `.env.example` mà không
+#: Biến chỉ dành cho script trong `scripts/` — backend không đọc, compose không
+#: đọc, pytest cũng không. Tách set riêng vì cùng lý lẽ với hai set trên: tên
+#: nào ở đây phải chỉ ra được **file nào** đọc nó.
+#: - DEV_DATABASE_URL: `scripts/test_resume.py` (T-1.11) — database `scarlet`
+#:   của dev nhìn từ WSL host. Đưa vào `Settings` sẽ là bắt app production khai
+#:   một biến chỉ có nghĩa khi đo S3 trên máy dev.
+SCRIPT_ONLY = frozenset({"DEV_DATABASE_URL"})
+
+#: Ba nhóm trên gộp lại: những tên được phép có trong `.env.example` mà không
 #: có trong `Settings`.
-NGOAI_SETTINGS = COMPOSE_ONLY | TEST_ONLY
+NGOAI_SETTINGS = COMPOSE_ONLY | TEST_ONLY | SCRIPT_ONLY
 
 
 def env_example_keys() -> set[str]:
