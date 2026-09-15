@@ -35,6 +35,20 @@ check "Mau literal trong component" "$out3"
 out4=$(git ls-files -z | xargs -0 grep -nE "sk-[a-zA-Z0-9]{20,}" 2>/dev/null)
 check "Secret trong file git dang theo doi" "$out4"
 
+# 5. Khong KHOA RIENG lot vao repo (B-76).
+# Lenh 4 chi biet mau `sk-...` cua API key, khong bat duoc PEM: hai file mkcert
+# `localhost+3*.pem` nam o GOC REPO tu T-0.8 toi T-1.6 ma khong lenh nao keu.
+#
+# Hai chi tiet cua mau, ca hai deu da lam do phep kiem nay khi viet sai:
+#  - Doi DU vanh PEM (nam dau gach hai ben) chu khong chi ba chu "BEGIN PRIVATE
+#    KEY": van ban MO TA cai bay nay — chinh dong B-76 trong docs/tasks.md —
+#    viet ba chu do trong dau nhay, va mot canh bao gia moi lan chay la mot
+#    lenh kiem se bi tat.
+#  - `[A-Z ]*` chu khong phai `.*`: dang `.*` khop CHINH DONG NAY khi grep quet
+#    file nay, tuc bao dong gia vinh vien khong lien quan gi toi khoa that.
+out5=$(git ls-files -z | xargs -0 grep -lE -- "-----BEGIN [A-Z ]*PRIVATE KEY-----" 2>/dev/null)
+check "Khoa rieng trong file git dang theo doi" "$out5"
+
 if [ "$status" -ne 0 ]; then
   echo "check-hardcode: THAT BAI"
   exit 1

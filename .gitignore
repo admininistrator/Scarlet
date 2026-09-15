@@ -2,6 +2,12 @@
 .env.providers
 CLAUDE.md
 certs/
+# B-76: mkcert ghi ra `localhost+3.pem` / `localhost+3-key.pem` ngay tai thu muc
+# no duoc goi, tuc GOC REPO — ngoai tam phu cua `certs/` o tren. Mot `git add -A`
+# khi do la commit thang khoa rieng TLS vao lich su. Phu ca hai duoi, va phu o
+# MOI thu muc, vi lan sau no co the roi vao cho khac.
+*.pem
+*.key
 .venv/
 node_modules/
 __pycache__/
