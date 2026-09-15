@@ -55,6 +55,23 @@ def stream_key(message_id: uuid.UUID | str) -> str:
     return f"{STREAM_KEY_PREFIX}{message_id}"
 
 
+def encode_event(event: Event) -> tuple[str, str]:
+    """`Event` -> hai gia tri cua mot ban ghi stream: `(type, data)`.
+
+    Tach khoi `emit()` vi T-1.7 co **mot** duong khong di qua Redis: khi stream
+    da het TTL ma message da `completed`, consumer dung lai cau tra loi tu
+    Postgres va phai phat ra dung hinh dang `data:` nhu luc no con tren day.
+    Neu hai duong tu `json.dumps` lay thi chung lech nhau duoc — va lech o day
+    nghia la cau tra loi doc sau mot gio khac cau tra loi doc ngay luc sinh.
+
+    `ensure_ascii=False`: tieng Viet co dau va emoji di thang duoi dang UTF-8
+    thay vi bi thoat thanh ma unicode. `json.loads` doc lai duoc ca hai dang,
+    nhung dang nay ngan hon ~3 lan cho tieng Viet va doc duoc bang mat khi
+    debug bang `redis-cli XRANGE`.
+    """
+    return event.TYPE, json.dumps(event.data(), ensure_ascii=False)
+
+
 class StreamProducer:
     """Đầu ghi của MỘT message. Không dùng lại cho message khác.
 
@@ -81,18 +98,12 @@ class StreamProducer:
         trong `Last-Event-ID` khi reconnect — nên nó phải là ID **thật** Redis
         cấp, không phải một số đếm tự sinh.
 
-        `ensure_ascii=False`: tiếng Việt có dấu và emoji đi thẳng dưới dạng
-        UTF-8 thay vì `\\uXXXX`. `json.loads` đọc lại được cả hai dạng, nhưng
-        dạng này ngắn hơn ~3 lần cho tiếng Việt và đọc được bằng mắt khi debug
-        bằng `redis-cli XRANGE`.
+        Hinh dang hai truong do `encode_event()` quyet dinh chu khong phai o
+        day: consumer cua T-1.7 co mot duong dung lai event tu Postgres va
+        phai ra dung chuoi ay.
         """
-        raw = await self._redis.xadd(
-            self._key,
-            {
-                FIELD_TYPE: event.TYPE,
-                FIELD_DATA: json.dumps(event.data(), ensure_ascii=False),
-            },
-        )
+        loai, data = encode_event(event)
+        raw = await self._redis.xadd(self._key, {FIELD_TYPE: loai, FIELD_DATA: data})
         return raw.decode() if isinstance(raw, bytes) else str(raw)
 
     async def expire(self) -> bool:
