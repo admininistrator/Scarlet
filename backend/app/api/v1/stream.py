@@ -31,11 +31,12 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.config.settings import settings
 from app.core.deps import get_current_user_id
+from app.core.errors import ApiError, ApiErrorCode
 from app.core.redis import get_redis
 from app.db.repositories import MessageRepository
 from app.db.session import session_scope
@@ -76,13 +77,15 @@ async def stream_message(
     try:
         vi_tri = doc_cursor(last_event_id, cursor)
     except CursorKhongHopLe as loi:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(loi)) from loi
+        raise ApiError(status.HTTP_400_BAD_REQUEST, ApiErrorCode.CURSOR_INVALID, str(loi)) from loi
 
     async with session_scope() as session:
         message = await MessageRepository(session).get_message(message_id, user_id=user_id)
         if message is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="khong tim thay message"
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND,
+                ApiErrorCode.MESSAGE_NOT_FOUND,
+                "khong tim thay message",
             )
         snapshot = MessageSnapshot.from_message(message)
 

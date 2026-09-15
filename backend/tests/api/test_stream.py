@@ -225,7 +225,9 @@ async def test_cursor_sai_dang_tra_400_truoc_khi_mo_stream(
     )
 
     assert resp.status_code == 400
-    assert "cursor" in resp.json()["detail"]
+    # Khung lỗi của §18 (B-86): mã nằm ở `error.code`, không phải `detail`.
+    assert resp.json()["error"]["code"] == "CURSOR_INVALID"
+    assert "cursor" in resp.json()["error"]["message"]
 
 
 async def test_last_event_id_nhan_tiep_tu_do_khong_lap(

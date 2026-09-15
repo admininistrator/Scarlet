@@ -1,0 +1,229 @@
+"""Khung lỗi DUY NHẤT của HTTP API — §18 (B-86, chốt ở NQ-25).
+
+KH tham chiếu: §18, §20, §23 `core/errors.py` · CLAUDE.md A10 · B-86.
+
+§18 mở đầu bằng một câu áp cho toàn bộ mặt API:
+
+    { "error": { "code": "QUOTA_EXCEEDED", "message": "…", "details": {...} } }
+
+Cho tới hết T-1.7 không endpoint nào làm việc đó — FastAPI trả
+`{"detail": "..."}` và **mã HTTP là thứ duy nhất FE đọc được**. Điều đó đủ khi
+người đọc là `curl`, và hỏng ở T-1.14: `sse.ts` phải phân biệt "chưa đăng
+nhập" với "model đã tắt" với "hết quota" để hiện ba màn hình khác nhau, mà một
+câu tiếng Việt thì không so sánh được. B-86 ghi lệch này lại và giao cho task
+đầu tiên có nhiều mã lỗi — T-1.8; file này là phần trả nợ đó, làm **trước**
+task và thành một commit riêng.
+
+**Vì sao là exception handler toàn cục, không phải sửa từng chỗ raise.**
+Phân nửa số lỗi của một app FastAPI không đi qua code của mình: body sai kiểu
+(`RequestValidationError`), đường dẫn không tồn tại (404 của router), method
+sai (405), một `Depends` ném `HTTPException`. Đổi hình dạng ở chỗ nào *mình*
+raise thì ba nguồn kia vẫn trả dạng cũ, và FE lại phải biết hai dạng.
+
+**Vì sao `ApiError` kế thừa `HTTPException` thay vì là một kiểu mới.**
+Starlette đã bắt `HTTPException` ở đúng mọi chỗ cần bắt (dependency,
+background task, route); kế thừa nó nghĩa là không có đường nào lọt. Cái nó
+thêm vào là hai trường mà §18 đòi còn `HTTPException` không có: `code` và
+`details`.
+
+**Vì sao bảng mã này TÁCH khỏi `app/streaming/events.py::ErrorCode`.** Hai
+bảng trả lời hai câu khác nhau: bảng kia là "lượt sinh chết vì cái gì" (đi
+trên dây SSE và vào cột `messages.error_code`), bảng này là "request HTTP bị
+từ chối vì cái gì". Gộp lại thì `UNAUTHENTICATED` phải nằm cạnh
+`PERSIST_FAILED`, và mỗi bên kéo bên kia theo mỗi lần mở rộng. Chỗ hai bảng
+nói cùng một chuyện — `MESSAGE_NOT_FOUND`, `MODEL_UNKNOWN` — **cố ý** dùng
+đúng một chuỗi, để FE không phải học hai tên cho một nghĩa.
+
+**§20 sống ở hai chỗ trong file này:** `message` của lỗi 500 là câu cố định
+chứ không phải `str(exc)` (traceback là bản đồ nội thất của server); và
+`details` của lỗi 422 chỉ mang `loc`/`msg`/`type`, **không** mang `input` —
+`input` của `POST /conversations/{id}/messages` chính là câu người dùng vừa gõ.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from enum import StrEnum
+from typing import Any
+
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import Request
+from starlette.responses import Response
+
+logger = logging.getLogger(__name__)
+
+
+class ApiErrorCode(StrEnum):
+    """Giá trị của `error.code` — hợp đồng với FE, không phải chuỗi tự do.
+
+    Thêm mã mới là thêm một dòng ở đây, **không** phải một chuỗi rời rạc nằm
+    trong router: một mã chỉ có ích nếu FE tìm được nó bằng cách đọc một danh
+    sách.
+    """
+
+    # ── khung HTTP: dùng khi một `HTTPException` trần đi qua handler ──
+    BAD_REQUEST = "BAD_REQUEST"
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    UNAUTHENTICATED = "UNAUTHENTICATED"
+    FORBIDDEN = "FORBIDDEN"
+    NOT_FOUND = "NOT_FOUND"
+    METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
+    CONFLICT = "CONFLICT"
+    RATE_LIMITED = "RATE_LIMITED"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
+
+    # ── danh tính (§18.1) ──
+    #: Chỗ tạm của Phase 1: `DEBUG=false` mà auth thật chưa có (NQ-24).
+    AUTH_NOT_IMPLEMENTED = "AUTH_NOT_IMPLEMENTED"
+
+    # ── chat (§18.2) ──
+    #: `Last-Event-ID` / `?cursor=` không phải một Redis Stream ID.
+    CURSOR_INVALID = "CURSOR_INVALID"
+    #: Message không tồn tại, đã xoá mềm, hoặc của người khác — §20 gộp ba ca.
+    #: Cùng chuỗi với `streaming.events.ErrorCode.MESSAGE_NOT_FOUND`, cố ý.
+    MESSAGE_NOT_FOUND = "MESSAGE_NOT_FOUND"
+
+
+#: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ
+#: là lưới đỡ: mọi chỗ raise trong `app/` nên dùng `ApiError` với một mã nói
+#: đúng chuyện gì đã xảy ra. Bảng này tồn tại cho 404-không-có-route và 405
+#: của Starlette, hai thứ không đi qua code của mình.
+_THEO_STATUS: dict[int, ApiErrorCode] = {
+    400: ApiErrorCode.BAD_REQUEST,
+    401: ApiErrorCode.UNAUTHENTICATED,
+    403: ApiErrorCode.FORBIDDEN,
+    404: ApiErrorCode.NOT_FOUND,
+    405: ApiErrorCode.METHOD_NOT_ALLOWED,
+    409: ApiErrorCode.CONFLICT,
+    422: ApiErrorCode.VALIDATION_ERROR,
+    429: ApiErrorCode.RATE_LIMITED,
+    503: ApiErrorCode.SERVICE_UNAVAILABLE,
+}
+
+#: Câu trả cho lỗi 500. Cố định, không nội suy `str(exc)` — xem docstring module.
+LOI_500 = "loi noi bo, xem log cua server"
+
+
+class ErrorBody(BaseModel):
+    """Ba trường của §18. `details` luôn có mặt (rỗng thì `{}`).
+
+    Luôn có mặt chứ không `null`: FE đọc thẳng `err.details` mà không phải hỏi
+    trước nó có tồn tại không, và một trường khi có khi không là chỗ sinh ra
+    đúng loại `undefined is not an object` mà không test nào bắt.
+    """
+
+    code: ApiErrorCode
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ErrorEnvelope(BaseModel):
+    """Toàn bộ body của MỌI response lỗi. Không có dạng thứ hai."""
+
+    error: ErrorBody
+
+
+class ApiError(StarletteHTTPException):
+    """`HTTPException` có mang theo `code` và `details` của §18.
+
+    Dùng nó thay `HTTPException` ở mọi chỗ trong `app/api/` và `app/core/`:
+    `HTTPException` trần vẫn ra đúng khung (handler bên dưới lo), nhưng mã của
+    nó chỉ suy được từ status — tức `NOT_FOUND` cho cả "hội thoại không có"
+    lẫn "message cha không thuộc hội thoại này", và FE mất đúng thứ B-86 nói.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        code: ApiErrorCode,
+        message: str,
+        *,
+        details: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(status_code=status_code, detail=message, headers=headers)
+        self.code = code
+        self.details = details or {}
+
+
+def _tra_ve(status_code: int, body: ErrorBody, headers: Mapping[str, str] | None) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=ErrorEnvelope(error=body).model_dump(mode="json"),
+        headers=headers,
+    )
+
+
+async def http_exception_handler(request: Request, exc: Exception) -> Response:
+    """Mọi `HTTPException` — của mình, của Starlette (404 route, 405) — ra §18.
+
+    `headers` giữ nguyên: 401 kèm `WWW-Authenticate` và 429 kèm `Retry-After`
+    mất tác dụng nếu handler này nuốt chúng.
+    """
+    if not isinstance(exc, StarletteHTTPException):  # pragma: no cover - Starlette bảo đảm kiểu
+        raise exc
+    if isinstance(exc, ApiError):
+        code, details = exc.code, exc.details
+    else:
+        code = _THEO_STATUS.get(exc.status_code, ApiErrorCode.INTERNAL_ERROR)
+        details = {}
+    return _tra_ve(
+        exc.status_code,
+        ErrorBody(code=code, message=str(exc.detail), details=details),
+        exc.headers,
+    )
+
+
+async def validation_exception_handler(request: Request, exc: Exception) -> Response:
+    """Body/query/header sai kiểu → 422 `VALIDATION_ERROR`.
+
+    `details.fields` chỉ giữ `loc`/`msg`/`type` của pydantic. Hai lý do, cả
+    hai đều cần: (a) §20 — `input` mà pydantic trả về chính là nội dung người
+    dùng vừa gõ, nó không có việc gì phải quay ngược ra khỏi server một lần
+    nữa; (b) `ctx` của pydantic có thể chứa object Python (một `ValueError`
+    chẳng hạn) và `JSONResponse` chết khi serialize nó — một lỗi 422 biến
+    thành một lỗi 500.
+    """
+    if not isinstance(exc, RequestValidationError):  # pragma: no cover - FastAPI bảo đảm kiểu
+        raise exc
+    fields = [
+        {
+            "loc": [str(phan) for phan in loi.get("loc", ())],
+            "msg": loi.get("msg", ""),
+            "type": loi.get("type", ""),
+        }
+        for loi in exc.errors()
+    ]
+    return _tra_ve(
+        422,
+        ErrorBody(
+            code=ApiErrorCode.VALIDATION_ERROR,
+            message="du lieu gui len khong hop le",
+            details={"fields": fields},
+        ),
+        None,
+    )
+
+
+async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:
+    """Ngoại lệ không ai bắt → 500 đúng khung, và **một dòng log có traceback**.
+
+    Không có handler này thì Starlette trả `Internal Server Error` dạng chữ
+    trơn: FE parse JSON thất bại rồi hiện "lỗi không rõ" — đúng lúc thứ nó cần
+    hiện là một mã để bấm Retry.
+    """
+    logger.exception("loi khong bat duoc tai %s %s", request.method, request.url.path)
+    return _tra_ve(500, ErrorBody(code=ApiErrorCode.INTERNAL_ERROR, message=LOI_500), None)
+
+
+def register(app: FastAPI) -> None:
+    """Gắn ba handler vào app. `main.py` gọi đúng một lần lúc dựng app."""
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(Exception, unhandled_exception_handler)

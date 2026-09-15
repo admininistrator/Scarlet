@@ -34,9 +34,10 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import Header, HTTPException, status
+from fastapi import Header, status
 
 from app.config.settings import settings
+from app.core.errors import ApiError, ApiErrorCode
 
 
 async def get_current_user_id(
@@ -45,18 +46,24 @@ async def get_current_user_id(
     """`user_id` của người gọi. **Chỗ tạm của Phase 1** — xem docstring module.
 
     Raise:
-        HTTPException 503: `DEBUG=false`. Auth thật chưa tồn tại (T-2.3), và
-            im lặng cho qua sẽ biến mọi endpoint thành công khai.
-        HTTPException 401: thiếu header `X-User-Id`.
+        ApiError 503 `AUTH_NOT_IMPLEMENTED`: `DEBUG=false`. Auth thật chưa tồn
+            tại (T-2.3), và im lặng cho qua sẽ biến mọi endpoint thành công khai.
+        ApiError 401 `UNAUTHENTICATED`: thiếu header `X-User-Id`.
+
+    Hai mã đó là hợp đồng với FE (§18, B-86): T-2.3 thay thân hàm này bằng auth
+    thật, và `UNAUTHENTICATED` vẫn là mã FE đọc để đẩy người dùng ra màn hình
+    đăng nhập — đổi thân hàm không được đổi mã.
     """
     if not settings.DEBUG:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="auth chua duoc hien thuc (tasks.md T-2.3); Phase 1 chi chay voi DEBUG=true",
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            ApiErrorCode.AUTH_NOT_IMPLEMENTED,
+            "auth chua duoc hien thuc (tasks.md T-2.3); Phase 1 chi chay voi DEBUG=true",
         )
     if x_user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="thieu header X-User-Id (cho tam cua Phase 1, xem app/core/deps.py)",
+        raise ApiError(
+            status.HTTP_401_UNAUTHORIZED,
+            ApiErrorCode.UNAUTHENTICATED,
+            "thieu header X-User-Id (cho tam cua Phase 1, xem app/core/deps.py)",
         )
     return x_user_id

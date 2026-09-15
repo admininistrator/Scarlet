@@ -6,6 +6,10 @@ task đầu tiên mà tầng HTTP giữ tài nguyên sống lâu hơn một requ
 `app/db/session.py` (engine dùng chung với worker). Không có chỗ đóng thì mỗi
 lần `uvicorn --reload` nạp lại code là một pool bị bỏ rơi, và trong container
 là một đống kết nối Postgres/Redis mà `docker compose restart api` mới dọn.
+
+`errors.register(app)` gắn khung lỗi `{"error":{...}}` của §18 (B-86, NQ-25).
+Nó phải chạy **trên `app`**, không phải trên router: 404-không-có-route và
+405 do Starlette sinh ra trước khi bất kỳ router nào được hỏi tới.
 """
 
 from collections.abc import AsyncIterator
@@ -14,6 +18,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.v1 import router as api_v1_router
+from app.core import errors
 from app.core.redis import dispose_redis
 from app.db.session import dispose_engine
 
@@ -26,6 +31,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Scarlet", lifespan=lifespan)
+errors.register(app)
 app.include_router(api_v1_router)
 
 
