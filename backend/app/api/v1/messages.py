@@ -1,6 +1,9 @@
-"""`POST /api/v1/conversations/{id}/messages` — §7.2 bước ① (§18.2, C14).
+"""Hai endpoint ghi của §18.2: **tạo** một lượt chat, và **dừng** nó.
 
-KH tham chiếu: §7.2 ①, §8.2, §11.4, §18.2, §20 · CLAUDE.md A1, A2, A3, A8.
+    POST /api/v1/conversations/{id}/messages   §7.2 ① — T-1.8
+    POST /api/v1/messages/{id}/cancel          §7.5   — T-1.9
+
+KH tham chiếu: §7.2 ①, §7.5, §8.2, §11.4, §18.2, §20 · CLAUDE.md A1, A2, A3, A8.
 
 **Đây là chỗ A1 được quyết định.** Handler này làm đúng bốn việc rồi trả lời:
 
@@ -58,9 +61,11 @@ from fastapi import APIRouter, Depends, Header, Request, status
 from pydantic import BaseModel, Field
 
 from app.config import catalog
+from app.config.settings import settings
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.queue import GENERATE_JOB_NAME, get_arq_pool
+from app.core.redis import get_redis
 from app.db.models import MessageRole, MessageStatus
 from app.db.repositories import (
     ConversationRepository,
@@ -68,6 +73,7 @@ from app.db.repositories import (
     MessageRepository,
 )
 from app.db.session import session_scope
+from app.streaming.cancel import dat_co_huy
 
 logger = logging.getLogger(__name__)
 
@@ -292,3 +298,97 @@ async def _day_job(assistant_message_id: uuid.UUID) -> None:
             ApiErrorCode.ENQUEUE_FAILED,
             "hang doi tu choi job",
         )
+
+
+# ══════════════════════ §7.5 — huỷ giữa chừng (T-1.9) ══════════════════════
+
+
+#: Hai trạng thái còn có gì để dừng. Ba trạng thái còn lại (`completed`,
+#: `failed`, `cancelled`) là ba ngả đã khép: bấm Dừng ở đó vẫn trả `200` nhưng
+#: **không** đặt cờ — xem docstring `cancel_message`.
+TRANG_THAI_CON_DUNG_DUOC = frozenset({MessageStatus.QUEUED, MessageStatus.STREAMING})
+
+
+class HuyResponse(BaseModel):
+    """`200` của `POST /messages/{id}/cancel`. §18.2 không ghi hình dạng body.
+
+    Ba trường vì FE cần phân biệt hai lần bấm Dừng khác nhau: lần trúng một
+    lượt đang sinh (`cancel_requested: true` — nút chuyển sang "đang dừng…") và
+    lần bấm khi chữ vừa chảy hết (`false` — không hiện gì cả, câu trả lời đã
+    xong rồi). Không có trường nào nói "đã dừng xong": lúc response về, worker
+    còn chưa kịp đọc cờ. Sự thật đó tới qua event `done` của SSE (§7.4).
+    """
+
+    message_id: uuid.UUID
+    #: Trạng thái **lúc nhận request**, đọc từ Postgres. Không phải trạng thái
+    #: sau khi huỷ — `cancelled` chỉ xuất hiện khi worker đã ghi nó.
+    status: MessageStatus
+    #: `true` = đã đặt cờ `cancel:{id}`; `false` = không có gì để dừng.
+    cancel_requested: bool
+
+
+@router.post(
+    "/messages/{message_id}/cancel",
+    status_code=status.HTTP_200_OK,
+    response_model=HuyResponse,
+    responses={
+        404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
+        503: {"model": ErrorEnvelope, "description": "Khong dat duoc co huy (Redis hong)"},
+    },
+)
+async def cancel_message(
+    message_id: uuid.UUID,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> HuyResponse:
+    """`SET cancel:{id} 1 EX CANCEL_TTL_S` — §7.5. Không đụng Postgres.
+
+    **A1 ở đây cũng như ở `stream.py`:** handler không dừng cái gì cả. Nó dựng
+    một lá cờ và trả lời ngay; người dừng vòng lặp là `workers/generate.py`,
+    và người ghi `status='cancelled'` xuống Postgres cũng là worker. Ngả ngược
+    lại — API tự `UPDATE messages SET status='cancelled'` — tạo hai người cùng
+    ghi một hàng: worker đang sinh sẽ ghi đè lại bằng `completed` vài giây sau,
+    và nút Dừng trở thành thứ đôi khi có tác dụng.
+
+    **Idempotent theo đúng nghĩa của DoD:** bấm Dừng trên một message đã
+    `completed`/`failed`/`cancelled` trả `200` và **không** đặt cờ. Không đặt
+    chứ không phải đặt-rồi-kệ: một khoá `cancel:{id}` cho một message đã xong
+    là rác sống `CANCEL_TTL_S` giây, và nếu T-1.13 cho `retry` dùng lại cùng
+    `message_id` thì nó là một quả mìn hẹn giờ. Đặt cờ hai lần trên một lượt
+    **đang** sinh thì vô hại và có ích — `SET` gia hạn TTL, xem `cancel.py`.
+
+    **404 chứ không 403 (§20)**, cùng lối với `stream.py`: "không tồn tại", "đã
+    xoá mềm" và "của người khác" trả về cùng một câu.
+    """
+    async with session_scope() as session:
+        message = await MessageRepository(session).get_message(message_id, user_id=user_id)
+        if message is None:
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND,
+                ApiErrorCode.MESSAGE_NOT_FOUND,
+                "khong tim thay message",
+            )
+        trang_thai = message.status
+
+    if trang_thai not in TRANG_THAI_CON_DUNG_DUOC:
+        logger.info(
+            "cancel: %s dang o trang thai %s — khong con gi de dung (§7.5)",
+            message_id,
+            trang_thai.value,
+        )
+        return HuyResponse(message_id=message_id, status=trang_thai, cancel_requested=False)
+
+    try:
+        await dat_co_huy(get_redis(), message_id, ttl_s=settings.CANCEL_TTL_S)
+    except Exception as loi:
+        # Cùng lý lẽ với `_day_job`: Redis chết là sự cố *phụ thuộc*, tức thử
+        # lại được. Nguyên nhân thật đi vào log kèm traceback; FE nhận một mã
+        # nó phân nhánh được thay vì một `INTERNAL_ERROR` không ai truy ra.
+        logger.exception("khong dat duoc co huy cho message %s", message_id)
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            ApiErrorCode.CANCEL_FAILED,
+            "khong dat duoc co huy",
+        ) from loi
+
+    logger.info("cancel: da dat co cho %s (status=%s)", message_id, trang_thai.value)
+    return HuyResponse(message_id=message_id, status=trang_thai, cancel_requested=True)

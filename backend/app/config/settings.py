@@ -108,6 +108,13 @@ class Settings(BaseSettings):
     WORKER_HEARTBEAT_S: int = Field(default=15, gt=0)
     REAPER_STALE_S: int = Field(default=90, gt=0)
     MAX_CONCURRENT_STREAMS: int = Field(default=3, gt=0)
+    #: Tuổi thọ của cờ huỷ `cancel:{message_id}` (§7.5). Là một *giới hạn* nên
+    #: nó ở đây chứ không phải một số trong `app/streaming/cancel.py` (A3,
+    #: §19.2 L4) — cùng họ với `STREAM_TTL_S`. Giá trị 300 là con số §7.5 viết
+    #: ra (`EX 300`); nó chỉ cần **lớn hơn** khoảng thời gian từ lúc bấm Dừng
+    #: tới lúc worker đọc chunk tiếp theo, nên rộng rãi thế này là để phòng ca
+    #: message còn `queued` và worker chưa nhận job.
+    CANCEL_TTL_S: int = Field(default=300, gt=0)
 
     # ═══ Worker & hàng đợi (ADR-02, §5.2) ═══
     #: Trần thời gian của MỘT job `generate`. Phải **lớn hơn**

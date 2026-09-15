@@ -11,6 +11,7 @@ model nằm ở đây. Thứ tự các bước bám đúng §7.2 ③ và **khôn
     ③ UPDATE status='streaming'  → ④ XADD start
     ⑤ vòng lặp stream: XADD delta/reasoning/tool_call/usage
                        + ghi heartbeat_at mỗi WORKER_HEARTBEAT_S (§7.6)
+                       + kiểm cờ huỷ mỗi KIEM_HUY_MOI_N_CHUNK chunk (§7.5)
     ⑥ UPDATE messages (content/status/usage)  → ⑦ XADD done|error  → ⑧ EXPIRE
 
 **Ba luật của file này:**
@@ -33,10 +34,26 @@ model nằm ở đây. Thứ tự các bước bám đúng §7.2 ③ và **khôn
 `finish_reason`/`usage` từ đó rồi đi tiếp. Event `done` ra dây ở bước ⑦, sau
 khi Postgres đã ghi xong. Nhầm hai cái này là hai `done` trên cùng một stream.
 
+**Huỷ giữa chừng là đường thoát thứ tư, và nó KHÔNG phải một lỗi (§7.5).**
+Ba ngả kia kết thúc bằng `done` (xong), `error` (hỏng) hoặc `error` (bị arq
+cắt). Ngả huỷ kết thúc bằng `done` mang `finish_reason='cancelled'`, và
+`messages.status` là `cancelled` chứ không phải `failed`: người dùng chủ động
+bấm Dừng thì phần chữ họ đã đọc là một câu trả lời ngắn, không phải một sự cố.
+Đó cũng là lý do `llm/context.py::USABLE_STATUSES` nhận `cancelled` — phần đã
+sinh vẫn đi vào ngữ cảnh lượt sau, vì người dùng đã nhìn thấy nó.
+
 **Chưa có ở Phase 1, cố ý:** `tools=None` (tool registry là §12/§13, Phase 6–7,
-và §7.2 ghi vòng lặp tool ở đó); cờ huỷ `cancel:{amid}` của §7.5 là **T-1.9**;
-`INSERT usage_events` + `cost_usd` là **T-2.12** (giá snapshot vào từng dòng
-usage — A7, ADR-08); `raw_response` (§17.2) chưa có người ghi.
+và §7.2 ghi vòng lặp tool ở đó); `INSERT usage_events` + `cost_usd` là
+**T-2.12** (giá snapshot vào từng dòng usage — A7, ADR-08); `raw_response`
+(§17.2) chưa có người ghi. **Trên đường huỷ, `usage` là `None`** và hai cột
+`messages.prompt_tokens`/`completion_tokens` để NULL: cả bốn provider đang bật
+chỉ gửi `usage` ở **chunk cuối cùng** (đo lại trên fixture của T-1.3:
+135/135 · 533/533 · 11/11 · 602/602), mà huỷ nghĩa là bỏ stream trước chunk
+đó. Điền một con số tự đếm vào hai cột ấy sẽ biến "không đo được" thành "đo
+được" — đúng thứ NQ-23 cấm — trong khi chưa có cột `cost_confidence` nào để
+đánh dấu. Việc đếm ước tính cho phần đã huỷ thuộc **T-2.12** cùng với
+`cost_confidence='low'` (B-67, B-94); ở Phase 1 nó là **một dòng log**, đúng
+chữ của DoD T-1.9.
 """
 
 from __future__ import annotations
@@ -55,6 +72,7 @@ from app.db.repositories import MessageRepository
 from app.db.session import session_scope
 from app.llm import context
 from app.llm.client import Chunk, LLMClient, ToolCall, Usage
+from app.streaming.cancel import FINISH_REASON_CANCELLED, da_yeu_cau_huy
 from app.streaming.events import (
     DeltaEvent,
     DoneEvent,
@@ -76,6 +94,19 @@ logger = logging.getLogger(__name__)
 #: vứt pool đi mỗi lượt (docstring `adapters/system.py`). Tên khoá ở đây chứ
 #: không ở `main.py` để tránh import vòng: `main` đã import module này.
 CTX_LLM_CLIENT = "llm_client"
+
+#: §7.5 viết thẳng "mỗi 8 chunk kiểm EXISTS cancel:{amid}". Đếm theo **chunk**
+#: chứ không theo giây như `_Nhip` của heartbeat, và khác biệt đó là cố ý: nhịp
+#: tim trả lời một câu hỏi đo bằng giây (reaper §7.6 so `heartbeat_at` với
+#: `now()`), còn nút Dừng trả lời câu "bao nhiêu chữ nữa thì người dùng thôi
+#: thấy chữ chảy" — đo bằng chunk là đo đúng thứ họ nhìn.
+#:
+#: **Không** phải biến `Settings`: đây là nhịp hỏi nội bộ của một vòng lặp, cùng
+#: loại với `SO_BAN_GHI_MOI_LAN` của `streaming/consumer.py`, chứ không phải
+#: một *giới hạn* vận hành như `CANCEL_TTL_S` (A3 liệt "tên model, giá, giới
+#: hạn, URL provider, màu sắc"). Giá của nó: một `EXISTS` cho mỗi 8 chunk, tức
+#: ~66 lệnh cho một câu trả lời dài của `deepseek-flash` (533 chunk đo ở T-1.3).
+KIEM_HUY_MOI_N_CHUNK = 8
 
 
 class LoiSinh(Exception):
@@ -108,6 +139,11 @@ class _KetQua:
     usage: Usage | None = None
     finish_reason: str | None = None
     loi: LoiSinh | None = None
+    #: §7.5 — người dùng đã bấm Dừng và vòng lặp đã thoát vì thế. Cờ RIÊNG chứ
+    #: không phải `finish_reason == "cancelled"`: ba giá trị `finish_reason`
+    #: kia đến từ provider, và một ngày nào đó provider trả đúng chuỗi ấy thì
+    #: `messages.status` sẽ thành `cancelled` cho một lượt không ai huỷ.
+    bi_huy: bool = False
 
     @property
     def content(self) -> str:
@@ -210,9 +246,18 @@ async def _chay(
         raise LoiSinh(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
 
     nhip = _Nhip(settings.WORKER_HEARTBEAT_S)
+    so_chunk = 0
     try:
         async for chunk in stream:
+            # `_phat` chạy TRƯỚC phép kiểm: chunk thứ 8 vẫn ra dây và vẫn vào
+            # `ket_qua.chu`. §7.5 đòi "vẫn lưu phần đã sinh", mà phần đã sinh
+            # tính tới mẩu cuối cùng provider đã gửi — bỏ nó đi là để màn hình
+            # và `messages.content` nói hai chuyện khác nhau.
             await _phat(producer, ket_qua, chunk)
+            so_chunk += 1
+            if so_chunk % KIEM_HUY_MOI_N_CHUNK == 0 and await _bi_huy(ctx, mid):
+                _dung_vi_huy(mid, ket_qua, so_chunk)
+                break
             if nhip.den_han():
                 await _ghi_heartbeat(mid)
     except LoiSinh:
@@ -315,6 +360,46 @@ async def _phat(producer: StreamProducer, ket_qua: _KetQua, chunk: Chunk) -> Non
             logger.warning("generate: bo qua chunk kind=%r khong co du lieu", chunk.kind)
 
 
+async def _bi_huy(ctx: dict[str, Any], mid: uuid.UUID) -> bool:
+    """`EXISTS cancel:{mid}` (§7.5). Hỏng thì **không** làm hỏng lượt sinh.
+
+    Cùng lý lẽ với `_ghi_heartbeat`, nhưng ở đây cái giá của việc không nuốt
+    còn rõ hơn: để ngoại lệ thoát ra thì `_chay` bọc nó thành
+    `UPSTREAM_ERROR`, tức người dùng đọc được "provider lỗi" cho một sự cố
+    hoàn toàn nằm ở phía mình. Mất một lần hỏi nghĩa là nút Dừng ăn muộn
+    `KIEM_HUY_MOI_N_CHUNK` chunk nữa, và cờ vẫn còn đó (`CANCEL_TTL_S`).
+    """
+    try:
+        return await da_yeu_cau_huy(ctx["redis"], mid)
+    except Exception:  # noqa: BLE001 — xem docstring
+        logger.warning("generate: %s khong kiem duoc co huy", mid, exc_info=True)
+        return False
+
+
+def _dung_vi_huy(mid: uuid.UUID, ket_qua: _KetQua, so_chunk: int) -> None:
+    """Ghi nhận ngả huỷ vào `ket_qua` — và **dòng log** mà DoD T-1.9 đòi.
+
+    Không `raise`: huỷ không phải lỗi (xem docstring module). Đặt hai trường
+    rồi để `break` ở `_chay` đưa luồng về `_dong_so`, nơi nó ra dây thành
+    `done` mang `finish_reason='cancelled'` đúng như §7.5 viết.
+
+    Dòng log này là thứ thay cho `usage_events` ở Phase 1 — DoD T-1.9 ghi
+    *"ở phase này kiểm bằng log"*. Nó in cả `usage` (gần như luôn là `None`,
+    xem docstring module) để chỗ trống ấy **nhìn thấy được** trong log thay vì
+    im lặng: T-2.12 là người lấp nó bằng `count_text()` + `cost_confidence`.
+    """
+    ket_qua.bi_huy = True
+    ket_qua.finish_reason = FINISH_REASON_CANCELLED
+    logger.info(
+        "generate: %s NGUOI DUNG HUY sau %d chunk · %d ky tu da sinh · "
+        "usage tu provider: %s · usage_events: chua ghi (T-2.12, B-94)",
+        mid,
+        so_chunk,
+        len(ket_qua.content),
+        ket_qua.usage,
+    )
+
+
 async def _ghi_heartbeat(mid: uuid.UUID) -> None:
     """Nhịp §7.6. Hỏng thì **không** làm hỏng lượt sinh.
 
@@ -373,8 +458,27 @@ async def _dong_so(mid: uuid.UUID, producer: StreamProducer, ket_qua: _KetQua) -
     )
 
 
+def _trang_thai_cuoi(ket_qua: _KetQua) -> MessageStatus:
+    """Ba ngả của §7.2 ③ + §7.5 → một giá trị của `message_status`.
+
+    **Lỗi thắng cờ huỷ.** Trúng cả hai (bấm Dừng rồi Postgres hỏng ngay sau
+    đó) thì `failed` là câu đúng hơn: có một sự cố cần người đọc log biết, còn
+    `cancelled` sẽ nói rằng mọi thứ đã diễn ra như người dùng muốn.
+    """
+    if ket_qua.loi is not None:
+        return MessageStatus.FAILED
+    if ket_qua.bi_huy:
+        return MessageStatus.CANCELLED
+    return MessageStatus.COMPLETED
+
+
 async def _ghi_ket_qua(mid: uuid.UUID, ket_qua: _KetQua) -> None:
     """`UPDATE messages` — lần ghi DUY NHẤT vào `content` (§17.2, C5).
+
+    Đường huỷ (§7.5) đi qua đúng hàm này chứ không có nhánh riêng: nó ghi
+    `status='cancelled'`, `finish_reason='cancelled'`, và `content` là **phần
+    đã sinh được** — cùng một câu lệnh, cùng một chỗ. `error_code` để NULL vì
+    không có lỗi nào xảy ra.
 
     `tool_calls` ghi bằng `ToolCall.to_wire()`, tức đúng khối `tool_calls` của
     dây OpenAI (NQ-22/B-68). Đó là hình dạng mà `llm/context.py::_to_wire` đọc
@@ -386,7 +490,7 @@ async def _ghi_ket_qua(mid: uuid.UUID, ket_qua: _KetQua) -> None:
     async with session_scope() as session:
         await MessageRepository(session).finish_generation(
             mid,
-            status=MessageStatus.COMPLETED if loi is None else MessageStatus.FAILED,
+            status=_trang_thai_cuoi(ket_qua),
             content=ket_qua.content,
             reasoning="".join(ket_qua.reasoning) or None,
             tool_calls=[tc.to_wire() for tc in ket_qua.tool_calls] or None,

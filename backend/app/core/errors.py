@@ -99,6 +99,11 @@ class ApiErrorCode(StrEnum):
     NO_MODEL_AVAILABLE = "NO_MODEL_AVAILABLE"
     #: Không đẩy được job vào hàng đợi (Redis hỏng) — §7.2 ① không hoàn tất.
     ENQUEUE_FAILED = "ENQUEUE_FAILED"
+    #: Không đặt được cờ huỷ `cancel:{id}` của §7.5 (Redis hỏng). Mã riêng chứ
+    #: không phải `SERVICE_UNAVAILABLE` trần, cùng lý lẽ với `ENQUEUE_FAILED`:
+    #: FE cần phân biệt "nút Dừng chưa ăn, bấm lại đi" với một lỗi lập trình,
+    #: và người dùng đang nhìn chữ vẫn chảy nên câu trả lời phải nói đúng việc.
+    CANCEL_FAILED = "CANCEL_FAILED"
 
 
 #: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ

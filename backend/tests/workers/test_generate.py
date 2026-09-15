@@ -32,13 +32,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.db.session as db_session
+from app.config.catalog import get_model
 from app.config.settings import settings
 from app.db.models import Conversation, Message, MessageRole, MessageStatus
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.llm import context as llm_context
 from app.llm.client import Chunk, ToolCall, Usage
+from app.streaming.cancel import FINISH_REASON_CANCELLED, cancel_key
 from app.streaming.producer import FIELD_DATA, FIELD_TYPE
-from app.workers.generate import CTX_LLM_CLIENT, generate
+from app.workers.generate import CTX_LLM_CLIENT, KIEM_HUY_MOI_N_CHUNK, generate
 
 #: Model THẬT trong `config/model_catalog.json` — `generate` tra catalog bằng
 #: `messages.model_id`, nên một id bịa sẽ đi thẳng vào nhánh `MODEL_UNKNOWN`.
@@ -49,12 +51,25 @@ MODEL_ID = "deepseek-flash"
 
 
 class RedisGia:
-    """Chỉ đủ `xadd`/`expire`. Trả `bytes` như pool arq dựng (không decode)."""
+    """Đủ `xadd`/`expire` (§7.2 ③) và `exists` (cờ huỷ §7.5).
+
+    Trả `bytes` như pool arq dựng (không decode). `co_huy` là tập khoá đang
+    "tồn tại" — test đặt tay thay cho `POST /messages/{id}/cancel`.
+    """
 
     def __init__(self) -> None:
         self.ban_ghi: list[dict[str, str]] = []
         self.expire_calls: list[tuple[str, int]] = []
+        self.co_huy: set[str] = set()
+        self.exists_calls: list[str] = []
+        self.exists_no_ra = False
         self._seq = 0
+
+    async def exists(self, name: str) -> int:
+        self.exists_calls.append(name)
+        if self.exists_no_ra:
+            raise ConnectionError("redis chet giua chung (gia lap)")
+        return 1 if name in self.co_huy else 0
 
     async def xadd(self, name: str, fields: dict[str, Any]) -> bytes:
         self._seq += 1
@@ -464,3 +479,217 @@ async def test_tham_so_gui_cho_model_lay_tu_catalog_va_settings(
     # A2/C11: ngữ cảnh là ĐƯỜNG ĐI, và message `queued` đang sinh không có mặt.
     vai_tro = [m["role"] for m in client.goi["messages"]]
     assert vai_tro == ["system", "user"]
+
+
+# ═════════════════════ §7.5 — huỷ giữa chừng (T-1.9) ═════════════════════
+
+
+def _chunks_dai(so_luong: int) -> list[Chunk]:
+    """`so_luong` mẩu `delta`, rồi `usage` + `done` như một lượt sinh bình thường.
+
+    Dãy này **cố ý** kết thúc đầy đủ: nếu vòng lặp không dừng vì cờ huỷ, test sẽ
+    thấy `finish_reason='stop'` và `status='completed'` — tức phép kiểm hỏng
+    theo hướng nhìn thấy được, chứ không phải treo.
+    """
+    chu = [f"m{i} " for i in range(so_luong)]
+    return _chunks_binh_thuong(chu)
+
+
+async def test_dung_vong_lap_khi_thay_co_huy(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """§7.5: thấy cờ ⇒ dừng, `finish_reason='cancelled'`, `status='cancelled'`.
+
+    Huỷ **không** phải lỗi: `error_code` để NULL và event cuối là `done`, chứ
+    không phải `error`. FE bật nút Retry theo `error`, mà một câu trả lời người
+    dùng chủ động dừng thì không có gì để thử lại.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.co_huy.add(cancel_key(message.id))
+    client = ClientGia(_chunks_dai(40))
+
+    await generate(_ctx(redis_gia, client), str(message.id))
+
+    assert redis_gia.cuoi["type"] == "done"
+    assert redis_gia.cuoi["data"]["finish_reason"] == FINISH_REASON_CANCELLED
+
+    lai = await _doc_lai(session_factory, message.id)
+    assert lai.status is MessageStatus.CANCELLED
+    assert lai.finish_reason == FINISH_REASON_CANCELLED
+    assert lai.error_code is None
+
+
+async def test_dung_dung_sau_N_chunk_khong_som_khong_muon(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Đếm **chính xác** `KIEM_HUY_MOI_N_CHUNK`: đó là ngân sách của "≤ 500 ms".
+
+    Kiểm mỗi chunk thì tốn một `EXISTS` cho mỗi mẩu chữ; kiểm thưa hơn thì nút
+    Dừng ăn muộn. Test khoá con số lại để một lần "tối ưu" sau này phải đi qua
+    đây.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.co_huy.add(cancel_key(message.id))
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_dai(100))), str(message.id))
+
+    assert redis_gia.chu() == "".join(f"m{i} " for i in range(KIEM_HUY_MOI_N_CHUNK))
+    assert len(redis_gia.exists_calls) == 1, "thấy cờ ở lần hỏi đầu tiên thì thôi hỏi nữa"
+
+
+async def test_van_luu_phan_da_sinh_va_bang_dung_chu_tren_day(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """DoD dòng 2: `messages.content` chứa **đúng** phần đã sinh — không rỗng,
+    không đầy đủ, và bằng byte-by-byte với chuỗi client dựng từ stream."""
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.co_huy.add(cancel_key(message.id))
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_dai(100))), str(message.id))
+
+    lai = await _doc_lai(session_factory, message.id)
+    day_du = "".join(f"m{i} " for i in range(100))
+    assert lai.content == redis_gia.chu()
+    assert lai.content, "không rỗng"
+    assert lai.content != day_du, "không đầy đủ"
+    assert day_du.startswith(lai.content), "là TIỀN TỐ của câu trả lời đầy đủ"
+
+
+async def test_khong_co_co_thi_khong_dung_va_van_hoi_dung_khoa(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Không ai bấm Dừng ⇒ lượt sinh chạy hết, và khoá được hỏi đúng tên.
+
+    Phép so `exists_calls` là chỗ bắt lỗi gõ lệch tiền tố: nếu worker hỏi
+    `cancel-{id}` còn API ghi `cancel:{id}` thì mọi test huỷ ở trên vẫn xanh
+    (chúng tự đặt khoá bằng `cancel_key`), chỉ đường chạy thật là hỏng.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    so_chunk_delta = 40
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_dai(so_chunk_delta))), str(message.id))
+
+    lai = await _doc_lai(session_factory, message.id)
+    assert lai.status is MessageStatus.COMPLETED
+    assert lai.finish_reason == "stop"
+    # `usage` + `done` là hai chunk nữa sau `delta`, nên tổng là 42.
+    assert len(redis_gia.exists_calls) == (so_chunk_delta + 2) // KIEM_HUY_MOI_N_CHUNK
+    assert set(redis_gia.exists_calls) == {cancel_key(message.id)}
+
+
+async def test_khong_kiem_duoc_co_thi_van_sinh_tiep(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """`EXISTS` nổ ⇒ ghi cảnh báo rồi đi tiếp, KHÔNG đội lốt `UPSTREAM_ERROR`.
+
+    Mất một lần hỏi là nút Dừng ăn muộn vài chunk. Để ngoại lệ thoát ra thì
+    người dùng đọc được "provider lỗi" cho một sự cố nằm hoàn toàn ở phía mình.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.exists_no_ra = True
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_dai(40))), str(message.id))
+
+    assert redis_gia.cuoi["type"] == "done"
+    lai = await _doc_lai(session_factory, message.id)
+    assert lai.status is MessageStatus.COMPLETED
+
+
+async def test_huy_thi_usage_de_NULL_chu_khong_bia_so(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Provider chỉ gửi `usage` ở chunk CUỐI, nên huỷ = không có usage thật.
+
+    Hai cột để NULL chứ không điền một con số tự đếm: NQ-23 dựa vào chỗ khác
+    nhau giữa "provider không báo" và "báo và bằng 0", và chưa có cột
+    `cost_confidence` nào để đánh dấu một con số ước tính. Việc đếm cho phần đã
+    huỷ thuộc T-2.12 (B-94); ở Phase 1 nó là một dòng log.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.co_huy.add(cancel_key(message.id))
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_dai(100))), str(message.id))
+
+    assert redis_gia.cuoi["data"]["usage"] is None
+    lai = await _doc_lai(session_factory, message.id)
+    assert lai.prompt_tokens is None
+    assert lai.completion_tokens is None
+
+
+async def test_huy_ghi_mot_dong_log_cho_usage(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DoD dòng 3: "ở phase này kiểm bằng log" — dòng log ấy phải TỒN TẠI.
+
+    Không có nó thì phần đã huỷ biến mất khỏi sổ sách một cách im lặng, và
+    T-2.12 không có chỗ nào để nối vào (Cạm bẫy của task: quota bị rò).
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.co_huy.add(cancel_key(message.id))
+
+    with caplog.at_level("INFO", logger="app.workers.generate"):
+        await generate(_ctx(redis_gia, ClientGia(_chunks_dai(100))), str(message.id))
+
+    dong = [r.getMessage() for r in caplog.records if "HUY" in r.getMessage()]
+    assert len(dong) == 1, "đúng một dòng, không phải không dòng nào và không phải hai"
+    assert str(message.id) in dong[0]
+    assert "usage" in dong[0]
+
+
+async def test_huy_van_EXPIRE_stream(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """C8 áp cho cả ba ngả: stream của một lượt bị huỷ cũng chiếm RAM."""
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.co_huy.add(cancel_key(message.id))
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_dai(100))), str(message.id))
+
+    assert redis_gia.expire_calls == [(f"stream:{message.id}", settings.STREAM_TTL_S)]
+
+
+async def test_phan_da_huy_van_vao_ngu_canh_luot_sau(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """`USABLE_STATUSES` nhận `cancelled` — người dùng đã nhìn thấy phần chữ đó.
+
+    Kiểm qua chính `context.build` chứ không đọc hằng số: nếu một ngày ai đó
+    bỏ `cancelled` khỏi `USABLE_STATUSES` thì lượt sau sẽ thấy một hội thoại
+    thiếu mất câu trả lời mà người dùng đang nhìn trên màn hình.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.co_huy.add(cancel_key(message.id))
+    await generate(_ctx(redis_gia, ClientGia(_chunks_dai(100))), str(message.id))
+
+    lai = await _doc_lai(session_factory, message.id)
+    model_meta = get_model(MODEL_ID)
+    assert model_meta is not None
+    async with session_factory() as s:
+        wire = await llm_context.build(s, lai.id, model_meta, user_id=user_a)
+
+    assert any(m["role"] == "assistant" and m.get("content") == lai.content for m in wire)
