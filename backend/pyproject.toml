@@ -26,6 +26,7 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "pytest-timeout>=2.3",
     "ruff>=0.6",
     "mypy>=1.11",
     "pre-commit>=3.8",
@@ -57,3 +58,18 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# B-88 — TRẦN THỜI GIAN CHO MỖI TEST.
+#
+# Không có dòng này thì một lỗi kiểu "vòng lặp không bao giờ thoát" làm bộ test
+# TREO thay vì đỏ, và treo là kiểu đỏ không tự khai báo: trên CI nó trông y hệt
+# một máy build chậm. Đo thật ở T-1.7: 3 trong 12 phép kiểm ngược (`[cursor`,
+# `XREAD` từ `$`, bỏ `: ping`) biến vòng đuổi kịp hoặc vòng BLOCK thành vô hạn,
+# `pytest` chạy quá 45 s rồi bị một `timeout` NGOÀI cắt, không in một dòng
+# `failed` nào.
+#
+# 60 s là trần cho MỘT test, không phải cho cả bộ. Mốc để so: cả 400 test hiện
+# chạy 12.85 s và test chậm nhất (`test_get_path_tren_cay_500_message_duoi_nguong`)
+# mất 0.90 s — tức ngưỡng này rộng gấp ~66× test chậm nhất. Nó cố ý KHÔNG phải
+# một phép đo hiệu năng (S14 đo cả bộ < 3 phút bằng `time make test`); nó chỉ
+# là cái phanh để một vòng lặp vô hạn tự khai báo thành `Failed: Timeout`.
+timeout = 60
