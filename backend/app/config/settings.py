@@ -102,6 +102,15 @@ class Settings(BaseSettings):
     ARGON2_TIME_COST: int = Field(default=3, gt=0)
     ARGON2_MEMORY_KIB: int = Field(default=65536, gt=0)
 
+    # ═══ API (§18.2) ═══
+    #: Số hội thoại tối đa một trang của `GET /conversations` — vừa là mặc định,
+    #: vừa là trần cho `?limit=`. Ở đây chứ không phải một số trong
+    #: `api/v1/conversations.py` vì `ConversationRepository.list_conversations`
+    #: cố ý bắt caller truyền `limit` (A3, §19.2 L4): hạn mức là cấu hình.
+    #: Một biến chứ không phải hai (mặc định + trần): chưa màn hình nào cần xin
+    #: nhiều hơn một trang, và hai nút vặn cho một con số là hai chỗ để lệch.
+    CONVERSATION_PAGE_SIZE: int = Field(default=30, gt=0)
+
     # ═══ Streaming (§7) ═══
     STREAM_TTL_S: int = Field(default=3600, gt=0)
     STREAM_HEARTBEAT_S: int = Field(default=15, gt=0)

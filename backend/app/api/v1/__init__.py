@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import admin, health, messages, models, stream
+from app.api.v1 import admin, conversations, health, messages, models, stream
 from app.config.settings import settings
 
 router = APIRouter(prefix="/api/v1")
@@ -8,6 +8,7 @@ router.include_router(models.router)
 router.include_router(admin.router)
 router.include_router(health.router)
 router.include_router(stream.router)
+router.include_router(conversations.router)
 router.include_router(messages.router)
 
 # §18.6 — `/_debug/*` CHỈ tồn tại khi DEBUG=true. Gắn router có điều kiện thay
