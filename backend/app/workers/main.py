@@ -8,11 +8,15 @@ mỗi job sống trong file riêng của nó (§23).
 
 **Ba tham số của `generate` đều có lý do, không cái nào là mặc định của arq:**
 
-1. `name="generate"` — §7.2 bước ① viết `arq.enqueue('generate', ...)`, tức
-   tên job là một *giao kèo* giữa `api` và `worker`. arq mặc định lấy
+1. `name=GENERATE_JOB_NAME` — §7.2 bước ① viết `arq.enqueue('generate', ...)`,
+   tức tên job là một *giao kèo* giữa `api` và `worker`. arq mặc định lấy
    `__qualname__`, nghĩa là đổi tên hàm Python cũng đổi tên job, và bên gọi
    sẽ enqueue vào một tên không ai đăng ký: job nằm mãi trong hàng đợi, không
-   lỗi, không log. Ghim tên ra đây làm chỗ đó đứt ngay lúc đọc code.
+   lỗi, không log. Hằng này — cùng với `redis_settings()` — **chuyển sang
+   `app/core/queue.py` ở T-1.8**: chúng là hợp đồng giữa hai tiến trình, nên
+   phải nằm ở chỗ cả `api` lẫn `worker` import được. Đường ngược lại (`api`
+   import chính file này) sẽ kéo `SystemAdapter` và cả SDK `openai` vào tiến
+   trình `api` — đúng thứ §5.3 chặn.
 2. `max_tries=GENERATE_MAX_TRIES` — xem docstring `generate.py`. Mặc định của
    arq là 5; với lượt sinh, thử lại lần hai là hoá đơn lần hai.
 3. `timeout=GENERATE_TIMEOUT_S` — mặc định của arq là 300 s, ngắn hơn cả
@@ -42,18 +46,15 @@ import logging
 from typing import Any
 
 from arq import func
-from arq.connections import RedisSettings
 from arq.worker import Function
 
 from app.config.settings import settings
+from app.core.queue import GENERATE_JOB_NAME, redis_settings
 from app.db.session import dispose_engine
 from app.llm.adapters.system import SystemAdapter
 from app.workers.generate import CTX_LLM_CLIENT, generate
 
 logger = logging.getLogger(__name__)
-
-#: Tên job trên dây — giao kèo với §7.2 bước ①. Xem điểm 1 ở docstring module.
-GENERATE_JOB_NAME = "generate"
 
 #: KHÔNG thử lại. Xem điểm 2 ở docstring module và docstring `generate.py`.
 GENERATE_MAX_TRIES = 1
@@ -66,16 +67,6 @@ FUNCTIONS: list[Function] = [
         max_tries=GENERATE_MAX_TRIES,
     ),
 ]
-
-
-def redis_settings() -> RedisSettings:
-    """`REDIS_URL` của §19.1 đổi sang dạng arq hiểu.
-
-    Cả worker lẫn bên enqueue (T-1.8) phải gọi hàm này thay vì tự dựng
-    `RedisSettings()`: mặc định của arq là `localhost:6379/0`, và trong compose
-    thì host là `redis` — sai lặng lẽ thành "job biến mất" chứ không thành lỗi.
-    """
-    return RedisSettings.from_dsn(str(settings.REDIS_URL))
 
 
 def _dung_logging() -> None:

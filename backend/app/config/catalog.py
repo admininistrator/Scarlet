@@ -177,5 +177,22 @@ def get_model(model_id: str) -> ModelEntry | None:
     return next((m for m in _catalog.models if m.id == model_id and m.enabled), None)
 
 
+def get_default_model() -> ModelEntry | None:
+    """Model dùng khi request không nói dùng model nào (§9.2 `default: true`).
+
+    `Catalog._dung_mot_default` đã bắt phải có **đúng một** model `default`,
+    nhưng nó **không** bắt model đó phải `enabled` — tắt một provider đang hỏng
+    là chuyện của giờ phút, còn sửa cờ `default` là một quyết định khác. Vì
+    vậy hàm vẫn lọc `enabled` và vẫn trả `None` được: ca "model mặc định vừa bị
+    tắt" phải thành một mã lỗi mà người dùng đọc được (T-1.8 trả 503), chứ
+    không phải một `StopIteration` giữa handler.
+
+    Đây là hàm duy nhất ngoài `get_model` mà tầng app dùng để *chọn* model —
+    tầng api không tự duyệt `get_catalog().models` đi tìm cờ `default`, vì như
+    vậy là chép luật của §9.2 ra khỏi file này (A3).
+    """
+    return next((m for m in _catalog.models if m.default and m.enabled), None)
+
+
 #: Nạp ngay lúc import — fail-fast (L2). Catalog sai schema → app không boot.
 _catalog = _read_and_validate(CATALOG_PATH)

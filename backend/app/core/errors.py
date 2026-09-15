@@ -88,6 +88,17 @@ class ApiErrorCode(StrEnum):
     #: Message không tồn tại, đã xoá mềm, hoặc của người khác — §20 gộp ba ca.
     #: Cùng chuỗi với `streaming.events.ErrorCode.MESSAGE_NOT_FOUND`, cố ý.
     MESSAGE_NOT_FOUND = "MESSAGE_NOT_FOUND"
+    #: Hội thoại không tồn tại, đã xoá mềm, hoặc của người khác (§20, cùng lối).
+    CONVERSATION_NOT_FOUND = "CONVERSATION_NOT_FOUND"
+    #: `parent_id` client gửi lên (C14) không nằm trong hội thoại này.
+    PARENT_NOT_FOUND = "PARENT_NOT_FOUND"
+    #: `model_id` không có trong catalog hoặc đã `enabled: false` (§9.2).
+    #: Cùng chuỗi với `streaming.events.ErrorCode.MODEL_UNKNOWN`, cố ý.
+    MODEL_UNKNOWN = "MODEL_UNKNOWN"
+    #: Không request nào chỉ định model và model `default` cũng đã bị tắt.
+    NO_MODEL_AVAILABLE = "NO_MODEL_AVAILABLE"
+    #: Không đẩy được job vào hàng đợi (Redis hỏng) — §7.2 ① không hoàn tất.
+    ENQUEUE_FAILED = "ENQUEUE_FAILED"
 
 
 #: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ

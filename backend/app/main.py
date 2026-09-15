@@ -1,11 +1,13 @@
 """Ứng dụng FastAPI của service `api`.
 
-`lifespan` chỉ làm một việc: **đóng hai pool khi tiến trình dừng.** T-1.7 là
-task đầu tiên mà tầng HTTP giữ tài nguyên sống lâu hơn một request —
+`lifespan` chỉ làm một việc: **đóng pool khi tiến trình dừng.** T-1.7 là task
+đầu tiên mà tầng HTTP giữ tài nguyên sống lâu hơn một request —
 `app/core/redis.py` (một `XREAD BLOCK` cho mỗi SSE đang mở) và
-`app/db/session.py` (engine dùng chung với worker). Không có chỗ đóng thì mỗi
-lần `uvicorn --reload` nạp lại code là một pool bị bỏ rơi, và trong container
-là một đống kết nối Postgres/Redis mà `docker compose restart api` mới dọn.
+`app/db/session.py` (engine dùng chung với worker); T-1.8 thêm cái thứ ba,
+`app/core/queue.py` (pool arq để đẩy job `generate`). Không có chỗ đóng thì
+mỗi lần `uvicorn --reload` nạp lại code là một pool bị bỏ rơi, và trong
+container là một đống kết nối Postgres/Redis mà `docker compose restart api`
+mới dọn.
 
 `errors.register(app)` gắn khung lỗi `{"error":{...}}` của §18 (B-86, NQ-25).
 Nó phải chạy **trên `app`**, không phải trên router: 404-không-có-route và
@@ -19,6 +21,7 @@ from fastapi import FastAPI
 
 from app.api.v1 import router as api_v1_router
 from app.core import errors
+from app.core.queue import dispose_arq_pool
 from app.core.redis import dispose_redis
 from app.db.session import dispose_engine
 
@@ -27,6 +30,7 @@ from app.db.session import dispose_engine
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
     await dispose_redis()
+    await dispose_arq_pool()
     await dispose_engine()
 
 
