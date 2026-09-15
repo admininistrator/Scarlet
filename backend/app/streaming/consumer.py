@@ -40,6 +40,12 @@ nên mở lại một message của hôm qua thì stream đã biến mất. Khi 
 khi đó — consumer đọc `messages.content` rồi phát ra đúng những event tương
 ứng. Redis là bộ đệm, Postgres là sự thật (C5), nên đây không phải đường lùi
 tạm bợ mà là đường đúng cho một câu trả lời đã khép.
+
+**Đường thứ ba: cursor đứng sau event kết thúc (B-84).** Một client đã nhận
+`done` mà vẫn quay lại — trái §7.4, nhưng có thật — không được treo. Consumer hỏi
+`XREVRANGE COUNT 1` xem bản ghi cuối của stream có phải event kết thúc không, rồi
+**phát lại đúng event đó** và đóng. Hỏi chính stream chứ không hỏi
+`messages.status` là có chủ ý — xem khối ②bis trong `frames()`.
 """
 
 from __future__ import annotations
@@ -147,6 +153,18 @@ def doc_cursor(last_event_id: str | None, cursor: str | None) -> str:
             raise CursorKhongHopLe(gia_tri)
         return gia_tri
     return CURSOR_DAU
+
+
+def _thu_tu_id(raw: str) -> tuple[int, int]:
+    """`"1725984000123-4"` → `(1725984000123, 4)`; `"7"` → `(7, 0)`.
+
+    Redis Stream ID so sánh theo **số**, không theo chuỗi: `"100-0" < "99-0"`
+    đúng với `str` và sai với Redis. Phần `-seq` vắng mặt được Redis hiểu là
+    `-0`, và `doc_cursor` cho phép cursor chỉ có mili-giây — nên hai dạng phải
+    quy về cùng một khóa trước khi so.
+    """
+    ms, _, seq = raw.partition("-")
+    return int(ms), int(seq or 0)
 
 
 def _mot_dong(gia_tri: str) -> str:
@@ -301,6 +319,56 @@ class StreamConsumer:
             for khung in self._tu_postgres():
                 yield khung
             return
+
+        # ②bis (B-84) — CURSOR ĐỨNG SAU EVENT KẾT THÚC: phát lại event đó rồi đóng.
+        #      Xảy ra khi một client đã nhận `done`/`error` mà vẫn quay lại với
+        #      `Last-Event-ID` của chính nó. §7.4 dặn FE đóng `EventSource` khi
+        #      thấy `done`, nhưng một client cũ hay một script viết vội thì không.
+        #      Không có nhánh này thì `XRANGE` rỗng, stream vẫn còn (chưa hết TTL)
+        #      nên ② không nhận, và ③ chờ một bản ghi KHÔNG BAO GIỜ tới — client
+        #      treo tới lúc tự bỏ đi.
+        #
+        #      Phép kiểm là `XREVRANGE COUNT 1`, **không** phải `messages.status`:
+        #      worker ghi Postgres TRƯỚC rồi `XADD done` SAU (luật 2 của
+        #      `generate.py`), nên có một khe vài mili-giây mà message đã
+        #      `completed` còn `done` chưa lên dây — đóng trong khe đó là cắt client
+        #      ngay trước event cuối. Bản ghi cuối của chính stream thì không có
+        #      khe nào: nó đã ở đó hoặc chưa.
+        #
+        #      **Phát LẠI chứ không đóng suông.** Đóng một `text/event-stream` mà
+        #      không gửi gì là mời `EventSource` reconnect sau ~3 s, và nó quay lại
+        #      với đúng cursor cũ: treo đổi thành vòng lặp nóng, tệ hơn. Một event
+        #      kết thúc phát lại là thứ DUY NHẤT làm một client tuân §7.4 dừng
+        #      hẳn, và nó không mang chữ nên không có gì để lặp (C3 yên).
+        #
+        #      Chỉ chạy khi ① không đọc được bản ghi nào: có đọc được nghĩa là
+        #      bản ghi cuối nằm SAU cursor và không phải event kết thúc (nếu phải
+        #      thì ① đã `return`), nên một vòng round-trip ở đây chắc chắn vô ích.
+        #
+        #      **`_thu_tu_id(...) <= last_id` là bắt buộc, không phải thận trọng
+        #      thừa.** Giữa lúc `XRANGE` trả rỗng và lúc `XREVRANGE` chạy có đúng
+        #      cái khe của C4: worker kịp ghi `delta` RỒI `done`. `XREVRANGE COUNT 1`
+        #      chỉ thấy `done`, và phát nó rồi đóng là **nuốt mất `delta` ở giữa** —
+        #      đúng loại mất chữ mà cả §7.3 dựng ra để chống. Bản ghi cuối mới hơn
+        #      cursor nghĩa là có thứ client chưa thấy ⇒ không đi đường này, để ③
+        #      đọc từ `last_id` và lấy đủ cả hai bản ghi.
+        if not co_ban_ghi:
+            cuoi = await self._redis.xrevrange(self._key, "+", "-", count=1)
+            if (
+                cuoi
+                and cuoi[0][1].get(FIELD_TYPE) in LOAI_KET_THUC
+                and _thu_tu_id(cuoi[0][0]) <= _thu_tu_id(last_id)
+            ):
+                entry_id, fields = cuoi[0]
+                logger.info(
+                    "consumer: %s cursor dung sau event %s — phat lai roi dong (B-84)",
+                    self._key,
+                    fields.get(FIELD_TYPE),
+                )
+                khung = self._khung_ban_ghi(entry_id, fields)
+                if khung is not None:
+                    yield khung
+                return
 
         # ③ XREAD BLOCK từ ID CUỐI CÙNG ĐÃ GỬI — không phải `$` (C4).
         while True:

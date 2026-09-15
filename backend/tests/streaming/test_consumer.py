@@ -116,6 +116,14 @@ class RedisGia:
             moi = moi[:count]
         return [(name, moi)] if moi else None
 
+    async def xrevrange(
+        self, name: str, max: str = "+", min: str = "-", count: int | None = None
+    ) -> list[tuple[str, dict[str, str]]]:
+        """B-84. Chỉ dựng đúng ca consumer cần: toàn stream, đảo ngược, cắt `count`."""
+        assert (max, min) == ("+", "-"), "consumer chi hoi ban ghi CUOI cua ca stream"
+        nguoc = list(reversed(self.streams.get(name, [])))
+        return nguoc[:count] if count is not None else nguoc
+
     async def exists(self, name: str) -> int:
         return 1 if name in self.streams else 0
 
@@ -362,6 +370,107 @@ async def test_dung_ngay_sau_event_ket_thuc(loai_ket_thuc: str) -> None:
 
     assert [_truong(k, "event")[0] for k in khung] == ["delta", loai_ket_thuc]
     assert redis.so_lan_xread == 0, "da co event ket thuc thi khong duoc BLOCK them"
+
+
+# ═════════ ②bis — cursor đứng sau event kết thúc (B-84) ══════════
+
+
+@pytest.mark.parametrize("loai_ket_thuc", ["done", "error"])
+async def test_cursor_dung_sau_event_ket_thuc_thi_phat_lai_roi_dong(loai_ket_thuc: str) -> None:
+    """B-84: client đã nhận `done` mà vẫn quay lại — **không được** treo.
+
+    Không có khối ②bis thì `XRANGE (cursor +` rỗng, stream vẫn còn nên đường
+    Postgres không nhận, và `XREAD BLOCK` chờ một bản ghi không bao giờ tới.
+    """
+    redis = RedisGia()
+    mid = uuid.uuid4()
+    consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content="a"))
+    redis.them(consumer.key, "delta", {"t": "a"})
+    id_cuoi = redis.them(consumer.key, loai_ket_thuc, {"code": "UPSTREAM_ERROR"})
+
+    khung = await _thu(consumer, id_cuoi)
+
+    assert [_truong(k, "event")[0] for k in khung] == [loai_ket_thuc]
+    assert _truong(khung[0], "id") == [id_cuoi], "phat lai dung ban ghi cu, khong bia ID"
+    assert redis.so_lan_xread == 0, "khong duoc BLOCK cho mot ban ghi khong bao gio toi"
+
+
+async def test_phat_lai_event_ket_thuc_khong_them_mot_ky_tu_nao() -> None:
+    """C3 vẫn yên: thứ được phát lại là `done`, mà `done` không mang chữ."""
+    redis = RedisGia()
+    mid = uuid.uuid4()
+    consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content="chu0"))
+    redis.them(consumer.key, "delta", {"t": "chu0"})
+    id_done = redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+
+    assert _chuoi_chu(await _thu(consumer, id_done)) == ""
+
+
+async def test_cursor_dung_sau_ban_ghi_cuoi_MA_CHUA_KET_THUC_thi_van_cho() -> None:
+    """Nửa còn lại của B-84: bản ghi cuối là `delta` thì đóng là cắt giữa chừng.
+
+    Đây là khe vài mili-giây mà B-84 cảnh báo: worker ghi Postgres TRƯỚC rồi
+    `XADD done` SAU, nên `status` đã `completed` trong khi `done` chưa lên dây.
+    ②bis hỏi `messages.status` thay vì hỏi chính stream thì test này đỏ.
+    """
+    redis = RedisGia()
+    mid = uuid.uuid4()
+    consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content="a"))
+    id_delta = redis.them(consumer.key, "delta", {"t": "a"})
+
+    def worker_ghi_not() -> None:
+        redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+
+    redis.moc_sau_xrange_rong = worker_ghi_not
+    khung = await _thu(consumer, id_delta)
+
+    assert [_truong(k, "event")[0] for k in khung] == ["done"]
+    assert redis.so_lan_xread == 1, "phai di tiep sang XREAD chu khong duoc dong"
+
+
+async def test_ban_ghi_moi_hon_cursor_khong_bi_nuot_boi_nhanh_phat_lai() -> None:
+    """Khe C4 bên trong chính ②bis: worker kịp ghi `delta` RỒI `done`.
+
+    `XREVRANGE COUNT 1` chỉ thấy `done`; phát nó rồi đóng là nuốt mất `delta` ở
+    giữa. Bỏ phép so `_thu_tu_id(...) <= last_id` thì test này đỏ đúng chỗ đó.
+    """
+    redis = RedisGia()
+    mid = uuid.uuid4()
+    consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content="ab"))
+    id_delta = redis.them(consumer.key, "delta", {"t": "a"})
+
+    def worker_ghi_not() -> None:
+        redis.them(consumer.key, "delta", {"t": "b"})
+        redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+
+    redis.moc_sau_xrange_rong = worker_ghi_not
+    khung = await _thu(consumer, id_delta)
+
+    assert _chuoi_chu(khung) == "b", "phan sinh ra trong khe KHONG duoc mat"
+    assert [_truong(k, "event")[0] for k in khung] == ["delta", "done"]
+
+
+async def test_cursor_chi_co_mili_giay_van_nhan_ra_da_qua_event_ket_thuc() -> None:
+    """`?cursor=1725984000005` (không có `-seq`) vẫn phải bằng `1725984000005-0`.
+
+    So hai ID bằng chuỗi thì `"...005-0" <= "...005"` là `False` và client treo
+    đúng ca B-84 mô tả. `doc_cursor` cho phép dạng chỉ-mili-giây này (xem
+    `test_cursor_chi_co_mili_giay_van_hop_le`) nên nó không phải ca giả định.
+    """
+    redis = RedisGia()
+    mid = uuid.uuid4()
+    consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content=""))
+    redis.streams[consumer.key] = [
+        (
+            "1725984000005-0",
+            {FIELD_TYPE: "done", FIELD_DATA: json.dumps({"finish_reason": "stop"})},
+        )
+    ]
+
+    khung = await _thu(consumer, "1725984000005")
+
+    assert [_truong(k, "event")[0] for k in khung] == ["done"]
+    assert redis.so_lan_xread == 0
 
 
 # ════════════════════════ ③ hai client song song (C7) ══════════════════════
