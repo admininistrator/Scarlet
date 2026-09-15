@@ -2,18 +2,53 @@
 # cờ riêng). Muốn thêm mailpit/adminer thì mới cần: --profile core --profile
 # tools --profile dev.
 #
-# Bind-mount `./frontend` cho hot-reload (T-0.10): volumes là danh sách nên
-# compose NỐI THÊM vào volumes rỗng của `web` trong docker-compose.yml, không
-# thay thế. `/app/node_modules` là volume ẩn danh để node_modules cài trong
-# image (từ Dockerfile) không bị đè bởi bind-mount rỗng phía host.
+# Đây là file CHỈ DÀNH CHO DEV. `--reload`/`--watch` và bind-mount source không
+# bao giờ được đi vào `docker-compose.yml`.
 #
-# TODO (B-19): làm tương tự cho `./backend` khi thêm uvicorn --reload cho
-# api/worker — chưa làm ở đây vì ngoài phạm vi T-0.10.
+# ─── Bind-mount source (B-19/B-22/B-59/B-75) ────────────────────────────────
+# `volumes` là danh sách nên compose NỐI THÊM vào `volumes` của service trong
+# `docker-compose.yml`, không thay thế — `./config:/config:ro` của `api`/`worker`
+# vẫn còn. `command` là chuỗi nên nó bị THAY, đó là chỗ thêm cờ reload.
+#
+# Vì sao mount `./backend/app` → `/app/app` chứ không `./backend` → `/app`:
+# image đặt `alembic/`, `alembic.ini` và site-packages quanh `/app`, và
+# `./backend` phía host còn chứa `.venv` của WSL (T-0.2) — mount đè cả thư mục
+# là đưa một venv của host vào chỗ `PYTHONPATH=/app` trỏ tới. Mount đúng phần
+# source, đúng như `web` đã làm với `/app/node_modules`.
 services:
   web:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+
+  # Bằng chứng B-75 đã cắn thật, đo ngay trước khi viết file này: container
+  # `api` đang chạy `import app.streaming.producer` -> ModuleNotFoundError, vì
+  # image `scarlet-api` được build TRƯỚC T-1.6. Không có bind-mount thì mọi
+  # endpoint mới (T-1.7, T-1.8) phải nhớ `--build` mới thấy code — và quên thì
+  # nó không báo lỗi, nó chỉ chạy bản cũ.
+  api:
+    command: >-
+      uvicorn app.main:app --host 0.0.0.0 --port 8000
+      --reload --reload-dir /app/app
+    volumes:
+      - ./backend/app:/app/app
+
+  # `arq --watch` cần `watchfiles`, đã có sẵn trong image qua `uvicorn[standard]`.
+  # Khác uvicorn ở chỗ nó nhận thư mục làm tham số chứ không phải cờ riêng.
+  worker:
+    command: arq app.workers.main.WorkerSettings --watch /app/app
+    volumes:
+      - ./backend/app:/app/app
+
+  # `migrate` cần CẢ BA: `alembic/versions/` (file migration mới), `alembic.ini`
+  # (`prepend_sys_path`), và `app/` — `alembic/env.py` import
+  # `app.config.settings` để lấy DATABASE_URL (A3/A4), nên thiếu nó thì migrate
+  # chạy bằng settings của image cũ.
+  migrate:
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini:ro
 
   mailpit:
     image: axllent/mailpit:latest
