@@ -2,9 +2,9 @@
 
 KH tham chiếu: ADR-02, §5.2, §7.2, §7.6, Phụ lục C · CLAUDE.md A1, A3, A4.
 
-Module này chỉ làm ba việc: khai nơi tìm Redis, khai danh sách job, và khai
-hai cái móc `on_startup`/`on_shutdown`. Không có logic nghiệp vụ nào ở đây —
-mỗi job sống trong file riêng của nó (§23).
+Module này chỉ làm bốn việc: khai nơi tìm Redis, khai danh sách job, khai lịch
+cron (§7.6), và khai hai cái móc `on_startup`/`on_shutdown`. Không có logic
+nghiệp vụ nào ở đây — mỗi job sống trong file riêng của nó (§23).
 
 **Ba tham số của `generate` đều có lý do, không cái nào là mặc định của arq:**
 
@@ -45,7 +45,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from arq import func
+from arq import cron, func
+from arq.cron import CronJob
 from arq.worker import Function
 
 from app.config.settings import settings
@@ -53,6 +54,7 @@ from app.core.queue import GENERATE_JOB_NAME, redis_settings
 from app.db.session import dispose_engine
 from app.llm.adapters.system import SystemAdapter
 from app.workers.generate import CTX_LLM_CLIENT, generate
+from app.workers.reaper import REAPER_GIAY_TRONG_PHUT, REAPER_JOB_NAME, reaper
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,19 @@ FUNCTIONS: list[Function] = [
         timeout=settings.GENERATE_TIMEOUT_S,
         max_tries=GENERATE_MAX_TRIES,
     ),
+]
+
+#: §7.6 — lưới cuối cho ca "worker chết giữa lúc sinh" (tiêu chí S4).
+#:
+#: `run_at_startup=False`: ngưỡng là `heartbeat_at` chứ không phải "worker vừa
+#: bật", nên chạy ngay lúc khởi động không dọn sớm được một dòng nào — nó chỉ
+#: thêm một lượt quét vào đúng lúc tiến trình đang bận dựng pool.
+#:
+#: `unique=True` (mặc định) giữ nguyên: nó là thứ khiến hai worker không cùng
+#: quét một tick. Hôm nay chỉ có một replica, nhưng đây là loại giả định rẻ
+#: khi giữ và đắt khi phát hiện ra đã mất.
+CRON_JOBS: list[CronJob] = [
+    cron(reaper, name=REAPER_JOB_NAME, second=set(REAPER_GIAY_TRONG_PHUT), run_at_startup=False),
 ]
 
 
@@ -91,11 +106,12 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     # KHÔNG in `REDIS_URL` nguyên văn: DSN có chỗ chứa mật khẩu (§15 DoD chung
     # — "không log secret"). Host/port/db là đủ để biết mình nối vào đâu.
     logger.info(
-        "worker: da noi Redis %s:%s/%s · job dang ky: %s",
+        "worker: da noi Redis %s:%s/%s · job dang ky: %s · cron: %s",
         conn.host,
         conn.port,
         conn.database,
         ", ".join(f"{f.name}(timeout={f.timeout_s}s, max_tries={f.max_tries})" for f in FUNCTIONS),
+        ", ".join(f"{c.name}(second={c.second}, max_tries={c.max_tries})" for c in CRON_JOBS),
     )
 
 
@@ -117,6 +133,7 @@ class WorkerSettings:
     """Đối tượng mà lệnh `arq` đọc (Phụ lục C: `arq app.workers.main.WorkerSettings`)."""
 
     functions = FUNCTIONS
+    cron_jobs = CRON_JOBS
     redis_settings = redis_settings()
     on_startup = on_startup
     on_shutdown = on_shutdown
@@ -124,8 +141,13 @@ class WorkerSettings:
     #: Nhịp worker ghi khoá `arq:queue:health-check` vào Redis, cũng là thứ
     #: `arq --check` (healthcheck của container) đọc. Mặc định của arq là
     #: **3600 s**: worker chết lúc 00:01 thì tới 01:00 `docker compose ps` vẫn
-    #: báo `healthy`. Dùng lại `WORKER_HEARTBEAT_S` của §7.6 vì đó đã là câu
-    #: trả lời của kế hoạch cho "bao lâu thì worker phải chứng minh nó còn
-    #: sống"; khoá có TTL = nhịp + 1 s nên mất khoá nghĩa là vòng lặp chính của
-    #: worker đã đứng.
-    health_check_interval = settings.WORKER_HEARTBEAT_S
+    #: báo `healthy`; khoá có TTL = nhịp + 1 s nên mất khoá nghĩa là vòng lặp
+    #: chính của worker đã đứng.
+    #:
+    #: **Biến riêng `WORKER_HEALTHCHECK_S`, KHÔNG dùng lại `WORKER_HEARTBEAT_S`
+    #: nữa (B-74 → NQ-27).** T-1.5 dùng chung một biến vì cả hai trả lời "bao
+    #: lâu thì worker phải chứng minh nó còn sống"; T-1.10 làm câu đó tách đôi:
+    #: `WORKER_HEARTBEAT_S` nay là một vế của tỉ lệ `REAPER_STALE_S /
+    #: WORKER_HEARTBEAT_S` (số nhịp được phép lỡ trước khi reaper §7.6 đánh
+    #: `WORKER_LOST`), nên vặn nó sẽ đồng thời đổi ba thứ ở ba tầng.
+    health_check_interval = settings.WORKER_HEALTHCHECK_S

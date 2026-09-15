@@ -18,16 +18,21 @@ dùng, rồi đọc lại giá trị trên đối tượng đó — không đọ
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from arq.worker import Worker, create_worker
 
-from app.config.settings import settings
+import app.workers.main as worker_main
+from app.config.settings import Settings, settings
 from app.workers.main import (
+    CRON_JOBS,
     FUNCTIONS,
     GENERATE_JOB_NAME,
     GENERATE_MAX_TRIES,
     WorkerSettings,
     redis_settings,
 )
+from app.workers.reaper import REAPER_JOB_NAME
 
 
 def test_dung_mot_job_ten_generate() -> None:
@@ -57,9 +62,41 @@ def test_worker_that_nhan_du_ba_tham_so() -> None:
 
     # `health_check_interval` và `redis_settings` chỉ có tác dụng nếu arq thật
     # sự nhận được chúng — xem lý do ở docstring module.
-    assert worker.health_check_interval == settings.WORKER_HEARTBEAT_S
+    assert worker.health_check_interval == settings.WORKER_HEALTHCHECK_S
     assert worker.redis_settings is not None
     assert worker.redis_settings.host == redis_settings().host
+
+    # Cron của §7.6 cũng đi qua cùng cái phễu `get_kwargs`: gõ `cron_job` thay
+    # vì `cron_jobs` thì arq bỏ qua lặng lẽ và reaper không bao giờ chạy.
+    assert REAPER_JOB_NAME in worker.cron_jobs[0].name
+    assert len(worker.cron_jobs) == len(CRON_JOBS)
+
+
+def test_nhip_healthcheck_tach_khoi_nhip_heartbeat_cua_dieu_7_6() -> None:
+    """B-74 → NQ-27: hai nhịp, hai biến, hai người đọc.
+
+    `WORKER_HEARTBEAT_S` nay chỉ còn nghĩa "nhịp ghi `messages.heartbeat_at`"
+    và là mẫu số của tỉ lệ `REAPER_STALE_S / WORKER_HEARTBEAT_S` (số nhịp được
+    phép lỡ). `WORKER_HEALTHCHECK_S` là nhịp ghi khoá `arq:queue:health-check`
+    mà `arq --check` đọc. Nối lại làm một thì vặn nhịp ghi DB sẽ đồng thời đổi
+    cửa sổ phát hiện worker chết của Docker — đúng rủi ro B-74 nêu.
+    """
+    # Hai trường ĐỘC LẬP: vặn cái này không được kéo theo cái kia. Phép khẳng
+    # định trên giá trị (`== settings.WORKER_HEALTHCHECK_S`) một mình là vô
+    # dụng vì mặc định cả hai đều là 15 — nó xanh kể cả khi ai đó nối lại.
+    assert Settings(WORKER_HEARTBEAT_S=99).WORKER_HEALTHCHECK_S == 15
+    assert Settings(WORKER_HEALTHCHECK_S=99).WORKER_HEARTBEAT_S == 15
+    assert WorkerSettings.health_check_interval == settings.WORKER_HEALTHCHECK_S
+
+    # Và chỗ *dùng* phải gọi đúng tên. Đọc mã nguồn vì hai giá trị bằng nhau ở
+    # mặc định nên không phép so sánh runtime nào phân biệt được — cùng lối với
+    # `tests/api/test_messages.py::test_tang_api_khong_import_gi_cua_provider`.
+    nguon = (Path(worker_main.__file__)).read_text(encoding="utf-8")
+    assert "health_check_interval = settings.WORKER_HEALTHCHECK_S" in nguon
+    assert "health_check_interval = settings.WORKER_HEARTBEAT_S" not in nguon
+
+    # Tỉ lệ phải còn nghĩa: reaper đợi ít nhất hai nhịp trước khi kết luận chết.
+    assert settings.REAPER_STALE_S >= 2 * settings.WORKER_HEARTBEAT_S
 
 
 def test_job_timeout_lon_hon_timeout_http_cua_tang_model() -> None:

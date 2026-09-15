@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -260,6 +261,58 @@ class MessageRepository:
             .execution_options(synchronize_session=False)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def reap_stale_streaming(
+        self, *, stale_after_s: int, error_code: str
+    ) -> Sequence[uuid.UUID]:
+        """Câu UPDATE của §7.6 — đánh `failed` mọi lượt sinh mất nhịp tim.
+
+        Đây là hàm thứ hai (sau `get_message_for_worker`) **không** nhận
+        `user_id`, và vì cùng một lý do: reaper chạy thay **hệ thống**, không
+        thay một phiên đăng nhập. Nó cũng không lọc `deleted_at IS NULL` —
+        khác luật chung của file — vì một message đã xoá mềm mà kẹt
+        `status='streaming'` vĩnh viễn là đúng thứ §7.6 sinh ra để dọn, và
+        cái giá của việc dọn nó là một `XADD` vào stream không ai đọc.
+
+        **`status = 'streaming'` phải ra SQL dưới dạng HẰNG, không phải tham
+        số** — đó là toàn bộ lý do có `bindparam(..., literal_execute=True)` ở
+        đây. `ix_msg_streaming` là **partial index** (`WHERE status =
+        'streaming'`): Postgres chỉ dùng được nó khi chứng minh được vị từ của
+        câu truy vấn kéo theo vị từ của index, mà với `status = $1` thì ở
+        *generic plan* nó không chứng minh được. Hệ quả nếu để tham số: năm
+        lần chạy đầu (custom plan, biết giá trị) dùng index, rồi từ lần thứ sáu
+        Postgres đổi sang generic plan và cùng câu lệnh ấy thành `Seq Scan` —
+        chậm dần theo tháng, không có gì báo. Cùng lý do, ngưỡng thời gian cũng
+        nội suy thẳng thành `make_interval(secs=>…)`; giá trị vẫn tới từ
+        `settings.REAPER_STALE_S` nên A3 không bị vi phạm, chỉ có *chỗ ghép
+        chuỗi* là ở đây.
+
+        `now()` (= `transaction_timestamp()`) chứ không `clock_timestamp()`,
+        đúng chữ §7.6 và **ngược** với `touch_heartbeat`: ở đây một mốc đứng
+        yên suốt transaction là thứ mình muốn — mọi message trong cùng một lượt
+        quét phải được đo bằng cùng một cái đồng hồ.
+
+        Trả về `id` của những message **thực sự bị đổi** (qua `RETURNING`), vì
+        reaper phải `XADD` đúng cho từng cái. Danh sách rỗng là đường chạy
+        thường ngày, không phải lỗi.
+        """
+        stale = func.now() - bindparam(
+            "reaper_stale", value=timedelta(seconds=stale_after_s), literal_execute=True
+        )
+        streaming = bindparam(
+            "reaper_status",
+            value=MessageStatus.STREAMING,
+            type_=Message.status.type,
+            literal_execute=True,
+        )
+        stmt = (
+            update(Message)
+            .where(Message.status == streaming, Message.heartbeat_at < stale)
+            .values(status=MessageStatus.FAILED, error_code=error_code)
+            .returning(Message.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
 
     async def finish_generation(
         self,

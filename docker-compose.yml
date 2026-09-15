@@ -71,9 +71,13 @@ services:
     healthcheck:
       # Worker khong mo cong nao nen khong co gi de curl/wget — `arq --check`
       # doc khoa `arq:queue:health-check` ma chinh worker ghi vao Redis moi
-      # WORKER_HEARTBEAT_S giay (TTL = nhip + 1 s). Mat khoa = vong lap chinh
-      # cua worker da dung, dung dinh nghia "con song" cua §7.6. Can healthcheck
-      # vi DoD chung §15 doi `docker compose ps` moi service healthy.
+      # WORKER_HEALTHCHECK_S giay (TTL = nhip + 1 s). Mat khoa = vong lap chinh
+      # cua worker da dung. Can healthcheck vi DoD chung §15 doi
+      # `docker compose ps` moi service healthy.
+      #
+      # Bien nay TACH khoi WORKER_HEARTBEAT_S o T-1.10 (B-74 -> NQ-27):
+      # WORKER_HEARTBEAT_S nay chi con nghia "nhip ghi messages.heartbeat_at"
+      # cua §7.6, thu ma reaper doc — hai tang, hai nguoi doc, hai nut van.
       test: ["CMD", "arq", "app.workers.main.WorkerSettings", "--check"]
       interval: 30s
       timeout: 10s

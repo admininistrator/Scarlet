@@ -105,8 +105,26 @@ class Settings(BaseSettings):
     # ═══ Streaming (§7) ═══
     STREAM_TTL_S: int = Field(default=3600, gt=0)
     STREAM_HEARTBEAT_S: int = Field(default=15, gt=0)
+    #: Nhịp worker ghi `messages.heartbeat_at` trong lúc sinh (§7.6). Kể từ
+    #: T-1.10 nó mang **đúng một** nghĩa: nhịp healthcheck của container là
+    #: `WORKER_HEALTHCHECK_S` ngay dưới (B-74, NQ-27).
     WORKER_HEARTBEAT_S: int = Field(default=15, gt=0)
+    #: Tuổi tối đa của `heartbeat_at` trước khi reaper §7.6 coi lượt sinh là
+    #: mồ côi. Quan hệ với biến trên là một *tỉ lệ*: `REAPER_STALE_S /
+    #: WORKER_HEARTBEAT_S` = số nhịp được phép lỡ (mặc định 90/15 = 6).
     REAPER_STALE_S: int = Field(default=90, gt=0)
+    #: Nhịp worker ghi khoá `arq:queue:health-check` — thứ mà `arq --check`
+    #: (healthcheck của service `worker`) đọc. Mặc định của arq là **3600 s**:
+    #: để nguyên thì worker chết lúc 00:01 mà 00:59 `docker compose ps` vẫn báo
+    #: `healthy`, đúng dạng xanh giả của B-47/B-49/B-59.
+    #:
+    #: Biến RIÊNG chứ không dùng lại `WORKER_HEARTBEAT_S` (B-74, NQ-27): hai
+    #: nhịp trả lời hai câu hỏi khác nhau cho hai người đọc khác nhau — một bên
+    #: là reaper so `messages.heartbeat_at` trong SQL, bên kia là Docker đọc một
+    #: khoá Redis có TTL = nhịp + 1 s. Dùng chung một biến thì nới nhịp ghi DB
+    #: sẽ **đồng thời** nới cửa sổ phát hiện worker chết và siết tỉ lệ nhịp
+    #: được phép lỡ ở trên — ba hệ quả từ một nút vặn, không ai nhận ra.
+    WORKER_HEALTHCHECK_S: int = Field(default=15, gt=0)
     MAX_CONCURRENT_STREAMS: int = Field(default=3, gt=0)
     #: Tuổi thọ của cờ huỷ `cancel:{message_id}` (§7.5). Là một *giới hạn* nên
     #: nó ở đây chứ không phải một số trong `app/streaming/cancel.py` (A3,
