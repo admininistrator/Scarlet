@@ -20,6 +20,7 @@ ngữ nghĩa của Postgres chứ không phải của Python — kiểu ENUM `me
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -88,6 +89,7 @@ async def _message(
     *,
     status: MessageStatus,
     heartbeat_tuoi_s: float | None,
+    created_tuoi_s: float | None = None,
 ) -> Message:
     """Một message assistant với `heartbeat_at` đặt tay ở quá khứ.
 
@@ -120,6 +122,14 @@ async def _message(
             .where(Message.id == tra_loi.id)
             .values(heartbeat_at=datetime.now(UTC) - timedelta(seconds=heartbeat_tuoi_s))
         )
+    if created_tuoi_s is not None:
+        # Nhánh `queued` của §7.6 đo trên `created_at` chứ không `heartbeat_at`
+        # (B-123), nên test của nó phải dời được đúng cột ấy.
+        await session.execute(
+            update(Message)
+            .where(Message.id == tra_loi.id)
+            .values(created_at=datetime.now(UTC) - timedelta(seconds=created_tuoi_s))
+        )
     await session.commit()
     return tra_loi
 
@@ -135,6 +145,138 @@ def _qua_han() -> float:
 
 def _con_moi() -> float:
     return settings.REAPER_STALE_S / 2
+
+
+def _queued_qua_han() -> float:
+    return settings.REAPER_QUEUED_STALE_S + 10
+
+
+# ────────────────────── nhánh `queued` của §7.6 (B-123) ──────────────────────
+
+
+async def test_queued_qua_han_thanh_failed_voi_ma_job_lost(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """B-123: worker chết TRƯỚC `mark_streaming` để lại một tập reaper cũ mù.
+
+    `status='queued'` + `heartbeat_at=NULL` trượt cả hai vế của câu UPDATE
+    nhánh `streaming`, còn job thì bị arq từ chối bằng `max retries 1 exceeded`
+    — nên trước bản vá này message kẹt `queued` **vĩnh viễn**.
+    """
+    mid = (
+        await _message(
+            session,
+            user_a,
+            status=MessageStatus.QUEUED,
+            heartbeat_tuoi_s=None,
+            created_tuoi_s=_queued_qua_han(),
+        )
+    ).id
+
+    await reaper(_ctx(redis_gia))
+
+    sau = await _doc_lai(session_factory, mid)
+    assert sau.status is MessageStatus.FAILED
+    assert sau.error_code == "JOB_LOST"
+
+    # `stream:{id}` CHƯA hề tồn tại trước lượt quét này — `generate` chưa chạy
+    # tới `XADD start` bao giờ. `XADD` tự tạo khoá, nên client đang mở SSE vẫn
+    # nhận được `error` thay vì chờ mãi.
+    ban_ghi = redis_gia.ban_ghi_cua(mid)
+    assert len(ban_ghi) == 1
+    assert ban_ghi[0][FIELD_TYPE] == "error"
+    assert json.loads(ban_ghi[0][FIELD_DATA])["code"] == "JOB_LOST"
+
+
+async def test_queued_con_moi_khong_bi_don(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Đường chạy thường ngày: mọi message vừa gửi đều `queued` trong ~0.1 s."""
+    mid = (
+        await _message(
+            session, user_a, status=MessageStatus.QUEUED, heartbeat_tuoi_s=None, created_tuoi_s=None
+        )
+    ).id
+
+    await reaper(_ctx(redis_gia))
+
+    sau = await _doc_lai(session_factory, mid)
+    assert sau.status is MessageStatus.QUEUED
+    assert redis_gia.ban_ghi == []
+
+
+async def test_hai_nhanh_dung_HAI_nguong_rieng_khong_dung_chung(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Ngưỡng `queued` phải LỚN HƠN ngưỡng `streaming`, và là biến khác.
+
+    Đây là test canh chỗ dễ sai nhất của B-123: dùng lại `REAPER_STALE_S` cho
+    cả hai nhánh. Nếu ai đó làm thế, message dưới đây — già hơn ngưỡng
+    `streaming` nhưng trẻ hơn ngưỡng `queued` — sẽ bị đánh `failed` oan, trong
+    khi job của nó vẫn còn nằm trong hàng đợi arq và **sắp chạy**
+    (khoá `arq:in-progress:` sống tới `GENERATE_TIMEOUT_S + 10` ≈ 910 s, B-72).
+    """
+    assert settings.REAPER_QUEUED_STALE_S > settings.GENERATE_TIMEOUT_S, (
+        "ngưỡng queued phải lớn hơn timeout của job, nếu không reaper đua với arq"
+    )
+
+    mid = (
+        await _message(
+            session,
+            user_a,
+            status=MessageStatus.QUEUED,
+            heartbeat_tuoi_s=None,
+            created_tuoi_s=settings.REAPER_STALE_S + 10,
+        )
+    ).id
+
+    await reaper(_ctx(redis_gia))
+
+    sau = await _doc_lai(session_factory, mid)
+    assert sau.status is MessageStatus.QUEUED, (
+        "message queued bị dọn theo ngưỡng của nhánh streaming — hai nhánh đang "
+        "dùng chung một biến (B-123)"
+    )
+    assert redis_gia.ban_ghi == []
+
+
+async def test_don_ca_hai_nhanh_trong_mot_luot_quet(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Một tick phải dọn cả hai tập, và mỗi tập mang MÃ của chính nó."""
+    mat_nhip = (
+        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_qua_han())
+    ).id
+    mo_coi = (
+        await _message(
+            session,
+            user_a,
+            status=MessageStatus.QUEUED,
+            heartbeat_tuoi_s=None,
+            created_tuoi_s=_queued_qua_han(),
+        )
+    ).id
+
+    await reaper(_ctx(redis_gia))
+
+    assert (await _doc_lai(session_factory, mat_nhip)).error_code == "WORKER_LOST"
+    assert (await _doc_lai(session_factory, mo_coi)).error_code == "JOB_LOST"
+
+    # Mỗi message nhận ĐÚNG mã của nhánh mình, không phải mã của lượt quét.
+    assert json.loads(redis_gia.ban_ghi_cua(mat_nhip)[0][FIELD_DATA])["code"] == "WORKER_LOST"
+    assert json.loads(redis_gia.ban_ghi_cua(mo_coi)[0][FIELD_DATA])["code"] == "JOB_LOST"
 
 
 # ─────────────────────────── DoD 1 và DoD 2 ───────────────────────────
@@ -168,8 +310,6 @@ async def test_phat_event_error_ma_worker_lost_len_dung_stream(
     `error` là một trong hai loại kết thúc mà `streaming/consumer.py` nhận ra
     (`LOAI_KET_THUC`), nên phát đúng loại này là điều kiện để SSE đóng.
     """
-    import json
-
     mid = (
         await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_qua_han())
     ).id

@@ -122,6 +122,26 @@ class Settings(BaseSettings):
     #: mồ côi. Quan hệ với biến trên là một *tỉ lệ*: `REAPER_STALE_S /
     #: WORKER_HEARTBEAT_S` = số nhịp được phép lỡ (mặc định 90/15 = 6).
     REAPER_STALE_S: int = Field(default=90, gt=0)
+    #: Tuổi tối đa của một message còn `queued` trước khi reaper §7.6 coi là mồ
+    #: côi (B-123). Đo trên `created_at`, **không** phải `heartbeat_at`: message
+    #: `queued` chưa bao giờ có nhịp tim vì `mark_streaming` — chỗ đặt
+    #: `heartbeat_at` — đúng là bước chưa chạy.
+    #:
+    #: Biến RIÊNG chứ không dùng lại `REAPER_STALE_S`: hai trạng thái trả lời
+    #: hai câu hỏi khác nhau. `streaming` hỏi "worker còn sống không" (90 s là
+    #: sáu nhịp tim bị lỡ); `queued` hỏi "còn ai sẽ nhận job này không", và câu
+    #: đó bị chi phối bởi arq chứ không bởi nhịp tim.
+    #:
+    #: **Vì sao 1200 chứ không nhỏ hơn.** Sau SIGKILL, arq giữ khoá
+    #: `arq:in-progress:` thêm `GENERATE_TIMEOUT_S + 10` giây (đo được 906 s ở
+    #: B-72) rồi mới chọn lại job và từ chối bằng `max retries 1 exceeded` —
+    #: trước mốc đó job **vẫn có thể chạy**, và dọn sớm là báo lỗi cho một câu
+    #: hỏi sắp được trả lời. 1200 s cho ~290 s biên trên 910 s. Hạ xuống dưới
+    #: `GENERATE_TIMEOUT_S` là đua với arq, và người thua là người dùng.
+    #:
+    #: Dọn sớm **không** gây sinh hai lần: `mark_streaming` đòi `status='queued'`
+    #: nên một worker tới muộn sẽ nhận `False` và bỏ lượt (đúng lối B-72).
+    REAPER_QUEUED_STALE_S: int = Field(default=1200, gt=0)
     #: Nhịp worker ghi khoá `arq:queue:health-check` — thứ mà `arq --check`
     #: (healthcheck của service `worker`) đọc. Mặc định của arq là **3600 s**:
     #: để nguyên thì worker chết lúc 00:01 mà 00:59 `docker compose ps` vẫn báo

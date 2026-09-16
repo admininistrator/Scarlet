@@ -106,11 +106,15 @@ class Message(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     __table_args__ = (
-        # Ba index dưới đây do migration 0001 tạo; khai lại ở đây để metadata
-        # không nói dối (§17.4). Tên phải TRÙNG DDL.
+        # Ba index đầu do migration 0001 tạo, `ix_msg_queued` do 0003; khai lại
+        # ở đây để metadata không nói dối (§17.4). Tên phải TRÙNG DDL.
         Index("ix_msg_conv_parent", "conversation_id", "parent_id"),
         Index("ix_msg_parent", "parent_id"),
         Index("ix_msg_streaming", "heartbeat_at", postgresql_where=text("status = 'streaming'")),
+        # Nhánh thứ hai của reaper §7.6 (B-123). Đánh trên `created_at` chứ
+        # không `heartbeat_at`: message `queued` chưa bao giờ có nhịp tim, vì
+        # `mark_streaming` — chỗ đặt `heartbeat_at` — đúng là bước chưa chạy.
+        Index("ix_msg_queued", "created_at", postgresql_where=text("status = 'queued'")),
     )
 
     def __repr__(self) -> str:

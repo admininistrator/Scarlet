@@ -82,6 +82,14 @@ class ErrorCode(StrEnum):
     #: §7.6 — do **reaper** (T-1.10) ghi, không phải `generate`. Khai ở đây để
     #: FE chỉ phải đọc một bảng mã, không phải hai.
     WORKER_LOST = "WORKER_LOST"
+    #: §7.6 nhánh thứ hai — cũng do **reaper** ghi, nhưng cho message chưa bao
+    #: giờ được nhận: worker chết *trước* `mark_streaming`, hoặc job rơi khỏi
+    #: hàng đợi arq (B-123). Mã RIÊNG chứ không dùng lại `WORKER_LOST` vì hai
+    #: ca khác nhau ở chỗ quan trọng nhất với người dùng: `WORKER_LOST` nghĩa
+    #: là **đã sinh một phần** (và phần đó có thể còn trong Redis Stream tới hết
+    #: `STREAM_TTL_S` — xem B-98), còn mã này nghĩa là **chưa một chữ nào**.
+    #: Gộp làm một là bắt FE đoán, và §7.4 dựng bảng mã ra để không phải đoán.
+    JOB_LOST = "JOB_LOST"
 
 
 @dataclass(frozen=True, slots=True)

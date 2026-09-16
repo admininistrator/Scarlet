@@ -10,9 +10,11 @@ model nằm ở đây. Thứ tự các bước bám đúng §7.2 ③ và **khôn
     ① đọc message + chủ sở hữu   → ② dựng ngữ cảnh từ ĐƯỜNG ĐI (A2, C11)
     ③ UPDATE status='streaming'  → ④ XADD start
     ⑤ vòng lặp stream: XADD delta/reasoning/tool_call/usage
-                       + ghi heartbeat_at mỗi WORKER_HEARTBEAT_S (§7.6)
                        + kiểm cờ huỷ mỗi KIEM_HUY_MOI_N_CHUNK chunk (§7.5)
     ⑥ UPDATE messages (content/status/usage)  → ⑦ XADD done|error  → ⑧ EXPIRE
+
+    ╰─ song song từ ③ tới ⑤: task `_nhip_tim` ghi `heartbeat_at` mỗi
+       `WORKER_HEARTBEAT_S` (§7.6), ĐỘC LẬP với việc có chunk hay không (B-122)
 
 **Ba luật của file này:**
 
@@ -60,8 +62,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -96,7 +99,7 @@ logger = logging.getLogger(__name__)
 CTX_LLM_CLIENT = "llm_client"
 
 #: §7.5 viết thẳng "mỗi 8 chunk kiểm EXISTS cancel:{amid}". Đếm theo **chunk**
-#: chứ không theo giây như `_Nhip` của heartbeat, và khác biệt đó là cố ý: nhịp
+#: chứ không theo giây như `_nhip_tim` của heartbeat, và khác biệt đó là cố ý: nhịp
 #: tim trả lời một câu hỏi đo bằng giây (reaper §7.6 so `heartbeat_at` với
 #: `now()`), còn nút Dừng trả lời câu "bao nhiêu chữ nữa thì người dùng thôi
 #: thấy chữ chảy" — đo bằng chunk là đo đúng thứ họ nhìn.
@@ -156,27 +159,52 @@ class _KetQua:
         return "".join(self.chu)
 
 
-class _Nhip:
-    """Bộ đếm "đã tới lúc ghi heartbeat chưa" (§7.6).
+async def _vong_nhip_tim(mid: uuid.UUID) -> None:
+    """Ghi `messages.heartbeat_at` mỗi `WORKER_HEARTBEAT_S` cho tới khi bị huỷ.
 
-    Dựa trên `time.monotonic()` chứ không đếm số chunk: số chunk mỗi giây khác
-    nhau cả trăm lần giữa `deepseek-flash` (333 chunk reasoning một lượt) và
-    một model trả lời ngắn, nên "mỗi N chunk" cho ra nhịp tim lúc 2 giây lúc 2
-    phút — và reaper §7.6 đo bằng giây.
+    Ngủ **trước** rồi mới ghi: `mark_streaming` vừa đặt `heartbeat_at = now()`
+    ngay trước khi vòng này chạy, nên một lần ghi tức thì chỉ tốn một
+    round-trip để viết lại đúng con số vừa có.
+
+    Không có `try/except` quanh vòng lặp: `_ghi_heartbeat` đã tự nuốt mọi lỗi
+    của nó rồi (một blip Postgres không được phép giết nhịp tim), nên ngoại lệ
+    thoát tới đây chỉ có thể là `CancelledError` — và cái đó phải bay tiếp.
     """
+    while True:
+        await asyncio.sleep(settings.WORKER_HEARTBEAT_S)
+        await _ghi_heartbeat(mid)
 
-    __slots__ = ("_moi_giay", "_lan_cuoi")
 
-    def __init__(self, moi_giay: float) -> None:
-        self._moi_giay = moi_giay
-        self._lan_cuoi = time.monotonic()
+@asynccontextmanager
+async def _nhip_tim(mid: uuid.UUID) -> AsyncIterator[None]:
+    """Nhịp tim §7.6 chạy như một task ĐỘC LẬP, không bám vào vòng chunk (B-122).
 
-    def den_han(self) -> bool:
-        now = time.monotonic()
-        if now - self._lan_cuoi < self._moi_giay:
-            return False
-        self._lan_cuoi = now
-        return True
+    **Vì sao không còn là một bộ đếm trong vòng lặp.** Bản cũ (`_Nhip`) đo bằng
+    `time.monotonic()` — đúng — nhưng chỗ *hỏi* nó lại nằm bên trong
+    `async for chunk in stream`, nên giữa `mark_streaming` và chunk đầu tiên
+    **không một nhịp nào được ghi**. Hệ quả là `REAPER_STALE_S` kiêm luôn một
+    vai thứ hai mà không ai khai: *TTFT tối đa trước khi reaper giết một lượt
+    sinh còn sống*. Với `nr-gemini-flash` đo được TTFT p95 **43.7 s** ngày xấu
+    (B-103) và `LLM_REQUEST_TIMEOUT_S = 600 s` cho phép model im lặng tới mười
+    phút, đó là một quả mìn hẹn giờ — và nó cũng là thứ chặn việc hạ
+    `REAPER_STALE_S` để đóng B-100/B-116.
+
+    Tách ra rồi thì `REAPER_STALE_S` thuần một nghĩa: "worker còn sống không".
+
+    Task bị huỷ trong `finally`, nên nó **không bao giờ** sống lâu hơn lượt
+    sinh. Kể cả nếu lọt, `touch_heartbeat` chỉ khớp `status='streaming'` nên
+    một nhịp muộn rơi vào message đã khép là no-op — hai lớp, vì một nhịp tim
+    mồ côi sẽ làm reaper mù đúng ca nó sinh ra để bắt.
+    """
+    task = asyncio.create_task(_vong_nhip_tim(mid), name=f"nhip-tim:{mid}")
+    try:
+        yield
+    finally:
+        task.cancel()
+        # `await` để chắc chắn task đã dừng hẳn trước khi hàm thoát: bỏ qua
+        # bước này thì nó có thể còn ghi thêm một nhịp *sau* `_dong_so`.
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 async def generate(ctx: dict[str, Any], message_id: str) -> None:
@@ -225,47 +253,48 @@ async def _chay(
     model_meta, wire_messages = await _chuan_bi(mid)
     ket_qua.model_id = model_meta.id
 
-    await producer.emit(StartEvent(message_id=str(mid), model_id=model_meta.id))
+    # Nhịp tim mở NGAY sau `_chuan_bi` (nơi `mark_streaming` chạy) chứ không
+    # đợi chunk đầu: quãng `client.stream(...)` bên dưới chính là TTFT, và đó
+    # đúng là quãng mà bản cũ để trống — xem `_nhip_tim` (B-122).
+    async with _nhip_tim(mid):
+        await producer.emit(StartEvent(message_id=str(mid), model_id=model_meta.id))
 
-    client: LLMClient = ctx[CTX_LLM_CLIENT]
-    try:
-        stream = await client.stream(
-            model=model_meta.id,
-            messages=wire_messages,
-            # Tool registry là §12/§13 (Phase 6–7). `None` chứ không `[]`:
-            # adapter đổi nó thành `omit`, model không có capability `tools`
-            # (§9.4) thì không được thấy khoá đó (C18).
-            tools=None,
-            max_tokens=model_meta.max_output,
-            temperature=settings.LLM_TEMPERATURE,
-            extra={},
-        )
-    except Exception as exc:
-        # `await` này là chỗ gửi request và nhận header, nên 401/400/429 nổ
-        # tại đây chứ không đội lốt stream rỗng (điểm 1 docstring `client.py`).
-        raise LoiSinh(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
+        client: LLMClient = ctx[CTX_LLM_CLIENT]
+        try:
+            stream = await client.stream(
+                model=model_meta.id,
+                messages=wire_messages,
+                # Tool registry là §12/§13 (Phase 6–7). `None` chứ không `[]`:
+                # adapter đổi nó thành `omit`, model không có capability `tools`
+                # (§9.4) thì không được thấy khoá đó (C18).
+                tools=None,
+                max_tokens=model_meta.max_output,
+                temperature=settings.LLM_TEMPERATURE,
+                extra={},
+            )
+        except Exception as exc:
+            # `await` này là chỗ gửi request và nhận header, nên 401/400/429 nổ
+            # tại đây chứ không đội lốt stream rỗng (điểm 1 docstring `client.py`).
+            raise LoiSinh(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
 
-    nhip = _Nhip(settings.WORKER_HEARTBEAT_S)
-    so_chunk = 0
-    try:
-        async for chunk in stream:
-            # `_phat` chạy TRƯỚC phép kiểm: chunk thứ 8 vẫn ra dây và vẫn vào
-            # `ket_qua.chu`. §7.5 đòi "vẫn lưu phần đã sinh", mà phần đã sinh
-            # tính tới mẩu cuối cùng provider đã gửi — bỏ nó đi là để màn hình
-            # và `messages.content` nói hai chuyện khác nhau.
-            await _phat(producer, ket_qua, chunk)
-            so_chunk += 1
-            if so_chunk % KIEM_HUY_MOI_N_CHUNK == 0 and await _bi_huy(ctx, mid):
-                _dung_vi_huy(mid, ket_qua, so_chunk)
-                break
-            if nhip.den_han():
-                await _ghi_heartbeat(mid)
-    except LoiSinh:
-        raise
-    except Exception as exc:
-        # Đứt giữa chừng: đây là ca chính của C19. Phần chữ đã gom trong
-        # `ket_qua` vẫn được ghi xuống Postgres ở `_dong_so`.
-        raise LoiSinh(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
+        so_chunk = 0
+        try:
+            async for chunk in stream:
+                # `_phat` chạy TRƯỚC phép kiểm: chunk thứ 8 vẫn ra dây và vẫn vào
+                # `ket_qua.chu`. §7.5 đòi "vẫn lưu phần đã sinh", mà phần đã sinh
+                # tính tới mẩu cuối cùng provider đã gửi — bỏ nó đi là để màn hình
+                # và `messages.content` nói hai chuyện khác nhau.
+                await _phat(producer, ket_qua, chunk)
+                so_chunk += 1
+                if so_chunk % KIEM_HUY_MOI_N_CHUNK == 0 and await _bi_huy(ctx, mid):
+                    _dung_vi_huy(mid, ket_qua, so_chunk)
+                    break
+        except LoiSinh:
+            raise
+        except Exception as exc:
+            # Đứt giữa chừng: đây là ca chính của C19. Phần chữ đã gom trong
+            # `ket_qua` vẫn được ghi xuống Postgres ở `_dong_so`.
+            raise LoiSinh(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
 
 
 async def _chuan_bi(mid: uuid.UUID) -> tuple[ModelEntry, list[dict[str, Any]]]:

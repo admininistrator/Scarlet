@@ -314,6 +314,48 @@ class MessageRepository:
         )
         return (await self._session.execute(stmt)).scalars().all()
 
+    async def reap_stale_queued(
+        self, *, stale_after_s: int, error_code: str
+    ) -> Sequence[uuid.UUID]:
+        """Nhánh thứ hai của §7.6 — message mồ côi trong HÀNG ĐỢI (B-123).
+
+        `reap_stale_streaming` ở trên không thấy được tập này, và không phải vì
+        sót: worker chết *sau* khi nhận job nhưng *trước* `mark_streaming` để
+        lại `status='queued'` **và** `heartbeat_at=NULL`, nên cả hai vế của câu
+        UPDATE kia đều trượt — `NULL < now() - interval` cho ra `NULL`, tức
+        không khớp. Job thì bị arq từ chối bằng `max retries 1 exceeded` sau
+        khi khoá `arq:in-progress:` hết hạn (B-72/NQ-28), nên không ai quay lại
+        đổi trạng thái. Kết cục: message kẹt `queued` **vĩnh viễn**, và §7.4
+        cấm FE suy ra "xong" từ im lặng nên với client đó là *đang chờ* mãi.
+
+        Đo trên `created_at` vì đó là mốc duy nhất message này có. Ngưỡng là
+        `REAPER_QUEUED_STALE_S` — biến RIÊNG, xem docstring của nó cho lý do nó
+        phải lớn hơn `GENERATE_TIMEOUT_S`.
+
+        Cùng ba quyết định với hàm trên và cùng lý do: hằng chứ không tham số
+        (partial index `ix_msg_queued` là `WHERE status = 'queued'`, và
+        `status = $1` ở generic plan không chứng minh được vị từ ⇒ `Seq Scan`
+        từ lần chạy thứ sáu), `now()` chứ không `clock_timestamp()` (một lượt
+        quét đo bằng một cái đồng hồ), và `RETURNING` chứ không SELECT-rồi-UPDATE.
+        """
+        stale = func.now() - bindparam(
+            "reaper_queued_stale", value=timedelta(seconds=stale_after_s), literal_execute=True
+        )
+        queued = bindparam(
+            "reaper_queued_status",
+            value=MessageStatus.QUEUED,
+            type_=Message.status.type,
+            literal_execute=True,
+        )
+        stmt = (
+            update(Message)
+            .where(Message.status == queued, Message.created_at < stale)
+            .values(status=MessageStatus.FAILED, error_code=error_code)
+            .returning(Message.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
     async def finish_generation(
         self,
         message_id: uuid.UUID,

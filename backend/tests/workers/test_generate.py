@@ -46,6 +46,12 @@ from app.workers.generate import CTX_LLM_CLIENT, KIEM_HUY_MOI_N_CHUNK, generate
 #: `messages.model_id`, nên một id bịa sẽ đi thẳng vào nhánh `MODEL_UNKNOWN`.
 MODEL_ID = "deepseek-flash"
 
+#: Nhịp tim dùng trong test §7.6. **Không** đặt 0: từ B-122 nhịp tim là một
+#: task riêng chạy `while True: await sleep(nhip)`, nên 0 biến nó thành vòng
+#: nóng quay Postgres không nghỉ và test sẽ đỏ vì cạn pool chứ không vì cái nó
+#: muốn đo. Đủ nhỏ để test vẫn nhanh, đủ lớn để một nhịp thật sự kịp ghi.
+NHIP_TEST_S = 0.02
+
 
 # ─────────────────────────── hai thứ giả ───────────────────────────
 
@@ -443,7 +449,7 @@ async def test_ghi_heartbeat_trong_luc_sinh(
 ) -> None:
     """§7.6: reaper so `heartbeat_at` với `now()`, nên nó phải NHÍCH trong lúc sinh."""
     message = await _cay_toi_thieu(session, user_a)
-    monkeypatch.setattr(settings, "WORKER_HEARTBEAT_S", 0)
+    monkeypatch.setattr(settings, "WORKER_HEARTBEAT_S", NHIP_TEST_S)
 
     async def doc_heartbeat() -> Any:
         return (await _doc_lai(session_factory, message.id)).heartbeat_at
@@ -454,12 +460,78 @@ async def test_ghi_heartbeat_trong_luc_sinh(
         async def _phat(self) -> AsyncIterator[Chunk]:
             for chunk in _chunks_binh_thuong(["a", "b"]):
                 yield chunk
+                await asyncio.sleep(NHIP_TEST_S * 3)
                 moc.append(await doc_heartbeat())
 
     await generate(_ctx(redis_gia, ClientCoMoc([])), str(message.id))
 
     assert all(m is not None for m in moc), "heartbeat_at phải có giá trị ngay từ mark_streaming"
     assert moc[-1] > moc[0], f"heartbeat_at không nhích: {moc}"
+
+
+async def test_nhip_tim_dap_ca_khi_model_CHUA_tra_mot_chunk_nao(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B-122 — quãng TTFT là quãng bản cũ để trống, và thường là quãng DÀI NHẤT.
+
+    Bản trước `_Nhip` chỉ được hỏi **bên trong** `async for chunk in stream`,
+    nên từ `mark_streaming` tới chunk đầu tiên không một nhịp nào được ghi.
+    Hệ quả: `REAPER_STALE_S` kiêm luôn vai "TTFT tối đa trước khi reaper giết
+    một lượt sinh còn sống" — với `nr-gemini-flash` đo được TTFT p95 43.7 s
+    (B-103) và `LLM_REQUEST_TIMEOUT_S = 600 s`, đó là một quả mìn hẹn giờ.
+
+    Test dựng đúng hình dạng đó: model "nghĩ" một quãng **trước** chunk đầu.
+    Chạy test này trên bản cũ thì hai mốc bằng nhau và nó đỏ.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    monkeypatch.setattr(settings, "WORKER_HEARTBEAT_S", NHIP_TEST_S)
+
+    async def doc_heartbeat() -> Any:
+        return (await _doc_lai(session_factory, message.id)).heartbeat_at
+
+    moc: list[Any] = []
+
+    class ClientNghiLau(ClientGia):
+        async def _phat(self) -> AsyncIterator[Chunk]:
+            moc.append(await doc_heartbeat())  # ngay sau `mark_streaming`
+            await asyncio.sleep(NHIP_TEST_S * 4)  # model đang "nghĩ"
+            moc.append(await doc_heartbeat())  # VẪN chưa có chunk nào ra
+            for chunk in _chunks_binh_thuong(["a"]):
+                yield chunk
+
+    await generate(_ctx(redis_gia, ClientNghiLau([])), str(message.id))
+
+    assert all(m is not None for m in moc)
+    assert moc[1] > moc[0], (
+        f"nhịp tim không đập trong lúc chờ chunk đầu — REAPER_STALE_S vẫn đang "
+        f"kiêm vai 'TTFT tối đa' (B-122): {moc}"
+    )
+
+
+async def test_nhip_tim_khong_song_lau_hon_luot_sinh(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task nhịp tim phải bị huỷ ở `finally`, không rò ra ngoài `generate`.
+
+    Một task rò sẽ ghi `heartbeat_at` cho một message đã khép. Hôm nay vô hại
+    vì `touch_heartbeat` chỉ khớp `status='streaming'`, nhưng nó là lớp phòng
+    thủ thứ hai — lớp thứ nhất là không rò. Đếm task theo TÊN chứ không theo
+    tác dụng phụ, vì tác dụng phụ đang bị lớp thứ hai che mất.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    monkeypatch.setattr(settings, "WORKER_HEARTBEAT_S", NHIP_TEST_S)
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_binh_thuong(["a"]))), str(message.id))
+
+    con_song = [t for t in asyncio.all_tasks() if t.get_name().startswith("nhip-tim:")]
+    assert con_song == [], f"task nhịp tim còn sống sau khi generate xong: {con_song}"
 
 
 async def test_tham_so_gui_cho_model_lay_tu_catalog_va_settings(
