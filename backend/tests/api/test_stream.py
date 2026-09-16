@@ -28,6 +28,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config.settings import settings
+from app.core.deps import DEV_USER_COOKIE
 from app.db.models import Message, MessageRole, MessageStatus
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.main import app
@@ -199,6 +200,106 @@ async def test_x_user_id_khong_phai_uuid_tra_422(
     resp = await client.get(DUONG_DAN.format(uuid.uuid4()), headers={"X-User-Id": "khong-phai"})
 
     assert resp.status_code == 422
+
+
+# ── đường thứ hai: cookie (B-83, NQ-33) ──
+#
+# `EventSource` không đặt được header tuỳ chọn, nên T-1.14 mang danh tính bằng
+# cookie. Bốn test dưới đây canh đúng bốn chiều có thể sai của đường đó.
+
+
+async def test_cookie_thay_duoc_header(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    _debug_bat: None,
+    _db_cua_test: None,
+    redis_gia: RedisRong,
+) -> None:
+    """Không header, chỉ cookie → vẫn đọc được message CỦA MÌNH.
+
+    Đây là điều kiện để `new EventSource(...)` của Phụ lục F chạy được: nếu
+    test này đỏ thì màn chat của T-1.14 không stream được dòng nào.
+    """
+    message = await _tao_message(session_factory, user_a, status=MessageStatus.COMPLETED)
+    client.cookies.set(DEV_USER_COOKIE, str(user_a))
+
+    resp = await client.get(DUONG_DAN.format(message.id))
+
+    assert resp.status_code == 200
+
+
+async def test_header_thang_cookie(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    user_b: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    _debug_bat: None,
+    _db_cua_test: None,
+    redis_gia: RedisRong,
+) -> None:
+    """Cookie của người KHÁC không được cướp danh tính mà header đã nói rõ.
+
+    Đây là chiều nguy hiểm: `test_resume.py`/`bench_ttft.py` gửi header, và một
+    cookie còn sót lại sẽ lặng lẽ đổi người đo nếu thứ tự ưu tiên đảo ngược.
+    Message thuộc `user_a`, cookie nói `user_b`, header nói `user_a` ⇒ 200.
+    """
+    message = await _tao_message(session_factory, user_a, status=MessageStatus.COMPLETED)
+    client.cookies.set(DEV_USER_COOKIE, str(user_b))
+
+    resp = await client.get(DUONG_DAN.format(message.id), headers={"X-User-Id": str(user_a)})
+
+    assert resp.status_code == 200
+
+
+async def test_cookie_hong_khong_pha_request_co_header(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    _debug_bat: None,
+    _db_cua_test: None,
+    redis_gia: RedisRong,
+) -> None:
+    """Cookie rác + header hợp lệ ⇒ 200, KHÔNG phải 422 của pydantic.
+
+    Lý do tham số cookie khai `str` chứ không `uuid.UUID`: khai `uuid.UUID` thì
+    FastAPI validate cả hai trước khi thân hàm chạy, và một cookie hỏng sẽ làm
+    đỏ cả những `curl` không hề gửi cookie nào.
+    """
+    message = await _tao_message(session_factory, user_a, status=MessageStatus.COMPLETED)
+    client.cookies.set(DEV_USER_COOKIE, "khong-phai-uuid")
+
+    resp = await client.get(DUONG_DAN.format(message.id), headers={"X-User-Id": str(user_a)})
+
+    assert resp.status_code == 200
+
+
+async def test_cookie_hong_mot_minh_tra_422(
+    client: AsyncClient, _debug_bat: None, _db_cua_test: None
+) -> None:
+    """Không header, cookie rác ⇒ 422 chứ không 401: nói đúng cái đang hỏng."""
+    client.cookies.set(DEV_USER_COOKIE, "khong-phai-uuid")
+
+    resp = await client.get(DUONG_DAN.format(uuid.uuid4()))
+
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+async def test_debug_tat_thi_cookie_cung_503(
+    client: AsyncClient, user_a: uuid.UUID, _db_cua_test: None
+) -> None:
+    """Lớp phòng thủ số 1 không được có cửa sau thứ hai.
+
+    `DEBUG=false` phải chặn **mọi** đường mang danh tính, không chỉ header —
+    thêm một đường vào là thêm một chỗ có thể quên phép kiểm này.
+    """
+    assert settings.DEBUG is False
+    client.cookies.set(DEV_USER_COOKIE, str(user_a))
+
+    resp = await client.get(DUONG_DAN.format(uuid.uuid4()))
+
+    assert resp.status_code == 503
 
 
 # ══════════════════════════════ cursor (C3) ════════════════════════════════
