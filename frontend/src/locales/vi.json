@@ -3,5 +3,36 @@
   "app.tagline": "Trợ lý chat nội bộ",
   "theme.toggleLabel": "Đổi giao diện sáng/tối",
   "theme.light": "Sáng",
-  "theme.dark": "Tối"
+  "theme.dark": "Tối",
+
+  "chat.hoiThoaiMoi": "Hội thoại mới",
+  "chat.chuaCoHoiThoai": "Chưa mở hội thoại nào. Bấm “Hội thoại mới” để bắt đầu.",
+  "chat.oNhap": "Nhập câu hỏi rồi bấm Gửi (Ctrl+Enter)",
+  "chat.gui": "Gửi",
+  "chat.dung": "Dừng",
+  "chat.thuLai": "Thử lại",
+  "chat.sua": "Sửa",
+  "chat.luu": "Lưu",
+  "chat.thoi": "Thôi",
+  "chat.dangCho": "Đang chờ…",
+  "chat.reasoning": "Suy luận",
+
+  "chat.danhTinhNhan": "Danh tính tạm (Phase 1)",
+  "chat.danhTinhTrong": "chưa đặt",
+  "chat.danhTinhONhap": "user_id (UUID)",
+  "chat.danhTinhDat": "Dùng danh tính này",
+  "chat.danhTinhGiaiThich": "Chỗ tạm của Phase 1 — lưu vào cookie scarlet_dev_user, T-2.3 sẽ thay bằng đăng nhập thật.",
+
+  "chat.model": "Model",
+  "chat.modelMacDinh": "(mặc định của catalog)",
+
+  "chat.ketNoi.dangMo": "đang mở kết nối…",
+  "chat.ketNoi.dangChay": "đang nhận chữ",
+  "chat.ketNoi.dangNoiLai": "mất kết nối, đang nối lại…",
+  "chat.ketNoi.dong": "kết nối đã đóng",
+
+  "chat.nhanhTruoc": "Nhánh trước",
+  "chat.nhanhSau": "Nhánh sau",
+
+  "loi.dong": "Đóng"
 }

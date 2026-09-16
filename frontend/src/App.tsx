@@ -1,3 +1,4 @@
+import { ChatScreen } from "./components/chat/ChatScreen";
 import { ThemeToggle } from "./components/ui/ThemeToggle";
 import { t } from "./lib/i18n";
 
@@ -8,9 +9,7 @@ export default function App() {
         <h1 className="text-lg font-semibold">{t("app.title")}</h1>
         <ThemeToggle />
       </header>
-      <main className="px-6 py-8">
-        <p className="text-muted">{t("app.tagline")}</p>
-      </main>
+      <ChatScreen />
     </div>
   );
 }
