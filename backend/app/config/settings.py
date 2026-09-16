@@ -134,6 +134,24 @@ class Settings(BaseSettings):
     #: sẽ **đồng thời** nới cửa sổ phát hiện worker chết và siết tỉ lệ nhịp
     #: được phép lỡ ở trên — ba hệ quả từ một nút vặn, không ai nhận ra.
     WORKER_HEALTHCHECK_S: int = Field(default=15, gt=0)
+    #: Khoảng cách giữa hai lần worker hỏi Redis "có job mới không" (B-104).
+    #:
+    #: Mặc định của arq là **0.5 s**, và T-1.12 đo được đúng con số đó nằm
+    #: chình ình trong TTFT của **mọi** model: chặng `202` → event `start` có
+    #: p95 0.486–0.505 s và `max` 0.494–0.510 s ở cả bốn model — trần bằng
+    #: đúng `poll_delay`, không phải đặc tính của model nào. Với
+    #: `ol-qwen-small` (upstream 0.048 s) thì ~85% TTFT là chờ arq nhặt job.
+    #:
+    #: Là một *giới hạn vận hành* nên nó ở đây chứ không phải một số trong
+    #: `WorkerSettings` (A3, §19.2 L4) — khác `REAPER_MOI_N_GIAY`, vốn là *độ
+    #: phân giải* của một phép quét và chỉ nhận ước của 60.
+    #:
+    #: Giá trị 0.1 đổi ~0.2 s p50 TTFT cho mọi model, giá là worker quay vòng
+    #: Redis nhiều hơn 5× khi rỗi — với 15–20 người dùng thì gần như miễn phí.
+    #: **Hạ dưới 0.5 s KHÔNG phá lịch cron của §7.6**: arq 0.28 tự kẹp
+    #: `cron_window_size = max(poll_delay, 0.5)` (`arq/worker.py`), nên reaper
+    #: vẫn nổ đúng một lần mỗi tick `{0, 30}`.
+    ARQ_POLL_DELAY_S: float = Field(default=0.1, gt=0)
     MAX_CONCURRENT_STREAMS: int = Field(default=3, gt=0)
     #: Tuổi thọ của cờ huỷ `cancel:{message_id}` (§7.5). Là một *giới hạn* nên
     #: nó ở đây chứ không phải một số trong `app/streaming/cancel.py` (A3,

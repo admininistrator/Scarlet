@@ -151,3 +151,10 @@ class WorkerSettings:
     #: WORKER_HEARTBEAT_S` (số nhịp được phép lỡ trước khi reaper §7.6 đánh
     #: `WORKER_LOST`), nên vặn nó sẽ đồng thời đổi ba thứ ở ba tầng.
     health_check_interval = settings.WORKER_HEALTHCHECK_S
+
+    #: Nhịp hỏi Redis "có job mới không". Mặc định của arq là 0.5 s và T-1.12
+    #: đo được đúng con số đó nằm trong TTFT của mọi model (B-104): chặng
+    #: `202` → `start` có trần bằng đúng `poll_delay` ở cả bốn model. Xem
+    #: `Settings.ARQ_POLL_DELAY_S` cho phần còn lại của lý lẽ, gồm cả vì sao
+    #: hạ xuống dưới 0.5 s không phá lịch cron của reaper.
+    poll_delay = settings.ARQ_POLL_DELAY_S

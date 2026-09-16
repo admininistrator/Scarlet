@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from arq import worker as arq_worker
 from arq.worker import Worker, create_worker
 
 import app.workers.main as worker_main
@@ -97,6 +98,48 @@ def test_nhip_healthcheck_tach_khoi_nhip_heartbeat_cua_dieu_7_6() -> None:
 
     # Tỉ lệ phải còn nghĩa: reaper đợi ít nhất hai nhịp trước khi kết luận chết.
     assert settings.REAPER_STALE_S >= 2 * settings.WORKER_HEARTBEAT_S
+
+
+def test_poll_delay_doc_tu_settings_chu_khong_phai_mac_dinh_arq() -> None:
+    """B-104 — nhịp poll của arq nằm chình ình trong TTFT của mọi model.
+
+    T-1.12 đo chặng `202` → `start`: p95 0.486–0.505 s và `max` 0.494–0.510 s
+    ở **cả bốn** model — trần bằng đúng `poll_delay` mặc định 0.5 s của arq,
+    không phải đặc tính của model nào.
+
+    Đây cũng đúng cái bẫy mà docstring module nói: `get_kwargs` lọc theo chữ ký
+    của `Worker`, nên gõ `poll_delay_s` (tên thuộc tính *bên trong* Worker) thay
+    vì `poll_delay` (tên tham số) sẽ bị **bỏ qua lặng lẽ** — worker vẫn chạy,
+    chỉ là chạy ở 0.5 s, và phép đo TTFT sẽ không đổi một mili-giây nào.
+    """
+    worker: Worker = create_worker(WorkerSettings)
+    assert worker.poll_delay_s == settings.ARQ_POLL_DELAY_S
+    assert worker.poll_delay_s < 0.5, "không thấp hơn mặc định arq thì B-104 chưa được sửa"
+
+    # Đọc mã nguồn vì nếu ai đó gõ nhầm tên thuộc tính thì phép so sánh ở trên
+    # vẫn xanh khi `ARQ_POLL_DELAY_S` tình cờ bằng mặc định của arq.
+    nguon = (Path(worker_main.__file__)).read_text(encoding="utf-8")
+    assert "poll_delay = settings.ARQ_POLL_DELAY_S" in nguon
+
+
+def test_ha_poll_delay_khong_pha_lich_cron_cua_dieu_7_6() -> None:
+    """Ghim giả định của arq mà quyết định hạ `poll_delay` dựa vào.
+
+    `REAPER_MOI_N_GIAY = 30` chỉ đúng nếu arq **kẹp** cửa sổ cron ở 0.5 s:
+    `arq/worker.py` viết `cron_window_size = max(self.poll_delay_s, 0.5)`.
+    Nếu một bản arq sau bỏ phép kẹp ấy đi thì cửa sổ co lại bằng
+    `poll_delay` (0.1 s) và reaper có thể **lỡ hẳn** một tick mà không ai báo
+    — đúng dạng hỏng im lặng của §7.6.
+
+    Giá trị được đọc ra từ chính mã nguồn arq đang cài, không chép lại: test
+    này phải đỏ khi nâng arq làm đổi hành vi, chứ không đỏ khi mình đổi số.
+    """
+    nguon_arq = Path(arq_worker.__file__).read_text(encoding="utf-8")
+    assert "max(self.poll_delay_s, 0.5)" in nguon_arq, (
+        "arq đã đổi cách tính cron_window_size — kiểm lại REAPER_MOI_N_GIAY "
+        "trước khi giữ ARQ_POLL_DELAY_S dưới 0.5 s"
+    )
+    assert settings.ARQ_POLL_DELAY_S <= 0.5
 
 
 def test_job_timeout_lon_hon_timeout_http_cua_tang_model() -> None:

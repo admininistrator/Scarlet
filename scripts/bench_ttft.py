@@ -654,6 +654,24 @@ def in_bang(ket_qua: list[KetQuaModel], bo_qua: set[str]) -> None:
         print(f"  · {cau}")
 
 
+def _ten_con_trong(goc: Path) -> Path:
+    """Tên đầu tiên chưa bị chiếm, thử `-hhmm` rồi `-hhmm-2`, `-hhmm-3`…
+
+    Hậu tố phút một mình là **chưa đủ** và đó không phải chuyện lý thuyết: một
+    lượt 8 lượt trên `ol-qwen-small` chạy hết ~11 s, nên hai lần chạy liên tiếp
+    rơi trọn vào cùng một phút — đã đè mất một phép đo đúng như thế ngay trong
+    phiên vá B-106 này. Vòng lặp chạy tới khi tìm được tên trống nên hàm này
+    **không bao giờ** trả về một đường dẫn đã có file.
+    """
+    phut = datetime.now().strftime("%H%M")
+    ung_vien = goc.with_name(f"{goc.stem}-{phut}{goc.suffix}")
+    lan = 2
+    while ung_vien.is_file():
+        ung_vien = goc.with_name(f"{goc.stem}-{phut}-{lan}{goc.suffix}")
+        lan += 1
+    return ung_vien
+
+
 def ghi_json(
     ket_qua: list[KetQuaModel], bo_qua: set[str], duong_dan: Path, *, ghi_de: bool = False
 ) -> None:
@@ -684,9 +702,7 @@ def ghi_json(
     duong_dan.parent.mkdir(parents=True, exist_ok=True)
     da_co = duong_dan.is_file()
     if da_co and not ghi_de:
-        duong_dan = duong_dan.with_name(
-            f"{duong_dan.stem}-{datetime.now().strftime('%H%M')}{duong_dan.suffix}"
-        )
+        duong_dan = _ten_con_trong(duong_dan)
 
     def so(v: float) -> float | None:
         # `math.isfinite` chứ không phải `math.isinf`: `nan` cũng không phải
