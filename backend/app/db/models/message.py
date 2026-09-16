@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import ForeignKey, Index, Integer, Text, func, text
-from sqlalchemy.dialects.postgresql import ENUM, JSONB, TIMESTAMP, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.models.base import Base
+from app.db.models.base import Base, pg_enum
 
 
 class MessageRole(StrEnum):
@@ -40,22 +40,6 @@ class MessageStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-
-
-def pg_enum(python_enum: type[Enum], name: str) -> ENUM:
-    """Ánh xạ enum Python sang kiểu ENUM **đã có sẵn** trong Postgres.
-
-    `create_type=False`: kiểu do migration 0001 tạo, ORM không được tạo lại.
-    `values_callable`: không có nó, SQLAlchemy gửi **tên** thành viên
-    (`ASSISTANT`) xuống DB thay vì **giá trị** (`assistant`), và Postgres từ
-    chối vì nhãn không tồn tại trong kiểu.
-    """
-    return ENUM(
-        python_enum,
-        name=name,
-        create_type=False,
-        values_callable=lambda enum_cls: [member.value for member in enum_cls],
-    )
 
 
 class Message(Base):

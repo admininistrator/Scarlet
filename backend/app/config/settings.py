@@ -100,7 +100,25 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_TTL_MIN: int = Field(default=15, gt=0)
     REFRESH_TOKEN_TTL_DAYS: int = Field(default=30, gt=0)
     ARGON2_TIME_COST: int = Field(default=3, gt=0)
-    ARGON2_MEMORY_KIB: int = Field(default=65536, gt=0)
+    #: DoD T-2.1 đòi thời gian hash 50–200 ms ("quá nhanh nghĩa là tham số quá
+    #: yếu"). Mặc định cũ của argon2-cffi (65536 KiB = 64 MiB) đo được ~35 ms
+    #: trên máy dev — dưới sàn. Đo lại 5 lần với `time_cost=3` cố định (chi
+    #: tiết ở báo cáo T-2.1): 98304→~53 ms (sát sàn, rủi ro), 131072→~74 ms,
+    #: **196608 (192 MiB)→~108–126 ms** — giữa khoảng, còn dư cả hai chiều nếu
+    #: máy chạy thật nhanh/chậm hơn máy dev. Tăng bộ nhớ chứ không tăng
+    #: `ARGON2_TIME_COST`: OWASP khuyến nghị ưu tiên bộ nhớ trước vì đó là thứ
+    #: GPU/ASIC khó rẻ hoá song song nhất.
+    ARGON2_MEMORY_KIB: int = Field(default=196608, gt=0)
+    #: §11.6: "Độ dài tối thiểu 12 ký tự". Một *giới hạn* nên nó ở đây chứ
+    #: không phải hằng trong `app/core/security.py` (A3, §19.2 L4).
+    PASSWORD_MIN_LENGTH: int = Field(default=12, gt=0)
+    #: Ngưỡng điểm zxcvbn (0–4, xem `app/core/security.py`) để coi một mật
+    #: khẩu là "quá phổ biến" (§11.6 cho phép `zxcvbn` hoặc danh sách 10k
+    #: top; chọn zxcvbn vì nó mang sẵn tập tần suất mật khẩu rò rỉ thật và
+    #: chạy offline sau khi cài, không cần vendor một file danh sách mà repo
+    #: này không có cách xác minh nguồn gốc). Đo được `password1234` → điểm 1,
+    #: mật khẩu ngẫu nhiên dài → điểm 4; ngưỡng 2 chặn đúng hai điểm thấp nhất.
+    PASSWORD_MIN_ZXCVBN_SCORE: int = Field(default=2, ge=0, le=4)
 
     # ═══ API (§18.2) ═══
     #: Số hội thoại tối đa một trang của `GET /conversations` — vừa là mặc định,

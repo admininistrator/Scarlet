@@ -15,9 +15,30 @@ Hai luật của tầng này:
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
+from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.orm import DeclarativeBase
+
+
+def pg_enum(python_enum: type[Enum], name: str) -> ENUM:
+    """Ánh xạ enum Python sang kiểu ENUM **đã có sẵn** trong Postgres.
+
+    Dùng chung cho mọi model có cột kiểu ENUM (`message.py`, `user.py`, …) —
+    một hàm, không phải mỗi model tự chép lại.
+
+    `create_type=False`: kiểu do migration tạo, ORM không được tạo lại.
+    `values_callable`: không có nó, SQLAlchemy gửi **tên** thành viên
+    (`ASSISTANT`) xuống DB thay vì **giá trị** (`assistant`), và Postgres từ
+    chối vì nhãn không tồn tại trong kiểu.
+    """
+    return ENUM(
+        python_enum,
+        name=name,
+        create_type=False,
+        values_callable=lambda enum_cls: [member.value for member in enum_cls],
+    )
 
 
 class Base(DeclarativeBase):

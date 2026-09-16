@@ -227,27 +227,43 @@ async def session(
         yield db_session
 
 
-async def _create_user(conn: AsyncConnection) -> uuid.UUID:
-    """Một user tối thiểu. `users` chưa có model (Phase 2) nên chèn bằng SQL thô.
+# Đặt SAU khối MINIMAL_ENV (Phần 1) một cách cố ý: `app.db.repositories.users`
+# kéo theo `app.config.settings`, thứ khởi tạo `Settings()` ngay lúc import
+# (fail-fast, L2) — import này phải chạy SAU khi biến môi trường tối thiểu đã
+# có mặt, không phải trước.
+from app.db.repositories.users import UserRepository  # noqa: E402
 
-    `tier_name` để trống ⇒ dùng DEFAULT 'free', tier này do migration 0001 seed.
+
+async def _create_user(session_factory: async_sessionmaker[AsyncSession]) -> uuid.UUID:
+    """Một user tối thiểu, qua ORM thật (T-2.1, B-55) — không còn SQL thô.
+
+    Trước T-2.1, `users` chưa có model nên fixture này chèn bằng `text()`
+    thô; giờ model đã ra đời, giữ nguyên đường chèn tay là có HAI cách tạo
+    user trong cùng một bộ test (B-55) — repository là đường DUY NHẤT.
+
+    `tier_name` không truyền ⇒ Postgres tự điền `server_default` 'free'
+    (migration 0001 seed tier này; xem `db/models/base.py` rule 2).
     """
-    user_id = await conn.scalar(
-        text(
-            "INSERT INTO users (email, password_hash) VALUES (:email, :password_hash) RETURNING id"
-        ),
-        {"email": f"{uuid.uuid4().hex}@scarlet.test", "password_hash": "khong-phai-hash-that"},
-    )
-    assert isinstance(user_id, uuid.UUID)
-    return user_id
+    async with session_factory() as session:
+        user = await UserRepository(session).create_pending_user(
+            # `.example` (RFC 2606), KHÔNG `.test`: `email-validator` (dùng bởi
+            # `EmailStr` của T-2.1) coi TLD `test` là special-use và từ chối —
+            # `_create_user` không đi qua `EmailStr` nên vẫn chạy được với
+            # `.test`, nhưng cùng miền với `test_auth.py` cho khỏi hai chuẩn.
+            email=f"{uuid.uuid4().hex}@scarlet.example",
+            password_hash="khong-phai-hash-that",
+        )
+        assert user is not None
+        await session.commit()
+        return user.id
 
 
 @pytest_asyncio.fixture
-async def user_a(connection: AsyncConnection) -> uuid.UUID:
-    return await _create_user(connection)
+async def user_a(session_factory: async_sessionmaker[AsyncSession]) -> uuid.UUID:
+    return await _create_user(session_factory)
 
 
 @pytest_asyncio.fixture
-async def user_b(connection: AsyncConnection) -> uuid.UUID:
+async def user_b(session_factory: async_sessionmaker[AsyncSession]) -> uuid.UUID:
     """User thứ hai — dùng cho mọi phép kiểm IDOR (§20)."""
-    return await _create_user(connection)
+    return await _create_user(session_factory)

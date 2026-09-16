@@ -1,0 +1,90 @@
+"""Bảng `users` (KH Phụ lục A, §11.1, §11.6) — T-2.1.
+
+`status` là máy trạng thái 5 bước của §11.1, KHÔNG phải cờ boolean
+`is_active`: đăng ký mở + admin duyệt (R5) cần phân biệt "chưa verify email"
+với "chờ duyệt", còn một boolean chỉ trả lời được một câu hỏi.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+
+from sqlalchemy import ForeignKey, Index, Text, func, text
+from sqlalchemy.dialects.postgresql import CITEXT, JSONB, TIMESTAMP, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.models.base import Base, pg_enum
+
+
+class UserStatus(StrEnum):
+    """Khớp kiểu Postgres `user_status` (§11.1)."""
+
+    PENDING_EMAIL = "pending_email"
+    PENDING_APPROVAL = "pending_approval"
+    ACTIVE = "active"
+    REJECTED = "rejected"
+    SUSPENDED = "suspended"
+
+
+class UserRole(StrEnum):
+    """Khớp kiểu Postgres `user_role`. R7: một admin, không RBAC."""
+
+    USER = "user"
+    ADMIN = "admin"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    #: CITEXT: Postgres so sánh/UNIQUE không phân biệt hoa-thường, nên không
+    #: có `.lower()` nào lặp lại ở tầng Python — một nguồn sự thật duy nhất
+    #: cho câu hỏi "hai email này có trùng không" (§11.5 chống dò).
+    email: Mapped[str] = mapped_column(CITEXT, nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[UserStatus] = mapped_column(
+        pg_enum(UserStatus, "user_status"),
+        nullable=False,
+        server_default=text("'pending_email'"),
+    )
+    role: Mapped[UserRole] = mapped_column(
+        pg_enum(UserRole, "user_role"),
+        nullable=False,
+        server_default=text("'user'"),
+    )
+    #: DDL: `REFERENCES tiers(name) DEFAULT 'free'`. Không khai `ForeignKey`
+    #: ở đây vì bảng `tiers` chưa có model — cùng lý do với `Conversation.user_id`
+    #: (xem ghi chú ở đó): một FK trỏ vào bảng không nằm trong `Base.metadata`
+    #: sẽ nổ ngay khi có ai đó compile DDL từ metadata. Ràng buộc thật vẫn do
+    #: Postgres giữ, và `server_default` dưới đây là cách "tier mặc định" của
+    #: T-2.1 vào đời mà không cần một chuỗi `"free"` nằm trong `.py` (A3) —
+    #: `create_pending_user` không truyền `tier_name`, Postgres tự điền.
+    tier_name: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
+    limit_override_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    email_verified_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    approved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    password_changed_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+
+    __table_args__ = (
+        Index("ix_users_status", "status", postgresql_where=text("deleted_at IS NULL")),
+    )
+
+    def __repr__(self) -> str:
+        # Không in `email`/`password_hash`: đây là danh tính + bí mật (§20).
+        return f"User(id={self.id!r}, status={self.status!r}, role={self.role!r})"

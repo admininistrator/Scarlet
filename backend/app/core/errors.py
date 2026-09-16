@@ -82,6 +82,14 @@ class ApiErrorCode(StrEnum):
     #: Chỗ tạm của Phase 1: `DEBUG=false` mà auth thật chưa có (NQ-24).
     AUTH_NOT_IMPLEMENTED = "AUTH_NOT_IMPLEMENTED"
 
+    # ── đăng ký (§11.6, T-2.1) ──
+    #: `len(password) < settings.PASSWORD_MIN_LENGTH`.
+    PASSWORD_TOO_SHORT = "PASSWORD_TOO_SHORT"
+    #: Điểm zxcvbn dưới `settings.PASSWORD_MIN_ZXCVBN_SCORE` — mật khẩu nằm
+    #: trong nhóm quá phổ biến/dễ đoán (Cạm bẫy T-2.1: không nói gì thêm về
+    #: LÝ DO cụ thể ngoài "quá phổ biến", tránh dạy kẻ tấn công cách né).
+    PASSWORD_TOO_WEAK = "PASSWORD_TOO_WEAK"
+
     # ── chat (§18.2) ──
     #: `Last-Event-ID` / `?cursor=` không phải một Redis Stream ID.
     CURSOR_INVALID = "CURSOR_INVALID"

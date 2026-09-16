@@ -17,6 +17,7 @@ from app.db.repositories.messages import (
     PathNode,
     path_statement,
 )
+from app.db.repositories.users import UserRepository
 
 __all__ = [
     "ConversationNotFoundError",
@@ -26,5 +27,6 @@ __all__ = [
     "OwnedMessage",
     "PathNode",
     "RepositoryError",
+    "UserRepository",
     "path_statement",
 ]
