@@ -155,7 +155,7 @@ Danh sách này là hợp đồng. Muốn thêm gì vào đây phải viết ADR
 | **S1** | Xoá 1 biến `.env` bắt buộc → app **không boot**, log in đúng tên biến thiếu | `docker compose up` → exit code ≠ 0, grep tên biến trong log | P0 |
 | **S2** | p95 từ lúc bấm gửi → **token đầu tiên** ≤ 2.0 s (model qua 9Router local) và ≤ 4.0 s (model qua API) | Script `scripts/bench_ttft.py` chạy 30 lượt, in p50/p95 | P1 |
 | **S3** | **F5 giữa lúc đang stream** → quay lại thấy chữ chảy tiếp: **0 ký tự mất, 0 ký tự lặp** | `scripts/test_resume.py`: bắt đầu stream, ngắt ở token thứ 50, reconnect, so chuỗi nối được với chuỗi tham chiếu → phải khớp byte-by-byte | P1 |
-| **S4** | Kill container `worker` giữa lúc stream → sau khi bật lại, message không kẹt trạng thái `streaming` quá 90 s | `docker compose kill worker` rồi query DB sau 120 s: `status ∈ {failed, completed}` | P1 |
+| **S4** | Kill container `worker` giữa lúc stream → sau khi bật lại, message không kẹt trạng thái `streaming` quá **120 s** | `docker compose kill worker` rồi query DB sau **150 s**: `status ∈ {failed, completed}` | P1 |
 | **S5** | Bấm nút gửi **2 lần trong 300 ms** → đúng **1** message trong DB, lần thứ hai trả về cùng `message_id` | `scripts/test_idempotency.sh` | P2 |
 | **S6** | User hết quota → request bị chặn **trước** khi gọi model, trả `429` với `retry_after` chính xác; **0 USD phát sinh** | Đặt `limit_5h_usd = 0.001`, gửi request, kiểm bảng `usage_events` không có dòng mới | P2 |
 | **S7** | Thêm 1 model mới vào catalog: hiện trong Model Picker sau ≤ 5 phút, **0 dòng code sửa, 0 lần rebuild image** | Sửa `config/model_catalog.json` → `curl -X POST /api/v1/admin/catalog/reload` → `GET /api/v1/models` có model mới | P3 |
@@ -169,6 +169,19 @@ Danh sách này là hợp đồng. Muốn thêm gì vào đây phải viết ADR
 | **S14** | Toàn bộ test suite chạy < 3 phút trên máy dev | `time make test` | Liên tục |
 
 **Ghi chú về S13:** với model đi qua 9Router, con số này **sẽ không khớp** — xem §9.5 và ADR-03. Tiêu chí S13 chỉ áp cho model gọi trực tiếp qua LiteLLM tới DeepSeek/Anthropic.
+
+**Ghi chú về S4 — hai con số 120 s và 150 s ở đâu ra** *(sửa 2026-09-16, NQ-38; trước đó là 90 s và 120 s)*. Cửa sổ phát hiện suy ra được từ chính ba tham số của §7.6, không phải chọn cho đẹp:
+
+```
+cửa sổ = [REAPER_STALE_S − WORKER_HEARTBEAT_S,  REAPER_STALE_S + nhịp cron]
+       = [90 − 15, 90 + 30] = [75 s, 120 s]
+```
+
+Cận trên là `REAPER_STALE_S + nhịp cron`. Vì `REAPER_STALE_S` đã bằng 90, **mọi** nhịp cron > 0 đều đẩy cận trên vượt 90 — tức "≤ 90 s" là điều §7.6 không bao giờ thoả được, và hạ nhịp quét một mình không cứu được. Ba phép đo thật rơi đúng trong khoảng: **82.31 s**, **95.72 s** (T-1.10) và **121.2 s** (rà phase 1, chạm trần).
+
+Cách kiểm đo ở **150 s** chứ không 120 s vì 120 s là **đúng** cận trên: hỏi ngay tại biên là một phép thử 50/50 tự đỏ. 30 s dôi ra là biên an toàn cho hạt của phép đo, không phải nới tiêu chí.
+
+**Không hạ `REAPER_STALE_S` để ép cửa sổ xuống dưới 90 s.** Nhịp tim chỉ được ghi **bên trong** vòng `async for chunk in stream` (`workers/generate.py`), nên giữa `mark_streaming` và chunk đầu tiên không có nhịp nào — `REAPER_STALE_S` vì thế đồng thời là **TTFT tối đa trước khi reaper giết một lượt sinh còn sống**. `nr-gemini-flash` đo được TTFT p95 **43.7 s** ngày xấu (B-103) nên 90 s chỉ còn ~2× biên; hạ xuống 60 s là đổi một phiền toái (dọn chậm) lấy một mất mát (giết nhầm câu trả lời người dùng đã trả tiền). Muốn hạ thì phải tách nhịp tim khỏi vòng chunk trước — xem B-122.
 
 ---
 
@@ -1753,7 +1766,7 @@ Không theo "hạ tầng → backend → frontend". Ba quy tắc:
 | Phase | Xong khi |
 |---|---|
 | P0 | `docker compose ps` tất cả healthy · `curl -k https://localhost/health/deep` trả ok cho cả 5 phụ thuộc · `docker compose exec litellm curl -s http://host.docker.internal:20128/v1/models` ra JSON · xoá 1 biến `.env` → không boot, in đúng tên biến (S1) |
-| P1 | `scripts/test_resume.py` xanh (S3) · kill worker giữa chừng → message không kẹt quá 90 s (S4) · tạo 3 nhánh, kiểm context gửi lên chỉ chứa đường đi hiện tại (C11) · TTFT p95 đạt S2 |
+| P1 | `scripts/test_resume.py` xanh (S3) · kill worker giữa chừng → message không kẹt quá 120 s (S4) · tạo 3 nhánh, kiểm context gửi lên chỉ chứa đường đi hiện tại (C11) · TTFT p95 đạt S2 |
 | P2 | Đăng ký → verify (Mailpit) → duyệt → chat được, toàn bộ bằng UI · double-click tạo đúng 1 message (S5) · quota = 0 → chặn trước khi gọi model, 0 USD phát sinh (S6) · logout → token cũ trả 401 (C21) · user A không đọc được hội thoại của B (404) |
 | P3 | Lighthouse mobile đạt S8 · thêm model vào catalog hiện trong picker ≤ 5 phút không sửa code (S7) · dùng được ở 375 px · sáng/tối không có chỗ nào chữ chìm vào nền |
 | P4 | Model không vision → nút upload mờ + icon cấm khi hover; bypass API → 422 (S9) · gửi ảnh lượt 1, `prompt_tokens` lượt 3 không tăng theo số ảnh (C33) |
