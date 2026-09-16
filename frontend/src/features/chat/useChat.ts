@@ -162,7 +162,16 @@ export function useChat(): ChatDangDung {
 
       streamRef.current = moStream({
         url,
-        onTrangThai: setKetNoi,
+        onTrangThai: (trangThai) => {
+          setKetNoi(trangThai);
+          // Noi lai duoc thi bang loi cua lan dut truoc KHONG duoc o lai tren
+          // man hinh: DoD "Offline 5 s roi bat lai" ket thuc bang mot man hinh
+          // dang chay, ma mot dong "Failed to fetch" nam yen o do doc y het
+          // mot cai hong chua duoc sua (B-115).
+          if (trangThai === "dang-chay") {
+            setLoi(null);
+          }
+        },
         onChet: setLoi,
         onCanhBao: setLoi,
         onSuKien: (suKien) => {
@@ -240,9 +249,8 @@ export function useChat(): ChatDangDung {
     [baoDamStream, lamTuoi],
   );
 
-  // ── nap lan dau: danh tinh, models, hoi thoai ghi trong URL ──
-  useEffect(() => {
-    setDanhTinh(docDanhTinhDev());
+  /** Models + hoi thoai ghi trong URL. Goi luc mount, va goi lai khi mang ve. */
+  const napBanDau = useCallback(() => {
     api
       .danhSachModel()
       .then(setModels)
@@ -254,8 +262,34 @@ export function useChat(): ChatDangDung {
     if (id !== null) {
       void mo(id);
     }
-    return () => streamRef.current?.dong();
   }, [mo]);
+
+  // ── nap lan dau, va nap LAI neu lan dau roi dung luc mat mang ──
+  useEffect(() => {
+    setDanhTinh(docDanhTinhDev());
+    napBanDau();
+
+    /**
+     * F5 trong luc DevTools con dat Offline thi ca `/models` lan
+     * `GET /conversations/{id}` deu nem `Failed to fetch`, va man hinh ket o
+     * do voi mot bang loi — khong co duong nao ve tru mot lan F5 nua. Mot lan
+     * mat mang khong duoc phep doi mot lan tai trang (B-115).
+     *
+     * Chi lo phan KHOI DONG: stream dang song thi `sse.ts` tu lo lay phan cua
+     * no, dung vao day la mo thua mot ket noi.
+     */
+    function khiCoMang(): void {
+      if (cayRef.current.conversationId === null) {
+        napBanDau();
+      }
+    }
+
+    window.addEventListener("online", khiCoMang);
+    return () => {
+      window.removeEventListener("online", khiCoMang);
+      streamRef.current?.dong();
+    };
+  }, [napBanDau]);
 
   const datDanhTinh = useCallback((userId: string) => {
     datDanhTinhDev(userId.trim());

@@ -1,7 +1,7 @@
 /**
  * Dau doc SSE cua FE — §7 phia client (§23 ghi dung mot dong: `sse.ts` = §7).
  *
- * KH tham chieu: §7.2 ②, §7.4, Phu luc F, C1, C6 · tasks.md T-1.14.
+ * KH tham chieu: §7.2 ②, §7.4, Phu luc F, C1, C6 · tasks.md T-1.14 · B-115.
  *
  * File nay KHONG biet React, khong biet cay message, khong biet hoi thoai nao.
  * No nhan mot URL va tra lai mot dong su kien da go kieu. Nho vay cai kho cua
@@ -9,7 +9,7 @@
  * component nao.
  *
  * ╔════════════════════════════════════════════════════════════════════════╗
- * ║  BON DIEU DE SAI, VA CA BON DEU SAI TRONG IM LANG                      ║
+ * ║  NAM DIEU DE SAI, VA CA NAM DEU SAI TRONG IM LANG                      ║
  * ╚════════════════════════════════════════════════════════════════════════╝
  *
  * **1. `error` la HAI chuyen khac han nhau, tren cung mot ten.**
@@ -21,12 +21,24 @@
  * lan rot mang se hien ra thanh "model bao loi", va nut Retry moc len giua luc
  * cau tra loi van dang chay.
  *
- * **2. KHONG dong khi dut duong truyen** (dung chu cua task) — de trinh duyet
- * tu reconnect voi `Last-Event-ID`. Nhung `readyState === CLOSED` la chuyen
- * khac: trinh duyet DA BO CUOC (response khong phai 2xx — 401/404/503 — hoac
- * `Content-Type` sai), va no se KHONG thu lai. Coi ca nay la "dang cho" nghia
- * la treo vinh vien mot con tro nhap nhay. §7.4 cam suy ra "xong" tu im lang;
- * no khong cam phan biet "dang cho" voi "da chet".
+ * **2. `readyState === CLOSED` KHONG co nghia la "khong con gi de lam".**
+ * Day la cho ban dau tu viet SAI va DoD cua T-1.14 bat duoc (B-115): DevTools
+ * → Offline 5 s, Chrome **fail** ket noi chu khong phai chi dut no, tuc
+ * `readyState` thanh `CLOSED` ngay — dung trang thai ma mot response 404/401
+ * cung tao ra. Coi CLOSED la "chet han" roi `close()` nghia la khi mang ve thi
+ * KHONG CON GI de noi lai, va man hinh dung im vinh vien.
+ *
+ * Luat dung la: **trinh duyet bo cuoc thi MINH nhan viec**, khong phai minh
+ * cung bo cuoc. `CONNECTING` ⇒ de trinh duyet tu thu (no se gui
+ * `Last-Event-ID`); `CLOSED` ⇒ tu hen gio mo lai, luy thua co tran, cong mot
+ * lan mo NGAY khi su kien `online` bao mang da ve. Chi sau
+ * `SO_LAN_THU_TOI_DA` lan lien tiep khong len duoc moi bao `onChet` — va luc
+ * do no that su la 404/401 chu khong phai mot lan rot mang.
+ *
+ * Dieu nay KHONG mau thuan voi "khong tu dong khi `error`" cua task: cai bi
+ * cam la **ket thuc** mot luot sinh vi duong truyen, va o day khong luot nao
+ * bi ket thuc — chi co mot ket noi TCP duoc thay bang mot ket noi khac, mang
+ * theo dung cursor cu.
  *
  * **3. Reconnect TAY (C6) phai tu mang cursor.** Phu luc F viet "dong va mo
  * lai `EventSource` — `Last-Event-ID` lo phan con lai". Dieu do dung cho lan
@@ -42,6 +54,11 @@
  * lai tu Postgres (T-1.7) cung phat `start` truoc. Nguoi dung file nay phai
  * XOA phan chu da co cua message do khi thay `start`, neu khong thi mot lan F5
  * se noi chong ban phat lai len ban cu.
+ *
+ * **5. Im lang KHONG bao gio la "xong" (§7.4).** Khong co bo dem thoi gian nao
+ * trong file nay ket thuc mot luot sinh. Chi `done` va `error` lam duoc viec
+ * do; het `SO_LAN_THU_TOI_DA` chi doi trang thai duong day sang `dong` va goi
+ * `onChet`, no khong bia ra mot ket cuc cho cau tra loi.
  */
 
 /** So token — payload cua `usage`. Khoa VANG MAT nghia la provider khong bao. */
@@ -90,11 +107,26 @@ const LOAI_KHONG_PHAI_LOI = [
 /** Du chin loai — dung cho test va cho nguoi doc dem lai. */
 export const MOI_LOAI_SU_KIEN: readonly LoaiSuKien[] = [...LOAI_KHONG_PHAI_LOI, "error"];
 
+/** Cho bao lau truoc lan thu DAU khi trinh duyet bo cuoc (diem 2). */
+const CHO_DAU_MS = 1_000;
+/** Tran cua luy thua. Lon hon nua thi mot lan mat mang ngan cung phai cho lau. */
+const CHO_TOI_DA_MS = 15_000;
+/**
+ * Bao nhieu lan lien tiep khong len duoc thi thoi.
+ *
+ * Voi luy thua co tran o tren, tam lan la ~1+2+4+8+15+15+15 ≈ 60 s co gang.
+ * Mot lan Offline 5 s cua DoD len lai o lan thu nhat (va thuong la ngay lap
+ * tuc, nho su kien `online`); mot message 404 that thi dung sau ~60 s va noi
+ * ra — thay vi quay vong mai voi mot con tro nhap nhay.
+ */
+const SO_LAN_THU_TOI_DA = 8;
+
 /**
  * Trang thai duong day, de man hinh noi dung su that.
  *
- * `dang-noi-lai` khac `dong`: cai dau la trinh duyet dang tu thu lai, cai sau
- * la no da bo cuoc. Gop hai cai vao mot la mat dung thu nguoi dung can biet.
+ * `dang-noi-lai` khac `dong`: cai dau la "van dang co" (trinh duyet tu thu,
+ * hoac minh dang hen gio thu), cai sau la "da thoi". Gop hai cai vao mot la
+ * mat dung thu nguoi dung can biet.
  */
 export type TrangThaiKetNoi = "dang-mo" | "dang-chay" | "dang-noi-lai" | "dong";
 
@@ -103,14 +135,14 @@ export interface ThamSoStream {
   url: string;
   onSuKien: (suKien: SuKienStream) => void;
   onTrangThai?: (trangThai: TrangThaiKetNoi) => void;
-  /** Trinh duyet bo cuoc (`readyState === CLOSED`) — xem diem 2. */
+  /** Da thu het `SO_LAN_THU_TOI_DA` lan ma khong len — xem diem 2. */
   onChet?: (lyDo: string) => void;
   /** Khung doc khong duoc. Mac dinh in ra console, khong nuot. */
   onCanhBao?: (lyDo: string) => void;
 }
 
 export interface TayCamStream {
-  /** Dong han. Go ca listener `visibilitychange`. Goi nhieu lan khong sao. */
+  /** Dong han. Go het listener va hen gio. Goi nhieu lan khong sao. */
   dong: () => void;
   /** Redis Stream ID cuoi cung DA NHAN — de kiem trong DevTools. */
   cursor: () => string;
@@ -120,7 +152,8 @@ export interface TayCamStream {
  * Mo mot stream SSE toi mot message va giu no song cho toi `done`/`error`.
  *
  * Hop dong: ham nay KHONG bao gio tu ket luan "xong" tu im lang (§7.4). Chi
- * `done` hoac `error` dong duoc no; moi thu khac chi doi trang thai duong day.
+ * `done` hoac `error` dong duoc mot luot sinh; moi thu khac chi doi trang thai
+ * duong day.
  */
 export function moStream(thamSo: ThamSoStream): TayCamStream {
   const canhBao = thamSo.onCanhBao ?? ((lyDo: string) => console.error("[sse]", lyDo));
@@ -128,11 +161,21 @@ export function moStream(thamSo: ThamSoStream): TayCamStream {
   let es: EventSource | null = null;
   //: Redis Stream ID cua ban ghi CUOI CUNG DA GIAO CHO NGUOI DUNG (§7.3).
   let cursor = "";
-  //: `done`/`error` da toi. Sau day khong reconnect nua du tab co hien lai.
+  //: `done`/`error` da toi, hoac nguoi goi da `dong()`. Khong noi lai nua.
   let daKetThuc = false;
+  //: So lan mo KHONG len lien tiep. Ve 0 moi khi `open`, hoac khi mang vua ve.
+  let lanThu = 0;
+  let hen: number | null = null;
 
   function baoTrangThai(trangThai: TrangThaiKetNoi): void {
     thamSo.onTrangThai?.(trangThai);
+  }
+
+  function huyHen(): void {
+    if (hen !== null) {
+      window.clearTimeout(hen);
+      hen = null;
+    }
   }
 
   function dongKetNoi(): void {
@@ -163,9 +206,32 @@ export function moStream(thamSo: ThamSoStream): TayCamStream {
 
     if (loai === "done" || loai === "error") {
       daKetThuc = true;
+      huyHen();
       dongKetNoi();
       baoTrangThai("dong");
     }
+  }
+
+  /** Hen mo lai — chi goi khi TRINH DUYET da bo cuoc (diem 2). */
+  function henMoLai(): void {
+    if (daKetThuc || hen !== null) {
+      return;
+    }
+    lanThu += 1;
+    if (lanThu > SO_LAN_THU_TOI_DA) {
+      dongKetNoi();
+      baoTrangThai("dong");
+      thamSo.onChet?.(
+        `da thu noi lai ${SO_LAN_THU_TOI_DA} lan ma khong len duoc — ` +
+          `kiem tra mang, hoac message nay khong con doc duoc`,
+      );
+      return;
+    }
+    const cho = Math.min(CHO_DAU_MS * 2 ** (lanThu - 1), CHO_TOI_DA_MS);
+    hen = window.setTimeout(() => {
+      hen = null;
+      moKetNoi();
+    }, cho);
   }
 
   /** Mot ten, hai chuyen — xem diem 1 trong docstring module. */
@@ -176,20 +242,22 @@ export function moStream(thamSo: ThamSoStream): TayCamStream {
       return;
     }
 
+    baoTrangThai("dang-noi-lai");
+
     if (es === null || es.readyState === EventSource.CLOSED) {
-      // Trinh duyet da bo cuoc va se KHONG thu lai (diem 2).
+      // Trinh duyet da bo cuoc (Offline, 404, 401...) va se KHONG thu lai.
+      // MINH nhan viec — khong phai minh cung bo cuoc (diem 2, B-115).
       dongKetNoi();
-      baoTrangThai("dong");
-      thamSo.onChet?.("ket noi bi dong han, trinh duyet khong thu lai");
+      henMoLai();
       return;
     }
 
-    // Dut duong truyen. KHONG goi close() — de trinh duyet tu reconnect, no
-    // se gui `Last-Event-ID` va server phat tiep tu dung cho (§7.2 ②).
-    baoTrangThai("dang-noi-lai");
+    // `CONNECTING`: trinh duyet dang tu thu lai va no se gui `Last-Event-ID`.
+    // KHONG goi close() o day — do dung la thu task cam.
   }
 
   function moKetNoi(): void {
+    huyHen();
     dongKetNoi();
     const url = cursor === "" ? thamSo.url : `${thamSo.url}?cursor=${encodeURIComponent(cursor)}`;
     // `withCredentials` la chu cua Phu luc F, va la duong danh tinh di qua
@@ -198,7 +266,10 @@ export function moStream(thamSo: ThamSoStream): TayCamStream {
     const nguon = new EventSource(url, { withCredentials: true });
     es = nguon;
 
-    nguon.addEventListener("open", () => baoTrangThai("dang-chay"));
+    nguon.addEventListener("open", () => {
+      lanThu = 0;
+      baoTrangThai("dang-chay");
+    });
     for (const loai of LOAI_KHONG_PHAI_LOI) {
       nguon.addEventListener(loai, (ev) => nhanKhung(loai, ev as MessageEvent<string>));
     }
@@ -224,13 +295,31 @@ export function moStream(thamSo: ThamSoStream): TayCamStream {
     moKetNoi();
   }
 
+  /**
+   * Mang vua ve — mo lai NGAY, khong doi het luy thua.
+   *
+   * Day la thu bien "Offline 5 s roi bat lai" tu "cho toi 8 giay" thanh "chay
+   * tiep gan nhu tuc thi". `lanThu` ve 0 vi mot lan chuyen trang thai mang la
+   * thong tin moi: nhung lan truot truoc do khong noi gi ve lan nay.
+   */
+  function khiCoMang(): void {
+    if (daKetThuc) {
+      return;
+    }
+    lanThu = 0;
+    moKetNoi();
+  }
+
   document.addEventListener("visibilitychange", khiDoiHienThi);
+  window.addEventListener("online", khiCoMang);
   moKetNoi();
 
   return {
     dong: () => {
       daKetThuc = true;
       document.removeEventListener("visibilitychange", khiDoiHienThi);
+      window.removeEventListener("online", khiCoMang);
+      huyHen();
       dongKetNoi();
     },
     cursor: () => cursor,
