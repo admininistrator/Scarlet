@@ -1,13 +1,14 @@
-"""`POST /auth/register` (§11.1, §11.5, §11.6, UC-01) — T-2.1.
+"""`POST /auth/register`, `/verify-email`, `/resend-verification` (§11.1,
+§11.5, §11.6, UC-01) — T-2.1, T-2.2.
 
-KH tham chiếu: §11.1, §11.6, UC-01 · CLAUDE.md A3 · tasks.md T-2.1.
+KH tham chiếu: §11.5, UC-01 · CLAUDE.md A3 · tasks.md T-2.2.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  CẠM BẪY CỦA TASK NÀY: chống dò email (§11.5)                            │
+│  CẠM BẪY CỦA T-2.1: chống dò email (§11.5)                                │
 └──────────────────────────────────────────────────────────────────────────┘
 
 "Trả lỗi 'email đã tồn tại' là cho phép người lạ dò xem ai đã đăng ký."
-Handler dưới đây vì vậy cố ý KHÔNG có hai nhánh response khác nhau:
+`register` vì vậy cố ý KHÔNG có hai nhánh response khác nhau:
 
 1. Cả hai đường (email mới / email đã tồn tại) đều trả về đúng MỘT hằng số
    `_PHAN_HOI_DANG_KY` — cùng status code, cùng body, byte-for-byte (DoD).
@@ -16,25 +17,51 @@ Handler dưới đây vì vậy cố ý KHÔNG có hai nhánh response khác nha
    nhanh hơn hẳn đường "mới" là một cách dò khác, tinh vi hơn status code).
 3. `UserRepository.create_pending_user` trả `None` thay vì raise khi UNIQUE
    của `email` va chạm — không có exception riêng để lộ ra thành hai nhánh xử
-   lý ở đây.
+   lý ở đây. Nhánh đó cũng không phát hành token/gửi mail: không đọc/ghi gì
+   thêm về user đã có (§11.5).
 
-Kiểm độ dài/độ phổ biến của mật khẩu chạy TRƯỚC bước trên và không phụ thuộc
-email, nên `422` ở đó không lộ gì (đúng cho cả email mới lẫn email đã có).
+`resend-verification` áp đúng nguyên tắc trên: một hằng số response, không
+rẽ nhánh theo email có tồn tại/đã verify hay chưa.
 
-Turnstile (T-2.6) và gửi email xác thực (T-2.2) CHƯA có ở đây — hai task đó
-nối tiếp đúng endpoint này, không viết lại nó.
+┌──────────────────────────────────────────────────────────────────────────┐
+│  CẠM BẪY CỦA T-2.2: không lưu token bản rõ                                 │
+└──────────────────────────────────────────────────────────────────────────┘
+
+"Lưu token bản rõ trong DB nghĩa là ai đọc được DB thì chiếm được mọi tài
+khoản." Token bản rõ chỉ tồn tại trong biến cục bộ của request đang xử lý
+(`EmailTokenRepository.issue` trả về nó, không ghi nó) và trong nội dung
+email đã gửi — `email_tokens.token_hash` luôn là SHA-256 (`hash_email_token`).
+
+`verify-email` phải phân biệt BA kết cục khác nhau mà none trong số đó là
+lỗi 500 (DoD): token hợp lệ lần đầu và token đã dùng trước đó đều trả
+`{"status": "verified"}` (idempotent, UC-01); token hết hạn trả
+`{"status": "expired"}` **vẫn HTTP 200** — client dựa vào trường `status`,
+không dựa vào mã lỗi, để quyết định hiện trang nào. Chỉ token chưa từng tồn
+tại (giả mạo/sai `purpose`) mới ra `400 TOKEN_INVALID`.
+
+Turnstile (T-2.6) CHƯA có ở `register` — nối tiếp đúng endpoint này, không
+viết lại nó.
 """
 
 from __future__ import annotations
+
+import logging
+from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, status
 from pydantic import BaseModel, EmailStr
 
 from app.config.settings import settings
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
+from app.core.mailer import mailer
 from app.core.security import hash_password, mat_khau_qua_pho_bien
+from app.db.models import EmailTokenPurpose, UserStatus
+from app.db.repositories.email_tokens import ConsumeResult, EmailTokenRepository
 from app.db.repositories.users import UserRepository
 from app.db.session import session_scope
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -59,6 +86,50 @@ _PHAN_HOI_DANG_KY = DangKyResponse(
 )
 
 
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class ResendVerificationResponse(BaseModel):
+    message: str
+
+
+#: Cùng lối với `_PHAN_HOI_DANG_KY`: một hằng số, không rẽ nhánh theo email có
+#: tồn tại / đã verify hay chưa (§11.5).
+_PHAN_HOI_RESEND = ResendVerificationResponse(
+    message=("neu email nay ton tai va chua duoc xac thuc, mot email xac thuc moi da duoc gui")
+)
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class VerifyEmailResponse(BaseModel):
+    #: `verified`: token hợp lệ (lần đầu hoặc đã dùng trước đó — idempotent).
+    #: `expired`: hết hạn, FE hiện trang "gửi lại" — vẫn HTTP 200 (DoD T-2.2).
+    status: Literal["verified", "expired"]
+
+
+async def _gui_email_xac_thuc(email: str, raw_token: str) -> None:
+    """Best-effort: lỗi gửi mail KHÔNG được làm hỏng response của caller.
+
+    Xem docstring `core/mailer.py` phần "vì sao send lỗi không làm register
+    trả 500" — tài khoản/token đã commit vào DB trước khi hàm này chạy, nên
+    một lần SMTP hỏng chỉ mất một email, không mất dữ liệu; người dùng còn
+    đường `resend-verification` để lấy token mới.
+    """
+    verify_url = f"{settings.PUBLIC_BASE_URL}/verify-email?token={raw_token}"
+    try:
+        await mailer.send(
+            template="verify_email",
+            to=email,
+            ctx={"verify_url": verify_url, "ttl_minutes": settings.EMAIL_TOKEN_TTL_MIN},
+        )
+    except Exception:
+        logger.exception("gui email xac thuc that bai cho %s", email)
+
+
 @router.post(
     "/register",
     status_code=status.HTTP_200_OK,
@@ -72,10 +143,10 @@ _PHAN_HOI_DANG_KY = DangKyResponse(
     },
 )
 async def register(body: DangKyRequest) -> DangKyResponse:
-    """Đăng ký (UC-01): tạo user `status='pending_email'`, tier mặc định.
+    """Đăng ký (UC-01): tạo user `status='pending_email'`, tier mặc định,
+    phát hành token verify và gửi email xác thực (T-2.2).
 
-    Không verify Turnstile (T-2.6), không gửi email (T-2.2) — cả hai nối tiếp
-    sau, cùng một đường dẫn này.
+    Không verify Turnstile (T-2.6) — nối tiếp sau, cùng một đường dẫn này.
     """
     if len(body.password) < settings.PASSWORD_MIN_LENGTH:
         raise ApiError(
@@ -94,14 +165,91 @@ async def register(body: DangKyRequest) -> DangKyResponse:
     # module): cả hai nhánh dưới đây đều đã trả giá ~50–200 ms như nhau.
     password_hash = await hash_password(body.password)
 
+    raw_token: str | None = None
     async with session_scope() as session:
         user = await UserRepository(session).create_pending_user(
             email=body.email, password_hash=password_hash
         )
         if user is not None:
+            raw_token = await EmailTokenRepository(session).issue(
+                user_id=user.id,
+                purpose=EmailTokenPurpose.VERIFY,
+                ttl_minutes=settings.EMAIL_TOKEN_TTL_MIN,
+            )
             await session.commit()
         # else: email đã tồn tại — repository đã tự rollback, không có gì để
         # commit. Không đọc/ghi gì thêm: mọi thông tin về user đã có KHÔNG
         # được phép rò tới response (§11.5).
 
+    # Gửi mail NGOÀI transaction, sau khi user+token đã commit — xem docstring
+    # `_gui_email_xac_thuc`.
+    if raw_token is not None:
+        await _gui_email_xac_thuc(body.email, raw_token)
+
     return _PHAN_HOI_DANG_KY
+
+
+@router.post(
+    "/resend-verification",
+    status_code=status.HTTP_200_OK,
+    response_model=ResendVerificationResponse,
+)
+async def resend_verification(body: ResendVerificationRequest) -> ResendVerificationResponse:
+    """Gửi lại email verify (UC-01). Chống dò (§11.5): response cố định."""
+    raw_token: str | None = None
+    email_de_gui: str | None = None
+    async with session_scope() as session:
+        user = await UserRepository(session).get_by_email(body.email)
+        if user is not None and user.status == UserStatus.PENDING_EMAIL:
+            raw_token = await EmailTokenRepository(session).issue(
+                user_id=user.id,
+                purpose=EmailTokenPurpose.VERIFY,
+                ttl_minutes=settings.EMAIL_TOKEN_TTL_MIN,
+            )
+            email_de_gui = user.email
+            await session.commit()
+        # else: email không tồn tại, hoặc đã qua khỏi pending_email — không
+        # phát hành token, không gửi mail, không đọc/ghi gì thêm (§11.5).
+
+    if raw_token is not None and email_de_gui is not None:
+        await _gui_email_xac_thuc(email_de_gui, raw_token)
+
+    return _PHAN_HOI_RESEND
+
+
+@router.post(
+    "/verify-email",
+    status_code=status.HTTP_200_OK,
+    response_model=VerifyEmailResponse,
+    responses={400: {"model": ErrorEnvelope, "description": "token khong ton tai (TOKEN_INVALID)"}},
+)
+async def verify_email(body: VerifyEmailRequest) -> VerifyEmailResponse:
+    """Bấm link verify (UC-01). Idempotent: bấm lần hai vẫn `verified`, không lỗi."""
+    async with session_scope() as session:
+        outcome = await EmailTokenRepository(session).consume(
+            raw_token=body.token, purpose=EmailTokenPurpose.VERIFY
+        )
+
+        if outcome.result is ConsumeResult.NOT_FOUND:
+            raise ApiError(
+                status.HTTP_400_BAD_REQUEST,
+                ApiErrorCode.TOKEN_INVALID,
+                "token khong hop le",
+            )
+        if outcome.result is ConsumeResult.EXPIRED:
+            return VerifyEmailResponse(status="expired")
+
+        if outcome.result is ConsumeResult.OK:
+            uid: UUID | None = outcome.user_id
+            if uid is None:  # bất biến của EmailTokenRepository.consume — không nên xảy ra
+                raise ApiError(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    ApiErrorCode.INTERNAL_ERROR,
+                    "loi noi bo, xem log cua server",
+                )
+            await UserRepository(session).mark_email_verified(uid)
+        # ConsumeResult.ALREADY_USED: không có gì để đổi thêm — idempotent.
+
+        await session.commit()
+
+    return VerifyEmailResponse(status="verified")

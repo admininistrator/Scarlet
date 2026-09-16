@@ -90,6 +90,13 @@ class ApiErrorCode(StrEnum):
     #: LÝ DO cụ thể ngoài "quá phổ biến", tránh dạy kẻ tấn công cách né).
     PASSWORD_TOO_WEAK = "PASSWORD_TOO_WEAK"
 
+    # ── email token (§11.5, T-2.2) ──
+    #: `POST /auth/verify-email` với một token chưa từng tồn tại (không khớp
+    #: `token_hash` nào) hoặc đúng hash nhưng sai `purpose`. KHÔNG dùng cho
+    #: token hết hạn (đó là `200 {"status":"expired"}`, xem DoD T-2.2) hay
+    #: token đã dùng (đó là idempotent-success, cùng lý lẽ UC-01).
+    TOKEN_INVALID = "TOKEN_INVALID"
+
     # ── chat (§18.2) ──
     #: `Last-Event-ID` / `?cursor=` không phải một Redis Stream ID.
     CURSOR_INVALID = "CURSOR_INVALID"

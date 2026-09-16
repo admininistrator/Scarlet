@@ -1,0 +1,9 @@
+Chào bạn,
+
+Vui lòng xác thực địa chỉ email cho tài khoản Scarlet bằng cách mở liên kết dưới đây:
+
+{{ verify_url }}
+
+Liên kết có hiệu lực trong {{ ttl_minutes }} phút. Nếu bạn không yêu cầu đăng ký tài khoản này, hãy bỏ qua email này.
+
+-- Scarlet

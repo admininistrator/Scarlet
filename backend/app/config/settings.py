@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: SecretStr = SecretStr("")
     SMTP_TLS: bool = False
     MAIL_FROM: str = "Scarlet <no-reply@scarlet.local>"
+    #: Trần thời gian cho MỘT lần gọi `smtplib.SMTP(...)` (connect + login +
+    #: send), chạy trong `asyncio.to_thread` (T-2.2, `core/mailer.py`). Là một
+    #: *giới hạn* nên nó ở đây chứ không phải hằng trong `mailer.py` (A3, §19.2
+    #: L4) — cùng họ với `FETCH_TIMEOUT_S`/`SANDBOX_TIMEOUT_S`.
+    SMTP_TIMEOUT_S: int = Field(default=10, gt=0)
 
     # ═══ Đăng ký & bảo mật ═══
     REGISTRATION_MODE: Literal["open", "approval", "invite"] = "approval"
