@@ -1,8 +1,9 @@
-"""Bốn endpoint hội thoại của §18.2 — trước B-93 không task nào nhận chúng.
+"""Năm endpoint hội thoại của §18.2 — bốn cái đầu ra đời ở B-93, `PATCH` ở T-1.13.
 
     GET    /api/v1/conversations          sidebar, phân trang bằng con trỏ
     POST   /api/v1/conversations          tạo rỗng
     GET    /api/v1/conversations/{id}     metadata + ĐƯỜNG ĐI hiện tại
+    PATCH  /api/v1/conversations/{id}     tiêu đề · model · ghim · CHUYỂN NHÁNH
     DELETE /api/v1/conversations/{id}     xoá mềm
 
 KH tham chiếu: §8.2, §8.3, §17.4, §18.2, §20 · CLAUDE.md A2, A3 · B-93, NQ-31.
@@ -15,8 +16,13 @@ tới T-1.8 vẫn **không có cách nào tạo một hội thoại qua HTTP** �
 lại màn hình sau khi đóng tab, `GET /conversations` cho sidebar. Repository đã
 có đủ bốn hàm từ T-1.1, nên phần việc ở đây là router + schema.
 
-**`PATCH /conversations/{id}` KHÔNG nằm ở đây** — nó thuộc T-1.13, cùng lượt
-với `active_leaf_id` và điều hướng nhánh. Thêm nó bây giờ là lấn sang task khác.
+**`PATCH /conversations/{id}` tới sau, ở T-1.13** — cùng lượt với
+`active_leaf_id` và điều hướng nhánh, đúng như NQ-31 đã giao. Nó dựng đủ **bốn**
+trường mà §18.2 liệt (tiêu đề, model mặc định, ghim, `active_leaf_id`) chứ
+không chỉ trường cuối: `tasks.md` chỉ nêu tên `active_leaf_id` vì đó là phần
+thuộc về chủ đề của T-1.13, nhưng ba trường kia không có task nào khác nhận, và
+để endpoint ra đời thiếu một nửa nghĩa là sẽ có người sửa lại đúng file này lần
+nữa mà không có ai sở hữu lần sửa đó. Xem B-111.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  BA LUẬT                                                                 │
@@ -59,8 +65,13 @@ from app.config import catalog
 from app.config.settings import settings
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
-from app.db.models import Conversation, MessageRole, MessageStatus
-from app.db.repositories import ConversationRepository, MessageRepository
+from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.db.repositories import (
+    ConversationRepository,
+    MessageNotInConversationError,
+    MessageRepository,
+)
+from app.db.repositories.conversations import CO_THE_SUA
 from app.db.repositories.messages import PathNode
 from app.db.session import session_scope
 
@@ -81,6 +92,31 @@ class TaoHoiThoaiRequest(BaseModel):
     #: là quả mìn hẹn giờ mà người dùng chỉ thấy khi đã gõ xong câu hỏi.
     default_model: str | None = None
     system_prompt_override: str | None = None
+
+
+class SuaHoiThoaiRequest(BaseModel):
+    """Body của `PATCH /conversations/{id}` — bốn trường của §18.2.
+
+    Cả bốn đều tuỳ chọn, và **vắng mặt khác `null`**: handler đọc
+    `model_fields_set` chứ không so `is None`, đúng luật mà `parent_id` của
+    `POST .../messages` đã đặt ra (C14). Không có trường nào gộp hai nghĩa vào
+    một giá trị.
+
+    `system_prompt_override` **không** có mặt dù `POST /conversations` nhận nó:
+    §18.2 liệt đúng bốn thứ cho `PATCH` ("Đổi tiêu đề, model mặc định, ghim,
+    `active_leaf_id`"), và allowlist `CO_THE_SUA` của repository là bản thứ
+    hai của cùng danh sách đó — hai chỗ phải cùng nói một chuyện.
+    """
+
+    title: str | None = Field(default=None, max_length=200)
+    default_model: str | None = None
+    #: `null` không có nghĩa (cột `NOT NULL`) → handler trả `400`. Khai
+    #: `bool | None` chứ không `bool` để phân biệt được "vắng" với "gửi null":
+    #: `bool` sẽ biến `pinned: null` thành `422` của pydantic, một câu trả lời
+    #: đúng nhưng nói sai chuyện.
+    pinned: bool | None = None
+    #: §8.2 — chuyển nhánh. `null` = bỏ con trỏ, hội thoại hiện lại như rỗng.
+    active_leaf_id: uuid.UUID | None = None
 
 
 class HoiThoaiRa(BaseModel):
@@ -107,6 +143,12 @@ class MessageTrenDuongDi(BaseModel):
     Không có `raw_response`, `tool_calls`, `prompt_tokens`, `heartbeat_at`:
     chúng là dữ liệu vận hành chứ không phải thứ màn chat cần, và thêm vào đây
     là mở một đường rò dữ liệu mà không ai xin.
+
+    **`messages.py` dùng lại lớp này cho `GET /messages/{id}/siblings`** (T-1.13)
+    thay vì chép danh sách trường sang file thứ hai. Một anh em *là* một node
+    có thể trở thành đường đi ngay khi người dùng bấm `‹ 2/3 ›`, nên hai chỗ
+    phải trả về đúng cùng một hình dạng — và quan trọng hơn, luật "ba cột này
+    không được ra khỏi server" ở trên chỉ có một chỗ để đúng.
     """
 
     id: uuid.UUID
@@ -124,14 +166,29 @@ class MessageTrenDuongDi(BaseModel):
 
     @classmethod
     def from_path_node(cls, node: PathNode) -> MessageTrenDuongDi:
+        """Một node của `get_path`, hai con số anh em do SQL tính sẵn (§8.3)."""
+        return cls.from_message(
+            node.message,
+            sibling_index=node.sibling_index,
+            sibling_count=node.sibling_count,
+        )
+
+    @classmethod
+    def from_message(
+        cls, m: Message, *, sibling_index: int, sibling_count: int
+    ) -> MessageTrenDuongDi:
         """Liệt từng trường bằng tay, **không** `from_attributes`.
 
         `Message` có 20 cột và ba trong số đó (`raw_response`, `tool_calls`,
         `heartbeat_at`) không được ra khỏi server. Một model đọc thuộc tính tự
         động sẽ lặng lẽ nhận thêm cột mới ở migration sau; danh sách viết tay
         thì không đổi cho tới khi có người cố ý sửa nó.
+
+        Hai con số anh em là tham số chứ không đọc từ `m`: chúng **không phải
+        thuộc tính của message** (xem `PathNode`) — `get_path` tính chúng bằng
+        LATERAL, còn `GET /messages/{id}/siblings` tính bằng vị trí trong danh
+        sách đã sắp. Cùng kết quả, hai đường đi.
         """
-        m = node.message
         return cls(
             id=m.id,
             parent_id=m.parent_id,
@@ -143,8 +200,8 @@ class MessageTrenDuongDi(BaseModel):
             finish_reason=m.finish_reason,
             error_code=m.error_code,
             created_at=m.created_at,
-            sibling_index=node.sibling_index,
-            sibling_count=node.sibling_count,
+            sibling_index=sibling_index,
+            sibling_count=sibling_count,
         )
 
 
@@ -265,6 +322,101 @@ async def get_conversation(
             )
         path = await _duong_di(session, conversation, user_id=user_id)
         meta = HoiThoaiRa.model_validate(conversation)
+
+    return HoiThoaiChiTiet(**meta.model_dump(), path=path)
+
+
+@router.patch(
+    "/conversations/{conversation_id}",
+    response_model=HoiThoaiChiTiet,
+    responses={
+        400: {"model": ErrorEnvelope, "description": "default_model la, hoac pinned=null"},
+        404: {"model": ErrorEnvelope, "description": "Khong thay hoi thoai, hoac leaf la"},
+    },
+)
+async def update_conversation(
+    conversation_id: uuid.UUID,
+    body: SuaHoiThoaiRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> HoiThoaiChiTiet:
+    """Đổi tiêu đề, model mặc định, ghim, và **con trỏ nhánh** (§18.2, §8.2).
+
+    Đây là đường CHUYỂN NHÁNH của T-1.13: `‹ 2/3 ›` trên màn hình chỉ là một
+    `PATCH` đặt `active_leaf_id` sang id của anh em được chọn (lấy từ `GET
+    /messages/{id}/siblings`). **Không xoá gì, không sửa message nào** — §8.2
+    ghi đúng một dòng cho thao tác này: *"Chỉ đổi `active_leaf_id`"*.
+
+    Trả về **cùng hình dạng với `GET /conversations/{id}`**, tức kèm cả đường
+    đi mới, vì đường đi chính là thứ vừa đổi: bắt FE gọi thêm một `GET` ngay
+    sau mỗi lần bấm mũi tên là hai vòng mạng cho một thao tác mà người dùng
+    mong thấy đổi ngay.
+
+    **Vắng mặt khác `null`** (cùng luật với `parent_id` của `POST
+    .../messages`, đọc bằng `model_fields_set`): không gửi `title` là "đừng
+    đụng tới tiêu đề", gửi `title: null` là "xoá tiêu đề". `default_model:
+    null` = quay về model `default` của catalog; `active_leaf_id: null` = bỏ
+    con trỏ, hội thoại hiện lại như lúc rỗng. `pinned: null` thì **không** có
+    nghĩa nào (cột `NOT NULL`) nên nó là `400` chứ không phải một lần bỏ qua
+    im lặng.
+
+    Body rỗng `{}` là hợp lệ và không đổi gì — nó trả về trạng thái hiện tại,
+    đúng như `GET`. Một `400 "phải gửi ít nhất một trường"` chỉ bắt FE viết
+    thêm một nhánh `if` mà không ngăn được sai sót nào.
+    """
+    thay_doi = {ten: getattr(body, ten) for ten in body.model_fields_set if ten in CO_THE_SUA}
+    if "pinned" in thay_doi and thay_doi["pinned"] is None:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ApiErrorCode.BAD_REQUEST,
+            "pinned khong nhan null; gui true hoac false",
+        )
+    model_moi: str | None = thay_doi.get("default_model")
+    if model_moi is not None and catalog.get_model(model_moi) is None:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ApiErrorCode.MODEL_UNKNOWN,
+            f"model khong co trong catalog hoac da tat: {model_moi}",
+            details={"model_id": model_moi},
+        )
+
+    async with session_scope() as session:
+        conversations = ConversationRepository(session)
+        conversation = await conversations.get_conversation(conversation_id, user_id=user_id)
+        if conversation is None:
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND,
+                ApiErrorCode.CONVERSATION_NOT_FOUND,
+                "khong tim thay hoi thoai",
+            )
+
+        if thay_doi:
+            await conversations.update_conversation(
+                conversation_id, user_id=user_id, thay_doi=thay_doi
+            )
+        if "active_leaf_id" in body.model_fields_set:
+            try:
+                await conversations.set_active_leaf(
+                    conversation_id, user_id=user_id, message_id=body.active_leaf_id
+                )
+            except MessageNotInConversationError as loi:
+                # §20: câu trả lời không nói message ấy có tồn tại ở hội thoại
+                # khác hay không. Trỏ con trỏ nhánh sang cây của hội thoại khác
+                # sẽ làm `get_path` dựng ra đường đi lẫn hai hội thoại (C11).
+                raise ApiError(
+                    status.HTTP_404_NOT_FOUND,
+                    ApiErrorCode.LEAF_NOT_FOUND,
+                    "active_leaf_id khong nam trong hoi thoai nay",
+                ) from loi
+
+        # Hai câu UPDATE ở trên đi THẲNG xuống DB (`synchronize_session=False`),
+        # nên object `conversation` vẫn mang giá trị cũ và identity map sẽ trả
+        # lại đúng nó nếu `get_conversation` được gọi lần nữa. `refresh` là
+        # cách duy nhất đọc được thứ DB thực sự đang chứa — thiếu nó thì
+        # response của mọi `PATCH` là ảnh chụp TRƯỚC khi sửa.
+        await session.refresh(conversation)
+        path = await _duong_di(session, conversation, user_id=user_id)
+        meta = HoiThoaiRa.model_validate(conversation)
+        await session.commit()
 
     return HoiThoaiChiTiet(**meta.model_dump(), path=path)
 

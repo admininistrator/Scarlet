@@ -23,14 +23,26 @@ dùng session mới.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Conversation, Message
 from app.db.repositories.errors import MessageNotInConversationError
+
+#: Cột mà `PATCH /conversations/{id}` (§18.2) được phép đổi — allowlist, không
+#: phải blocklist. Thêm một cột vào bảng `conversations` ở migration sau sẽ
+#: **không** tự động mở nó ra cho HTTP; phải có người cố ý viết tên nó vào đây.
+#:
+#: `active_leaf_id` **cố ý không** nằm trong danh sách này dù §18.2 liệt nó
+#: cùng chỗ: đổi con trỏ nhánh phải đi qua `set_active_leaf`, nơi có phép kiểm
+#: "message này có thuộc đúng hội thoại không". Cho nó vào đây là mở đường trỏ
+#: `active_leaf_id` sang cây của hội thoại khác — `get_path` khi đó dựng ra một
+#: đường đi lẫn hai hội thoại và mọi lượt chat sau gửi nhầm ngữ cảnh lên model.
+CO_THE_SUA = frozenset({"title", "default_model", "pinned"})
 
 
 class ConversationRepository:
@@ -100,6 +112,47 @@ class ConversationRepository:
         if updated_before is not None:
             stmt = stmt.where(Conversation.updated_at < updated_before)
         return (await self._session.execute(stmt)).scalars().all()
+
+    async def update_conversation(
+        self,
+        conversation_id: uuid.UUID,
+        *,
+        user_id: uuid.UUID,
+        thay_doi: Mapping[str, Any],
+    ) -> bool:
+        """Đổi metadata của một hội thoại (§18.2). Trả `False` nếu không thấy được.
+
+        Nhận một `Mapping` chứ không phải bốn tham số tuỳ chọn vì `PATCH` phải
+        phân biệt **vắng mặt** với **`null`**: `title=None` là "xoá tiêu đề",
+        không phải "đừng đụng tới tiêu đề". Router đã đọc `model_fields_set`
+        để biết người gọi gửi những gì, nên nó truyền xuống đúng những khoá đó.
+
+        Khoá ngoài `CO_THE_SUA` → `ValueError`, không phải bỏ qua im lặng: gọi
+        nhầm tên cột là lỗi lập trình ở tầng trên, và một `PATCH` lặng lẽ không
+        đổi gì là thứ chỉ phát hiện được khi có người ngồi soi DB.
+
+        Hệ quả của luật 3 áp ở đây rõ nhất: câu UPDATE đi thẳng xuống DB, nên
+        object `Conversation` caller đang giữ **vẫn mang giá trị cũ**. Caller
+        muốn đọc lại phải `refresh()` hoặc dùng session khác.
+        """
+        la = set(thay_doi) - CO_THE_SUA
+        if la:
+            raise ValueError(f"cot khong duoc sua qua update_conversation: {sorted(la)}")
+        if not thay_doi:
+            raise ValueError("update_conversation goi voi thay_doi rong")
+
+        stmt = (
+            update(Conversation)
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+            )
+            .values(**thay_doi)
+            .returning(Conversation.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None
 
     async def soft_delete_conversation(
         self, conversation_id: uuid.UUID, *, user_id: uuid.UUID

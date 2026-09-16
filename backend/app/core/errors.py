@@ -105,6 +105,25 @@ class ApiErrorCode(StrEnum):
     #: và người dùng đang nhìn chữ vẫn chảy nên câu trả lời phải nói đúng việc.
     CANCEL_FAILED = "CANCEL_FAILED"
 
+    # ── nhánh (§8.2, T-1.13) ──
+    #: Thao tác nhánh gọi nhầm `role`: `retry` chỉ chạy trên message
+    #: `assistant`, `PATCH /messages/{id}` chỉ chạy trên message `user` (§18.2).
+    #: `details` mang `{"role", "expected"}` để FE nói được câu đúng thay vì
+    #: "yêu cầu không hợp lệ". Một mã cho cả hai chiều vì đây là **cùng** một
+    #: chuyện — "thao tác này không áp dụng cho loại message kia" — và hai mã
+    #: cho một nghĩa là đúng thứ docstring của bảng này cấm.
+    MESSAGE_ROLE_MISMATCH = "MESSAGE_ROLE_MISMATCH"
+    #: `retry` trên một message còn `queued`/`streaming`. 409 chứ không 400:
+    #: request **sẽ** hợp lệ sau khi lượt đang chạy khép lại (hoặc sau khi bấm
+    #: Dừng, §7.5), nên FE có một hành động cụ thể để đề nghị. Để nó đi qua sẽ
+    #: mở hai lượt sinh cho cùng một `parent_id` và trả tiền hai lần.
+    GENERATION_IN_PROGRESS = "GENERATION_IN_PROGRESS"
+    #: `active_leaf_id` gửi lên `PATCH /conversations/{id}` không nằm trong hội
+    #: thoại đó. Mã riêng chứ không dùng chung `PARENT_NOT_FOUND`: hai trường
+    #: khác nhau của hai request khác nhau, và §20 vẫn được giữ — câu trả lời
+    #: không nói message ấy có thật ở đâu khác hay không.
+    LEAF_NOT_FOUND = "LEAF_NOT_FOUND"
+
 
 #: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ
 #: là lưới đỡ: mọi chỗ raise trong `app/` nên dùng `ApiError` với một mã nói
