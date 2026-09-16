@@ -654,20 +654,39 @@ def in_bang(ket_qua: list[KetQuaModel], bo_qua: set[str]) -> None:
         print(f"  · {cau}")
 
 
-def ghi_json(ket_qua: list[KetQuaModel], bo_qua: set[str], duong_dan: Path) -> None:
+def ghi_json(
+    ket_qua: list[KetQuaModel], bo_qua: set[str], duong_dan: Path, *, ghi_de: bool = False
+) -> None:
     """DoD: `evals/results/ttft-{date}.json`.
 
     Ghi cả **mẫu thô** chứ không chỉ ba con số: p95 của 30 mẫu không cho biết
     phân bố có hai đỉnh hay không, mà "đôi khi 0.4 s, đôi khi 22 s" và "luôn
     luôn 11 s" là hai sự cố khác hẳn nhau. `∞` không phải JSON hợp lệ nên lượt
     hỏng ghi `null` — trường `ly_do_hong` của chính lượt đó nói vì sao.
+
+    **Không bao giờ huỷ một phép đo đã có (B-106, B-119).** Tên do DoD T-1.12
+    chốt là `ttft-{date}.json`, tức mọi lần chạy trong cùng một ngày trỏ vào
+    **một** chỗ. Đã mất dữ liệu vì điều đó **hai** lần: ba lần `--luot 1` thử
+    cờ đè mất bản 30 lượt khi viết T-1.12, rồi bản 30 lượt của chính T-1.12 bị
+    một lần rà phase `--luot 8` đè mất. Cả hai lần script *có* in `ĐÈ LÊN` —
+    nhưng chỉ **sau** khi đã đè, nên dòng đó không cứu được gì.
+
+    Luật nay là:
+
+    - file chưa có     → ghi đúng tên của DoD (hợp đồng còn nguyên cho lần đầu)
+    - file đã có       → ghi sang `ttft-{date}-{hhmm}.json`, **không** đụng bản cũ
+    - có ``--ghi-de``  → đè bản cũ, và nói rõ là đang đè
+
+    Chọn "ghi sang tên khác" chứ không phải "từ chối ghi": lượt chạy đã tốn
+    tiền thật và tính bằng chục phút, nên vứt kết quả đi để bảo vệ kết quả cũ
+    là đổi một mất mát lấy một mất mát khác. Ngả này không mất bên nào.
     """
     duong_dan.parent.mkdir(parents=True, exist_ok=True)
-    # Tên file do DoD T-1.12 chốt là `ttft-{date}.json`, tức MỌI lần chạy trong
-    # cùng một ngày ghi đè lên nhau — kể cả một lần `--luot 1` chạy để thử cờ
-    # đè mất một phép đo 30 lượt. Đã xảy ra thật khi viết task này. Không đổi
-    # tên (đó là hợp đồng), nhưng nói ra trước khi đè: xem Backlog.
     da_co = duong_dan.is_file()
+    if da_co and not ghi_de:
+        duong_dan = duong_dan.with_name(
+            f"{duong_dan.stem}-{datetime.now().strftime('%H%M')}{duong_dan.suffix}"
+        )
 
     def so(v: float) -> float | None:
         # `math.isfinite` chứ không phải `math.isinf`: `nan` cũng không phải
@@ -711,8 +730,15 @@ def ghi_json(ket_qua: list[KetQuaModel], bo_qua: set[str], duong_dan: Path) -> N
         ],
     }
     duong_dan.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    viec = "ĐÈ LÊN" if da_co else "đã ghi"
-    print(f"\n{viec} {duong_dan.relative_to(GOC_REPO)}")
+    if da_co and ghi_de:
+        print(f"\nĐÈ LÊN {duong_dan.relative_to(GOC_REPO)}  (--ghi-de)")
+    elif da_co:
+        print(
+            f"\nđã ghi {duong_dan.relative_to(GOC_REPO)}"
+            f"\n  (hôm nay đã có một phép đo rồi nên KHÔNG đè lên nó; `--ghi-de` nếu muốn đè)"
+        )
+    else:
+        print(f"\nđã ghi {duong_dan.relative_to(GOC_REPO)}")
 
 
 def _mot_json(mot: MotLuot, so: Callable[[float], float | None]) -> dict[str, object]:
@@ -833,7 +859,12 @@ async def chay(args: argparse.Namespace) -> int:
         await pool.close()
 
     in_bang(ket_qua, bo_qua)
-    ghi_json(ket_qua, bo_qua, THU_MUC_KET_QUA / f"ttft-{date.today().isoformat()}.json")
+    ghi_json(
+        ket_qua,
+        bo_qua,
+        THU_MUC_KET_QUA / f"ttft-{date.today().isoformat()}.json",
+        ghi_de=args.ghi_de,
+    )
     return in_phan_quyet(ket_qua, bo_qua)
 
 
@@ -844,6 +875,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--model", action="append", default=[], help="chỉ đo model này (lặp lại được)"
+    )
+    parser.add_argument(
+        "--ghi-de",
+        action="store_true",
+        help="đè lên kết quả cùng ngày. Mặc định KHÔNG đè mà ghi sang "
+        "ttft-{date}-{hhmm}.json (B-106)",
     )
     parser.add_argument(
         "--bo-qua",
