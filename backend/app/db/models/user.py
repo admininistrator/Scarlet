@@ -58,14 +58,18 @@ class User(Base):
         nullable=False,
         server_default=text("'user'"),
     )
-    #: DDL: `REFERENCES tiers(name) DEFAULT 'free'`. Không khai `ForeignKey`
-    #: ở đây vì bảng `tiers` chưa có model — cùng lý do với `Conversation.user_id`
-    #: (xem ghi chú ở đó): một FK trỏ vào bảng không nằm trong `Base.metadata`
-    #: sẽ nổ ngay khi có ai đó compile DDL từ metadata. Ràng buộc thật vẫn do
-    #: Postgres giữ, và `server_default` dưới đây là cách "tier mặc định" của
-    #: T-2.1 vào đời mà không cần một chuỗi `"free"` nằm trong `.py` (A3) —
-    #: `create_pending_user` không truyền `tier_name`, Postgres tự điền.
-    tier_name: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
+    #: DDL: `REFERENCES tiers(name) DEFAULT 'free'`. T-2.1 cố ý **không** khai
+    #: `ForeignKey` ở đây vì `tiers` chưa có model, và một FK trỏ vào bảng
+    #: không nằm trong `Base.metadata` sẽ nổ ngay khi có ai đó compile DDL từ
+    #: metadata. T-2.10 dựng `db/models/tier.py` nên lý do đó hết, và khai FK
+    #: thật là cách duy nhất để `TierRepository.get_for_user` JOIN được bằng
+    #: quan hệ mà Phụ lục A đã ghi chứ bằng một điều kiện chép tay.
+    #: `server_default` vẫn là cách "tier mặc định" vào đời mà không cần chuỗi
+    #: `"free"` nằm trong `.py` (A3) — `create_pending_user` không truyền
+    #: `tier_name`, Postgres tự điền.
+    tier_name: Mapped[str] = mapped_column(
+        Text, ForeignKey("tiers.name"), nullable=False, server_default=text("'free'")
+    )
     limit_override_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     email_verified_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     approved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))

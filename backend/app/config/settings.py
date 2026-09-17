@@ -265,6 +265,11 @@ class Settings(BaseSettings):
     QUOTA_WINDOW_LONG_S: int = Field(default=604800, gt=0)
     DAILY_ALERT_USD: Decimal = Field(default=Decimal("2.00"), ge=0)
     MONTHLY_BUDGET_USD: Decimal = Field(default=Decimal("30.00"), ge=0)
+    #: TTL của cache hạn mức trong Redis (§10.4, T-2.10). 60 s là con số §10.4
+    #: viết ra, và nó là **AC của UC-07**: admin đổi `limit_5h_usd` thì hiệu lực
+    #: phải tới trong ngần ấy giây mà không restart gì. Đây là một *giới hạn*
+    #: nên nó ở đây chứ không phải hằng trong `app/quota/tiers.py` (A3, L4).
+    TIER_CACHE_TTL_S: int = Field(default=60, gt=0)
 
     # ═══ Provider layer (§9.1) ═══
     #: Timeout HTTP của chặng backend → LiteLLM. Phải ≥ `request_timeout` trong
