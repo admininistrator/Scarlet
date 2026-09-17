@@ -298,6 +298,45 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
+    def _khong_nhan_gia_tri_la_chu_thich(self) -> Settings:
+        """Giá trị bắt đầu bằng `#` là một chú thích bị nuốt — KHÔNG boot (A4).
+
+        B-44/B-118: `KEY=<rỗng>   # ghi chú` trong `.env` cho ra giá trị là
+        **nguyên câu ghi chú**, vì docker compose chỉ bóc `#` khi phía trước nó
+        đã có giá trị. `tests/test_env_file_format.py` canh hai file `.env*` của
+        repo này; lớp ở đây canh mọi đường còn lại — `environment:` gõ tay trong
+        compose, một `export` trong shell, `.env` của máy khác.
+
+        **Vì sao cần một lớp riêng dù đã có `_long_enough`/`_not_blank`.** Câu
+        chú thích của `MASTER_ENCRYPTION_KEY` dài 37 ký tự, tức **qua** được
+        ngưỡng `MIN_SECRET_CHARS = 32` — không có phép kiểm này thì T-2.14 sẽ
+        mã hoá khoá BYOK của người dùng bằng một dòng ghi chú, và mọi thứ sẽ
+        chạy đúng cho tới ngày ai đó sửa chú thích.
+
+        **Vì sao `RuntimeError` chứ không `ValueError`.** pydantic bọc
+        `ValueError` thành `ValidationError`, mà `ValidationError` in kèm
+        `input_value=` — B-18 đã ghi lại đúng cái bẫy đó. `RuntimeError` đi
+        thẳng ra ngoài, nên thông báo chỉ chứa **tên biến**, không chứa giá trị.
+
+        Đánh đổi đã biết: một giá trị hợp lệ bắt đầu bằng `#` (mật khẩu chẳng
+        hạn) sẽ bị từ chối. Không field nào hôm nay có hình dạng đó, và câu trả
+        lời cho ca ấy là đổi giá trị — rẻ hơn nhiều so với một cấu hình rác chạy
+        im lặng.
+        """
+        for ten in type(self).model_fields:
+            gia_tri = getattr(self, ten)
+            if isinstance(gia_tri, SecretStr):
+                gia_tri = gia_tri.get_secret_value()
+            if isinstance(gia_tri, str) and gia_tri.lstrip().startswith("#"):
+                raise RuntimeError(
+                    f"{ten} đang mang giá trị là một CHÚ THÍCH, không phải giá trị thật "
+                    f"(B-44/B-118). Trong `.env`, chú thích phải nằm ở dòng riêng phía "
+                    f"trên phép gán — `{ten}=` rồi khoảng trắng rồi `# …` cho ra giá trị "
+                    f"là chính câu chú thích đó."
+                )
+        return self
+
+    @model_validator(mode="after")
     def _warn_on_boot(self) -> Settings:
         if not self.TURNSTILE_SECRET.get_secret_value().strip():
             logger.warning(
