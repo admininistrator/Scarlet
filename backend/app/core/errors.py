@@ -173,6 +173,20 @@ class ApiErrorCode(StrEnum):
     #: FE cần phân biệt "nút Dừng chưa ăn, bấm lại đi" với một lỗi lập trình,
     #: và người dùng đang nhìn chữ vẫn chảy nên câu trả lời phải nói đúng việc.
     CANCEL_FAILED = "CANCEL_FAILED"
+    #: Người này đã có `MAX_CONCURRENT_STREAMS` lượt sinh chưa khép
+    #: (`queued`/`streaming`) và vừa xin mở thêm một lượt nữa — §10.6 hàng
+    #: "Đồng thời", T-2.9, B-85. `429` chứ không `403`: request **sẽ** hợp lệ
+    #: ngay khi một lượt đang chạy khép lại, nên FE có một hành động cụ thể để
+    #: đề nghị (đợi, hoặc bấm Dừng ở một lượt khác).
+    #:
+    #: Mã RIÊNG chứ không dùng chung `RATE_LIMITED`, dù cả hai đều `429`: hai
+    #: câu trả lời khác nhau cho người dùng. `RATE_LIMITED` là "bạn bấm quá
+    #: nhanh, chờ N giây" và kèm `Retry-After` — một con số có thật. Mã này là
+    #: "bạn đang có ba câu trả lời cùng chảy", và nó **không** kèm
+    #: `Retry-After` vì không ai biết model sẽ sinh xong lúc nào; đoán một con
+    #: số ở đây là nói dối bằng một header mà client sẽ tin.
+    #: `details` mang `{"limit", "active"}` để FE nói được câu đúng.
+    TOO_MANY_STREAMS = "TOO_MANY_STREAMS"
 
     # ── idempotency (§11.4, ADR-15, T-2.8) ──
     #: POST vào một route bắt buộc `Idempotency-Key` mà thiếu header đó (A8

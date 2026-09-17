@@ -97,6 +97,7 @@ from app.config.settings import settings
 from app.core.deps import get_current_user_id, require_chat_access
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.queue import GENERATE_JOB_NAME, get_arq_pool
+from app.core.ratelimit import gioi_han_chat, nha_ghe_sinh, nhan_ghe_sinh
 from app.core.redis import get_redis
 from app.db.models import Conversation, Message, MessageRole, MessageStatus
 from app.db.repositories import (
@@ -124,6 +125,20 @@ TEN_ROUTE_STREAM = "stream_message"
 #: đổi tên `create_message` mà quên hằng này là gỡ luật bắt buộc **trong im
 #: lặng**; test `test_ten_route_khop_ham` canh đúng chiều đó.
 TEN_ROUTE_TAO_MESSAGE = "create_message"
+
+#: Hai luật của §10.6 áp cho ba route SINH CHỮ, dựng MỘT lần ở đây rồi gắn ba
+#: chỗ — cùng lối `_idempotency` của `api/v1/__init__.py`.
+#:
+#: Hạn mức theo user (20/phút, nhóm `chat`) là một **dependency**: nó chỉ cần
+#: `user_id` nên nó chạy được trước khi handler ghi dòng nào. Trần đồng thời
+#: thì **không** thể là dependency — nó phải biết `message_id` của lượt sinh,
+#: mà id đó chỉ tồn tại sau `INSERT`; nó sống trong `_mo_luot_sinh`.
+_GIOI_HAN_CHAT = gioi_han_chat()
+
+#: Ba route sinh chữ khai chung khối này. Viết một lần thay vì chép ba lần: hai
+#: luật phải luôn đi cùng nhau, và một route thứ tư quên một trong hai là đúng
+#: kiểu hỏng không ai thấy.
+_ROUTE_SINH_CHU = [Depends(require_chat_access), Depends(_GIOI_HAN_CHAT)]
 
 
 class TaoMessageRequest(BaseModel):
@@ -160,15 +175,19 @@ class TaoMessageResponse(BaseModel):
     "/conversations/{conversation_id}/messages",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=TaoMessageResponse,
-    # §11.1 (T-2.7) — route SINH CHỮ: `active`, hoặc `pending_approval` đã có
-    # BYOK. Xem `app/core/deps.py`; "xem UI" đã do router lo ở `v1/__init__.py`.
-    dependencies=[Depends(require_chat_access)],
+    # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_ROUTE_SINH_CHU`.
+    dependencies=_ROUTE_SINH_CHU,
     responses={
         400: {
             "model": ErrorEnvelope,
             "description": "model_id khong co trong catalog, hoac thieu Idempotency-Key",
         },
         409: {"model": ErrorEnvelope, "description": "Mot request cung khoa dang chay (§11.4)"},
+        429: {
+            "model": ErrorEnvelope,
+            "description": "Qua 20 luot/phut (RATE_LIMITED) hoac da co "
+            "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6",
+        },
         404: {"model": ErrorEnvelope, "description": "Hoi thoai hoac parent_id khong thay"},
         503: {"model": ErrorEnvelope, "description": "Khong day duoc job vao hang doi"},
     },
@@ -274,6 +293,8 @@ async def _mo_luot_sinh(
             này (hoặc vừa bị xoá mềm). Với `POST .../messages` ca này không thể
             xảy ra — cha là message vừa ghi ở dòng trên — nhưng `retry` thì có:
             nó nhận `parent_id` từ một hàng đã tồn tại từ trước.
+        ApiError 429 `TOO_MANY_STREAMS`: người này đã có
+            `MAX_CONCURRENT_STREAMS` lượt sinh chưa khép (§10.6, T-2.9).
         ApiError 503 `ENQUEUE_FAILED`: xem `_day_job`.
     """
     try:
@@ -305,7 +326,25 @@ async def _mo_luot_sinh(
     await conversations.set_active_leaf(conversation_id, user_id=user_id, message_id=assistant.id)
 
     amid = assistant.id
-    await _day_job(amid)
+
+    # §10.6 hàng "Đồng thời" (T-2.9, B-85, NQ-49). Ở **đây** chứ không ở một
+    # dependency vì phép kiểm cần `message_id`, mà id đó chỉ ra đời ở dòng
+    # `create_message` phía trên. Và **trước** `_day_job` chứ không sau: ném từ
+    # đây làm cả transaction của caller rollback, nên một lượt bị từ chối không
+    # để lại hàng `messages` nào — còn từ chối sau khi job đã vào hàng đợi thì
+    # worker vẫn sinh chữ và vẫn tính tiền.
+    await nhan_ghe_sinh(messages, user_id=user_id, message_id=amid)
+
+    try:
+        await _day_job(amid)
+    except BaseException:
+        # Transaction sắp rollback, nên hàng `messages` mang `amid` sẽ không
+        # bao giờ tồn tại — nhả ghế ngay thay vì để phép đối chiếu Postgres
+        # phát hiện nó là rác sau `PHANTOM_GRACE_S`. Bắt `BaseException` vì
+        # `asyncio.CancelledError` (client ngắt giữa chừng) cũng để lại đúng
+        # một cái ghế trỏ vào hư không.
+        await nha_ghe_sinh(user_id=user_id, message_id=amid)
+        raise
     return amid
 
 
@@ -588,13 +627,17 @@ class AnhEmResponse(BaseModel):
     "/messages/{message_id}/retry",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=RetryResponse,
-    # §11.1 (T-2.7) — route SINH CHỮ: `active`, hoặc `pending_approval` đã có
-    # BYOK. Xem `app/core/deps.py`; "xem UI" đã do router lo ở `v1/__init__.py`.
-    dependencies=[Depends(require_chat_access)],
+    # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_ROUTE_SINH_CHU`.
+    dependencies=_ROUTE_SINH_CHU,
     responses={
         400: {"model": ErrorEnvelope, "description": "Khong phai assistant, hoac model_id la"},
         404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
         409: {"model": ErrorEnvelope, "description": "Luot sinh cu con dang chay"},
+        429: {
+            "model": ErrorEnvelope,
+            "description": "Qua 20 luot/phut (RATE_LIMITED) hoac da co "
+            "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6",
+        },
         503: {"model": ErrorEnvelope, "description": "Khong day duoc job vao hang doi"},
     },
 )
@@ -668,12 +711,16 @@ async def retry_message(
     "/messages/{message_id}",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=SuaMessageResponse,
-    # §11.1 (T-2.7) — route SINH CHỮ: `active`, hoặc `pending_approval` đã có
-    # BYOK. Xem `app/core/deps.py`; "xem UI" đã do router lo ở `v1/__init__.py`.
-    dependencies=[Depends(require_chat_access)],
+    # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_ROUTE_SINH_CHU`.
+    dependencies=_ROUTE_SINH_CHU,
     responses={
         400: {"model": ErrorEnvelope, "description": "Khong phai message user"},
         404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
+        429: {
+            "model": ErrorEnvelope,
+            "description": "Qua 20 luot/phut (RATE_LIMITED) hoac da co "
+            "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6",
+        },
         503: {"model": ErrorEnvelope, "description": "Khong day duoc job vao hang doi"},
     },
 )

@@ -145,6 +145,18 @@ class Settings(BaseSettings):
     #: của người khác (đắt, đếm theo giờ), bên kia chỉ chặn gọi dồn dập (rẻ,
     #: đếm theo phút) — gộp lại thì siết cái này sẽ siết luôn cái kia.
     RATE_LIMIT_AUTH_IP_PER_MIN: int = Field(default=5, gt=0)
+    #: Hạn mức **theo user** của nhóm route `chat` (§10.6 hàng 2: "chat:
+    #: 20/phút"). Vừa là sức chứa của xô, vừa là tốc độ nạp lại: xô đầy 20
+    #: token và nạp lại đúng 20 token mỗi phút, nên nó cho phép bùng phát 20
+    #: lượt rồi hồi lại đều — đó là khác biệt giữa token bucket và cửa sổ cố
+    #: định của lớp theo IP ngay trên. Cửa sổ (60 s) là quy đổi đơn vị của
+    #: chính tên biến nên nó nằm trong `app/core/ratelimit.py`; con số 20 là
+    #: một *giới hạn* nên nó ở đây (A3, §19.2 L4).
+    #:
+    #: Nhóm `auth` của cùng hàng đó đã có mặt ở `RATE_LIMIT_AUTH_IP_PER_MIN`
+    #: (trục IP, NQ-43 — route `/auth/*` không có user để đếm theo); nhóm
+    #: `upload` chưa có endpoint nào tới Phase 4, nên chưa có biến (B-148).
+    RATE_LIMIT_CHAT_PER_MIN: int = Field(default=20, gt=0)
     #: Ngưỡng điểm zxcvbn (0–4, xem `app/core/security.py`) để coi một mật
     #: khẩu là "quá phổ biến" (§11.6 cho phép `zxcvbn` hoặc danh sách 10k
     #: top; chọn zxcvbn vì nó mang sẵn tập tần suất mật khẩu rò rỉ thật và

@@ -1461,6 +1461,70 @@ async def test_resend_verification_qua_han_muc_moi_gio_tra_429(client: AsyncClie
 
 
 @pytest.mark.usefixtures("_db_cua_test")
+async def test_dang_ky_qua_han_muc_moi_gio_tra_429(
+    client: AsyncClient,
+    mailer_gia: _MailerGia,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """§10.6 ghi "đăng ký: 3/giờ" theo IP — B-133, đóng ở T-2.9.
+
+    Mỗi lượt gọi gửi một lá thư tới một hộp thư người gọi tự nhập **và** băm
+    Argon2id 192 MiB (T-2.1), nên endpoint này vừa là đường gửi thư hàng loạt
+    vừa là đường làm cạn RAM của `api` rẻ nhất.
+
+    Turnstile không thay được lớp này: `TURNSTILE_SECRET` rỗng ở dev thì captcha
+    bị bỏ qua hoàn toàn (§11.6), còn khi bật thì nó chặn trình duyệt chứ không
+    chặn một script gọi thẳng API.
+    """
+    for _ in range(settings.RATE_LIMIT_EMAIL_IP_PER_HOUR):
+        resp = await client.post(
+            DUONG_DAN,
+            json={"email": f"{uuid.uuid4().hex}@scarlet.example", "password": _MAT_KHAU_TEST},
+        )
+        assert resp.status_code == 200
+
+    email_thu_tu = f"{uuid.uuid4().hex}@scarlet.example"
+    so_thu_da_gui = len(mailer_gia.calls)
+
+    resp = await client.post(DUONG_DAN, json={"email": email_thu_tu, "password": _MAT_KHAU_TEST})
+
+    assert resp.status_code == 429
+    assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
+    assert int(resp.headers["Retry-After"]) > 0
+    assert len(mailer_gia.calls) == so_thu_da_gui, "bị chặn thì không gửi thư nào"
+    assert await _dem_user_theo_email(session_factory, email_thu_tu) == 0, (
+        "dependency chạy TRƯỚC handler nên không hàng `users` nào được ghi"
+    )
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dang_ky_va_resend_dem_bang_HAI_bo_dem_rieng(
+    client: AsyncClient, mailer_gia: _MailerGia
+) -> None:
+    """Khoá mang tên route (§10.6 cho mỗi route một hạn mức riêng): người vừa
+    dùng hết hạn mức đăng ký vẫn phải xin lại được thư xác thực."""
+    for _ in range(settings.RATE_LIMIT_EMAIL_IP_PER_HOUR):
+        assert (
+            await client.post(
+                DUONG_DAN,
+                json={
+                    "email": f"{uuid.uuid4().hex}@scarlet.example",
+                    "password": _MAT_KHAU_TEST,
+                },
+            )
+        ).status_code == 200
+    assert (
+        await client.post(
+            DUONG_DAN, json={"email": "x@scarlet.example", "password": _MAT_KHAU_TEST}
+        )
+    ).status_code == 429
+
+    resp = await client.post(DUONG_DAN_RESEND, json={"email": "x@scarlet.example"})
+
+    assert resp.status_code == 200
+
+
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_logout_qua_han_muc_moi_phut_tra_429(client: AsyncClient) -> None:
     """Logout cố ý không đòi xác thực (NQ-42) nên bất kỳ ai cũng tạo được một
     lượt ghi Redis + một `UPDATE` — bề mặt duy nhất của `/auth/*` chưa đếm sau

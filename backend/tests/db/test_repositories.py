@@ -602,3 +602,131 @@ async def test_finish_generation_ghi_ca_duong_loi(
         assert lai.status is MessageStatus.FAILED
         assert lai.content == "mot nua cau tra loi"
         assert lai.error_code == "UPSTREAM_ERROR"
+
+
+# ───────── generation_states — trần đồng thời §10.6 (T-2.9, B-85) ─────────
+#
+# Đây là **đường nhả ghế** của trần `MAX_CONCURRENT_STREAMS`: Redis giữ danh
+# sách ghế bận, còn câu "ghế này còn bận thật không" thì chỉ Postgres trả lời
+# được (§10.3). Sai ở đây hỏng theo hai chiều, và cả hai đều im lặng — nhả một
+# ghế còn bận cho lượt thứ tư đi qua; không nhả một ghế đã khép thì khoá người
+# dùng ra khỏi chính tài khoản của họ.
+
+
+async def test_generation_states_tach_dang_sinh_khoi_da_khep(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    messages = MessageRepository(session)
+    theo_trang_thai: dict[MessageStatus, uuid.UUID] = {}
+    for trang_thai in MessageStatus:
+        message = await messages.create_message(
+            conversation_id=conversation.id,
+            user_id=user_a,
+            role=MessageRole.ASSISTANT,
+            status=trang_thai,
+        )
+        theo_trang_thai[trang_thai] = message.id
+
+    ket_qua = await messages.generation_states(list(theo_trang_thai.values()), user_id=user_a)
+
+    assert ket_qua.known == frozenset(theo_trang_thai.values()), "cả năm đều có thật"
+    assert ket_qua.in_flight == {
+        theo_trang_thai[MessageStatus.QUEUED],
+        theo_trang_thai[MessageStatus.STREAMING],
+    }, "chỉ `queued` và `streaming` là lượt sinh chưa khép"
+
+
+async def test_generation_states_khong_thay_message_cua_user_khac(
+    session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID
+) -> None:
+    """IDOR: ghế của người khác không được tính là ghế của mình — và cũng
+    không được coi là "đã khép" theo kiểu biết chắc. Nó chỉ đơn giản là một id
+    lạ, tức rơi ra khỏi cả hai tập hợp."""
+    conversation_b, _ = await _tao_hoi_thoai_co_goc(session, user_b)
+    messages = MessageRepository(session)
+    cua_b = await messages.create_message(
+        conversation_id=conversation_b.id,
+        user_id=user_b,
+        role=MessageRole.ASSISTANT,
+        status=MessageStatus.STREAMING,
+    )
+
+    ket_qua = await messages.generation_states([cua_b.id], user_id=user_a)
+
+    assert ket_qua.known == frozenset()
+    assert ket_qua.in_flight == frozenset()
+
+    cua_b_nhin_tu_b = await messages.generation_states([cua_b.id], user_id=user_b)
+    assert cua_b_nhin_tu_b.in_flight == {cua_b.id}, "cùng hàng, đúng chủ thì vẫn đang sinh"
+
+
+async def test_generation_states_coi_message_da_xoa_mem_la_da_khep(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """Xoá mềm giữa lúc đang sinh ⇒ `status` còn `streaming` mãi mãi.
+
+    `get_message_for_worker` trả `None` cho hàng đã xoá nên worker bỏ lượt mà
+    **không** ghi trạng thái mới. Không có dòng này thì đó là một ghế không bao
+    giờ được nhả.
+    """
+    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    messages = MessageRepository(session)
+    message = await messages.create_message(
+        conversation_id=conversation.id,
+        user_id=user_a,
+        role=MessageRole.ASSISTANT,
+        status=MessageStatus.STREAMING,
+    )
+    assert await messages.soft_delete_message(message.id, user_id=user_a) is True
+
+    ket_qua = await messages.generation_states([message.id], user_id=user_a)
+
+    assert ket_qua.known == {message.id}, "hàng vẫn còn trong DB (C12)"
+    assert ket_qua.in_flight == frozenset()
+
+
+async def test_generation_states_coi_hoi_thoai_da_xoa_mem_la_da_khep(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    messages = MessageRepository(session)
+    message = await messages.create_message(
+        conversation_id=conversation.id,
+        user_id=user_a,
+        role=MessageRole.ASSISTANT,
+        status=MessageStatus.QUEUED,
+    )
+    assert (
+        await ConversationRepository(session).soft_delete_conversation(
+            conversation.id, user_id=user_a
+        )
+        is True
+    )
+
+    ket_qua = await messages.generation_states([message.id], user_id=user_a)
+
+    assert ket_qua.known == {message.id}
+    assert ket_qua.in_flight == frozenset()
+
+
+async def test_generation_states_id_khong_ton_tai_roi_ra_khoi_ca_hai_tap(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """Khác biệt giữa "không có trong `known`" và "đã khép" là thứ giữ cho
+    `PHANTOM_GRACE_S` có nghĩa — xem `app/core/ratelimit.py`."""
+    la = uuid.uuid4()
+
+    ket_qua = await MessageRepository(session).generation_states([la], user_id=user_a)
+
+    assert ket_qua.known == frozenset()
+    assert ket_qua.in_flight == frozenset()
+
+
+async def test_generation_states_danh_sach_rong_khong_hoi_db(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    ket_qua = await MessageRepository(session).generation_states([], user_id=user_a)
+
+    assert ket_qua.known == frozenset()
+    assert ket_qua.in_flight == frozenset()

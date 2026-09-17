@@ -61,6 +61,35 @@ class OwnedMessage:
     user_id: uuid.UUID
 
 
+#: Hai trạng thái của §7.2 mà một lượt sinh còn CHƯA KHÉP. Một hằng chứ không
+#: hai chuỗi gõ tay ở mỗi chỗ hỏi: `reap_stale_queued` và `reap_stale_streaming`
+#: mỗi hàm lo một trạng thái, còn trần đồng thời của §10.6 (T-2.9) hỏi về **cả
+#: hai** — một message đứng trong hàng đợi vẫn là một lượt sinh đã hứa.
+IN_FLIGHT_STATUSES = (MessageStatus.QUEUED, MessageStatus.STREAMING)
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationStates:
+    """Postgres biết gì về một nhúm `message_id` — §10.6 hàng "Đồng thời".
+
+    Hai tập hợp chứ không một, và khác biệt giữa chúng là thứ giữ cho trần
+    đồng thời của T-2.9 vừa **chính xác** vừa **không đua** với transaction
+    đang ghi:
+
+    * `known` — id có thật, thuộc về user đang hỏi. Không nằm trong đây nghĩa
+      là Postgres **chưa từng nghe tới** id đó: hoặc transaction tạo nó còn
+      chưa commit (chuyện của vài mili-giây), hoặc nó đã rollback.
+    * `in_flight` — trong số `known`, cái nào còn `queued`/`streaming`.
+
+    `known - in_flight` = "đã khép, nhả ghế ngay". Còn `members - known` thì
+    **không** được nhả ngay: đó có thể là một lượt sinh vừa được ghi mà chưa
+    commit, và nhả nó là tự mở đường cho lượt thứ tư.
+    """
+
+    known: frozenset[uuid.UUID]
+    in_flight: frozenset[uuid.UUID]
+
+
 @dataclass(frozen=True, slots=True)
 class PathNode:
     """Một message trên đường đi, kèm vị trí của nó giữa các anh em (C13).
@@ -261,6 +290,46 @@ class MessageRepository:
             .execution_options(synchronize_session=False)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def generation_states(
+        self, message_ids: Sequence[uuid.UUID], *, user_id: uuid.UUID
+    ) -> GenerationStates:
+        """Trong `message_ids`, cái nào CÓ THẬT và cái nào còn đang sinh.
+
+        Người gọi duy nhất là trần đồng thời `MAX_CONCURRENT_STREAMS` của
+        §10.6 (`app/core/ratelimit.py`, T-2.9): Redis giữ danh sách ghế đang
+        bận, còn câu hỏi "ghế này còn bận thật không" thì chỉ Postgres trả lời
+        được — đúng luật §10.3 ("Redis là cache, Postgres là sự thật").
+
+        `user_id` lọc **trong câu SQL** (luật của file này), qua `conversations`
+        vì `messages` không có cột đó. Một `message_id` của người khác vì vậy
+        rơi ra khỏi `known` và được đối xử như một id lạ, không phải như một
+        ghế đang bận.
+
+        **Message đã xoá mềm — hoặc nằm trong hội thoại đã xoá mềm — tính là
+        ĐÃ KHÉP**, dù cột `status` còn ghi `queued`. Ngược lại là một ghế không
+        bao giờ được nhả: xoá một hội thoại giữa lúc câu trả lời đang chảy thì
+        `get_message_for_worker` trả `None` và worker bỏ lượt mà **không** ghi
+        `status` mới, nên hàng đó nằm lại ở `queued` vĩnh viễn.
+        """
+        if not message_ids:
+            return GenerationStates(known=frozenset(), in_flight=frozenset())
+
+        stmt = (
+            select(Message.id, Message.status, Message.deleted_at, Conversation.deleted_at)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(Message.id.in_(list(message_ids)), Conversation.user_id == user_id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+
+        known: set[uuid.UUID] = set()
+        in_flight: set[uuid.UUID] = set()
+        for mid, mstatus, message_deleted_at, conversation_deleted_at in rows:
+            known.add(mid)
+            da_xoa = message_deleted_at is not None or conversation_deleted_at is not None
+            if not da_xoa and mstatus in IN_FLIGHT_STATUSES:
+                in_flight.add(mid)
+        return GenerationStates(known=frozenset(known), in_flight=frozenset(in_flight))
 
     async def reap_stale_streaming(
         self, *, stale_after_s: int, error_code: str

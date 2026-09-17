@@ -308,11 +308,25 @@ async def _gui_email_xac_thuc(email: str, raw_token: str) -> None:
     "/register",
     status_code=status.HTTP_200_OK,
     response_model=DangKyResponse,
+    # §10.6 hàng "theo IP cho route chưa đăng nhập": **đăng ký 3/giờ** (B-133,
+    # T-2.9). Cùng chính sách với `forgot-password`/`resend-verification` và
+    # cùng lý do: mỗi lượt gọi gửi một lá thư tới một hộp thư người gọi tự
+    # nhập. Ở đây nó chặn thêm một thứ hai — mỗi lượt còn băm Argon2id 192 MiB
+    # (T-2.1), nên endpoint này là đường làm cạn RAM của `api` rẻ nhất.
+    #
+    # Bộ đếm RIÊNG với hai route kia (khoá mang tên route): người vừa đăng ký
+    # xong vẫn phải xin lại được thư xác thực.
+    #
+    # KHÔNG thay được Turnstile và không bị Turnstile thay: `TURNSTILE_SECRET`
+    # rỗng ở dev thì captcha bị bỏ qua hoàn toàn (§11.6), còn captcha bật thì
+    # nó chặn trình duyệt chứ không chặn một script gọi thẳng API.
+    dependencies=[Depends(gioi_han_gui_email("register"))],
     responses={
         400: {
             "model": ErrorEnvelope,
             "description": "thieu token Turnstile hoac token khong hop le (TURNSTILE_FAILED)",
         },
+        429: {"model": ErrorEnvelope, "description": "qua 3 lan/gio tu mot IP (RATE_LIMITED)"},
         422: {
             "model": ErrorEnvelope,
             "description": "mat khau qua ngan (PASSWORD_TOO_SHORT) "

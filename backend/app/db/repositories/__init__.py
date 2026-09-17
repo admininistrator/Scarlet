@@ -12,6 +12,7 @@ from app.db.repositories.errors import (
     RepositoryError,
 )
 from app.db.repositories.messages import (
+    GenerationStates,
     MessageRepository,
     OwnedMessage,
     PathNode,
@@ -22,6 +23,7 @@ from app.db.repositories.users import UserRepository
 __all__ = [
     "ConversationNotFoundError",
     "ConversationRepository",
+    "GenerationStates",
     "MessageNotInConversationError",
     "MessageRepository",
     "OwnedMessage",

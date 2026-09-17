@@ -95,7 +95,10 @@ class _ArqGia:
 def redis_gia(monkeypatch: pytest.MonkeyPatch) -> _RedisGia:
     gia = _RedisGia()
     monkeypatch.setattr("app.core.deps.get_redis", lambda: gia)
-    monkeypatch.setattr("app.core.ratelimit.get_redis", lambda: gia)
+    # `app.core.ratelimit.get_redis` KHÔNG patch ở đây nữa (T-2.9): fixture
+    # autouse `ratelimit_redis` của `tests/api/conftest.py` đã phủ cả ba lớp
+    # của module đó, kể cả hai script Lua mà `_RedisGia` không biết. Patch đè
+    # lên nó sẽ làm ba route sinh chữ trả `503` — đúng cái đã đo được khi thử.
     return gia
 
 
