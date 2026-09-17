@@ -1,9 +1,10 @@
 """`POST /auth/register`, `/verify-email`, `/resend-verification` (§11.1,
 §11.5, §11.6, UC-01) — T-2.1, T-2.2. `POST /auth/login`, `/refresh`,
 `GET /auth/me` (§11.2, ADR-07) — T-2.3. `POST /auth/logout` (§11.3, C21) — T-2.4.
+`POST /auth/forgot-password`, `/reset-password` (§11.5, §11.6) — T-2.5.
 
-KH tham chiếu: §11.5, §11.2, §11.3, UC-01, ADR-07, C21 · CLAUDE.md A3 ·
-tasks.md T-2.2, T-2.3, T-2.4, NQ-36.
+KH tham chiếu: §11.5, §11.2, §11.3, §11.6, §10.6, UC-01, ADR-07, C21 ·
+CLAUDE.md A3 · tasks.md T-2.2, T-2.3, T-2.4, T-2.5, NQ-36, NQ-43, NQ-44.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  CẠM BẪY CỦA T-2.1: chống dò email (§11.5)                                │
@@ -103,9 +104,57 @@ Hai hạn mức, hai lý do khác nhau (chi tiết ở `app/core/ratelimit.py`):
   ngay từ đầu cho đúng route đó. Không có nó, endpoint là một cách gửi thư hàng
   loạt tới một hộp thư bất kỳ — vô hại khi SMTP còn là Mailpit, thành đường
   lạm dụng/spam-report khi T-H8 đổi sang SMTP thật (B-127).
-- **5/phút** cho route `/auth/*` *không* gửi thư (`logout`): §10.6 xếp nhóm
-  `auth` ở 5/phút **theo user**, nhưng logout cố ý không có user (NQ-42) nên
-  trục đếm phải là IP (B-131).
+- **5/phút** cho route `/auth/*` *không* gửi thư (`logout`, `reset-password`):
+  §10.6 xếp nhóm `auth` ở 5/phút **theo user**, nhưng hai route này cố ý không
+  có user (NQ-42, và `reset-password` chạy khi chưa đăng nhập) nên trục đếm
+  phải là IP (B-131).
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│  CẠM BẪY CỦA T-2.5: đặt lại mật khẩu phải ĐUỔI ĐƯỢC kẻ đang ở trong       │
+└──────────────────────────────────────────────────────────────────────────┘
+
+"Không revoke session sau khi đổi mật khẩu = kẻ đã chiếm tài khoản vẫn ở trong
+đó sau khi nạn nhân đổi mật khẩu." `reset-password` vì vậy gọi
+`core/blacklist.py::thu_hoi_moi_phien()` — **một** hàm làm cả hai nửa của
+§11.3 (revoke mọi refresh family + đặt mốc `bl:user:`), đúng như T-2.4 dựng ra
+để T-2.5 không phải nhớ một nửa.
+
+`forgot-password` mang nguyên tắc chống dò của §11.5 sang một hình dạng mới:
+**không** rẽ nhánh response theo email có tồn tại hay không, và cũng không rẽ
+theo trạng thái tài khoản. Một hằng số response duy nhất, y như `register` và
+`resend-verification`.
+
+**Ba kết cục của một token reset hỏng đều trả CÙNG một câu.** Không tồn tại,
+đã dùng rồi, hết hạn → `400 TOKEN_INVALID` với cùng `message`. Khác hẳn
+`verify-email` (nơi "đã dùng" là thành công idempotent và "hết hạn" có mã
+riêng), và khác có lý do: bấm lại link verify là vô hại, còn dùng lại link
+reset là **đổi mật khẩu lần thứ hai**. Phân biệt ba ca đó cho người cầm một
+token đã tiêu (nhặt trong log proxy, trong lịch sử trình duyệt) biết token ấy
+từng là thật — tức biết email đó có tài khoản, đúng thứ §11.5 không cho rò. Và
+việc FE phải làm thì giống hệt nhau ở cả ba: xin một link mới.
+
+**Mật khẩu được kiểm TRƯỚC `hash_password` và trước khi mở transaction** — vì
+Argon2id ở đây tốn ~100 ms và 192 MiB RAM mỗi lượt (T-2.1), nên trả `422` cho
+một chuỗi 4 ký tự *sau* khi đã băm nó là tự trả tiền cho mỗi lượt gọi rác.
+
+Cái mà thứ tự này **không** phải là: một lớp bảo vệ cho token. Đo bằng phép
+kiểm ngược (dời hai phép kiểm xuống *sau* `consume`) — **không** test nào đỏ,
+vì `session_scope()` không commit khi có ngoại lệ, nên `used_at` vừa ghi bị
+rollback và link vẫn dùng được. Token sống sót qua một lần gõ sai là nhờ
+transaction, không nhờ thứ tự; ghi rõ ra đây để không ai "tối ưu" cái đúng
+bằng một lý do sai.
+
+Một lần gõ sai vẫn tính vào hạn mức (dependency chạy trước handler), nên
+`reset-password` dùng hạn mức 5/phút chứ không 3/giờ: ba lần gõ mật khẩu quá
+yếu không được khoá **nạn nhân** ra khỏi tài khoản một tiếng (xem
+`core/ratelimit.py`).
+
+**`reset-password` KHÔNG tự đăng nhập** — chốt ở NQ-44, đóng B-130. Mốc
+`bl:user:` giữ phần thập phân (NQ-42 ②) nên nó chặn cả access token phát hành
+trong *cùng giây* với lần thu hồi; một endpoint vừa đặt mốc vừa tự ký cookie
+phiên sẽ trả về một cookie mà chính nó vừa làm cho vô hiệu. Nó xoá hai cookie
+cũ thay vào đó: phiên cũ đằng nào cũng vừa bị thu hồi, để nguyên chỉ khiến mọi
+request kế tiếp của tab đó nhận `401` mà không ai hiểu vì sao.
 """
 
 from __future__ import annotations
@@ -124,7 +173,7 @@ from app.core.access_token import (
     decode_access_token,
     encode_access_token,
 )
-from app.core.blacklist import chan_jti
+from app.core.blacklist import chan_jti, thu_hoi_moi_phien
 from app.core.deps import SESSION_COOKIE_NAME, get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.mailer import mailer
@@ -628,6 +677,178 @@ async def logout(
         ttl_da_dat,
     )
     return _PHAN_HOI_DANG_XUAT
+
+
+# ═════════ POST /auth/forgot-password + /reset-password (T-2.5, §11.5) ══════
+
+
+class QuenMatKhauRequest(BaseModel):
+    email: EmailStr
+
+
+class QuenMatKhauResponse(BaseModel):
+    message: str
+
+
+#: Một hằng số, cùng lối `_PHAN_HOI_DANG_KY`/`_PHAN_HOI_RESEND`: DoD đòi
+#: response của email không tồn tại giống HỆT response của email có thật.
+_PHAN_HOI_QUEN_MAT_KHAU = QuenMatKhauResponse(
+    message="neu email nay ton tai, mot lien ket dat lai mat khau da duoc gui"
+)
+
+
+class DatLaiMatKhauRequest(BaseModel):
+    token: str
+    password: str
+
+
+class DatLaiMatKhauResponse(BaseModel):
+    #: Một giá trị duy nhất. Không trả thông tin user: endpoint này KHÔNG đăng
+    #: nhập ai cả (NQ-44), nên nó không có danh tính nào để nói.
+    status: Literal["reset"]
+
+
+_PHAN_HOI_DAT_LAI = DatLaiMatKhauResponse(status="reset")
+
+#: Câu trả lời CHUNG cho cả ba kiểu token hỏng — xem docstring module.
+_LOI_TOKEN_RESET = "lien ket dat lai mat khau khong hop le hoac da het han"
+
+
+async def _gui_email_dat_lai(email: str, raw_token: str) -> None:
+    """Best-effort, cùng lối `_gui_email_xac_thuc`: SMTP hỏng không được làm
+    `forgot-password` trả 500 — làm vậy là nói cho người gọi biết email đó có
+    thật (§11.5), và token thì đã commit rồi."""
+    reset_url = f"{settings.PUBLIC_BASE_URL}/reset-password?token={raw_token}"
+    try:
+        await mailer.send(
+            template="reset_password",
+            to=email,
+            ctx={"reset_url": reset_url, "ttl_minutes": settings.EMAIL_TOKEN_TTL_MIN},
+        )
+    except Exception:
+        logger.exception("gui email dat lai mat khau that bai cho %s", email)
+
+
+@router.post(
+    "/forgot-password",
+    status_code=status.HTTP_200_OK,
+    response_model=QuenMatKhauResponse,
+    dependencies=[Depends(gioi_han_gui_email("forgot-password"))],
+    responses={
+        429: {"model": ErrorEnvelope, "description": "qua 3 lan/gio tu mot IP (RATE_LIMITED)"}
+    },
+)
+async def forgot_password(body: QuenMatKhauRequest) -> QuenMatKhauResponse:
+    """Xin link đặt lại mật khẩu (§11.5). **Luôn** 200, luôn cùng một body.
+
+    Không kiểm `status` tài khoản: bảng §11.1 là việc của T-2.7, và rẽ nhánh
+    theo trạng thái ở đây sẽ làm response nói ra điều §11.5 cấm.
+    """
+    raw_token: str | None = None
+    email_de_gui: str | None = None
+    async with session_scope() as session:
+        user = await UserRepository(session).get_by_email(body.email)
+        if user is not None:
+            raw_token = await EmailTokenRepository(session).issue(
+                user_id=user.id,
+                purpose=EmailTokenPurpose.RESET,
+                ttl_minutes=settings.EMAIL_TOKEN_TTL_MIN,
+            )
+            email_de_gui = user.email
+            await session.commit()
+        # else: không có user — không phát hành token, không gửi thư, không
+        # đọc/ghi gì thêm (§11.5).
+
+    if raw_token is not None and email_de_gui is not None:
+        await _gui_email_dat_lai(email_de_gui, raw_token)
+
+    return _PHAN_HOI_QUEN_MAT_KHAU
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_200_OK,
+    response_model=DatLaiMatKhauResponse,
+    dependencies=[Depends(gioi_han_auth("reset-password"))],
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "token khong ton tai, da dung, hoac het han (TOKEN_INVALID)",
+        },
+        422: {
+            "model": ErrorEnvelope,
+            "description": "mat khau qua ngan (PASSWORD_TOO_SHORT) "
+            "hoac qua pho bien (PASSWORD_TOO_WEAK)",
+        },
+        429: {"model": ErrorEnvelope, "description": "qua 5 lan/phut tu mot IP (RATE_LIMITED)"},
+        503: {
+            "model": ErrorEnvelope,
+            "description": "khong dat duoc moc thu hoi phien vao Redis (SERVICE_UNAVAILABLE)",
+        },
+    },
+)
+async def reset_password(body: DatLaiMatKhauRequest, response: Response) -> DatLaiMatKhauResponse:
+    """Đặt mật khẩu mới bằng token trong email (§11.5, §11.6) + thu hồi **mọi**
+    phiên (§11.3, Cạm bẫy T-2.5).
+
+    KHÔNG tự đăng nhập (NQ-44, B-130) — xem docstring module.
+    """
+    # Kiểm mật khẩu TRƯỚC `hash_password` (~100 ms, 192 MiB) — xem docstring
+    # module, kể cả phần nói rõ thứ tự này KHÔNG phải thứ bảo vệ token.
+    if len(body.password) < settings.PASSWORD_MIN_LENGTH:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ApiErrorCode.PASSWORD_TOO_SHORT,
+            f"mat khau phai co it nhat {settings.PASSWORD_MIN_LENGTH} ky tu",
+        )
+    if mat_khau_qua_pho_bien(body.password):
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ApiErrorCode.PASSWORD_TOO_WEAK,
+            "mat khau qua pho bien, hay chon mat khau khac",
+        )
+
+    password_hash = await hash_password(body.password)
+
+    async with session_scope() as session:
+        outcome = await EmailTokenRepository(session).consume(
+            raw_token=body.token, purpose=EmailTokenPurpose.RESET
+        )
+        if outcome.result is not ConsumeResult.OK or outcome.user_id is None:
+            # NOT_FOUND / ALREADY_USED / EXPIRED — một câu trả lời cho cả ba.
+            raise ApiError(
+                status.HTTP_400_BAD_REQUEST, ApiErrorCode.TOKEN_INVALID, _LOI_TOKEN_RESET
+            )
+
+        user_id = outcome.user_id
+        if not await UserRepository(session).dat_mat_khau_moi(user_id, password_hash):
+            # Token còn hạn của một tài khoản đã xoá mềm. Cùng câu trả lời với
+            # token hỏng: sự tồn tại của tài khoản không phải thứ để rò ra.
+            raise ApiError(
+                status.HTTP_400_BAD_REQUEST, ApiErrorCode.TOKEN_INVALID, _LOI_TOKEN_RESET
+            )
+
+        try:
+            # Hai nửa của §11.3 trong MỘT hàm (T-2.4) — chạy trong transaction
+            # này, trước `commit`. Nửa Redis trượt ⇒ ngoại lệ ⇒ `session_scope`
+            # rollback ⇒ mật khẩu KHÔNG đổi: thà người dùng bấm lại link còn hơn
+            # đổi xong mật khẩu mà phiên của kẻ tấn công vẫn sống thêm 15 phút.
+            await thu_hoi_moi_phien(session, get_redis(), user_id)
+        except Exception as loi:
+            logger.exception("khong thu hoi duoc phien khi dat lai mat khau cho %s", user_id)
+            raise ApiError(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                ApiErrorCode.SERVICE_UNAVAILABLE,
+                "khong dat lai duoc mat khau, hay thu lai",
+            ) from loi
+
+        await session.commit()
+
+    # Phiên cũ vừa bị thu hồi; giữ lại cookie chỉ khiến tab này nhận `401` ở
+    # request kế tiếp mà không ai hiểu vì sao (NQ-44).
+    _xoa_hai_cookie(response)
+    logger.info("dat lai mat khau xong cho user %s, da thu hoi moi phien", user_id)
+    return _PHAN_HOI_DAT_LAI
 
 
 @router.get("/me", status_code=status.HTTP_200_OK, response_model=NguoiDungRa)

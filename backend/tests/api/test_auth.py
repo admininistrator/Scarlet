@@ -37,7 +37,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1.auth import REFRESH_COOKIE_NAME
@@ -46,7 +46,7 @@ from app.core.access_token import decode_access_token, encode_access_token
 from app.core.blacklist import jti_key, thu_hoi_moi_phien, user_key
 from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiErrorCode
-from app.core.security import hash_email_token, hash_password
+from app.core.security import hash_email_token, hash_password, verify_password
 from app.db.models import EmailToken, EmailTokenPurpose, RefreshToken, User, UserRole, UserStatus
 from app.db.repositories.users import UserRepository
 from app.main import app
@@ -58,6 +58,8 @@ DUONG_DAN_LOGIN = "/api/v1/auth/login"
 DUONG_DAN_REFRESH = "/api/v1/auth/refresh"
 DUONG_DAN_ME = "/api/v1/auth/me"
 DUONG_DAN_LOGOUT = "/api/v1/auth/logout"
+DUONG_DAN_QUEN_MAT_KHAU = "/api/v1/auth/forgot-password"
+DUONG_DAN_DAT_LAI_MAT_KHAU = "/api/v1/auth/reset-password"
 
 #: Mật khẩu thật dùng trong test login — khác `user_a`/`user_b` của
 #: `conftest.py` (những fixture đó gán `password_hash="khong-phai-hash-that"`,
@@ -65,6 +67,13 @@ DUONG_DAN_LOGOUT = "/api/v1/auth/logout"
 #: cho chúng — đúng ý đồ của conftest, vốn chỉ cần một user tồn tại cho các
 #: test IDOR chứ không cần đăng nhập được).
 _MAT_KHAU_TEST = "mot-mat-khau-du-manh-cho-test-login-123"
+
+#: Hai mật khẩu mới của T-2.5. Hai chứ không một: test "dùng token hai lần"
+#: phải chứng minh lần thứ hai KHÔNG đổi được gì, mà muốn vậy thì lần hai phải
+#: xin một mật khẩu KHÁC lần một — trùng nhau thì phép kiểm không phân biệt
+#: được "bị từ chối" với "đổi lại đúng thứ đang có".
+_MAT_KHAU_MOI = "mot-mat-khau-moi-du-manh-cho-t25-456"
+_MAT_KHAU_MOI_2 = "mot-mat-khau-moi-nua-du-manh-cho-t25-789"
 
 
 @pytest.fixture
@@ -174,8 +183,10 @@ def redis_gia(monkeypatch: pytest.MonkeyPatch) -> _RedisGia:
     return gia
 
 
-def _token_tu_verify_url(verify_url: str) -> str:
-    return parse_qs(urlsplit(verify_url).query)["token"][0]
+def _token_tu_url(url: str) -> str:
+    """Token bản rõ moi ra khỏi link trong thư — dùng cho cả `verify_url`
+    (T-2.2) lẫn `reset_url` (T-2.5): hai template, một hình dạng `?token=`."""
+    return parse_qs(urlsplit(url).query)["token"][0]
 
 
 async def _tao_user_that(
@@ -334,7 +345,7 @@ async def test_verify_email_dung_token_doi_status_pending_approval(
     """DoD T-2.2: bấm link → status đổi `pending_approval`."""
     email = f"{uuid.uuid4().hex}@scarlet.example"
     await client.post(DUONG_DAN, json={"email": email, "password": "mot-mat-khau-du-manh-123"})
-    token = _token_tu_verify_url(mailer_gia.calls[0]["ctx"]["verify_url"])
+    token = _token_tu_url(mailer_gia.calls[0]["ctx"]["verify_url"])
 
     resp = await client.post(DUONG_DAN_VERIFY, json={"token": token})
 
@@ -354,7 +365,7 @@ async def test_verify_email_bam_lai_lan_hai_khong_loi(
     """DoD T-2.2: bấm lại cùng link → không lỗi, idempotent (UC-01)."""
     email = f"{uuid.uuid4().hex}@scarlet.example"
     await client.post(DUONG_DAN, json={"email": email, "password": "mot-mat-khau-du-manh-123"})
-    token = _token_tu_verify_url(mailer_gia.calls[0]["ctx"]["verify_url"])
+    token = _token_tu_url(mailer_gia.calls[0]["ctx"]["verify_url"])
 
     resp1 = await client.post(DUONG_DAN_VERIFY, json={"token": token})
     resp2 = await client.post(DUONG_DAN_VERIFY, json={"token": token})
@@ -408,7 +419,7 @@ async def test_token_hash_khong_chua_token_ban_ro(
     token bản rõ có trong URL."""
     email = f"{uuid.uuid4().hex}@scarlet.example"
     await client.post(DUONG_DAN, json={"email": email, "password": "mot-mat-khau-du-manh-123"})
-    raw_token = _token_tu_verify_url(mailer_gia.calls[0]["ctx"]["verify_url"])
+    raw_token = _token_tu_url(mailer_gia.calls[0]["ctx"]["verify_url"])
 
     async with session_factory() as session:
         hashes = (await session.execute(select(EmailToken.token_hash))).scalars().all()
@@ -461,7 +472,7 @@ async def test_resend_verification_user_da_verify_khong_gui_mail(
     mail — response vẫn giống hệt (§11.5)."""
     email = f"{uuid.uuid4().hex}@scarlet.example"
     await client.post(DUONG_DAN, json={"email": email, "password": "mot-mat-khau-du-manh-123"})
-    token = _token_tu_verify_url(mailer_gia.calls[0]["ctx"]["verify_url"])
+    token = _token_tu_url(mailer_gia.calls[0]["ctx"]["verify_url"])
     await client.post(DUONG_DAN_VERIFY, json={"token": token})
     mailer_gia.calls.clear()
 
@@ -1097,6 +1108,330 @@ async def test_origin_vang_mat_thi_cho_qua(client: AsyncClient) -> None:
     """Không có `Origin` (mọi client hiện có: `curl`, `httpx`, script) → không
     bị chặn — xem docstring `app/core/origin.py` cho lý do."""
     resp = await client.get("/api/v1/models")
+
+    assert resp.status_code == 200
+
+
+# ═════ POST /auth/forgot-password + /reset-password (T-2.5, §11.5, §11.6) ════
+
+
+async def _xin_link_dat_lai(client: AsyncClient, mailer_gia: _MailerGia, email: str) -> str:
+    """Gọi `forgot-password` rồi moi token bản rõ ra khỏi thư đã gửi."""
+    resp = await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": email})
+    assert resp.status_code == 200
+    assert mailer_gia.calls, "khong co thu nao duoc gui"
+    goi = mailer_gia.calls[-1]
+    assert goi["template"] == "reset_password"
+    return _token_tu_url(goi["ctx"]["reset_url"])
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_quen_mat_khau_gui_thu_reset_cho_email_co_that(
+    client: AsyncClient, mailer_gia: _MailerGia, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    _, email = await _tao_user_that(session_factory)
+
+    resp = await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": email})
+
+    assert resp.status_code == 200
+    assert len(mailer_gia.calls) == 1
+    assert mailer_gia.calls[0]["template"] == "reset_password"
+    assert mailer_gia.calls[0]["to"] == email
+    assert "reset_url" in mailer_gia.calls[0]["ctx"]
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_quen_mat_khau_email_khong_ton_tai_response_giong_het_va_khong_gui_thu(
+    client: AsyncClient, mailer_gia: _MailerGia, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD dòng 1: response **giống hệt** email có thật, và không thư nào.
+
+    So sánh `content` (byte-for-byte) chứ không so `status_code`: chống dò của
+    §11.5 hỏng ngay khi hai nhánh khác nhau một dấu chấm.
+    """
+    _, email_that = await _tao_user_that(session_factory)
+    resp_co_that = await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": email_that})
+    mailer_gia.calls.clear()
+
+    resp_khong_co = await client.post(
+        DUONG_DAN_QUEN_MAT_KHAU, json={"email": f"{uuid.uuid4().hex}@khong-ton-tai.example"}
+    )
+
+    assert resp_khong_co.status_code == resp_co_that.status_code == 200
+    assert resp_khong_co.content == resp_co_that.content
+    assert mailer_gia.calls == []
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_quen_mat_khau_khong_luu_token_ban_ro(
+    client: AsyncClient, mailer_gia: _MailerGia, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Cạm bẫy T-2.2 áp lại nguyên vẹn cho token `reset` (§11.5)."""
+    _, email = await _tao_user_that(session_factory)
+    token = await _xin_link_dat_lai(client, mailer_gia, email)
+
+    async with session_factory() as session:
+        hang = (
+            await session.execute(
+                select(EmailToken).where(EmailToken.token_hash == hash_email_token(token))
+            )
+        ).scalar_one()
+        assert hang.purpose == EmailTokenPurpose.RESET.value
+        assert token not in hang.token_hash
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dat_lai_mat_khau_doi_duoc_mat_khau_va_dang_nhap_bang_mat_khau_moi(
+    client: AsyncClient, mailer_gia: _MailerGia, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    user_id, email = await _tao_user_that(session_factory)
+    token = await _xin_link_dat_lai(client, mailer_gia, email)
+
+    resp = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": _MAT_KHAU_MOI}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "reset"}
+    async with session_factory() as session:
+        user = (await session.execute(select(User).where(User.id == user_id))).scalar_one()
+        assert await verify_password(user.password_hash, _MAT_KHAU_MOI)
+        assert not await verify_password(user.password_hash, _MAT_KHAU_TEST)
+    resp_login = await client.post(
+        DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_MOI}
+    )
+    assert resp_login.status_code == 200
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dat_lai_mat_khau_thu_hoi_phien_o_tab_khac(
+    client: AsyncClient,
+    client_thiet_bi_hai: AsyncClient,
+    mailer_gia: _MailerGia,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """DoD dòng 2: session cũ ở tab khác trả `401` ở request TIẾP THEO.
+
+    Cạm bẫy của task: "không revoke session sau khi đổi mật khẩu = kẻ đã chiếm
+    tài khoản vẫn ở trong đó sau khi nạn nhân đổi mật khẩu."
+    """
+    _, email = await _tao_user_that(session_factory)
+    body = {"email": email, "password": _MAT_KHAU_TEST}
+    assert (await client_thiet_bi_hai.post(DUONG_DAN_LOGIN, json=body)).status_code == 200
+    assert (await client_thiet_bi_hai.get(DUONG_DAN_ME)).status_code == 200
+    refresh_tab_kia = client_thiet_bi_hai.cookies.get(REFRESH_COOKIE_NAME)
+    token = await _xin_link_dat_lai(client, mailer_gia, email)
+
+    assert (
+        await client.post(
+            DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": _MAT_KHAU_MOI}
+        )
+    ).status_code == 200
+
+    resp = await client_thiet_bi_hai.get(DUONG_DAN_ME)
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.TOKEN_REVOKED
+    # Và refresh token 30 ngày cũng chết — nếu không thì "thu hồi" chỉ kéo dài
+    # 15 phút rồi kẻ tấn công đổi ra một access token mới.
+    assert refresh_tab_kia is not None
+    client_thiet_bi_hai.cookies.set(REFRESH_COOKIE_NAME, refresh_tab_kia)
+    assert (await client_thiet_bi_hai.post(DUONG_DAN_REFRESH)).status_code == 401
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dat_lai_mat_khau_dung_token_hai_lan_lan_hai_400(
+    client: AsyncClient, mailer_gia: _MailerGia, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD dòng 3. Khác `verify-email` (bấm lại = thành công idempotent): dùng
+    lại link reset là **đổi mật khẩu lần thứ hai**."""
+    _, email = await _tao_user_that(session_factory)
+    token = await _xin_link_dat_lai(client, mailer_gia, email)
+    lan_mot = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": _MAT_KHAU_MOI}
+    )
+    assert lan_mot.status_code == 200
+
+    lan_hai = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": _MAT_KHAU_MOI_2}
+    )
+
+    assert lan_hai.status_code == 400
+    assert lan_hai.json()["error"]["code"] == ApiErrorCode.TOKEN_INVALID
+    # Mật khẩu vẫn là của lần đặt lại THỨ NHẤT.
+    assert (
+        await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_MOI})
+    ).status_code == 200
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dat_lai_mat_khau_token_het_han_400_giong_het_token_bia(
+    client: AsyncClient, mailer_gia: _MailerGia, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Ba kiểu token hỏng trả CÙNG một câu — xem docstring `api/v1/auth.py`."""
+    _, email = await _tao_user_that(session_factory)
+    token = await _xin_link_dat_lai(client, mailer_gia, email)
+    async with session_factory() as session:
+        await session.execute(
+            update(EmailToken)
+            .where(EmailToken.token_hash == hash_email_token(token))
+            .values(expires_at=datetime.now(UTC) - timedelta(minutes=1))
+        )
+        await session.commit()
+
+    resp_het_han = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": _MAT_KHAU_MOI}
+    )
+    resp_bia = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": "khong-phai-token", "password": _MAT_KHAU_MOI}
+    )
+
+    assert resp_het_han.status_code == resp_bia.status_code == 400
+    assert resp_het_han.content == resp_bia.content
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dat_lai_mat_khau_khong_nhan_token_verify(
+    client: AsyncClient, mailer_gia: _MailerGia
+) -> None:
+    """`purpose` lọc trong SQL: token `verify` không mở được cửa `reset`."""
+    email = f"{uuid.uuid4().hex}@scarlet.example"
+    await client.post(DUONG_DAN, json={"email": email, "password": "mot-mat-khau-du-manh-123"})
+    token_verify = _token_tu_url(mailer_gia.calls[0]["ctx"]["verify_url"])
+
+    resp = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token_verify, "password": _MAT_KHAU_MOI}
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == ApiErrorCode.TOKEN_INVALID
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+@pytest.mark.parametrize(
+    ("mat_khau", "ma_loi"),
+    [
+        ("ngan", ApiErrorCode.PASSWORD_TOO_SHORT),
+        ("password1234", ApiErrorCode.PASSWORD_TOO_WEAK),
+    ],
+)
+async def test_dat_lai_mat_khau_yeu_bi_tu_choi_va_token_VAN_CON_DUNG_DUOC(
+    client: AsyncClient,
+    mailer_gia: _MailerGia,
+    session_factory: async_sessionmaker[AsyncSession],
+    mat_khau: str,
+    ma_loi: ApiErrorCode,
+) -> None:
+    """§11.6 áp cho cả mật khẩu đặt lại, **và** một lần gõ sai không được giết
+    link: `session_scope()` không commit khi có ngoại lệ nên `used_at` bị
+    rollback (xem docstring `api/v1/auth.py` — đây là công của transaction,
+    không phải của thứ tự hai phép kiểm)."""
+    _, email = await _tao_user_that(session_factory)
+    token = await _xin_link_dat_lai(client, mailer_gia, email)
+
+    resp = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": mat_khau}
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == ma_loi
+    assert (
+        await client.post(
+            DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": _MAT_KHAU_MOI}
+        )
+    ).status_code == 200
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dat_lai_mat_khau_KHONG_tu_dang_nhap_va_xoa_hai_cookie(
+    client: AsyncClient, mailer_gia: _MailerGia, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """NQ-44 (đóng B-130): không phát hành cookie phiên mới.
+
+    Mốc `bl:user:` giữ phần thập phân (NQ-42 ②) nên nó chặn cả token phát hành
+    trong cùng giây — một endpoint vừa đặt mốc vừa tự ký cookie sẽ trả về đúng
+    một cookie mà chính nó vừa làm cho vô hiệu.
+    """
+    _, email = await _tao_user_that(session_factory)
+    assert (
+        await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+    ).status_code == 200
+    token = await _xin_link_dat_lai(client, mailer_gia, email)
+
+    resp = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": _MAT_KHAU_MOI}
+    )
+
+    assert resp.status_code == 200
+    dat_cookie = [c for c in resp.headers.get_list("set-cookie")]
+    assert all("Max-Age=0" in c or "expires=Thu, 01 Jan 1970" in c.lower() for c in dat_cookie), (
+        f"reset-password khong duoc phat hanh cookie phien moi: {dat_cookie}"
+    )
+    assert client.cookies.get(SESSION_COOKIE_NAME) is None
+    assert client.cookies.get(REFRESH_COOKIE_NAME) is None
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dat_lai_mat_khau_redis_chet_tra_503_va_KHONG_doi_mat_khau(
+    client: AsyncClient,
+    mailer_gia: _MailerGia,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_gia: _RedisGia,
+) -> None:
+    """Nửa Redis của §11.3 trượt ⇒ rollback cả nửa Postgres.
+
+    Thà bắt người dùng bấm lại link còn hơn đổi xong mật khẩu mà phiên của kẻ
+    tấn công vẫn sống thêm 15 phút — đúng Cạm bẫy của task.
+    """
+    user_id, email = await _tao_user_that(session_factory)
+    token = await _xin_link_dat_lai(client, mailer_gia, email)
+    redis_gia.no_ra = True
+
+    resp = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": _MAT_KHAU_MOI}
+    )
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == ApiErrorCode.SERVICE_UNAVAILABLE
+    async with session_factory() as session:
+        user = (await session.execute(select(User).where(User.id == user_id))).scalar_one()
+        assert await verify_password(user.password_hash, _MAT_KHAU_TEST)
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_quen_mat_khau_qua_han_muc_moi_gio_tra_429(client: AsyncClient) -> None:
+    """DoD dòng 4: gọi 4 lần trong 1 giờ từ cùng IP → lần 4 trả `429`."""
+    email = f"{uuid.uuid4().hex}@khong-ton-tai.example"
+    for _ in range(settings.RATE_LIMIT_EMAIL_IP_PER_HOUR):
+        assert (
+            await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": email})
+        ).status_code == 200
+
+    resp = await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": email})
+
+    assert resp.status_code == 429
+    assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
+    assert int(resp.headers["Retry-After"]) > 0
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dat_lai_mat_khau_dung_han_muc_theo_phut_khong_phai_theo_gio(
+    client: AsyncClient, mailer_gia: _MailerGia, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Gõ sai mật khẩu vài lần KHÔNG được khoá nạn nhân ra một tiếng.
+
+    `reset-password` vì vậy dùng hạn mức nhóm `auth` (5/phút) chứ không 3/giờ
+    của route gửi thư — xem `core/ratelimit.py`.
+    """
+    _, email = await _tao_user_that(session_factory)
+    token = await _xin_link_dat_lai(client, mailer_gia, email)
+    for _ in range(settings.RATE_LIMIT_EMAIL_IP_PER_HOUR):
+        assert (
+            await client.post(DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": "ngan"})
+        ).status_code == 422
+
+    resp = await client.post(
+        DUONG_DAN_DAT_LAI_MAT_KHAU, json={"token": token, "password": _MAT_KHAU_MOI}
+    )
 
     assert resp.status_code == 200
 

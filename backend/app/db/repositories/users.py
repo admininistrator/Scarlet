@@ -65,6 +65,34 @@ class UserRepository:
         stmt = select(User).where(User.email == email, User.deleted_at.is_(None))
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
+    async def dat_mat_khau_moi(self, user_id: uuid.UUID, password_hash: str) -> bool:
+        """Ghi hash mật khẩu mới + `password_changed_at` (§11.3, T-2.5).
+
+        `deleted_at IS NULL` **trong câu SQL** (§20, cùng lối `get_by_id`): một
+        token reset còn hạn của tài khoản vừa xoá không được phép hồi sinh nó.
+
+        `password_changed_at` cập nhật **cùng một câu UPDATE**, không phải một
+        lượt ghi thứ hai: hai câu lệnh là hai cơ hội để một trong hai trượt, và
+        một mật khẩu đã đổi mà cột mốc thì chưa là thứ không ai phát hiện được
+        cho tới lúc cần điều tra.
+
+        `func.now()` (mốc mở transaction) chứ không `clock_timestamp()`: khác
+        `heartbeat_at` của NQ-18, không ai so cột này với thời gian thực để
+        quyết định điều gì, và đây cũng chính là hàm mà `server_default` của
+        cột đang dùng — hai nguồn ghi vào một cột nên đi cùng một đồng hồ.
+
+        Trả `False` khi không có hàng nào khớp (user đã xoá) — không raise:
+        router quyết định câu trả lời, y như `mark_email_verified`.
+        """
+        stmt = (
+            update(User)
+            .where(User.id == user_id, User.deleted_at.is_(None))
+            .values(password_hash=password_hash, password_changed_at=func.now())
+            .returning(User.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
     async def mark_email_verified(self, user_id: uuid.UUID) -> bool:
         """`pending_email` → `pending_approval` (§11.1, UC-01), T-2.2.
 
