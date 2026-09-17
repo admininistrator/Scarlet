@@ -92,6 +92,20 @@ trượt thì nửa nào đã chạy quyết định thiệt hại: chạy DB tr
 lại "refresh (30 ngày) đã chết, access (≤15 phút) còn sống" — tự lành; chạy
 Redis trước thì lần trượt để lại "access đã chết, **refresh 30 ngày còn sống**"
 — không tự lành, và đó là credential đắt hơn hẳn.
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│  RATE LIMIT THEO IP (§10.6) — B-127, B-131                               │
+└──────────────────────────────────────────────────────────────────────────┘
+
+Hai hạn mức, hai lý do khác nhau (chi tiết ở `app/core/ratelimit.py`):
+
+- **3/giờ** cho route *gửi thư* (`resend-verification`): §18.1 ghi hạn mức này
+  ngay từ đầu cho đúng route đó. Không có nó, endpoint là một cách gửi thư hàng
+  loạt tới một hộp thư bất kỳ — vô hại khi SMTP còn là Mailpit, thành đường
+  lạm dụng/spam-report khi T-H8 đổi sang SMTP thật (B-127).
+- **5/phút** cho route `/auth/*` *không* gửi thư (`logout`): §10.6 xếp nhóm
+  `auth` ở 5/phút **theo user**, nhưng logout cố ý không có user (NQ-42) nên
+  trục đếm phải là IP (B-131).
 """
 
 from __future__ import annotations
@@ -114,6 +128,7 @@ from app.core.blacklist import chan_jti
 from app.core.deps import SESSION_COOKIE_NAME, get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.mailer import mailer
+from app.core.ratelimit import gioi_han_auth, gioi_han_gui_email
 from app.core.redis import get_redis
 from app.core.security import hash_password, mat_khau_qua_pho_bien, verify_password
 from app.db.models import EmailTokenPurpose, UserRole, UserStatus
@@ -272,6 +287,12 @@ async def register(body: DangKyRequest) -> DangKyResponse:
     "/resend-verification",
     status_code=status.HTTP_200_OK,
     response_model=ResendVerificationResponse,
+    # §18.1 ghi "Rate limit 3/giờ" cho đúng route này ngay từ đầu; T-2.2 làm
+    # theo "Việc cần làm" của task nên chưa có, B-127 ghi lại thiếu sót đó.
+    dependencies=[Depends(gioi_han_gui_email("resend-verification"))],
+    responses={
+        429: {"model": ErrorEnvelope, "description": "qua 3 lan/gio tu mot IP (RATE_LIMITED)"}
+    },
 )
 async def resend_verification(body: ResendVerificationRequest) -> ResendVerificationResponse:
     """Gửi lại email verify (UC-01). Chống dò (§11.5): response cố định."""
@@ -542,11 +563,18 @@ def _xoa_hai_cookie(response: Response) -> None:
     "/logout",
     status_code=status.HTTP_200_OK,
     response_model=DangXuatResponse,
+    # B-131: endpoint cố ý không đòi xác thực (NQ-42) nên bất kỳ ai gọi được nó
+    # cũng tạo được một lượt ghi Redis + một `UPDATE` trên `refresh_tokens`.
+    # Không có `user_id` để đếm theo ⇒ đếm theo IP, hạn mức của nhóm `auth`
+    # (§10.6). Hạn mức này KHÔNG phá NQ-42: nó không đòi thêm gì ở client, chỉ
+    # chặn gọi dồn dập — một người đăng xuất thật vẫn chỉ gọi một lần.
+    dependencies=[Depends(gioi_han_auth("logout"))],
     responses={
+        429: {"model": ErrorEnvelope, "description": "qua 5 lan/phut tu mot IP (RATE_LIMITED)"},
         503: {
             "model": ErrorEnvelope,
             "description": "khong ghi duoc blacklist vao Redis (SERVICE_UNAVAILABLE)",
-        }
+        },
     },
 )
 async def logout(

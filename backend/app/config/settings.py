@@ -117,6 +117,18 @@ class Settings(BaseSettings):
     #: §11.6: "Độ dài tối thiểu 12 ký tự". Một *giới hạn* nên nó ở đây chứ
     #: không phải hằng trong `app/core/security.py` (A3, §19.2 L4).
     PASSWORD_MIN_LENGTH: int = Field(default=12, gt=0)
+    #: Hạn mức theo IP cho route **gửi thư** chưa đăng nhập (§10.6 "quên mật
+    #: khẩu: 3/giờ", §18.1 "`/auth/resend-verification` — Rate limit 3/giờ").
+    #: Cửa sổ (3600 s) là quy đổi đơn vị của chính tên biến nên nó nằm trong
+    #: `app/core/ratelimit.py`; con số 3 là một *giới hạn* nên nó ở đây (A3).
+    RATE_LIMIT_EMAIL_IP_PER_HOUR: int = Field(default=3, gt=0)
+    #: Hạn mức theo IP cho route `/auth/*` KHÔNG gửi thư (`logout`,
+    #: `reset-password`). Con số lấy từ nhóm `auth` của §10.6 ("auth: 5/phút"),
+    #: đổi trục đếm từ user sang IP vì những route này chạy khi chưa có user
+    #: (B-131). Biến RIÊNG chứ không dùng lại biến trên: một bên bảo vệ hộp thư
+    #: của người khác (đắt, đếm theo giờ), bên kia chỉ chặn gọi dồn dập (rẻ,
+    #: đếm theo phút) — gộp lại thì siết cái này sẽ siết luôn cái kia.
+    RATE_LIMIT_AUTH_IP_PER_MIN: int = Field(default=5, gt=0)
     #: Ngưỡng điểm zxcvbn (0–4, xem `app/core/security.py`) để coi một mật
     #: khẩu là "quá phổ biến" (§11.6 cho phép `zxcvbn` hoặc danh sách 10k
     #: top; chọn zxcvbn vì nó mang sẵn tập tần suất mật khẩu rò rỉ thật và

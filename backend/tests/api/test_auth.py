@@ -101,18 +101,28 @@ def mailer_gia(monkeypatch: pytest.MonkeyPatch) -> _MailerGia:
 
 
 class _RedisGia:
-    """Redis trong bộ nhớ — chỉ ba lệnh blacklist thật sự dùng (T-2.4).
+    """Redis trong bộ nhớ — blacklist (T-2.4) + bộ đếm rate limit (B-127/B-131).
 
     Giữ cả TTL đã đặt cho từng khoá vì DoD dòng 3 của T-2.4 đo đúng nó
     (`redis-cli TTL bl:jti:{jti}` ≤ 900, **không** phải `-1`). `ttl()` trả về
     `-2`/`-1` đúng quy ước Redis (không có khoá / có khoá nhưng không TTL) chứ
     không trả `None`: nếu stub tự bịa quy ước riêng thì test có thể xanh trong
     khi `redis-cli` trên stack thật nói chuyện khác.
+
+    **HAI công tắc hỏng, không phải một.** Từ B-127/B-131, một request tới
+    `/auth/logout` hỏi Redis ở **hai** bước khác nhau: bộ đếm rate limit
+    (dependency, chạy trước) rồi blacklist (thân handler). Một công tắc chung
+    sẽ làm mọi test "Redis chết" đo đúng chỗ ĐẦU TIÊN, và nửa sau — chính là
+    nửa mà C21 quan tâm — mất phép kiểm mà không ai thấy. `no_ra` giữ nguyên
+    nghĩa cũ (các lệnh của blacklist), `no_ra_dem` là của bộ đếm.
     """
 
     def __init__(self) -> None:
         self.kho: dict[str, tuple[str, int | None]] = {}
+        self.dem: dict[str, int] = {}
+        self.ttl_dem: dict[str, int] = {}
         self.no_ra = False
+        self.no_ra_dem = False
 
     async def set(self, name: str, value: str, *, ex: int | None = None) -> bool:
         if self.no_ra:
@@ -125,19 +135,42 @@ class _RedisGia:
             raise ConnectionError("redis chet (gia lap)")
         return [self.kho[k][0] if k in self.kho else None for k in keys]
 
+    async def incr(self, name: str) -> int:
+        if self.no_ra_dem:
+            raise ConnectionError("redis chet (gia lap)")
+        self.dem[name] = self.dem.get(name, 0) + 1
+        return self.dem[name]
+
+    async def expire(self, name: str, time: int, *, nx: bool = False) -> bool:
+        if self.no_ra_dem:
+            raise ConnectionError("redis chet (gia lap)")
+        if nx and name in self.ttl_dem:
+            return False
+        self.ttl_dem[name] = time
+        return True
+
     async def ttl(self, name: str) -> int:
-        if name not in self.kho:
-            return -2
-        ex = self.kho[name][1]
-        return -1 if ex is None else ex
+        if name in self.kho:
+            ex = self.kho[name][1]
+            return -1 if ex is None else ex
+        if name in self.dem:
+            return self.ttl_dem.get(name, -1)
+        return -2
 
 
 @pytest.fixture(autouse=True)
 def redis_gia(monkeypatch: pytest.MonkeyPatch) -> _RedisGia:
-    """Autouse — xem docstring module cho lý do (T-2.4)."""
+    """Autouse — xem docstring module cho lý do (T-2.4).
+
+    Từ B-127/B-131 phải patch thêm `app.core.ratelimit.get_redis`: dependency
+    rate limit chạy TRƯỚC handler, nên không patch nghĩa là mọi route có hạn
+    mức trả `503` (không nối được `redis:6379` từ WSL host) chứ không phải mã
+    mà test đang chờ.
+    """
     gia = _RedisGia()
     monkeypatch.setattr("app.core.deps.get_redis", lambda: gia)
     monkeypatch.setattr("app.api.v1.auth.get_redis", lambda: gia)
+    monkeypatch.setattr("app.core.ratelimit.get_redis", lambda: gia)
     return gia
 
 
@@ -1064,5 +1097,57 @@ async def test_origin_vang_mat_thi_cho_qua(client: AsyncClient) -> None:
     """Không có `Origin` (mọi client hiện có: `curl`, `httpx`, script) → không
     bị chặn — xem docstring `app/core/origin.py` cho lý do."""
     resp = await client.get("/api/v1/models")
+
+    assert resp.status_code == 200
+
+
+# ════════════════ Rate limit theo IP (§10.6) — B-127, B-131 ══════════════════
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_resend_verification_qua_han_muc_moi_gio_tra_429(client: AsyncClient) -> None:
+    """§18.1 ghi "Rate limit 3/giờ" cho đúng route này (B-127).
+
+    Đếm cả lượt gọi với email không tồn tại: thứ cần chặn là lượt *thử*, và
+    một lần dò email thất bại cũng là một lần dò.
+    """
+    email = f"{uuid.uuid4().hex}@khong-ton-tai.example"
+    for _ in range(settings.RATE_LIMIT_EMAIL_IP_PER_HOUR):
+        assert (await client.post(DUONG_DAN_RESEND, json={"email": email})).status_code == 200
+
+    resp = await client.post(DUONG_DAN_RESEND, json={"email": email})
+
+    assert resp.status_code == 429
+    assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
+    assert int(resp.headers["Retry-After"]) > 0
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_logout_qua_han_muc_moi_phut_tra_429(client: AsyncClient) -> None:
+    """Logout cố ý không đòi xác thực (NQ-42) nên bất kỳ ai cũng tạo được một
+    lượt ghi Redis + một `UPDATE` — bề mặt duy nhất của `/auth/*` chưa đếm sau
+    T-2.5 (B-131)."""
+    for _ in range(settings.RATE_LIMIT_AUTH_IP_PER_MIN):
+        assert (await client.post(DUONG_DAN_LOGOUT)).status_code == 200
+
+    resp = await client.post(DUONG_DAN_LOGOUT)
+
+    assert resp.status_code == 429
+    assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_han_muc_dem_theo_ip_that_khong_phai_theo_nginx(client: AsyncClient) -> None:
+    """Nếu đếm nhầm theo `request.client` (IP của Nginx) thì người thứ tư
+    trong giờ bị chặn vì ba người khác — cả nhà chung một bộ đếm."""
+    email = f"{uuid.uuid4().hex}@khong-ton-tai.example"
+    for _ in range(settings.RATE_LIMIT_EMAIL_IP_PER_HOUR + 1):
+        await client.post(
+            DUONG_DAN_RESEND, json={"email": email}, headers={"X-Real-IP": "203.0.113.10"}
+        )
+
+    resp = await client.post(
+        DUONG_DAN_RESEND, json={"email": email}, headers={"X-Real-IP": "203.0.113.11"}
+    )
 
     assert resp.status_code == 200
