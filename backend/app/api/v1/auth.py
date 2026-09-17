@@ -195,7 +195,13 @@ from app.core.access_token import (
     encode_access_token,
 )
 from app.core.blacklist import chan_jti, thu_hoi_moi_phien
-from app.core.deps import SESSION_COOKIE_NAME, get_current_user_id
+from app.core.deps import (
+    SESSION_COOKIE_NAME,
+    STATUSES_CAN_LOGIN,
+    ensure_status_allowed,
+    get_current_user_id,
+    require_app_access,
+)
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.mailer import mailer
 from app.core.ratelimit import dia_chi_ip, gioi_han_auth, gioi_han_gui_email
@@ -503,13 +509,21 @@ def _dat_cookie_refresh(response: Response, raw_refresh_token: str) -> None:
         401: {
             "model": ErrorEnvelope,
             "description": "email hoac mat khau sai (INVALID_CREDENTIALS)",
-        }
+        },
+        403: {
+            "model": ErrorEnvelope,
+            "description": "tai khoan rejected/suspended (ACCOUNT_DISABLED)",
+        },
     },
 )
 async def login(body: DangNhapRequest, request: Request, response: Response) -> NguoiDungRa:
-    """Đăng nhập (§11.2, ADR-07): kiểm mật khẩu, phát hành family refresh MỚI
-    + set cookie phiên. KHÔNG kiểm `status` (pending_email/pending_approval
-    đều đăng nhập được — bảng §11.1; chặn theo trạng thái là việc của T-2.7)."""
+    """Đăng nhập (§11.2, ADR-07): kiểm mật khẩu, kiểm trạng thái, phát hành
+    family refresh MỚI + set cookie phiên.
+
+    Cột "Đăng nhập" của §11.1 (T-2.7): `pending_email`/`pending_approval` vẫn
+    vào được (họ cần thấy giao diện để verify / để chờ duyệt), `rejected` và
+    `suspended` nhận `403 ACCOUNT_DISABLED`.
+    """
     async with session_scope() as session:
         user = await UserRepository(session).get_by_email(body.email)
         if user is not None:
@@ -526,6 +540,13 @@ async def login(body: DangNhapRequest, request: Request, response: Response) -> 
                 ApiErrorCode.INVALID_CREDENTIALS,
                 "email hoac mat khau khong dung",
             )
+
+        # §11.1 (T-2.7) — cột "Đăng nhập". **Sau** khi mật khẩu đã đúng, không
+        # bao giờ trước: kiểm trước nghĩa là ai gõ một email bất kỳ cũng biết
+        # được tài khoản đó có tồn tại và đang ở trạng thái nào, đúng thứ §11.5
+        # cấm rò. Cũng **trước** khi phát hành family refresh ngay dưới: một
+        # tài khoản bị khoá không có việc gì phải cầm một credential 30 ngày.
+        ensure_status_allowed(user.status, STATUSES_CAN_LOGIN)
 
         ra = NguoiDungRa.model_validate(user)
         raw_refresh_token, _family_id = await RefreshTokenRepository(session).issue_new_family(
@@ -905,10 +926,30 @@ async def reset_password(body: DatLaiMatKhauRequest, response: Response) -> DatL
     return _PHAN_HOI_DAT_LAI
 
 
-@router.get("/me", status_code=status.HTTP_200_OK, response_model=NguoiDungRa)
+@router.get(
+    "/me",
+    status_code=status.HTTP_200_OK,
+    response_model=NguoiDungRa,
+    # §11.1 (T-2.7) — cột "Xem UI". Route duy nhất của router `auth` đòi tài
+    # khoản dùng được; `logout` cố ý KHÔNG (NQ-42), phần còn lại là công khai.
+    # Xem `api/v1/__init__.py` cho danh sách router được gắn cả cụm.
+    dependencies=[Depends(require_app_access)],
+    responses={
+        403: {
+            "model": ErrorEnvelope,
+            "description": "tai khoan rejected/suspended (ACCOUNT_DISABLED)",
+        }
+    },
+)
 async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> NguoiDungRa:
     """Thông tin user hiện tại — đi qua `get_current_user_id` như mọi route
-    khác (§20), không tự đọc cookie."""
+    khác (§20), không tự đọc cookie.
+
+    `403 ACCOUNT_DISABLED` cho `rejected`/`suspended` chứ không phải `200` kèm
+    `status`: §11.1 để trống cả ô "Xem UI" của hai hàng ấy, và FE đọc được
+    đúng câu chuyện từ mã lỗi — nó không cần đọc `status` rồi tự nghĩ ra luật
+    lần thứ hai (đúng cạm bẫy "mỗi endpoint một luật" của task này).
+    """
     async with session_scope() as session:
         user = await UserRepository(session).get_by_id(user_id)
         if user is None:

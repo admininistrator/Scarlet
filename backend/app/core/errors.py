@@ -129,6 +129,28 @@ class ApiErrorCode(StrEnum):
     #: token đã dùng (đó là idempotent-success, cùng lý lẽ UC-01).
     TOKEN_INVALID = "TOKEN_INVALID"
 
+    # ── máy trạng thái tài khoản (§11.1, UC-01, T-2.7) ──
+    #: Trạng thái `pending_email` gọi một endpoint đòi email đã xác thực —
+    #: UC-01 gọi đích danh mã này ("Chưa verify email → `403` với
+    #: `code=EMAIL_NOT_VERIFIED`"). Không dùng `FORBIDDEN` trần: FE phải hiện
+    #: đúng nút "gửi lại thư xác thực", một việc khác hẳn với mọi 403 khác.
+    EMAIL_NOT_VERIFIED = "EMAIL_NOT_VERIFIED"
+    #: Trạng thái `pending_approval` chat bằng **system key** (§11.1, UC-01).
+    #: Mã riêng chứ không chung với `EMAIL_NOT_VERIFIED` vì việc FE phải làm
+    #: khác hẳn: ở đây không có nút nào để bấm, chỉ một banner "đang chờ
+    #: duyệt" — và KHÔNG trả mã này khi người đó đã cấu hình BYOK, vì lúc ấy
+    #: họ chat được (§10.5: họ không tiêu tiền của mình).
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+    #: Tài khoản `rejected` hoặc `suspended` (§11.1 — hai hàng cuối, mọi ô đều
+    #: "—"). **Một** mã cho cả hai, đúng luật của bảng này: việc FE phải làm
+    #: giống hệt nhau ở cả hai ca — đóng phiên, hiện màn "tài khoản không dùng
+    #: được, liên hệ quản trị" — nên hai mã ở đây là hai tên cho một nghĩa.
+    #: Trạng thái cụ thể đi trong `details.status` (cho log và cho admin), chỗ
+    #: nó không mời FE mọc thêm một nhánh rẽ. Không rò gì cho người lạ: mã này
+    #: chỉ đến sau khi người gọi đã chứng minh được danh tính (đúng mật khẩu ở
+    #: `/auth/login`, hoặc một access token còn hạn ở mọi route khác).
+    ACCOUNT_DISABLED = "ACCOUNT_DISABLED"
+
     # ── chat (§18.2) ──
     #: `Last-Event-ID` / `?cursor=` không phải một Redis Stream ID.
     CURSOR_INVALID = "CURSOR_INVALID"

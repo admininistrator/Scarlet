@@ -94,7 +94,7 @@ from pydantic import BaseModel, Field
 from app.api.v1.conversations import MessageTrenDuongDi
 from app.config import catalog
 from app.config.settings import settings
-from app.core.deps import get_current_user_id
+from app.core.deps import get_current_user_id, require_chat_access
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.queue import GENERATE_JOB_NAME, get_arq_pool
 from app.core.redis import get_redis
@@ -152,6 +152,9 @@ class TaoMessageResponse(BaseModel):
     "/conversations/{conversation_id}/messages",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=TaoMessageResponse,
+    # §11.1 (T-2.7) — route SINH CHỮ: `active`, hoặc `pending_approval` đã có
+    # BYOK. Xem `app/core/deps.py`; "xem UI" đã do router lo ở `v1/__init__.py`.
+    dependencies=[Depends(require_chat_access)],
     responses={
         400: {"model": ErrorEnvelope, "description": "model_id khong co trong catalog"},
         404: {"model": ErrorEnvelope, "description": "Hoi thoai hoac parent_id khong thay"},
@@ -566,6 +569,9 @@ class AnhEmResponse(BaseModel):
     "/messages/{message_id}/retry",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=RetryResponse,
+    # §11.1 (T-2.7) — route SINH CHỮ: `active`, hoặc `pending_approval` đã có
+    # BYOK. Xem `app/core/deps.py`; "xem UI" đã do router lo ở `v1/__init__.py`.
+    dependencies=[Depends(require_chat_access)],
     responses={
         400: {"model": ErrorEnvelope, "description": "Khong phai assistant, hoac model_id la"},
         404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
@@ -643,6 +649,9 @@ async def retry_message(
     "/messages/{message_id}",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=SuaMessageResponse,
+    # §11.1 (T-2.7) — route SINH CHỮ: `active`, hoặc `pending_approval` đã có
+    # BYOK. Xem `app/core/deps.py`; "xem UI" đã do router lo ở `v1/__init__.py`.
+    dependencies=[Depends(require_chat_access)],
     responses={
         400: {"model": ErrorEnvelope, "description": "Khong phai message user"},
         404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},

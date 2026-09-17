@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select, update
+from sqlalchemy import bindparam, func, select, text, update
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +54,33 @@ class UserRepository:
         """
         stmt = select(User).where(User.id == user_id, User.deleted_at.is_(None))
         return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def has_provider_key(self, user_id: uuid.UUID) -> bool:
+        """Người này đã cấu hình BYOK chưa (§10.5, §11.1) — T-2.7.
+
+        Câu hỏi duy nhất mà `require_status` cần hỏi Postgres: bảng §11.1 cho
+        `pending_approval` chat **nếu** có BYOK, và không claim nào của access
+        token trả lời được điều đó (khoá có thể được thêm/xoá giữa hai lần
+        phát hành token).
+
+        **Vì sao `text()` chứ không phải một model ORM.** `user_provider_keys`
+        đã có trong DB từ migration 0001 nhưng chưa có model — và dựng model ở
+        đây là làm trước một phần của T-2.14 (BYOK: mã hoá và CRUD), nơi hình
+        dạng thật của bảng (`key_cipher`/`key_nonce` BYTEA, `key_last4`,
+        `verified_at`) mới có người dùng. Một model nửa vời hôm nay là một
+        model phải viết lại ngày mai, ở đúng task sở hữu nó.
+
+        `EXISTS` chứ không `COUNT`: câu hỏi là "có hay không", và Postgres
+        dừng ngay ở hàng đầu tiên. Lọc `user_id` **trong câu SQL** (§20).
+
+        `bindparam(..., type_=PgUUID)` chứ không để SQLAlchemy đoán: với
+        `text()` nó không biết kiểu của cột, còn asyncpg thì cần biết để gửi
+        `uuid` chứ không phải chuỗi.
+        """
+        stmt = text(
+            "SELECT EXISTS (SELECT 1 FROM user_provider_keys WHERE user_id = :user_id)"
+        ).bindparams(bindparam("user_id", type_=PgUUID(as_uuid=True)))
+        return bool((await self._session.execute(stmt, {"user_id": user_id})).scalar_one())
 
     async def get_by_email(self, email: str) -> User | None:
         """Tra một user theo email (CITEXT — so sánh không phân biệt hoa/thường).
