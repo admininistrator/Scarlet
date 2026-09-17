@@ -1,5 +1,16 @@
 {
-  "version": 1,
+  "version": 2,
+  "pricing_schedules": {
+    "deepseek-peak-vn": {
+      "label": "DeepSeek — giờ cao điểm (giờ Việt Nam)",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "weekdays": ["mon", "tue", "wed", "thu", "fri"],
+      "windows": [
+        { "start": "08:00", "end": "11:00" },
+        { "start": "13:00", "end": "17:00" }
+      ]
+    }
+  },
   "providers": {
     "deepseek": {
       "label": "DeepSeek AI",
@@ -46,7 +57,17 @@
       "capabilities": ["tools", "vision", "reasoning"],
       "context_window": 128000,
       "max_output": 8192,
-      "pricing": { "input_per_1m": 0.27, "output_per_1m": 1.10, "cached_input_per_1m": 0.07 },
+      "pricing": {
+        "input_per_1m": 0.30,
+        "output_per_1m": 1.20,
+        "cached_input_per_1m": 0.006,
+        "off_peak": {
+          "schedule": "deepseek-peak-vn",
+          "input_per_1m": 0.15,
+          "output_per_1m": 0.60,
+          "cached_input_per_1m": 0.003
+        }
+      },
       "pricing_mode": "metered",
       "enabled": true,
       "default": true,
@@ -61,7 +82,12 @@
       "capabilities": ["tools", "vision"],
       "context_window": 200000,
       "max_output": 8192,
-      "pricing": { "input_per_1m": 1.00, "output_per_1m": 5.00, "cached_input_per_1m": 0.10 },
+      "pricing": {
+        "input_per_1m": 1.00,
+        "output_per_1m": 5.00,
+        "cached_input_per_1m": 0.10,
+        "cache_write_per_1m": 1.25
+      },
       "pricing_mode": "metered",
       "enabled": true,
       "default": false,
