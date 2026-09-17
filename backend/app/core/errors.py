@@ -93,6 +93,14 @@ class ApiErrorCode(StrEnum):
     #: — FE xử lý cả hai như nhau (đẩy về đăng nhập), mã riêng này chỉ để log
     #: và để test phân biệt được hai đường.
     TOKEN_EXPIRED = "TOKEN_EXPIRED"
+    #: Access JWT còn hạn và đúng chữ ký nhưng đã bị thu hồi (§11.3, T-2.4):
+    #: `jti` nằm trong `bl:jti:`, hoặc `iat` cũ hơn mốc `bl:user:` do một lần
+    #: đổi mật khẩu/suspend đặt xuống. Mã riêng cùng lý lẽ với `TOKEN_EXPIRED`:
+    #: FE xử lý như nhau (đẩy về đăng nhập), nhưng "phiên này đã bị đóng" và
+    #: "token hỏng" là hai sự kiện khác nhau trong log — và là hai đường mà
+    #: test của C21 phải phân biệt được, nếu không một `UNAUTHENTICATED` do
+    #: **thiếu** cookie sẽ đọc y hệt một lần chặn thành công.
+    TOKEN_REVOKED = "TOKEN_REVOKED"
 
     # ── đăng ký (§11.6, T-2.1) ──
     #: `len(password) < settings.PASSWORD_MIN_LENGTH`.

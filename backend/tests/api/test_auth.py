@@ -1,16 +1,29 @@
 """`POST /auth/register` + `/verify-email` + `/resend-verification` (§11.1,
-§11.5, §11.6, UC-01) — T-2.1, T-2.2.
+§11.5, §11.6, UC-01) — T-2.1, T-2.2. `/login` + `/refresh` + `/me` (§11.2) —
+T-2.3. `/logout` + blacklist (§11.3, C21) — T-2.4.
 
 Cùng mô hình với `test_conversations.py`: `httpx.ASGITransport`, và
 `session_scope()` trong handler bị trỏ về đúng kết nối của test qua
-`_db_cua_test`. Không cần `_debug_bat`: cả ba endpoint không đi qua
-`Depends(get_current_user_id)` — đều công khai.
+`_db_cua_test`. Không cần `_debug_bat`: ba endpoint của T-2.1/T-2.2 không đi
+qua `Depends(get_current_user_id)` — đều công khai — còn `/me` đi vào bằng
+cookie phiên thật (T-2.3), không phải nhánh tạm DEBUG của Phase 1.
 
 `mailer_gia` (T-2.2) thay `app.api.v1.auth.mailer` bằng một stub ghi lại lời
 gọi thay vì gửi SMTP thật: bộ test này kiểm HÀNH VI của handler (có gọi
 `mailer.send` không, với `template`/`ctx` gì), không kiểm hạ tầng SMTP — phần
 "thư có thật sự tới Mailpit trong ≤ 5 s" là phép đo tay trên stack thật (báo
 cáo T-2.2 mục 2), không phải thứ `pytest` nên giả lập lại.
+
+`redis_gia` (T-2.4) là **autouse**, khác `mailer_gia`, và khác cả `redis_gia`
+của `test_messages_cancel.py` (nơi nó chỉ ghi lại lời gọi). Hai lý do:
+
+1. Từ T-2.4, **mọi** request mang cookie phiên đều hỏi Redis xem token có bị
+   thu hồi chưa (§11.3, `app/core/deps.py`), nên các test T-2.3 vốn đang xanh
+   sẽ chuyển thành `503` nếu không có Redis — `redis:6379` chỉ phân giải được
+   bên trong network `internal` của compose, còn `pytest` chạy từ WSL host.
+2. Blacklist là một cái **kho**, không phải một lời gọi: phép kiểm của T-2.4 là
+   "ghi vào rồi request sau có bị chặn không", nên stub phải nhớ được thứ nó
+   đã ghi, kèm TTL (DoD dòng 3 đọc đúng TTL đó).
 """
 
 from __future__ import annotations
@@ -28,7 +41,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1.auth import REFRESH_COOKIE_NAME
-from app.core.access_token import encode_access_token
+from app.config.settings import settings
+from app.core.access_token import decode_access_token, encode_access_token
+from app.core.blacklist import jti_key, thu_hoi_moi_phien, user_key
 from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiErrorCode
 from app.core.security import hash_email_token, hash_password
@@ -42,6 +57,7 @@ DUONG_DAN_RESEND = "/api/v1/auth/resend-verification"
 DUONG_DAN_LOGIN = "/api/v1/auth/login"
 DUONG_DAN_REFRESH = "/api/v1/auth/refresh"
 DUONG_DAN_ME = "/api/v1/auth/me"
+DUONG_DAN_LOGOUT = "/api/v1/auth/logout"
 
 #: Mật khẩu thật dùng trong test login — khác `user_a`/`user_b` của
 #: `conftest.py` (những fixture đó gán `password_hash="khong-phai-hash-that"`,
@@ -82,6 +98,47 @@ def mailer_gia(monkeypatch: pytest.MonkeyPatch) -> _MailerGia:
     stub = _MailerGia()
     monkeypatch.setattr("app.api.v1.auth.mailer", stub)
     return stub
+
+
+class _RedisGia:
+    """Redis trong bộ nhớ — chỉ ba lệnh blacklist thật sự dùng (T-2.4).
+
+    Giữ cả TTL đã đặt cho từng khoá vì DoD dòng 3 của T-2.4 đo đúng nó
+    (`redis-cli TTL bl:jti:{jti}` ≤ 900, **không** phải `-1`). `ttl()` trả về
+    `-2`/`-1` đúng quy ước Redis (không có khoá / có khoá nhưng không TTL) chứ
+    không trả `None`: nếu stub tự bịa quy ước riêng thì test có thể xanh trong
+    khi `redis-cli` trên stack thật nói chuyện khác.
+    """
+
+    def __init__(self) -> None:
+        self.kho: dict[str, tuple[str, int | None]] = {}
+        self.no_ra = False
+
+    async def set(self, name: str, value: str, *, ex: int | None = None) -> bool:
+        if self.no_ra:
+            raise ConnectionError("redis chet (gia lap)")
+        self.kho[name] = (value, ex)
+        return True
+
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        if self.no_ra:
+            raise ConnectionError("redis chet (gia lap)")
+        return [self.kho[k][0] if k in self.kho else None for k in keys]
+
+    async def ttl(self, name: str) -> int:
+        if name not in self.kho:
+            return -2
+        ex = self.kho[name][1]
+        return -1 if ex is None else ex
+
+
+@pytest.fixture(autouse=True)
+def redis_gia(monkeypatch: pytest.MonkeyPatch) -> _RedisGia:
+    """Autouse — xem docstring module cho lý do (T-2.4)."""
+    gia = _RedisGia()
+    monkeypatch.setattr("app.core.deps.get_redis", lambda: gia)
+    monkeypatch.setattr("app.api.v1.auth.get_redis", lambda: gia)
+    return gia
 
 
 def _token_tu_verify_url(verify_url: str) -> str:
@@ -622,6 +679,355 @@ async def test_refresh_sau_khi_bi_thu_hoi_van_401(
 
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
+
+
+# ═══════════════════ POST /auth/logout + blacklist (T-2.4) ══════════════════
+
+
+async def _dang_nhap(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> tuple[uuid.UUID, str]:
+    """Tạo user + đăng nhập trên `client`. Trả `(user_id, email)`."""
+    user_id, email = await _tao_user_that(session_factory)
+    resp = await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+    assert resp.status_code == 200
+    return user_id, email
+
+
+@pytest_asyncio.fixture
+async def client_thiet_bi_hai() -> AsyncIterator[AsyncClient]:
+    """Client THỨ HAI — "thiết bị khác" của DoD dòng 2 (jar cookie riêng)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://localhost") as http:
+        yield http
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_logout_roi_dung_lai_access_token_cu_tra_401(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD T-2.4 dòng 1 (C21): lưu access token → logout → dùng lại → **401**."""
+    await _dang_nhap(client, session_factory)
+    token_cu = client.cookies.get(SESSION_COOKIE_NAME)
+    assert token_cu is not None
+    assert (await client.get(DUONG_DAN_ME)).status_code == 200, "truoc logout phai vao duoc"
+
+    resp_logout = await client.post(DUONG_DAN_LOGOUT)
+    assert resp_logout.status_code == 200
+    assert resp_logout.json() == {"status": "logged_out"}
+
+    # "dùng lại token đó": cookie đã bị server xoá khỏi jar, nên đặt lại tay —
+    # đúng thứ một kẻ đã chép được token sẽ làm.
+    client.cookies.set(SESSION_COOKIE_NAME, token_cu)
+    resp_me = await client.get(DUONG_DAN_ME)
+
+    assert resp_me.status_code == 401
+    assert resp_me.json()["error"]["code"] == ApiErrorCode.TOKEN_REVOKED
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_logout_xoa_ca_hai_cookie_dung_path(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`delete_cookie` phải mang đúng `Path` đã `set_cookie`, nếu không trình
+    duyệt giữ nguyên cookie cũ mà response vẫn 200 (xem `api/v1/auth.py`)."""
+    await _dang_nhap(client, session_factory)
+
+    resp = await client.post(DUONG_DAN_LOGOUT)
+
+    headers = [h.lower() for h in resp.headers.get_list("set-cookie")]
+    phien = next(h for h in headers if h.startswith(f"{SESSION_COOKIE_NAME}="))
+    refresh_ck = next(h for h in headers if h.startswith(f"{REFRESH_COOKIE_NAME}="))
+    assert "path=/api/v1;" in phien
+    assert "path=/api/v1/auth" in refresh_ck
+    # Cả hai đều phải hết hạn ngay (Max-Age=0 hoặc Expires trong quá khứ).
+    assert "max-age=0" in phien and "max-age=0" in refresh_ck
+    assert client.cookies.get(SESSION_COOKIE_NAME) is None
+    assert client.cookies.get(REFRESH_COOKIE_NAME) is None
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_logout_dat_ttl_bl_jti_bang_doi_song_con_lai_khong_phai_vinh_vien(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_gia: _RedisGia,
+) -> None:
+    """DoD T-2.4 dòng 3: `TTL bl:jti:{jti}` ≤ 900 và **không** phải `-1`.
+
+    Cạm bẫy của task: "blacklist không có TTL sẽ phình vô hạn" — `-1` là đúng
+    cái giá trị Redis trả cho một khoá không bao giờ hết hạn.
+    """
+    await _dang_nhap(client, session_factory)
+    token = client.cookies.get(SESSION_COOKIE_NAME)
+    assert token is not None
+    jti = decode_access_token(token).jti
+
+    await client.post(DUONG_DAN_LOGOUT)
+
+    ttl = await redis_gia.ttl(jti_key(jti))
+    assert ttl != -1, "khoa khong co TTL se phinh vo han"
+    assert ttl != -2, "khoa phai ton tai"
+    assert 0 < ttl <= settings.ACCESS_TOKEN_TTL_MIN * 60
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_logout_thu_hoi_ca_refresh_family(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Nửa "+ revoke family" của §11.3: refresh token của phiên vừa đóng chết theo.
+
+    Không có nửa này thì access token chết 15 phút còn refresh token sống tiếp
+    30 ngày — logout chỉ là một hiệu ứng hình ảnh.
+    """
+    _, email = await _dang_nhap(client, session_factory)
+    refresh_cu = client.cookies.get(REFRESH_COOKIE_NAME)
+    assert refresh_cu is not None
+
+    await client.post(DUONG_DAN_LOGOUT)
+
+    client.cookies.set(REFRESH_COOKIE_NAME, refresh_cu)
+    resp = await client.post(DUONG_DAN_REFRESH)
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
+
+    async with session_factory() as session:
+        uid = (await session.execute(select(User.id).where(User.email == email))).scalar_one()
+        revoked = (
+            (
+                await session.execute(
+                    select(RefreshToken.revoked_at).where(RefreshToken.user_id == uid)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert revoked and all(r is not None for r in revoked)
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_logout_chi_dong_phien_nay_khong_dong_thiet_bi_khac(
+    client: AsyncClient,
+    client_thiet_bi_hai: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """`bl:jti:` chặn MỘT token, không chặn tài khoản — đăng xuất trên điện
+    thoại không được đá người dùng ra khỏi máy tính (§11.2 nói phiên, không
+    nói tài khoản). Đây là phép kiểm ngược của test DoD dòng 2 ngay dưới."""
+    _, email = await _tao_user_that(session_factory)
+    body = {"email": email, "password": _MAT_KHAU_TEST}
+    assert (await client.post(DUONG_DAN_LOGIN, json=body)).status_code == 200
+    assert (await client_thiet_bi_hai.post(DUONG_DAN_LOGIN, json=body)).status_code == 200
+
+    await client.post(DUONG_DAN_LOGOUT)
+
+    assert (await client_thiet_bi_hai.get(DUONG_DAN_ME)).status_code == 200
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_doi_mat_khau_dong_moi_token_cu_tren_moi_thiet_bi(
+    client: AsyncClient,
+    client_thiet_bi_hai: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_gia: _RedisGia,
+) -> None:
+    """DoD T-2.4 dòng 2: đổi mật khẩu → mọi token cũ trên **mọi** thiết bị 401.
+
+    Kích hoạt bằng `thu_hoi_moi_phien()` chứ không bằng một endpoint: §18.1 KHÔNG
+    có route đổi mật khẩu, và luồng đổi mật khẩu duy nhất của kế hoạch là
+    `POST /auth/reset-password` — việc của T-2.5, vốn khai T-2.4 là phụ thuộc.
+    T-2.4 dựng **cơ chế**; đây là phép đo của chính cơ chế đó.
+    """
+    user_id, email = await _tao_user_that(session_factory)
+    body = {"email": email, "password": _MAT_KHAU_TEST}
+    assert (await client.post(DUONG_DAN_LOGIN, json=body)).status_code == 200
+    assert (await client_thiet_bi_hai.post(DUONG_DAN_LOGIN, json=body)).status_code == 200
+    refresh_thiet_bi_hai = client_thiet_bi_hai.cookies.get(REFRESH_COOKIE_NAME)
+
+    async with session_factory() as session:
+        await thu_hoi_moi_phien(session, redis_gia, user_id)  # type: ignore[arg-type]
+        await session.commit()
+
+    for thiet_bi in (client, client_thiet_bi_hai):
+        resp = await thiet_bi.get(DUONG_DAN_ME)
+        assert resp.status_code == 401
+        assert resp.json()["error"]["code"] == ApiErrorCode.TOKEN_REVOKED
+
+    # Và refresh token cũng không đổi ra được access token mới — nếu không thì
+    # "mọi token cũ đều 401" chỉ đúng trong 15 phút.
+    assert refresh_thiet_bi_hai is not None
+    client_thiet_bi_hai.cookies.set(REFRESH_COOKIE_NAME, refresh_thiet_bi_hai)
+    assert (await client_thiet_bi_hai.post(DUONG_DAN_REFRESH)).status_code == 401
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_doi_mat_khau_khong_chan_token_phat_hanh_sau_do(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_gia: _RedisGia,
+) -> None:
+    """Mốc `bl:user:` chặn theo `iat`, nên đăng nhập LẠI phải dùng được ngay —
+    nếu không thì đổi mật khẩu = khoá tài khoản 15 phút.
+
+    Mốc đặt lùi 2 giây thay vì `now()`, và đó là phép đo chứ không phải mẹo
+    tránh né: `iat` của JWT là giây NGUYÊN, còn mốc giữ cả phần thập phân (xem
+    `core/blacklist.py`), nên một token phát hành trong **cùng giây** với lần
+    thu hồi vẫn bị chặn — có chủ ý, và test ngay trên đo đúng mặt kia của cùng
+    một lựa chọn. Lùi mốc ra khỏi giây hiện tại là cách duy nhất đo được "token
+    phát hành SAU khi thu hồi thì đi qua" mà không phải `sleep(1)` trong test.
+    """
+    user_id, email = await _tao_user_that(session_factory)
+    async with session_factory() as session:
+        await thu_hoi_moi_phien(
+            session,
+            redis_gia,  # type: ignore[arg-type]
+            user_id,
+            now=datetime.now(UTC) - timedelta(seconds=2),
+        )
+        await session.commit()
+
+    resp_login = await client.post(
+        DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST}
+    )
+    assert resp_login.status_code == 200
+
+    assert (await client.get(DUONG_DAN_ME)).status_code == 200
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_moc_bl_user_chan_ca_token_phat_hanh_trong_cung_mot_giay(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_gia: _RedisGia,
+) -> None:
+    """`iat` của JWT là giây NGUYÊN. Mốc mà cũng làm tròn xuống thì token phát
+    hành cùng giây với lần đổi mật khẩu sống sót (`iat == mốc`, `<` cho False).
+
+    Phép kiểm ngược: đổi `repr(moc)` trong `dat_moc_user` thành `str(int(moc))`
+    làm test này đỏ. Nó phải chạy nhanh hơn một giây để có nghĩa — `_tao_user_that`
+    tốn ~100 ms Argon2, `login` thêm ~100 ms, nên biên vẫn rộng.
+    """
+    user_id, email = await _tao_user_that(session_factory)
+    await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+    token = client.cookies.get(SESSION_COOKIE_NAME)
+    assert token is not None
+    iat = decode_access_token(token).issued_at
+
+    async with session_factory() as session:
+        moc = await thu_hoi_moi_phien(session, redis_gia, user_id)  # type: ignore[arg-type]
+        await session.commit()
+
+    if int(moc) != int(iat.timestamp()):
+        pytest.skip("hai moc roi vao hai giay khac nhau — khong do duoc ca bien nay")
+    resp = await client.get(DUONG_DAN_ME)
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.TOKEN_REVOKED
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_blacklist_trong_thi_token_hop_le_van_qua_duoc(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_gia: _RedisGia,
+) -> None:
+    """DoD T-2.4 dòng 4: blacklist trống mà token hợp lệ → vẫn qua (không chặn
+    nhầm). Một blacklist chặn tất cả cũng "đạt" ba dòng DoD kia."""
+    await _dang_nhap(client, session_factory)
+    assert redis_gia.kho == {}, "chua ai logout/doi mat khau thi kho phai rong"
+
+    for _ in range(3):
+        assert (await client.get(DUONG_DAN_ME)).status_code == 200
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_khoa_bl_user_co_gia_tri_hong_thi_chan_chu_khong_tha(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_gia: _RedisGia,
+) -> None:
+    """Khoá `bl:user:` chỉ tồn tại vì có người yêu cầu thu hồi. Nội dung không
+    đọc được (ai đó `SET` tay lúc debug) → chặn, không tha."""
+    user_id, _ = await _dang_nhap(client, session_factory)
+    await redis_gia.set(user_key(user_id), "khong-phai-so", ex=900)
+
+    resp = await client.get(DUONG_DAN_ME)
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.TOKEN_REVOKED
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_logout_voi_access_token_het_han_van_200_va_van_thu_hoi_family(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], user_a: uuid.UUID
+) -> None:
+    """Logout KHÔNG đòi access token còn hạn (xem docstring `api/v1/auth.py`).
+
+    Access token sống 15 phút, refresh token sống 30 ngày: trả `401` ở đây
+    nghĩa là người rời máy quá 15 phút không đóng được phiên 30 ngày của chính
+    mình — đúng C21, chỉ đổi nguyên nhân.
+    """
+    _, email = await _dang_nhap(client, session_factory)
+    refresh_cu = client.cookies.get(REFRESH_COOKIE_NAME)
+    client.cookies.set(
+        SESSION_COOKIE_NAME,
+        encode_access_token(
+            user_id=user_a,
+            role=UserRole.USER,
+            tier="free",
+            status=UserStatus.PENDING_EMAIL,
+            ttl_minutes=-1,
+        ),
+    )
+
+    resp = await client.post(DUONG_DAN_LOGOUT)
+
+    assert resp.status_code == 200
+    assert refresh_cu is not None
+    client.cookies.set(REFRESH_COOKIE_NAME, refresh_cu)
+    assert (await client.post(DUONG_DAN_REFRESH)).status_code == 401
+
+
+async def test_logout_khong_cookie_nao_van_200(client: AsyncClient) -> None:
+    """Không có gì để đóng và đã đóng xong là cùng một trạng thái cuối — và
+    phân biệt hai ca đó là nói cho người gọi biết cookie họ gửi có thật hay
+    không (§11.5)."""
+    resp = await client.post(DUONG_DAN_LOGOUT)
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "logged_out"}
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_logout_redis_chet_tra_503_chu_khong_bao_thanh_cong(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_gia: _RedisGia,
+) -> None:
+    """Nuốt lỗi Redis ở logout là C21 nguyên vẹn: người dùng đọc "đã đăng
+    xuất" trong khi access token còn chạy thêm 15 phút."""
+    await _dang_nhap(client, session_factory)
+    redis_gia.no_ra = True
+
+    resp = await client.post(DUONG_DAN_LOGOUT)
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == ApiErrorCode.SERVICE_UNAVAILABLE
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_redis_chet_thi_request_tra_503_chu_khong_cho_qua(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_gia: _RedisGia,
+) -> None:
+    """Không hỏi được Redis nghĩa là KHÔNG BIẾT token có bị thu hồi hay chưa.
+    Cho qua là mở lại C21 đúng lúc hệ thống đang hỏng; `503` chứ không `401` vì
+    đây là sự cố hạ tầng, không phải lỗi của phiên đăng nhập."""
+    await _dang_nhap(client, session_factory)
+    redis_gia.no_ra = True
+
+    resp = await client.get(DUONG_DAN_ME)
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == ApiErrorCode.SERVICE_UNAVAILABLE
 
 
 # ═══════════════════════ Kiểm Origin (NQ-36, B-114) ══════════════════════════

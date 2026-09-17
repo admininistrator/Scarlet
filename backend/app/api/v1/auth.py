@@ -1,8 +1,9 @@
 """`POST /auth/register`, `/verify-email`, `/resend-verification` (§11.1,
 §11.5, §11.6, UC-01) — T-2.1, T-2.2. `POST /auth/login`, `/refresh`,
-`GET /auth/me` (§11.2, ADR-07) — T-2.3.
+`GET /auth/me` (§11.2, ADR-07) — T-2.3. `POST /auth/logout` (§11.3, C21) — T-2.4.
 
-KH tham chiếu: §11.5, §11.2, UC-01, ADR-07 · CLAUDE.md A3 · tasks.md T-2.2, T-2.3, NQ-36.
+KH tham chiếu: §11.5, §11.2, §11.3, UC-01, ADR-07, C21 · CLAUDE.md A3 ·
+tasks.md T-2.2, T-2.3, T-2.4, NQ-36.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  CẠM BẪY CỦA T-2.1: chống dò email (§11.5)                                │
@@ -66,6 +67,31 @@ JWT; `app/core/deps.py::get_current_user_id` là nơi verify nó. Cookie refresh
 giữ `Path=/api/v1/auth` (chỉ gửi tới nhóm route này), cookie phiên rộng hơn
 (`Path=/api/v1`, mọi route cần đọc danh tính) — hai path khác nhau nên trình
 duyệt không bao giờ gửi nhầm cookie refresh cho một route thường.
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│  CẠM BẪY CỦA T-2.4 (C21): logout phải ĐÓNG ĐƯỢC, kể cả khi đã muộn        │
+└──────────────────────────────────────────────────────────────────────────┘
+
+`logout` **không** đứng sau `Depends(get_current_user_id)`, và đó là quyết định
+chính của task chứ không phải một chỗ lười. Access token sống 15 phút, refresh
+token sống 30 ngày: bắt buộc phải có access token còn hạn mới đăng xuất được
+nghĩa là người rời máy quá 15 phút rồi bấm "Đăng xuất" sẽ nhận `401` — và cái
+còn sống, refresh token, **vẫn nguyên**. Người dùng tin mình đã ra, thực tế thì
+phiên 30 ngày vẫn mở. Đó đúng là C21, chỉ đổi nguyên nhân từ "không blacklist"
+sang "blacklist không với tới". Vì vậy `logout` đọc thẳng hai cookie, tha mọi
+token không giải mã được, và **luôn** trả 200 — không có trạng thái nào của
+client làm nó từ chối đóng cửa.
+
+Cho đăng xuất mà không cần xác thực **không** mở thêm CSRF: thứ duy nhất kẻ
+tấn công đạt được là đá nạn nhân ra khỏi phiên của chính nạn nhân (phiền, không
+mất mát), và `OriginCheckMiddleware` (NQ-36) vẫn chặn POST cross-site có
+`Origin` — mọi trình duyệt thật đều gửi header đó cho request kiểu này.
+
+**Thứ tự hai nửa của §11.3 là Postgres TRƯỚC, Redis SAU.** Một trong hai nửa
+trượt thì nửa nào đã chạy quyết định thiệt hại: chạy DB trước thì lần trượt để
+lại "refresh (30 ngày) đã chết, access (≤15 phút) còn sống" — tự lành; chạy
+Redis trước thì lần trượt để lại "access đã chết, **refresh 30 ngày còn sống**"
+— không tự lành, và đó là credential đắt hơn hẳn.
 """
 
 from __future__ import annotations
@@ -78,10 +104,17 @@ from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 from pydantic import BaseModel, ConfigDict, EmailStr
 
 from app.config.settings import settings
-from app.core.access_token import encode_access_token
+from app.core.access_token import (
+    TokenExpiredError,
+    TokenInvalidError,
+    decode_access_token,
+    encode_access_token,
+)
+from app.core.blacklist import chan_jti
 from app.core.deps import SESSION_COOKIE_NAME, get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.mailer import mailer
+from app.core.redis import get_redis
 from app.core.security import hash_password, mat_khau_qua_pho_bien, verify_password
 from app.db.models import EmailTokenPurpose, UserRole, UserStatus
 from app.db.repositories.email_tokens import ConsumeResult, EmailTokenRepository
@@ -96,6 +129,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 #: `Path` hẹp hơn cookie phiên (`SESSION_COOKIE_NAME`, `app/core/deps.py`) —
 #: chỉ nhóm route `/auth/*` cần đọc token này (§11.2).
 REFRESH_COOKIE_NAME = "scarlet_refresh"
+
+#: `Path` của hai cookie. Thành hằng ở T-2.4 vì `delete_cookie` **phải** dùng
+#: đúng `Path` đã `set_cookie`: lệch một ký tự thì trình duyệt giữ nguyên
+#: cookie cũ và không ai biết — `Set-Cookie` vẫn đi ra, response vẫn 200, chỉ
+#: có điều người dùng vẫn đăng nhập. Chép tay ở bốn chỗ là bốn cơ hội để lệch.
+#: Giá trị bám theo `prefix` của `app/api/v1/__init__.py`; không import được từ
+#: đó (vòng import: `api.v1.__init__` nạp chính module này).
+SESSION_COOKIE_PATH = "/api/v1"
+REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 #: Mật khẩu giả — KHÔNG dùng để so khớp, chỉ để `hash_password` tốn đúng
 #: ngần ấy mili-giây khi email không tồn tại (chống dò qua thời gian, xem
@@ -327,7 +369,7 @@ def _dat_cookie_phien(response: Response, nguoi_dung: NguoiDungRa) -> None:
         key=SESSION_COOKIE_NAME,
         value=access_token,
         max_age=settings.ACCESS_TOKEN_TTL_MIN * 60,
-        path="/api/v1",
+        path=SESSION_COOKIE_PATH,
         httponly=True,
         secure=True,
         samesite="lax",
@@ -340,7 +382,7 @@ def _dat_cookie_refresh(response: Response, raw_refresh_token: str) -> None:
         key=REFRESH_COOKIE_NAME,
         value=raw_refresh_token,
         max_age=settings.REFRESH_TOKEN_TTL_DAYS * 86400,
-        path="/api/v1/auth",
+        path=REFRESH_COOKIE_PATH,
         httponly=True,
         secure=True,
         samesite="lax",
@@ -461,6 +503,103 @@ async def refresh(
     _dat_cookie_phien(response, ra)
     _dat_cookie_refresh(response, outcome.raw_token)
     return ra
+
+
+# ═══════════════════════ POST /auth/logout (T-2.4, §11.3, C21) ══════════════
+
+
+class DangXuatResponse(BaseModel):
+    #: Một giá trị duy nhất, luôn luôn. Logout không có kết cục thứ hai để
+    #: báo: "không có gì để đóng" và "đã đóng xong" là cùng một trạng thái
+    #: cuối đối với người dùng (xem docstring module), và phân biệt chúng chỉ
+    #: nói cho người gọi biết cookie họ vừa gửi có thật hay không — đúng loại
+    #: thông tin §11.5 không cho rò ra.
+    status: Literal["logged_out"]
+
+
+_PHAN_HOI_DANG_XUAT = DangXuatResponse(status="logged_out")
+
+
+def _xoa_hai_cookie(response: Response) -> None:
+    """Xoá cookie phiên + cookie refresh, đúng `Path` đã đặt chúng."""
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        path=SESSION_COOKIE_PATH,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
+        path=REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_200_OK,
+    response_model=DangXuatResponse,
+    responses={
+        503: {
+            "model": ErrorEnvelope,
+            "description": "khong ghi duoc blacklist vao Redis (SERVICE_UNAVAILABLE)",
+        }
+    },
+)
+async def logout(
+    response: Response,
+    session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
+    raw_refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE_NAME)] = None,
+) -> DangXuatResponse:
+    """Đăng xuất (§11.3, C21): blacklist `jti` + thu hồi family + xoá cookie.
+
+    KHÔNG đứng sau `Depends(get_current_user_id)` và KHÔNG từ chối token hết
+    hạn — xem docstring module cho lý do đầy đủ.
+
+    Raise:
+        ApiError 503 `SERVICE_UNAVAILABLE`: không ghi được `bl:jti:` vào Redis.
+            Nuốt lỗi ở đây là đúng nghĩa C21 — người dùng đọc "đã đăng xuất"
+            trong khi access token của họ còn chạy thêm 15 phút.
+    """
+    # ── nửa Postgres: thu hồi family của phiên này (thứ tự, xem docstring) ──
+    so_family_da_thu_hoi = 0
+    if raw_refresh_token is not None:
+        async with session_scope() as session:
+            so_family_da_thu_hoi = await RefreshTokenRepository(session).thu_hoi_family_theo_token(
+                raw_refresh_token
+            )
+            await session.commit()
+
+    # ── nửa Redis: chặn đúng access token đang cầm ──
+    ttl_da_dat: int | None = None
+    if session_cookie is not None:
+        try:
+            claims = decode_access_token(session_cookie)
+        except (TokenExpiredError, TokenInvalidError):
+            # Hết hạn thì không còn gì để chặn; sai chữ ký thì nó chưa bao giờ
+            # là token của ai. Cả hai đều không phải lý do để từ chối đóng cửa.
+            claims = None
+        if claims is not None:
+            try:
+                ttl_da_dat = await chan_jti(get_redis(), claims)
+            except Exception as loi:
+                logger.exception("khong ghi duoc bl:jti cho user %s", claims.user_id)
+                raise ApiError(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    ApiErrorCode.SERVICE_UNAVAILABLE,
+                    "khong dang xuat duoc, hay thu lai",
+                ) from loi
+
+    _xoa_hai_cookie(response)
+    logger.info(
+        "logout: da thu hoi %d refresh token, bl:jti TTL=%s",
+        so_family_da_thu_hoi,
+        ttl_da_dat,
+    )
+    return _PHAN_HOI_DANG_XUAT
 
 
 @router.get("/me", status_code=status.HTTP_200_OK, response_model=NguoiDungRa)

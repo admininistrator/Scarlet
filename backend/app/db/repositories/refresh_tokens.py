@@ -1,6 +1,6 @@
-"""Repository của bảng `refresh_tokens` (§11.2, ADR-07) — T-2.3.
+"""Repository của bảng `refresh_tokens` (§11.2, §11.3, ADR-07) — T-2.3, T-2.4.
 
-Hai thao tác:
+Hai thao tác của T-2.3:
 
 - `issue_new_family`: đăng nhập thành công → token đầu tiên của một family
   MỚI (`family_id` tự sinh).
@@ -15,6 +15,16 @@ Hai thao tác:
       xoay ra và còn hợp lệ) — dấu hiệu token đã bị đánh cắp.
     - Hợp lệ, chưa dùng, chưa hết hạn, chưa bị thu hồi → OK: đánh dấu
       `used_at`, phát hành token MỚI cùng `family_id`, trả về bản RÕ.
+
+T-2.4 thêm hai thao tác thu hồi **chủ động** — khác `rotate`, chúng không tra
+cứu để cho qua, chúng chỉ đóng cửa (§11.3):
+
+- `thu_hoi_family_theo_token`: logout → thu hồi đúng family của phiên đang
+  đăng xuất, không đụng phiên khác của cùng người dùng.
+- `thu_hoi_moi_family`: đổi mật khẩu / admin suspend → thu hồi **mọi** family.
+
+Cả hai đều trả về **số hàng đã đổi** thay vì `None`: đó là con số duy nhất cho
+biết thao tác có chạm được vào cái gì hay không, và DoD của T-2.4 đọc đúng nó.
 """
 
 from __future__ import annotations
@@ -26,6 +36,7 @@ from enum import StrEnum
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.security import generate_refresh_token, hash_refresh_token
 from app.db.models import RefreshToken
@@ -84,6 +95,35 @@ class RefreshTokenRepository:
         )
         return RotateOutcome(RotateResult.OK, user_id=row.user_id, raw_token=new_raw_token)
 
+    async def thu_hoi_family_theo_token(self, raw_token: str) -> int:
+        """Logout (§11.3): thu hồi family của **chính** token đang cầm.
+
+        Trả số hàng đã thu hồi; `0` nghĩa là không tìm thấy token (đã bị thu
+        hồi từ trước, hoặc bịa đặt). `0` **không** phải lỗi và chỗ gọi không
+        được biến nó thành lỗi: logout phải chạy được với một cookie cũ, xem
+        docstring của `logout` trong `api/v1/auth.py`.
+
+        Cố ý KHÔNG kiểm `used_at`/`expires_at` như `rotate`: ở đây không có ai
+        được cấp quyền gì, chỉ có quyền bị lấy đi. Một token đã hết hạn vẫn chỉ
+        đúng family cần đóng.
+        """
+        stmt = select(RefreshToken.family_id).where(
+            RefreshToken.token_hash == hash_refresh_token(raw_token)
+        )
+        family_id = (await self._session.execute(stmt)).scalar_one_or_none()
+        if family_id is None:
+            return 0
+        return await self._thu_hoi_ca_family(family_id)
+
+    async def thu_hoi_moi_family(self, user_id: uuid.UUID) -> int:
+        """Đổi mật khẩu / admin suspend (§11.3): thu hồi MỌI family của user.
+
+        Một câu `UPDATE` theo `user_id` chứ không phải vòng lặp theo từng
+        `family_id`: §20 đòi lọc **trong** SQL, và một vòng lặp ở Python có
+        thêm một cửa sổ để một lần đăng nhập mới chen vào giữa.
+        """
+        return await self._thu_hoi_theo_dieu_kien(RefreshToken.user_id == user_id)
+
     async def _them_hang(
         self, *, user_id: uuid.UUID, family_id: uuid.UUID, ttl_days: int, user_agent: str | None
     ) -> str:
@@ -100,12 +140,27 @@ class RefreshTokenRepository:
         await self._session.flush()
         return raw_token
 
-    async def _thu_hoi_ca_family(self, family_id: uuid.UUID) -> None:
+    async def _thu_hoi_ca_family(self, family_id: uuid.UUID) -> int:
+        return await self._thu_hoi_theo_dieu_kien(RefreshToken.family_id == family_id)
+
+    async def _thu_hoi_theo_dieu_kien(self, dieu_kien: ColumnElement[bool]) -> int:
+        """`UPDATE ... revoked_at = now()` cho mọi hàng khớp mà CHƯA bị thu hồi.
+
+        `revoked_at IS NULL` không phải để tiết kiệm: nó giữ **thời điểm thu
+        hồi đầu tiên**. Ghi đè bằng `now()` mỗi lần gọi sẽ xoá mất dấu vết của
+        lần phát hiện tái sử dụng (`rotate`) ngay khi người dùng bấm logout,
+        đúng lúc dấu vết đó đáng giá nhất.
+        """
         stmt = (
             update(RefreshToken)
-            .where(RefreshToken.family_id == family_id, RefreshToken.revoked_at.is_(None))
+            .where(dieu_kien, RefreshToken.revoked_at.is_(None))
             .values(revoked_at=datetime.now(UTC))
+            .returning(RefreshToken.id)
             .execution_options(synchronize_session=False)
         )
-        await self._session.execute(stmt)
+        # `RETURNING` chứ không `rowcount`: cùng lối `mark_email_verified` của
+        # `repositories/users.py`, và `Result.rowcount` không có trong kiểu tĩnh
+        # mà SQLAlchemy khai cho `session.execute` (mypy đỏ).
+        so_hang = len((await self._session.execute(stmt)).scalars().all())
         await self._session.flush()
+        return so_hang

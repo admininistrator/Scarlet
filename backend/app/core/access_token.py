@@ -1,13 +1,20 @@
-"""Access JWT — mã hoá/giải mã + xác minh (§11.2, ADR-07) — T-2.3.
+"""Access JWT — mã hoá/giải mã + xác minh (§11.2, ADR-07) — T-2.3, T-2.4.
 
-KH tham chiếu: §11.2, ADR-07 · CLAUDE.md A3, A4 · tasks.md T-2.3, NQ-36.
+KH tham chiếu: §11.2, §11.3, ADR-07 · CLAUDE.md A3, A4 · tasks.md T-2.3, T-2.4, NQ-36.
 
 Claim đúng §11.2: `sub` (user id), `jti` (cho blacklist T-2.4), `role`,
 `tier`, `status`, `iat`, `exp`. `get_current_user_id` (app/core/deps.py) hôm
-nay chỉ đọc `sub`; `role`/`tier`/`status` có mặt sẵn để T-2.4 (blacklist theo
-`iat`) và T-2.7 (`require_status`) đọc lại từ payload thay vì phải xin thêm
-một chuyến `SELECT` — nhưng việc ĐỌC chúng là việc của các task đó, không phải
-task này.
+nay chỉ đọc `sub`; `role`/`tier`/`status` có mặt sẵn để T-2.7
+(`require_status`) đọc lại từ payload thay vì phải xin thêm một chuyến
+`SELECT` — nhưng việc ĐỌC chúng là việc của task đó, không phải task này.
+
+**T-2.4 thêm `issued_at`/`expires_at` vào `AccessTokenClaims`** (đúng hai claim
+`iat`/`exp` mà `encode_access_token` vẫn luôn ghi ra, chỉ là chưa ai đọc lại).
+Cả hai là dữ liệu vào của §11.3, không phải tiện nghi: `expires_at` cho ra TTL
+của `bl:jti:{jti}` ("bằng đúng thời gian sống còn lại của token" — Cạm bẫy
+T-2.4), và `issued_at` là vế trái của phép so `iat < bl:user:{uid}`. Không đọc
+chúng ở đây thì `app/core/blacklist.py` phải tự `jwt.decode` lần thứ hai, tức
+có hai chỗ biết PyJWT ném ra kiểu gì — đúng thứ docstring dưới đây loại bỏ.
 
 Bí mật ký là `settings.JWT_SECRET` — biến bắt buộc, đã có từ T-0.3 (A4). TTL là
 `settings.ACCESS_TOKEN_TTL_MIN` — một *giới hạn*, không phải hằng trong file
@@ -49,6 +56,11 @@ class AccessTokenClaims:
     role: UserRole
     tier: str
     status: UserStatus
+    #: Claim `iat`/`exp` của §11.2, đã đổi sang `datetime` có múi giờ (T-2.4).
+    #: Tên dài thay vì `iat`/`exp` cùng lối với `user_id` thay vì `sub`: kiểu ở
+    #: đây là kiểu của miền vấn đề, không phải hình dạng nguyên văn của payload.
+    issued_at: datetime
+    expires_at: datetime
 
 
 def encode_access_token(
@@ -91,6 +103,12 @@ def decode_access_token(raw_token: str) -> AccessTokenClaims:
             role=UserRole(payload["role"]),
             tier=payload["tier"],
             status=UserStatus(payload["status"]),
+            issued_at=datetime.fromtimestamp(payload["iat"], UTC),
+            expires_at=datetime.fromtimestamp(payload["exp"], UTC),
         )
-    except (KeyError, ValueError, TypeError) as loi:
+    except (KeyError, ValueError, TypeError, OverflowError, OSError) as loi:
+        # `OverflowError`/`OSError`: `fromtimestamp` với một `iat`/`exp` nằm
+        # ngoài tầm của hệ điều hành. PyJWT đã bảo đảm chúng là số, nhưng "là
+        # số" và "là một mốc thời gian có thật" là hai chuyện khác nhau, và một
+        # token bịa đặt không có quyền làm nổ handler thành 500.
         raise TokenInvalidError from loi

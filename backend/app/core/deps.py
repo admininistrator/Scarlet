@@ -1,7 +1,31 @@
 """Dependency dùng chung của tầng HTTP (§23 `core/deps.py`).
 
-KH tham chiếu: §18.1, §20, §11.2, Phụ lục F · CLAUDE.md A10 · tasks.md T-2.3 ·
-B-83, B-114, NQ-36.
+KH tham chiếu: §18.1, §20, §11.2, §11.3, Phụ lục F · CLAUDE.md A10 ·
+tasks.md T-2.3, T-2.4 · B-83, B-114, NQ-36.
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║  T-2.4: BLACKLIST — "middleware" của §11.3 nằm ở ĐÂY                     ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+§11.3 gọi nó là "middleware", nhưng chỗ đúng là dependency này chứ không phải
+một lớp ASGI như `core/origin.py`: phép kiểm cần `jti` và `iat`, tức cần token
+đã **giải mã xong**, và chỗ duy nhất giải mã token là `get_access_claims` ngay
+dưới. Một middleware ASGI sẽ phải decode lần thứ hai — hai chỗ cùng biết luật,
+và chỗ nào cũng có thể sai một mình.
+
+`get_access_claims` tách ra khỏi `get_current_user_id` vì `POST /auth/logout`
+cần **cả claim** (`jti` để chặn, `exp` để tính TTL) chứ không chỉ `user_id`;
+`get_current_user_id` nay chỉ còn lấy `user_id` ra khỏi kết quả của nó. Nhánh
+tạm Phase 1 không đi qua blacklist và không cần: nó không có token nào để thu
+hồi, và nó chỉ sống khi `DEBUG=true`.
+
+**Redis chết ⇒ 503, KHÔNG cho qua.** Cho qua là mở lại đúng C21 ("logout xong
+vẫn gọi API được vài phút") với một nguyên nhân mới, và mở nó ra đúng lúc hệ
+thống đang hỏng — tức lúc khó phát hiện nhất. Redis vốn đã là phụ thuộc cứng
+của app (A1: mọi lượt sinh đi qua stream), nên "Redis chết mà API vẫn phục vụ
+được" không phải một trạng thái có thật để bảo vệ. 503 chứ không 401 cũng là
+một khác biệt có nghĩa: FE hiểu 503 là "thử lại", còn 401 sẽ đá người dùng ra
+màn hình đăng nhập vì một sự cố hạ tầng hoàn toàn không liên quan tới họ.
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  T-2.3: THÊM ĐƯỜNG AUTH THẬT — KHÔNG XOÁ CHỖ TẠM CỦA PHASE 1              ║
@@ -83,14 +107,24 @@ lệ — tức làm hỏng `curl` vì một thứ `curl` không gửi.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated
 
-from fastapi import Cookie, Header, status
+from fastapi import Cookie, Depends, Header, status
 
 from app.config.settings import settings
-from app.core.access_token import TokenExpiredError, TokenInvalidError, decode_access_token
+from app.core.access_token import (
+    AccessTokenClaims,
+    TokenExpiredError,
+    TokenInvalidError,
+    decode_access_token,
+)
+from app.core.blacklist import bi_chan
 from app.core.errors import ApiError, ApiErrorCode
+from app.core.redis import get_redis
+
+logger = logging.getLogger(__name__)
 
 #: Cookie phiên thật (§11.2, T-2.3, NQ-36). `Path=/api/v1` — rộng hơn cookie
 #: refresh (`Path=/api/v1/auth`, xem `app/api/v1/auth.py`) vì mọi endpoint
@@ -105,23 +139,79 @@ SESSION_COOKIE_NAME = "scarlet_session"
 DEV_USER_COOKIE = "scarlet_dev_user"
 
 
-async def get_current_user_id(
+async def get_access_claims(
     session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
+) -> AccessTokenClaims | None:
+    """Claim của cookie phiên, đã verify chữ ký + `exp` + blacklist (§11.3).
+
+    Trả `None` khi **không có** cookie phiên — đó không phải lỗi ở đây, vì
+    `get_current_user_id` còn nhánh tạm Phase 1 phía sau. Mọi ca khác (cookie
+    có mặt nhưng không dùng được) đều raise.
+
+    Raise:
+        ApiError 401 `TOKEN_EXPIRED`: đúng chữ ký nhưng đã qua `exp` — khác
+            "token sai" để FE (tương lai) thử `/auth/refresh` thay vì đẩy
+            thẳng ra màn đăng nhập.
+        ApiError 401 `UNAUTHENTICATED`: sai chữ ký/định dạng/thiếu claim.
+        ApiError 401 `TOKEN_REVOKED`: còn hạn nhưng đã bị thu hồi (§11.3) —
+            logout, đổi mật khẩu, hoặc admin suspend.
+        ApiError 503 `SERVICE_UNAVAILABLE`: không hỏi được Redis nên KHÔNG
+            biết token có bị thu hồi hay không (xem docstring module).
+    """
+    if session_cookie is None:
+        return None
+
+    try:
+        claims = decode_access_token(session_cookie)
+    except TokenExpiredError as loi:
+        raise ApiError(
+            status.HTTP_401_UNAUTHORIZED,
+            ApiErrorCode.TOKEN_EXPIRED,
+            "access token da het han",
+        ) from loi
+    except TokenInvalidError as loi:
+        raise ApiError(
+            status.HTTP_401_UNAUTHORIZED,
+            ApiErrorCode.UNAUTHENTICATED,
+            "access token khong hop le",
+        ) from loi
+
+    try:
+        da_bi_thu_hoi = await bi_chan(get_redis(), claims)
+    except Exception as loi:
+        logger.exception("khong kiem duoc blacklist cho user %s", claims.user_id)
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            ApiErrorCode.SERVICE_UNAVAILABLE,
+            "khong kiem duoc trang thai phien dang nhap",
+        ) from loi
+
+    if da_bi_thu_hoi:
+        raise ApiError(
+            status.HTTP_401_UNAUTHORIZED,
+            ApiErrorCode.TOKEN_REVOKED,
+            "phien dang nhap da bi thu hoi, hay dang nhap lai",
+        )
+    return claims
+
+
+async def get_current_user_id(
+    claims: Annotated[AccessTokenClaims | None, Depends(get_access_claims)] = None,
     x_user_id: Annotated[uuid.UUID | None, Header(alias="X-User-Id")] = None,
     dev_user_cookie: Annotated[str | None, Cookie(alias=DEV_USER_COOKIE)] = None,
 ) -> uuid.UUID:
     """`user_id` của người gọi.
 
-    Thứ tự: cookie phiên thật `scarlet_session` (§11.2, T-2.3, luôn bật) →
-    chỗ tạm của Phase 1 (header `X-User-Id` → cookie `scarlet_dev_user`,
-    DEBUG-only — xem docstring module cho lý do nó còn ở đây).
+    Thứ tự: cookie phiên thật `scarlet_session` (§11.2, T-2.3, luôn bật, nay đi
+    qua `get_access_claims` ở trên) → chỗ tạm của Phase 1 (header `X-User-Id` →
+    cookie `scarlet_dev_user`, DEBUG-only — xem docstring module cho lý do nó
+    còn ở đây).
 
     Raise:
-        ApiError 401 `TOKEN_EXPIRED`: cookie phiên đúng chữ ký nhưng đã hết
-            hạn — khác `token sai` để FE (tương lai) thử `/auth/refresh` thay
-            vì đẩy thẳng ra màn đăng nhập.
-        ApiError 401 `UNAUTHENTICATED`: cookie phiên sai chữ ký/định dạng,
-            HOẶC (nhánh Phase 1) không có đường nào mang danh tính tới.
+        Mọi lỗi của `get_access_claims` (401 `TOKEN_EXPIRED` /
+            `UNAUTHENTICATED` / `TOKEN_REVOKED`, 503 `SERVICE_UNAVAILABLE`).
+        ApiError 401 `UNAUTHENTICATED`: (nhánh Phase 1) không có đường nào
+            mang danh tính tới.
         ApiError 503 `AUTH_NOT_IMPLEMENTED`: không có cookie phiên VÀ
             `DEBUG=false` — nhánh Phase 1 đóng (xem docstring module).
         ApiError 422 `VALIDATION_ERROR`: (nhánh Phase 1) có cookie dev nhưng
@@ -130,21 +220,7 @@ async def get_current_user_id(
     `UNAUTHENTICATED` là mã FE đọc để đẩy người dùng ra màn hình đăng nhập
     (§18, B-86) — cả hai nhánh dưới đây đều giữ đúng mã này cho ca đó.
     """
-    if session_cookie is not None:
-        try:
-            claims = decode_access_token(session_cookie)
-        except TokenExpiredError as loi:
-            raise ApiError(
-                status.HTTP_401_UNAUTHORIZED,
-                ApiErrorCode.TOKEN_EXPIRED,
-                "access token da het han",
-            ) from loi
-        except TokenInvalidError as loi:
-            raise ApiError(
-                status.HTTP_401_UNAUTHORIZED,
-                ApiErrorCode.UNAUTHENTICATED,
-                "access token khong hop le",
-            ) from loi
+    if claims is not None:
         return claims.user_id
 
     # ── nhánh Phase 1 (NQ-24, NQ-33) — NGUYÊN VĂN, xem docstring module ──
