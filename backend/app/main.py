@@ -21,6 +21,7 @@ from fastapi import FastAPI
 
 from app.api.v1 import router as api_v1_router
 from app.core import errors
+from app.core.origin import OriginCheckMiddleware
 from app.core.queue import dispose_arq_pool
 from app.core.redis import dispose_redis
 from app.db.session import dispose_engine
@@ -36,6 +37,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Scarlet", lifespan=lifespan)
 errors.register(app)
+app.add_middleware(OriginCheckMiddleware)
 app.include_router(api_v1_router)
 
 

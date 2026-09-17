@@ -14,6 +14,12 @@ có ai đăng ký/đăng nhập.
 Token verify/reset (T-2.2) dùng một cặp hàm KHÁC — `generate_email_token`/
 `hash_email_token`, SHA-256 chứ không Argon2id — xem docstring của
 `hash_email_token` cho lý do tách.
+
+Refresh token (§11.2, T-2.3) dùng ĐÚNG kỹ thuật đó — CSPRNG 256-bit + SHA-256
+lúc lưu — khác bảng đích (`refresh_tokens` thay vì `email_tokens`), nên
+`generate_refresh_token`/`hash_refresh_token` chia sẻ hai hàm riêng
+`_random_token`/`_sha256_hex` với cặp hàm email thay vì gọi thẳng
+`generate_email_token` (tên đó nói dối nếu dùng cho refresh token).
 """
 
 from __future__ import annotations
@@ -73,6 +79,14 @@ def mat_khau_qua_pho_bien(password: str) -> bool:
     return bool(ket_qua["score"] < settings.PASSWORD_MIN_ZXCVBN_SCORE)
 
 
+def _random_token(n_bytes: int) -> str:
+    return secrets.token_urlsafe(n_bytes)
+
+
+def _sha256_hex(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
 def generate_email_token() -> str:
     """Token bản rõ cho verify/reset — chỉ sống trong bộ nhớ + email gửi đi.
 
@@ -83,9 +97,27 @@ def generate_email_token() -> str:
     256-bit entropy từ CSPRNG nên không cần một hash "chậm" chống brute-force
     như mật khẩu (§11.6) — SHA-256 (nhanh, tất định) là đúng công cụ.
     """
-    return secrets.token_urlsafe(EMAIL_TOKEN_BYTES)
+    return _random_token(EMAIL_TOKEN_BYTES)
 
 
 def hash_email_token(raw_token: str) -> str:
     """SHA-256 hex của token bản rõ (Cạm bẫy T-2.2: không bao giờ lưu bản rõ)."""
-    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    return _sha256_hex(raw_token)
+
+
+#: Độ dài (byte, trước base64) của refresh token — 256 bit entropy (§11.2),
+#: cùng cỡ với token email. Hằng RIÊNG chứ không dùng lại `EMAIL_TOKEN_BYTES`:
+#: hai giá trị tình cờ bằng nhau hôm nay, đổi một cái không được kéo cái kia.
+REFRESH_TOKEN_BYTES = 32
+
+
+def generate_refresh_token() -> str:
+    """Token bản rõ cho refresh (§11.2, T-2.3) — cùng kỹ thuật với
+    `generate_email_token` (CSPRNG 256-bit), khác bảng đích (`refresh_tokens`).
+    """
+    return _random_token(REFRESH_TOKEN_BYTES)
+
+
+def hash_refresh_token(raw_token: str) -> str:
+    """SHA-256 hex — refresh token cũng KHÔNG BAO GIỜ lưu bản rõ (§11.2, C21)."""
+    return _sha256_hex(raw_token)

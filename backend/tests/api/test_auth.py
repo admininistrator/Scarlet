@@ -27,15 +27,28 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api.v1.auth import REFRESH_COOKIE_NAME
+from app.core.access_token import encode_access_token
+from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiErrorCode
-from app.core.security import hash_email_token
-from app.db.models import EmailToken, EmailTokenPurpose, User
+from app.core.security import hash_email_token, hash_password
+from app.db.models import EmailToken, EmailTokenPurpose, RefreshToken, User, UserRole, UserStatus
 from app.db.repositories.users import UserRepository
 from app.main import app
 
 DUONG_DAN = "/api/v1/auth/register"
 DUONG_DAN_VERIFY = "/api/v1/auth/verify-email"
 DUONG_DAN_RESEND = "/api/v1/auth/resend-verification"
+DUONG_DAN_LOGIN = "/api/v1/auth/login"
+DUONG_DAN_REFRESH = "/api/v1/auth/refresh"
+DUONG_DAN_ME = "/api/v1/auth/me"
+
+#: Mật khẩu thật dùng trong test login — khác `user_a`/`user_b` của
+#: `conftest.py` (những fixture đó gán `password_hash="khong-phai-hash-that"`,
+#: một chuỗi KHÔNG phải Argon2 hợp lệ, nên `verify_password` luôn trả `False`
+#: cho chúng — đúng ý đồ của conftest, vốn chỉ cần một user tồn tại cho các
+#: test IDOR chứ không cần đăng nhập được).
+_MAT_KHAU_TEST = "mot-mat-khau-du-manh-cho-test-login-123"
 
 
 @pytest.fixture
@@ -73,6 +86,20 @@ def mailer_gia(monkeypatch: pytest.MonkeyPatch) -> _MailerGia:
 
 def _token_tu_verify_url(verify_url: str) -> str:
     return parse_qs(urlsplit(verify_url).query)["token"][0]
+
+
+async def _tao_user_that(
+    session_factory: async_sessionmaker[AsyncSession], *, mat_khau: str = _MAT_KHAU_TEST
+) -> tuple[uuid.UUID, str]:
+    """User với hash Argon2id THẬT của `mat_khau` — dùng cho test login."""
+    email = f"{uuid.uuid4().hex}@scarlet.example"
+    async with session_factory() as session:
+        user = await UserRepository(session).create_pending_user(
+            email=email, password_hash=await hash_password(mat_khau)
+        )
+        assert user is not None
+        await session.commit()
+        return user.id, email
 
 
 async def _dem_user_theo_email(
@@ -352,3 +379,284 @@ async def test_resend_verification_user_da_verify_khong_gui_mail(
 
     assert resp.status_code == 200
     assert mailer_gia.calls == []
+
+
+# ═══════════════════════ POST /auth/login (T-2.3) ═══════════════════════════
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_login_thanh_cong_tra_ve_thong_tin_user(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    user_id, email = await _tao_user_that(session_factory)
+
+    resp = await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == str(user_id)
+    assert body["email"] == email
+    assert body["status"] == "pending_email"
+    assert body["role"] == "user"
+    assert body["tier_name"] == "free"
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_login_dat_ca_hai_cookie_dung_thuoc_tinh(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD T-2.3: cookie refresh có đủ `HttpOnly`, `Secure`, `SameSite` — kiểm
+    bằng `curl -i` trên stack thật là phép đo tay bổ sung (xem báo cáo); đây là
+    phiên bản kiểm được bằng pytest cho cả hai cookie (phiên lẫn refresh)."""
+    _, email = await _tao_user_that(session_factory)
+
+    resp = await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+
+    set_cookie_headers = resp.headers.get_list("set-cookie")
+    assert len(set_cookie_headers) == 2
+
+    phien = next(h for h in set_cookie_headers if h.startswith(f"{SESSION_COOKIE_NAME}="))
+    lower = phien.lower()
+    assert "httponly" in lower
+    assert "secure" in lower
+    assert "samesite=lax" in lower
+    assert "path=/api/v1;" in lower or lower.endswith("path=/api/v1")
+
+    refresh_ck = next(h for h in set_cookie_headers if h.startswith(f"{REFRESH_COOKIE_NAME}="))
+    lower_refresh = refresh_ck.lower()
+    assert "httponly" in lower_refresh
+    assert "secure" in lower_refresh
+    assert "samesite=lax" in lower_refresh
+    assert "path=/api/v1/auth" in lower_refresh
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_login_sai_mat_khau_tra_401_invalid_credentials(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    _, email = await _tao_user_that(session_factory)
+
+    resp = await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": "sai-mat-khau"})
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.INVALID_CREDENTIALS
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_login_email_khong_ton_tai_tra_401_invalid_credentials(client: AsyncClient) -> None:
+    """Chống dò (cùng tinh thần §11.5): KHÔNG có mã riêng cho "email không tồn
+    tại" so với "sai mật khẩu" — cùng mã, cùng status."""
+    resp = await client.post(
+        DUONG_DAN_LOGIN,
+        json={"email": f"{uuid.uuid4().hex}@khong-ton-tai.example", "password": "gi-cung-duoc"},
+    )
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.INVALID_CREDENTIALS
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_login_khong_kiem_trang_thai_pending_email_van_dang_nhap_duoc(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """§11.1: `pending_email` vẫn đăng nhập được — chặn theo trạng thái là việc
+    của T-2.7, không phải T-2.3."""
+    _, email = await _tao_user_that(session_factory)
+
+    resp = await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+
+    assert resp.status_code == 200
+
+
+# ═══════════════════════ GET /auth/me (T-2.3) ═══════════════════════════════
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_me_sau_khi_login_tra_dung_user(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    user_id, email = await _tao_user_that(session_factory)
+    await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+
+    resp = await client.get(DUONG_DAN_ME)
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == str(user_id)
+
+
+async def test_me_khong_dang_nhap_tra_401(client: AsyncClient) -> None:
+    """Không cookie, không header, `DEBUG=false` (mặc định test) → nhánh Phase 1
+    đóng, và giờ nhánh mới cũng không có cookie phiên nào để thử."""
+    resp = await client.get(DUONG_DAN_ME)
+
+    assert resp.status_code in (401, 503)  # xem app/core/deps.py — 503 la nhanh Phase 1
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_access_token_het_han_tra_401_token_expired(
+    client: AsyncClient, user_a: uuid.UUID
+) -> None:
+    """DoD T-2.3: access token hết hạn → 401 `TOKEN_EXPIRED`, phân biệt với
+    token sai (test kế bên)."""
+    token_het_han = encode_access_token(
+        user_id=user_a,
+        role=UserRole.USER,
+        tier="free",
+        status=UserStatus.PENDING_EMAIL,
+        ttl_minutes=-1,
+    )
+    client.cookies.set(SESSION_COOKIE_NAME, token_het_han)
+
+    resp = await client.get(DUONG_DAN_ME)
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.TOKEN_EXPIRED
+
+
+async def test_access_token_sai_tra_401_unauthenticated_khac_token_expired(
+    client: AsyncClient,
+) -> None:
+    """Token sai chữ ký/định dạng → `UNAUTHENTICATED`, KHÁC `TOKEN_EXPIRED`
+    của test trên (DoD: "phân biệt với token sai")."""
+    client.cookies.set(SESSION_COOKIE_NAME, "khong-phai-jwt-hop-le")
+
+    resp = await client.get(DUONG_DAN_ME)
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
+
+
+# ═══════════════════════ POST /auth/refresh (T-2.3) ═════════════════════════
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_refresh_xoay_vong_sinh_cookie_moi_va_van_dang_nhap_duoc(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    _, email = await _tao_user_that(session_factory)
+    await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+    refresh_token_cu = client.cookies.get(REFRESH_COOKIE_NAME)
+    assert refresh_token_cu is not None
+
+    resp = await client.post(DUONG_DAN_REFRESH)
+
+    assert resp.status_code == 200
+    refresh_token_moi = client.cookies.get(REFRESH_COOKIE_NAME)
+    assert refresh_token_moi is not None
+    assert refresh_token_moi != refresh_token_cu
+
+    # Cookie phiên mới cũng phải dùng được ngay (không cần login lại).
+    resp_me = await client.get(DUONG_DAN_ME)
+    assert resp_me.status_code == 200
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_refresh_thieu_cookie_tra_401(client: AsyncClient) -> None:
+    resp = await client.post(DUONG_DAN_REFRESH)
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_refresh_token_gia_tra_401(client: AsyncClient) -> None:
+    client.cookies.set(REFRESH_COOKIE_NAME, "token-bia-dat-khong-ton-tai")
+
+    resp = await client.post(DUONG_DAN_REFRESH)
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_refresh_dung_lai_token_da_dung_tra_401_va_thu_hoi_ca_family(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD T-2.3: dùng refresh token 2 lần → lần 2 trả 401 VÀ
+    `SELECT revoked_at FROM refresh_tokens WHERE family_id=...` → tất cả khác
+    NULL (cả token đã dùng lẫn token vừa xoay ra còn hợp lệ)."""
+    _, email = await _tao_user_that(session_factory)
+    await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+    token_dau_tien = client.cookies.get(REFRESH_COOKIE_NAME)
+    assert token_dau_tien is not None
+
+    # Lần 1 — hợp lệ, xoay vòng sinh token thứ hai.
+    resp1 = await client.post(DUONG_DAN_REFRESH)
+    assert resp1.status_code == 200
+
+    # Lần 2 — trình LẠI token đầu tiên (đã dùng) → tái sử dụng.
+    client.cookies.set(REFRESH_COOKIE_NAME, token_dau_tien)
+    resp2 = await client.post(DUONG_DAN_REFRESH)
+
+    assert resp2.status_code == 401
+    assert resp2.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
+
+    async with session_factory() as session:
+        stmt = select(RefreshToken.family_id, RefreshToken.revoked_at).where(
+            RefreshToken.user_id
+            == (await session.execute(select(User.id).where(User.email == email))).scalar_one()
+        )
+        rows = (await session.execute(stmt)).all()
+
+    assert len(rows) >= 2, "phai co it nhat token dau tien + token xoay ra lan 1"
+    assert all(revoked_at is not None for _family_id, revoked_at in rows)
+    assert len({family_id for family_id, _r in rows}) == 1, "ca family phai cung mot family_id"
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_refresh_sau_khi_bi_thu_hoi_van_401(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Sau khi family đã bị thu hồi (test trên), ngay cả token MỚI NHẤT (chưa
+    từng bị coi là tái sử dụng) cũng không dùng lại được nữa."""
+    _, email = await _tao_user_that(session_factory)
+    await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+    token_dau_tien = client.cookies.get(REFRESH_COOKIE_NAME)
+    await client.post(DUONG_DAN_REFRESH)  # sinh token thứ hai
+    token_thu_hai = client.cookies.get(REFRESH_COOKIE_NAME)
+    client.cookies.set(REFRESH_COOKIE_NAME, token_dau_tien)
+    await client.post(DUONG_DAN_REFRESH)  # tai su dung -> thu hoi ca family
+
+    client.cookies.set(REFRESH_COOKIE_NAME, token_thu_hai)
+    resp = await client.post(DUONG_DAN_REFRESH)
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
+
+
+# ═══════════════════════ Kiểm Origin (NQ-36, B-114) ══════════════════════════
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_origin_khop_thi_cho_qua(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    _, email = await _tao_user_that(session_factory)
+
+    resp = await client.post(
+        DUONG_DAN_LOGIN,
+        json={"email": email, "password": _MAT_KHAU_TEST},
+        headers={"Origin": "https://localhost"},
+    )
+
+    assert resp.status_code == 200
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_origin_khong_khop_bi_chan_403(client: AsyncClient) -> None:
+    resp = await client.post(
+        DUONG_DAN_LOGIN,
+        json={"email": "khong-quan-trong@scarlet.example", "password": "x"},
+        headers={"Origin": "https://ke-tan-cong.example"},
+    )
+
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == ApiErrorCode.FORBIDDEN
+
+
+async def test_origin_vang_mat_thi_cho_qua(client: AsyncClient) -> None:
+    """Không có `Origin` (mọi client hiện có: `curl`, `httpx`, script) → không
+    bị chặn — xem docstring `app/core/origin.py` cho lý do."""
+    resp = await client.get("/api/v1/models")
+
+    assert resp.status_code == 200

@@ -16,6 +16,7 @@ dependencies = [
     "tiktoken>=0.8",
     "argon2-cffi>=23.1",
     "zxcvbn>=4.4",
+    "pyjwt>=2.9",
     "email-validator>=2.0",
     "python-magic>=0.4.27",
     "pillow>=10.4",

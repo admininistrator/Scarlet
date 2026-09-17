@@ -79,8 +79,20 @@ class ApiErrorCode(StrEnum):
     SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
 
     # ── danh tính (§18.1) ──
-    #: Chỗ tạm của Phase 1: `DEBUG=false` mà auth thật chưa có (NQ-24).
+    #: Chỗ tạm của Phase 1: `DEBUG=false` và không có session cookie thật nào
+    #: đi kèm (NQ-24). T-2.3 thêm đường auth thật (cookie phiên) chạy TRƯỚC
+    #: nhánh này — mã này chỉ còn nghĩa cho đường tạm phía sau nó, xem
+    #: `app/core/deps.py`.
     AUTH_NOT_IMPLEMENTED = "AUTH_NOT_IMPLEMENTED"
+    #: `POST /auth/login` sai email hoặc sai mật khẩu (T-2.3). Một mã cho cả
+    #: hai lý do — cùng tinh thần chống dò của §11.5: nói rõ "email không tồn
+    #: tại" là mời kẻ tấn công dò danh sách người dùng.
+    INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
+    #: Access JWT còn đúng chữ ký nhưng đã qua `exp` (T-2.3, DoD: "phân biệt
+    #: với token sai"). Token sai chữ ký/định dạng vẫn dùng `UNAUTHENTICATED`
+    #: — FE xử lý cả hai như nhau (đẩy về đăng nhập), mã riêng này chỉ để log
+    #: và để test phân biệt được hai đường.
+    TOKEN_EXPIRED = "TOKEN_EXPIRED"
 
     # ── đăng ký (§11.6, T-2.1) ──
     #: `len(password) < settings.PASSWORD_MIN_LENGTH`.

@@ -45,6 +45,15 @@ class UserRepository:
             return None
         return user
 
+    async def get_by_id(self, user_id: uuid.UUID) -> User | None:
+        """Tra một user theo id — dùng bởi `GET /auth/me` và `/auth/refresh` (T-2.3).
+
+        `deleted_at IS NULL` trong SQL (§20): một user vừa xoá tài khoản không
+        được phép tiếp tục đọc chính thông tin của mình qua một token còn hạn.
+        """
+        stmt = select(User).where(User.id == user_id, User.deleted_at.is_(None))
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
     async def get_by_email(self, email: str) -> User | None:
         """Tra một user theo email (CITEXT — so sánh không phân biệt hoa/thường).
 

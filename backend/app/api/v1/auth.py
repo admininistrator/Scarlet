@@ -1,7 +1,8 @@
 """`POST /auth/register`, `/verify-email`, `/resend-verification` (§11.1,
-§11.5, §11.6, UC-01) — T-2.1, T-2.2.
+§11.5, §11.6, UC-01) — T-2.1, T-2.2. `POST /auth/login`, `/refresh`,
+`GET /auth/me` (§11.2, ADR-07) — T-2.3.
 
-KH tham chiếu: §11.5, UC-01 · CLAUDE.md A3 · tasks.md T-2.2.
+KH tham chiếu: §11.5, §11.2, UC-01, ADR-07 · CLAUDE.md A3 · tasks.md T-2.2, T-2.3, NQ-36.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  CẠM BẪY CỦA T-2.1: chống dò email (§11.5)                                │
@@ -41,29 +42,65 @@ tại (giả mạo/sai `purpose`) mới ra `400 TOKEN_INVALID`.
 
 Turnstile (T-2.6) CHƯA có ở `register` — nối tiếp đúng endpoint này, không
 viết lại nó.
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│  CẠM BẪY CỦA T-2.3: xoay vòng refresh + phát hiện tái sử dụng             │
+└──────────────────────────────────────────────────────────────────────────┘
+
+`login` phát hành family refresh token MỚI; `refresh` xoay vòng — đọc token
+cũ, đánh dấu `used_at`, phát hành token mới CÙNG `family_id`. Một token đã
+`used_at` bị trình ra LẦN NỮA là dấu hiệu nó bị đánh cắp (kẻ tấn công dùng bản
+sao trong khi nạn nhân đã tự xoay vòng, hoặc ngược lại) → `RefreshTokenRepository.rotate`
+thu hồi TOÀN BỘ family, kể cả hàng vừa xoay ra và còn hợp lệ — DoD T-2.3 kiểm
+đúng chỗ này (`SELECT revoked_at FROM refresh_tokens WHERE family_id=...` →
+tất cả khác NULL sau lần dùng lại thứ hai).
+
+`login` áp lại đúng kỹ thuật chống dò-qua-thời-gian của `register` (điểm 2 ở
+trên): sai mật khẩu và email không tồn tại phải tốn THỜI GIAN như nhau, nên
+nhánh "không có user" vẫn băm `_MAT_KHAU_GIA` thay vì trả lỗi ngay — nếu không,
+đo độ trễ response là một cách dò danh sách email đã đăng ký (khác hẳn nhánh
+"sai mật khẩu" vốn luôn băm thật).
+
+Một cookie phiên (`scarlet_session`, §11.2, NQ-36) — KHÔNG Bearer — mang access
+JWT; `app/core/deps.py::get_current_user_id` là nơi verify nó. Cookie refresh
+giữ `Path=/api/v1/auth` (chỉ gửi tới nhóm route này), cookie phiên rộng hơn
+(`Path=/api/v1`, mọi route cần đọc danh tính) — hai path khác nhau nên trình
+duyệt không bao giờ gửi nhầm cookie refresh cho một route thường.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, status
-from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 from app.config.settings import settings
+from app.core.access_token import encode_access_token
+from app.core.deps import SESSION_COOKIE_NAME, get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.mailer import mailer
-from app.core.security import hash_password, mat_khau_qua_pho_bien
-from app.db.models import EmailTokenPurpose, UserStatus
+from app.core.security import hash_password, mat_khau_qua_pho_bien, verify_password
+from app.db.models import EmailTokenPurpose, UserRole, UserStatus
 from app.db.repositories.email_tokens import ConsumeResult, EmailTokenRepository
+from app.db.repositories.refresh_tokens import RefreshTokenRepository, RotateResult
 from app.db.repositories.users import UserRepository
 from app.db.session import session_scope
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+#: `Path` hẹp hơn cookie phiên (`SESSION_COOKIE_NAME`, `app/core/deps.py`) —
+#: chỉ nhóm route `/auth/*` cần đọc token này (§11.2).
+REFRESH_COOKIE_NAME = "scarlet_refresh"
+
+#: Mật khẩu giả — KHÔNG dùng để so khớp, chỉ để `hash_password` tốn đúng
+#: ngần ấy mili-giây khi email không tồn tại (chống dò qua thời gian, xem
+#: docstring module).
+_MAT_KHAU_GIA = "mat-khau-gia-chi-de-giu-thoi-gian-phan-hoi-dong-deu-000"
 
 
 class DangKyRequest(BaseModel):
@@ -253,3 +290,189 @@ async def verify_email(body: VerifyEmailRequest) -> VerifyEmailResponse:
         await session.commit()
 
     return VerifyEmailResponse(status="verified")
+
+
+# ═══════════════════ POST /auth/login, /refresh, GET /auth/me (T-2.3) ═══════
+
+
+class DangNhapRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class NguoiDungRa(BaseModel):
+    """Thông tin công khai của user hiện tại — dùng chung cho `/login`,
+    `/refresh`, `/me` (một hình dạng, một chỗ để đúng)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str
+    display_name: str | None
+    status: UserStatus
+    role: UserRole
+    tier_name: str
+
+
+def _dat_cookie_phien(response: Response, nguoi_dung: NguoiDungRa) -> None:
+    """Set cookie phiên mang access JWT (§11.2, NQ-36) — KHÔNG trả JWT trong body."""
+    access_token = encode_access_token(
+        user_id=nguoi_dung.id,
+        role=nguoi_dung.role,
+        tier=nguoi_dung.tier_name,
+        status=nguoi_dung.status,
+        ttl_minutes=settings.ACCESS_TOKEN_TTL_MIN,
+    )
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=access_token,
+        max_age=settings.ACCESS_TOKEN_TTL_MIN * 60,
+        path="/api/v1",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+
+
+def _dat_cookie_refresh(response: Response, raw_refresh_token: str) -> None:
+    """Set cookie refresh — `Path=/api/v1/auth`, hẹp hơn cookie phiên (§11.2)."""
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=raw_refresh_token,
+        max_age=settings.REFRESH_TOKEN_TTL_DAYS * 86400,
+        path="/api/v1/auth",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+
+
+@router.post(
+    "/login",
+    status_code=status.HTTP_200_OK,
+    response_model=NguoiDungRa,
+    responses={
+        401: {
+            "model": ErrorEnvelope,
+            "description": "email hoac mat khau sai (INVALID_CREDENTIALS)",
+        }
+    },
+)
+async def login(body: DangNhapRequest, request: Request, response: Response) -> NguoiDungRa:
+    """Đăng nhập (§11.2, ADR-07): kiểm mật khẩu, phát hành family refresh MỚI
+    + set cookie phiên. KHÔNG kiểm `status` (pending_email/pending_approval
+    đều đăng nhập được — bảng §11.1; chặn theo trạng thái là việc của T-2.7)."""
+    async with session_scope() as session:
+        user = await UserRepository(session).get_by_email(body.email)
+        if user is not None:
+            hop_le = await verify_password(user.password_hash, body.password)
+        else:
+            # Chống dò qua thời gian (xem docstring module) — vẫn trả giá
+            # Argon2 dù không có user để so.
+            await hash_password(_MAT_KHAU_GIA)
+            hop_le = False
+
+        if user is None or not hop_le:
+            raise ApiError(
+                status.HTTP_401_UNAUTHORIZED,
+                ApiErrorCode.INVALID_CREDENTIALS,
+                "email hoac mat khau khong dung",
+            )
+
+        ra = NguoiDungRa.model_validate(user)
+        raw_refresh_token, _family_id = await RefreshTokenRepository(session).issue_new_family(
+            user_id=user.id,
+            ttl_days=settings.REFRESH_TOKEN_TTL_DAYS,
+            user_agent=request.headers.get("user-agent"),
+        )
+        await session.commit()
+
+    _dat_cookie_phien(response, ra)
+    _dat_cookie_refresh(response, raw_refresh_token)
+    return ra
+
+
+@router.post(
+    "/refresh",
+    status_code=status.HTTP_200_OK,
+    response_model=NguoiDungRa,
+    responses={
+        401: {
+            "model": ErrorEnvelope,
+            "description": "refresh token thieu, sai, het han, hoac da bi thu hoi "
+            "(UNAUTHENTICATED)",
+        }
+    },
+)
+async def refresh(
+    request: Request,
+    response: Response,
+    raw_refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE_NAME)] = None,
+) -> NguoiDungRa:
+    """Xoay vòng refresh token + phát hành access JWT mới (§11.2, ADR-07).
+
+    Phát hiện tái sử dụng (Cạm bẫy T-2.3): token đã `used_at` bị trình ra lần
+    nữa → thu hồi cả family, `401`. Xem `RefreshTokenRepository.rotate`.
+    """
+    if raw_refresh_token is None:
+        raise ApiError(
+            status.HTTP_401_UNAUTHORIZED, ApiErrorCode.UNAUTHENTICATED, "thieu refresh token"
+        )
+
+    async with session_scope() as session:
+        outcome = await RefreshTokenRepository(session).rotate(
+            raw_token=raw_refresh_token,
+            ttl_days=settings.REFRESH_TOKEN_TTL_DAYS,
+            user_agent=request.headers.get("user-agent"),
+        )
+
+        if outcome.result is RotateResult.REUSED:
+            # `rotate` đã thu hồi cả family — commit để giữ lại đúng đó.
+            await session.commit()
+            logger.warning("refresh token bi tai su dung - da thu hoi ca family")
+            raise ApiError(
+                status.HTTP_401_UNAUTHORIZED,
+                ApiErrorCode.UNAUTHENTICATED,
+                "refresh token da bi thu hoi (tai su dung)",
+            )
+        if outcome.result is RotateResult.INVALID:
+            raise ApiError(
+                status.HTTP_401_UNAUTHORIZED,
+                ApiErrorCode.UNAUTHENTICATED,
+                "refresh token khong hop le",
+            )
+
+        if outcome.user_id is None or outcome.raw_token is None:
+            # bất biến của RefreshTokenRepository.rotate — không nên xảy ra.
+            raise ApiError(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                ApiErrorCode.INTERNAL_ERROR,
+                "loi noi bo, xem log cua server",
+            )
+        user = await UserRepository(session).get_by_id(outcome.user_id)
+        if user is None:  # tài khoản đã bị xoá giữa hai lần refresh
+            raise ApiError(
+                status.HTTP_401_UNAUTHORIZED, ApiErrorCode.UNAUTHENTICATED, "user khong con ton tai"
+            )
+
+        ra = NguoiDungRa.model_validate(user)
+        await session.commit()
+
+    _dat_cookie_phien(response, ra)
+    _dat_cookie_refresh(response, outcome.raw_token)
+    return ra
+
+
+@router.get("/me", status_code=status.HTTP_200_OK, response_model=NguoiDungRa)
+async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> NguoiDungRa:
+    """Thông tin user hiện tại — đi qua `get_current_user_id` như mọi route
+    khác (§20), không tự đọc cookie."""
+    async with session_scope() as session:
+        user = await UserRepository(session).get_by_id(user_id)
+        if user is None:
+            raise ApiError(
+                status.HTTP_401_UNAUTHORIZED, ApiErrorCode.UNAUTHENTICATED, "user khong con ton tai"
+            )
+        ra = NguoiDungRa.model_validate(user)
+
+    return ra

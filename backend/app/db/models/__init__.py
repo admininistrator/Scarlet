@@ -9,6 +9,7 @@ from app.db.models.base import Base
 from app.db.models.conversation import Conversation
 from app.db.models.email_token import EmailToken, EmailTokenPurpose
 from app.db.models.message import Message, MessageRole, MessageStatus
+from app.db.models.refresh_token import RefreshToken
 from app.db.models.user import User, UserRole, UserStatus
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "Message",
     "MessageRole",
     "MessageStatus",
+    "RefreshToken",
     "User",
     "UserRole",
     "UserStatus",
