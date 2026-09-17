@@ -88,8 +88,13 @@ async def arq_gia(monkeypatch: pytest.MonkeyPatch) -> ArqGia:
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://localhost") as http:
+async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
+    # `event_hooks`: mỗi POST một `Idempotency-Key` mới, đúng hành vi FE của C22
+    # — xem `tests/api/conftest.py`. Không có nó thì mọi POST tới
+    # `.../messages` nhận `400 IDEMPOTENCY_KEY_REQUIRED` (§11.4, A8, T-2.8).
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://localhost", event_hooks=event_hooks
+    ) as http:
         yield http
 
 

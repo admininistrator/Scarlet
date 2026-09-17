@@ -27,6 +27,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api.v1 import ROUTE_BAT_BUOC_IDEMPOTENCY
+from app.api.v1.messages import TEN_ROUTE_TAO_MESSAGE
 from app.config import catalog
 from app.config.settings import settings
 from app.db.models import Conversation, Message, MessageRole, MessageStatus
@@ -46,13 +48,19 @@ class ArqGia:
 
     def __init__(self) -> None:
         self.da_day: list[tuple[str, tuple[Any, ...]]] = []
+        #: `_job_id` của từng lần enqueue, theo đúng thứ tự `da_day` (B-92).
+        #: Tách khỏi `da_day` chứ không nhét thêm vào tuple: bốn file test khác
+        #: so `da_day` bằng `==` với một tuple hai phần tử, và đổi hình dạng của
+        #: nó là sửa những test không liên quan gì tới B-92.
+        self.job_id_da_dung: list[str | None] = []
         self.no_ra = False
         self.tra_none = False
 
-    async def enqueue_job(self, ten: str, *args: Any, **_: Any) -> object | None:
+    async def enqueue_job(self, ten: str, *args: Any, **kwargs: Any) -> object | None:
         if self.no_ra:
             raise ConnectionError("redis chet giua chung (gia lap)")
         self.da_day.append((ten, args))
+        self.job_id_da_dung.append(kwargs.get("_job_id"))
         return None if self.tra_none else object()
 
 
@@ -82,8 +90,13 @@ async def arq_gia(monkeypatch: pytest.MonkeyPatch) -> ArqGia:
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://localhost") as http:
+async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
+    # `event_hooks`: mỗi POST một `Idempotency-Key` mới, đúng hành vi FE của C22
+    # — xem `tests/api/conftest.py`. Không có nó thì mọi POST tới
+    # `.../messages` nhận `400 IDEMPOTENCY_KEY_REQUIRED` (§11.4, A8, T-2.8).
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://localhost", event_hooks=event_hooks
+    ) as http:
         yield http
 
 
@@ -696,6 +709,34 @@ async def test_arq_tu_choi_job_thi_cung_khong_con_message_mo_coi(
     assert await _active_leaf(session_factory, conversation.id) is None
 
 
+async def test_job_id_bang_assistant_message_id(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _debug_bat: None,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """B-92: `_job_id` phải là chính `assistant_message_id`, không phải gì khác.
+
+    Lớp chống trùng của **hàng đợi**, độc lập với `Idempotency-Key` của §11.4
+    (§11.4 chặn ở mức request, cái này ở mức job). Bỏ `_job_id` đi thì arq sinh
+    một id ngẫu nhiên mỗi lần và lớp này biến mất **trong im lặng** — không
+    lỗi, không log, chỉ là một phép chống trùng không bao giờ chặn ai.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+
+    resp = await client.post(
+        DUONG_DAN.format(conversation.id),
+        headers={"X-User-Id": str(user_a)},
+        json={"content": "a"},
+    )
+
+    assert resp.status_code == 202
+    amid = resp.json()["assistant_message_id"]
+    assert arq_gia.job_id_da_dung == [amid]
+
+
 # ═════════════════════ body và Idempotency-Key (§11.4) ════════════════════
 
 
@@ -720,57 +761,86 @@ async def test_body_sai_tra_422(
     assert await _dem_message(session_factory, conversation.id) == 0
 
 
-async def test_idempotency_key_duoc_doc_va_log_chu_chua_xu_ly(
+async def test_hai_lan_gui_cung_key_chi_tao_mot_luot(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    caplog: pytest.LogCaptureFixture,
     user_a: uuid.UUID,
     _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
-    """T-1.8 chỉ log; T-2.8 mới chống trùng. Gửi HAI lần cùng key ⇒ HAI message.
+    """§11.4 nhìn từ phía endpoint: hai POST cùng key ⇒ **một** lượt sinh.
 
-    Ca này cố ý khẳng định hành vi **chưa đúng** của §11.4, để khi T-2.8 làm
-    xong thì chính test này đỏ và buộc người viết sửa nó — thay vì để một hành
-    vi tạm lặng lẽ sống tiếp.
+    T-1.8 để lại ca này khẳng định hành vi **chưa đúng** (hai key giống nhau
+    cho bốn message) để T-2.8 buộc phải sửa nó. Đây là bản sau khi sửa: cùng
+    một `Idempotency-Key` cho đúng hai message, đúng một job, và lần thứ hai
+    trả **cùng** `assistant_message_id` — tức tiêu chí S5.
+
+    Luật ở đây được kiểm đầy đủ trong `tests/api/test_idempotency.py`; ca này
+    ở lại `test_messages.py` vì nó nói về hợp đồng của chính endpoint này.
     """
     conversation = await _tao_hoi_thoai(session_factory, user_a)
     headers = {"X-User-Id": str(user_a), "Idempotency-Key": "khoa-cua-mot-lan-soan-thao"}
 
-    with caplog.at_level("INFO", logger="app.api.v1.messages"):
-        mot = await client.post(
-            DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"}
-        )
-        hai = await client.post(
-            DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"}
-        )
+    mot = await client.post(
+        DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"}
+    )
+    hai = await client.post(
+        DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"}
+    )
 
     assert mot.status_code == hai.status_code == 202
-    assert mot.json()["assistant_message_id"] != hai.json()["assistant_message_id"]
-    assert await _dem_message(session_factory, conversation.id) == 4
-    assert "khoa-cua-mot-lan-soan-thao" in caplog.text
-    assert "T-2.8" in caplog.text
+    assert mot.json() == hai.json()
+    assert hai.headers["Idempotent-Replay"] == "true"
+    assert await _dem_message(session_factory, conversation.id) == 2
+    assert len(arq_gia.da_day) == 1
 
 
-async def test_khong_co_idempotency_key_van_chay(
-    client: AsyncClient,
+async def test_thieu_idempotency_key_tra_400(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
-    """§18.2 ghi header này là bắt buộc, nhưng **T-2.8** mới ép. Ở đây: 202."""
+    """DoD T-2.8 dòng 3 + A8: header là **bắt buộc** với đúng endpoint này.
+
+    Dựng client riêng, KHÔNG có `event_hooks` của `tests/api/conftest.py`: chỗ
+    này cần một request thật sự vắng header, còn fixture `client` cố ý gắn một
+    key mới cho mọi POST (xem docstring conftest).
+    """
     conversation = await _tao_hoi_thoai(session_factory, user_a)
 
-    resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
-        json={"content": "a"},
-    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://localhost"
+    ) as khong_hook:
+        resp = await khong_hook.post(
+            DUONG_DAN.format(conversation.id),
+            headers={"X-User-Id": str(user_a)},
+            json={"content": "a"},
+        )
 
-    assert resp.status_code == 202
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "IDEMPOTENCY_KEY_REQUIRED"
+    assert await _dem_message(session_factory, conversation.id) == 0
+
+
+def test_ten_route_khop_ham() -> None:
+    """`TEN_ROUTE_TAO_MESSAGE` phải là tên FastAPI thực sự đặt cho route.
+
+    FastAPI lấy tên route từ **tên hàm**, nên đổi tên `create_message` mà quên
+    hằng ấy sẽ gỡ luật "bắt buộc `Idempotency-Key`" trong im lặng: danh sách ở
+    `api/v1/__init__.py` trỏ vào một tên không route nào mang, và endpoint đắt
+    tiền nhất của app lại thành "tuỳ chọn" mà không một dòng log nào kêu.
+    """
+    assert frozenset({TEN_ROUTE_TAO_MESSAGE}) == ROUTE_BAT_BUOC_IDEMPOTENCY
+    # `url_path_for` ném `NoMatchFound` nếu không route nào mang tên ấy — đó
+    # chính là phép kiểm. Đi đường này chứ không duyệt `app.routes` vì từ
+    # FastAPI 0.141 `include_router` giữ router lồng nhau (`_IncludedRouter`)
+    # thay vì trải phẳng, nên `app.routes` không còn là danh sách route nữa.
+    duong_dan = app.url_path_for(TEN_ROUTE_TAO_MESSAGE, conversation_id=str(uuid.uuid4()))
+
+    assert str(duong_dan).endswith("/messages")
 
 
 # ═══════════════ A1 dạng kiểm được bằng grep (§5.3, DoD) ══════════════════

@@ -88,7 +88,7 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.conversations import MessageTrenDuongDi
@@ -116,6 +116,14 @@ router = APIRouter(tags=["messages"])
 #: sống ở `api/v1/__init__.py` và đường dẫn sống ở `stream.py`, nên chép lại
 #: ở đây là tạo bản thứ ba sẽ lệch trong im lặng (A3 cùng tinh thần).
 TEN_ROUTE_STREAM = "stream_message"
+
+#: Tên route của chính `POST /conversations/{id}/messages`. `api/v1/__init__.py`
+#: đọc nó để khai "route này BẮT BUỘC `Idempotency-Key`" (§11.4, A8) — tên
+#: route chứ không phải đường dẫn, cùng lý do đã ghi ở hằng trên và ở
+#: `app/core/idempotency.py::build_key`. FastAPI lấy tên route từ tên hàm, nên
+#: đổi tên `create_message` mà quên hằng này là gỡ luật bắt buộc **trong im
+#: lặng**; test `test_ten_route_khop_ham` canh đúng chiều đó.
+TEN_ROUTE_TAO_MESSAGE = "create_message"
 
 
 class TaoMessageRequest(BaseModel):
@@ -156,7 +164,11 @@ class TaoMessageResponse(BaseModel):
     # BYOK. Xem `app/core/deps.py`; "xem UI" đã do router lo ở `v1/__init__.py`.
     dependencies=[Depends(require_chat_access)],
     responses={
-        400: {"model": ErrorEnvelope, "description": "model_id khong co trong catalog"},
+        400: {
+            "model": ErrorEnvelope,
+            "description": "model_id khong co trong catalog, hoac thieu Idempotency-Key",
+        },
+        409: {"model": ErrorEnvelope, "description": "Mot request cung khoa dang chay (§11.4)"},
         404: {"model": ErrorEnvelope, "description": "Hoi thoai hoac parent_id khong thay"},
         503: {"model": ErrorEnvelope, "description": "Khong day duoc job vao hang doi"},
     },
@@ -166,22 +178,16 @@ async def create_message(
     conversation_id: uuid.UUID,
     body: TaoMessageRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> TaoMessageResponse:
     """Ghi hai message, dời con trỏ nhánh, đẩy job, trả `202`. Không gọi model.
 
-    `Idempotency-Key` (§11.4, A8) được **đọc và log, chưa xử lý** — middleware
-    là T-2.8, và chính task đó mới bắt header này thành bắt buộc. Log ngay từ
-    bây giờ vì nó là bằng chứng rẻ nhất cho C22 khi T-3.4 làm ô nhập: nếu FE
-    sinh key mới mỗi lần bấm, log sẽ cho thấy hai key khác nhau cho một lần
-    soạn thảo, và middleware của T-2.8 sẽ vô dụng trước cả khi nó ra đời.
+    `Idempotency-Key` (§11.4, A8) **không** xuất hiện trong chữ ký này nữa kể
+    từ T-2.8: cả phép kiểm lẫn việc lưu response sống ở
+    `app/core/idempotency.py` và được gắn ở `api/v1/__init__.py`. Handler
+    không biết header đó tồn tại, đúng như nó không biết `require_app_access`
+    tồn tại — một luật gắn theo router chỉ giữ được tính chất "không ai quên"
+    khi không endpoint nào phải nhắc tới nó.
     """
-    if idempotency_key is not None:
-        logger.info(
-            "POST messages: Idempotency-Key=%s (doc, chua xu ly — tasks.md T-2.8)",
-            idempotency_key,
-        )
-
     async with session_scope() as session:
         conversations = ConversationRepository(session)
         messages = MessageRepository(session)
@@ -363,12 +369,25 @@ async def _day_job(assistant_message_id: uuid.UUID) -> None:
     phân biệt nó với một lỗi lập trình. Ném `ApiError` từ trong `async with
     session_scope()` là thứ làm transaction rollback — xem docstring module.
 
-    T-1.8 không đặt `_job_id` nên ngả `None` chưa xảy ra hôm nay; xử nó ngay
-    vì T-2.8 gắn idempotency vào đúng chỗ này (xem B-92).
+    **`_job_id` là `assistant_message_id`** (B-92, T-2.8). arq từ chối một
+    `_job_id` đã có mặt và trả `None`, nên đẩy **cùng một message** hai lần trở
+    thành vô hại: không có lượt sinh thứ hai, không có hoá đơn thứ hai. Đây là
+    lớp phòng thủ **thứ hai**, độc lập với `Idempotency-Key` của §11.4 — cái
+    kia chặn ở mức *request* (hai lần bấm Gửi), cái này chặn ở mức *job* (một
+    message, hai lần enqueue), và hai mức đó hỏng vì hai lý do khác nhau.
+    Không thay được nhau: khoá job-id của arq chỉ sống theo `keep_result`, hết
+    hạn thì `_job_id` cũ dùng lại được, còn khoá `idem:` sống đủ 24 giờ.
+
+    Giá trị lấy thẳng từ khoá chính của hàng `messages` chứ không sinh riêng:
+    một UUID mới cho mỗi lần enqueue là đúng thứ làm lớp chống trùng này vô
+    nghĩa, và `assistant_message_id` đã là thứ duy nhất trên dây (xem đoạn
+    payload ở trên) nên không cần thêm nguồn sự thật nào.
     """
     try:
         pool = await get_arq_pool()
-        job = await pool.enqueue_job(GENERATE_JOB_NAME, str(assistant_message_id))
+        job = await pool.enqueue_job(
+            GENERATE_JOB_NAME, str(assistant_message_id), _job_id=str(assistant_message_id)
+        )
     except Exception as loi:
         # KHÔNG nuốt: log kèm traceback rồi đổi thành mã FE đọc được. Không có
         # dòng này thì nguyên nhân thật ("redis:6379 không phân giải được") chỉ

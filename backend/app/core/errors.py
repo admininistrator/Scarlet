@@ -174,6 +174,20 @@ class ApiErrorCode(StrEnum):
     #: và người dùng đang nhìn chữ vẫn chảy nên câu trả lời phải nói đúng việc.
     CANCEL_FAILED = "CANCEL_FAILED"
 
+    # ── idempotency (§11.4, ADR-15, T-2.8) ──
+    #: POST vào một route bắt buộc `Idempotency-Key` mà thiếu header đó (A8
+    #: gọi đích danh `POST /conversations/{id}/messages`). `400` chứ không
+    #: `422`: đây là một header thiếu, không phải một giá trị sai kiểu, và
+    #: DoD T-2.8 dòng 3 ghi thẳng con số này. `details.header` mang đúng tên
+    #: header để FE không phải đoán từ câu tiếng Việt.
+    IDEMPOTENCY_KEY_REQUIRED = "IDEMPOTENCY_KEY_REQUIRED"
+    #: Một request **cùng** `Idempotency-Key` đang được xử lý (§11.4 gọi đích
+    #: danh `409 {code:"IN_PROGRESS"}`). Không phải lỗi của người dùng: nó
+    #: nghĩa là "cái bạn vừa bấm đang chạy rồi", nên FE chỉ cần đợi — khác hẳn
+    #: `GENERATION_IN_PROGRESS` (409 của `retry`), thứ nói về một **message**
+    #: chưa khép chứ không về một request trùng.
+    IN_PROGRESS = "IN_PROGRESS"
+
     # ── nhánh (§8.2, T-1.13) ──
     #: Thao tác nhánh gọi nhầm `role`: `retry` chỉ chạy trên message
     #: `assistant`, `PATCH /messages/{id}` chỉ chạy trên message `user` (§18.2).

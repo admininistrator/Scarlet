@@ -161,6 +161,13 @@ class Settings(BaseSettings):
     #: Một biến chứ không phải hai (mặc định + trần): chưa màn hình nào cần xin
     #: nhiều hơn một trang, và hai nút vặn cho một con số là hai chỗ để lệch.
     CONVERSATION_PAGE_SIZE: int = Field(default=30, gt=0)
+    #: Tuổi thọ bản ghi `idem:{user_id}:{route}:{key}` của §11.4 — dùng cho cả
+    #: hai trạng thái (`in_progress` lúc `SET NX`, `done` lúc ghi response).
+    #: Giá trị 86400 là con số §11.4/ADR-15 viết ra ("Redis `SET NX` TTL 24h").
+    #: Là một *giới hạn* nên nó ở đây chứ không phải hằng trong
+    #: `app/core/idempotency.py` (A3, §19.2 L4) — cùng họ `CANCEL_TTL_S`,
+    #: `STREAM_TTL_S`.
+    IDEMPOTENCY_TTL_S: int = Field(default=86400, gt=0)
 
     # ═══ Streaming (§7) ═══
     STREAM_TTL_S: int = Field(default=3600, gt=0)

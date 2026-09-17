@@ -12,6 +12,16 @@ mới dọn.
 `errors.register(app)` gắn khung lỗi `{"error":{...}}` của §18 (B-86, NQ-25).
 Nó phải chạy **trên `app`**, không phải trên router: 404-không-có-route và
 405 do Starlette sinh ra trước khi bất kỳ router nào được hỏi tới.
+
+`idempotency.register(app)` gắn handler phát lại response đã lưu của §11.4
+(T-2.8) — cùng lý do phải ở mức `app`.
+
+**Thứ tự hai middleware là chủ ý.** `add_middleware` chèn vào đầu danh sách,
+nên cái gọi **sau** nằm **ngoài**: `OriginCheckMiddleware` ở ngoài cùng, và
+một POST cross-site bị chặn `403` trước khi `IdempotencyMiddleware` kịp làm
+bất cứ việc gì. Đảo lại thì lớp idempotency vẫn chạy đúng (nó chỉ ghi khoá khi
+dependency đã đặt, mà dependency không bao giờ chạy cho một request bị chặn),
+nhưng nó sẽ bọc `send` cho cả những request đã biết chắc là bị từ chối.
 """
 
 from collections.abc import AsyncIterator
@@ -20,7 +30,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.v1 import router as api_v1_router
-from app.core import errors
+from app.core import errors, idempotency
+from app.core.idempotency import IdempotencyMiddleware
 from app.core.origin import OriginCheckMiddleware
 from app.core.queue import dispose_arq_pool
 from app.core.redis import dispose_redis
@@ -37,6 +48,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Scarlet", lifespan=lifespan)
 errors.register(app)
+idempotency.register(app)
+app.add_middleware(IdempotencyMiddleware)
 app.add_middleware(OriginCheckMiddleware)
 app.include_router(api_v1_router)
 

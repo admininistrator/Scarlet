@@ -19,6 +19,19 @@ Ba router KHÔNG có mặt trong danh sách đó, mỗi cái một lý do:
   đóng được phiên của chính mình là C21 ở dạng khác). Route duy nhất của nó
   đòi tài khoản dùng được là `GET /auth/me`, khai ngay tại chỗ trong
   `auth.py`.
+
+**Và từ T-2.8, nơi khai "POST nào chịu luật idempotency của §11.4".** Cùng ba
+router, cùng lý do đặt ở `include_router`: một POST thứ mười hai thêm vào
+`conversations.py` phải chịu luật vì nó nằm trong router, không phải vì ai đó
+nhớ chép thêm một dòng. `auth` **không** có mặt vì khoá §11.4 mở đầu bằng
+`{user_id}` mà `register`/`login`/`refresh` chạy khi chưa có ai đăng nhập —
+xem docstring `app/core/idempotency.py`.
+
+`ROUTE_BAT_BUOC_IDEMPOTENCY` là danh sách route mà header là **bắt buộc**
+(A8, thiếu ⇒ `400`); mọi POST còn lại của ba router là "tuỳ chọn": có header
+thì áp luật, không có thì đi tiếp. Danh sách nằm ở đây — cạnh
+`require_app_access` — chứ không trong `core/idempotency.py`, vì `core/`
+không được biết tên route của `api/` (luật lớp §5.3).
 """
 
 from fastapi import APIRouter, Depends
@@ -26,14 +39,26 @@ from fastapi import APIRouter, Depends
 from app.api.v1 import admin, auth, conversations, health, messages, models, stream
 from app.config.settings import settings
 from app.core.deps import require_app_access
+from app.core.idempotency import require_idempotency
+
+#: A8: "Bắt buộc với POST /conversations/{id}/messages". Một tên route, không
+#: phải một đường dẫn — xem `app/core/idempotency.py::build_key`.
+ROUTE_BAT_BUOC_IDEMPOTENCY = frozenset({messages.TEN_ROUTE_TAO_MESSAGE})
+
+_idempotency = require_idempotency(ROUTE_BAT_BUOC_IDEMPOTENCY)
+
+#: Hai luật đi cùng nhau ở cả ba router có danh tính. Thứ tự là chủ ý:
+#: `require_app_access` chạy trước, nên một tài khoản `suspended` nhận `403`
+#: mà **không** để lại khoá `idem:` nào trong Redis.
+_CO_DANH_TINH = [Depends(require_app_access), Depends(_idempotency)]
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(models.router)
 router.include_router(admin.router)
 router.include_router(health.router)
-router.include_router(stream.router, dependencies=[Depends(require_app_access)])
-router.include_router(conversations.router, dependencies=[Depends(require_app_access)])
-router.include_router(messages.router, dependencies=[Depends(require_app_access)])
+router.include_router(stream.router, dependencies=_CO_DANH_TINH)
+router.include_router(conversations.router, dependencies=_CO_DANH_TINH)
+router.include_router(messages.router, dependencies=_CO_DANH_TINH)
 router.include_router(auth.router)
 
 # §18.6 — `/_debug/*` CHỈ tồn tại khi DEBUG=true. Gắn router có điều kiện thay
