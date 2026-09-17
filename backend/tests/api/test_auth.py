@@ -34,14 +34,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1.auth import REFRESH_COOKIE_NAME
 from app.config.settings import settings
+from app.core import turnstile as turnstile_mod
 from app.core.access_token import decode_access_token, encode_access_token
 from app.core.blacklist import jti_key, thu_hoi_moi_phien, user_key
 from app.core.deps import SESSION_COOKIE_NAME
@@ -1486,3 +1489,208 @@ async def test_han_muc_dem_theo_ip_that_khong_phai_theo_nginx(client: AsyncClien
     )
 
     assert resp.status_code == 200
+
+
+# ═══════════════════ Turnstile (§11.6, RR-1) — T-2.6 ═════════════════════════
+#
+# Hai endpoint, MỘT hàm (`app/core/turnstile.py`), nên bộ test này KHÔNG lặp
+# lại phần đã kiểm ở `tests/core/test_turnstile.py` (hình dạng request gửi đi,
+# cách đọc `success`, bốn kiểu "không hỏi được"). Nó chỉ kiểm phần chỉ thấy
+# được ở tầng HTTP: mã lỗi ra tới client, và **chỗ đặt** phép kiểm trong thân
+# handler.
+#
+# `httpx.MockTransport` bơm vào `_tao_client` — cùng cách và cùng lý do với
+# `tests/core/test_turnstile.py`: không test nào được gọi ra Internet thật.
+
+
+def _bat_turnstile(monkeypatch: pytest.MonkeyPatch, body: dict[str, Any]) -> list[httpx.Request]:
+    """Bật Turnstile + ghim câu trả lời của Cloudflare. Trả về sổ ghi request."""
+    monkeypatch.setattr(settings, "TURNSTILE_SECRET", SecretStr("0x-secret-cua-test"))
+    da_gui: list[httpx.Request] = []
+
+    def _bat(request: httpx.Request) -> httpx.Response:
+        da_gui.append(request)
+        return httpx.Response(200, json=body)
+
+    monkeypatch.setattr(
+        turnstile_mod,
+        "_tao_client",
+        lambda: AsyncClient(transport=httpx.MockTransport(_bat)),
+    )
+    return da_gui
+
+
+@pytest.fixture
+def turnstile_dat(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
+    """Turnstile bật, Cloudflare luôn trả `success: true`."""
+    return _bat_turnstile(monkeypatch, {"success": True, "error-codes": []})
+
+
+@pytest.fixture
+def turnstile_truot(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
+    """Turnstile bật, Cloudflare luôn từ chối.
+
+    Body là bản ghi THẬT mà khoá thử `2x0000…AA` của Cloudflare trả về, đo
+    2026-09-17 từ trong container `api` — không phải một dict bịa ra.
+    """
+    return _bat_turnstile(
+        monkeypatch,
+        {"error-codes": ["invalid-input-response"], "success": False, "messages": []},
+    )
+
+
+@pytest.mark.usefixtures("_db_cua_test", "turnstile_dat")
+async def test_dang_ky_khong_kem_token_tra_400_chu_khong_422(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD T-2.6 dòng 1: đăng ký không kèm token → `400`.
+
+    `400` chứ không `422`, và đó là lý do `turnstile_token` khai
+    `str | None = None`: một field pydantic **bắt buộc** mà thiếu sẽ ra
+    `422 VALIDATION_ERROR` ("body sai kiểu, sửa client đi") thay vì
+    `400 TURNSTILE_FAILED` ("giải lại captcha").
+    """
+    email = f"{uuid.uuid4().hex}@scarlet.example"
+
+    resp = await client.post(DUONG_DAN, json={"email": email, "password": _MAT_KHAU_TEST})
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == ApiErrorCode.TURNSTILE_FAILED
+    # Không có user nào được tạo: phép kiểm đứng TRƯỚC mọi việc khác.
+    assert await _dem_user_theo_email(session_factory, email) == 0
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dang_ky_token_gia_tra_400(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    turnstile_truot: list[httpx.Request],
+) -> None:
+    """DoD T-2.6 dòng 2: token giả → `400`."""
+    email = f"{uuid.uuid4().hex}@scarlet.example"
+
+    resp = await client.post(
+        DUONG_DAN,
+        json={"email": email, "password": _MAT_KHAU_TEST, "turnstile_token": "0.token-gia"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == ApiErrorCode.TURNSTILE_FAILED
+    assert len(turnstile_truot) == 1, "phải HỎI Cloudflare khi có token, không tự phán"
+    assert await _dem_user_theo_email(session_factory, email) == 0
+
+
+@pytest.mark.usefixtures("_db_cua_test", "turnstile_dat")
+async def test_dang_ky_token_dat_thi_tao_user_nhu_thuong(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], mailer_gia: _MailerGia
+) -> None:
+    """Phép kiểm ngược của hai test trên: bật Turnstile KHÔNG làm hỏng đường
+    đăng ký thật."""
+    email = f"{uuid.uuid4().hex}@scarlet.example"
+
+    resp = await client.post(
+        DUONG_DAN,
+        json={"email": email, "password": _MAT_KHAU_TEST, "turnstile_token": "0.token-that"},
+    )
+
+    assert resp.status_code == 200
+    assert await _dem_user_theo_email(session_factory, email) == 1
+    assert len(mailer_gia.calls) == 1
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_dang_ky_khi_tat_turnstile_van_khong_can_token(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD T-2.6 dòng 3, nửa "đăng ký được".
+
+    Bộ test không đặt `TURNSTILE_SECRET` (`tests/conftest.py` chỉ nạp biến bắt
+    buộc), nên đây cũng là lý do hơn ba mươi test T-2.1…T-2.5 phía trên không
+    phải sửa một dòng nào.
+    """
+    email = f"{uuid.uuid4().hex}@scarlet.example"
+
+    resp = await client.post(DUONG_DAN, json={"email": email, "password": _MAT_KHAU_TEST})
+
+    assert resp.status_code == 200
+    assert await _dem_user_theo_email(session_factory, email) == 1
+
+
+@pytest.mark.usefixtures("_db_cua_test", "turnstile_dat")
+async def test_turnstile_chay_TRUOC_phep_kiem_mat_khau(client: AsyncClient) -> None:
+    """Mật khẩu rác + thiếu token → `400` (captcha), không phải `422`.
+
+    Đây là cổng chống *máy*: đặt nó sau `hash_password` (~100 ms và 192 MiB
+    mỗi lượt, T-2.1) là trả tiền cho đúng những request mình sắp từ chối.
+    """
+    resp = await client.post(
+        DUONG_DAN, json={"email": f"{uuid.uuid4().hex}@scarlet.example", "password": "abc"}
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == ApiErrorCode.TURNSTILE_FAILED
+
+
+@pytest.mark.usefixtures("_db_cua_test", "turnstile_dat")
+async def test_quen_mat_khau_khong_kem_token_tra_400(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], mailer_gia: _MailerGia
+) -> None:
+    """§11.6 chỉ định captcha cho CẢ HAI form, không riêng đăng ký."""
+    _, email = await _tao_user_that(session_factory)
+
+    resp = await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": email})
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == ApiErrorCode.TURNSTILE_FAILED
+    assert mailer_gia.calls == [], "không được gửi thư khi captcha chưa qua"
+
+
+@pytest.mark.usefixtures("_db_cua_test", "turnstile_dat")
+async def test_quen_mat_khau_token_dat_van_gui_thu(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], mailer_gia: _MailerGia
+) -> None:
+    _, email = await _tao_user_that(session_factory)
+
+    resp = await client.post(
+        DUONG_DAN_QUEN_MAT_KHAU, json={"email": email, "turnstile_token": "0.token-that"}
+    )
+
+    assert resp.status_code == 200
+    assert len(mailer_gia.calls) == 1
+
+
+@pytest.mark.usefixtures("_db_cua_test", "turnstile_dat")
+async def test_quen_mat_khau_hai_email_van_cung_mot_response(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """§11.5 không bị Turnstile làm sứt: phép kiểm captcha không đọc `email`
+    nên nó không tạo được nhánh nào rẽ theo "email này có tồn tại không"."""
+    _, co_that = await _tao_user_that(session_factory)
+    khong_co = f"{uuid.uuid4().hex}@khong-ton-tai.example"
+    body = {"turnstile_token": "0.token-that"}
+
+    resp1 = await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": co_that, **body})
+    resp2 = await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": khong_co, **body})
+
+    assert resp1.status_code == resp2.status_code == 200
+    assert resp1.content == resp2.content
+
+
+@pytest.mark.usefixtures("_db_cua_test", "turnstile_dat")
+async def test_quen_mat_khau_han_muc_dem_ca_luot_bi_captcha_chan(client: AsyncClient) -> None:
+    """Dependency hạn mức chạy TRƯỚC thân handler, nên một lượt bị captcha
+    chặn vẫn là một lượt đã đếm (NQ-43 — đếm lượt *thử*).
+
+    Đường ngược lại: ai cũng gọi vô hạn miễn là không kèm token, và hạn mức
+    3/giờ của §10.6 thành trang trí.
+    """
+    email = f"{uuid.uuid4().hex}@khong-ton-tai.example"
+    for _ in range(settings.RATE_LIMIT_EMAIL_IP_PER_HOUR):
+        assert (
+            await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": email})
+        ).status_code == 400
+
+    resp = await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": email})
+
+    assert resp.status_code == 429
+    assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED

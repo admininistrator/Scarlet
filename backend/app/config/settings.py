@@ -99,8 +99,24 @@ class Settings(BaseSettings):
 
     # ═══ Đăng ký & bảo mật ═══
     REGISTRATION_MODE: Literal["open", "approval", "invite"] = "approval"
+    #: Khoá CÔNG KHAI của widget — backend không dùng nó để kiểm gì cả; nó đi
+    #: ra FE qua `VITE_TURNSTILE_SITE_KEY` mà `docker-compose.yml` ánh xạ từ
+    #: chính biến này (một nguồn sự thật, xem `components/auth/Turnstile.tsx`).
+    #: Vẫn khai ở đây vì `.env.example` là hợp đồng với người vận hành và
+    #: `tests/test_settings_complete.py` so hai tập hợp theo cả hai chiều.
     TURNSTILE_SITE_KEY: str = ""
     TURNSTILE_SECRET: SecretStr = SecretStr("")
+    #: Endpoint `siteverify` của Cloudflare. Ở đây chứ không phải một chuỗi
+    #: trong `app/core/turnstile.py` vì A3/§19.2 L1 xếp "URL provider" vào danh
+    #: sách literal bị cấm, và §19.1 xếp "endpoint hạ tầng" vào `.env` — cùng
+    #: hàng với `LITELLM_BASE_URL`, `FETCHER_BASE_URL`, `SANDBOX_BASE_URL`.
+    TURNSTILE_VERIFY_URL: HttpUrlStr = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+    #: Trần thời gian cho MỘT lần gọi `siteverify`. Biến RIÊNG chứ không dùng
+    #: lại `FETCH_TIMEOUT_S` (§12, đường fetch URL do người dùng gửi): hai chặng
+    #: mạng khác nhau tới hai bên khác nhau, và gộp lại thì nới cái này sẽ nới
+    #: luôn cái kia. Nằm ở đây chứ không phải một số trong `core/turnstile.py`
+    #: vì đó là một *giới hạn* (A3, §19.2 L4) — cùng họ `SMTP_TIMEOUT_S`.
+    TURNSTILE_TIMEOUT_S: int = Field(default=10, gt=0)
     EMAIL_TOKEN_TTL_MIN: int = Field(default=60, gt=0)
     ACCESS_TOKEN_TTL_MIN: int = Field(default=15, gt=0)
     REFRESH_TOKEN_TTL_DAYS: int = Field(default=30, gt=0)
@@ -339,9 +355,16 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _warn_on_boot(self) -> Settings:
         if not self.TURNSTILE_SECRET.get_secret_value().strip():
+            # "Bỏ qua âm thầm khi thiếu secret nghĩa là một ngày nào đó bạn
+            # deploy production mà không có captcha và không biết" (Cạm bẫy
+            # T-2.6). Dòng này là thứ DUY NHẤT nói ra điều đó, nên nó phải kêu
+            # mỗi lần boot chứ không chỉ lần đầu — và phải nêu đủ CẢ HAI route
+            # đang mất lớp bảo vệ (§11.6: đăng ký và quên mật khẩu).
             logger.warning(
-                "TURNSTILE_SECRET rỗng — bỏ qua kiểm tra Turnstile khi đăng ký. "
-                "Chỉ chấp nhận ở môi trường dev (KH Phụ lục B)."
+                "TURNSTILE_SECRET rỗng — BỎ QUA kiểm tra Turnstile ở "
+                "POST /auth/register và POST /auth/forgot-password. "
+                "Chỉ chấp nhận ở môi trường dev (KH §11.6, Phụ lục B); "
+                "RR-1 mất một trong bốn lớp chống đăng ký rác."
             )
         return self
 

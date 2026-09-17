@@ -110,6 +110,18 @@ class ApiErrorCode(StrEnum):
     #: LÝ DO cụ thể ngoài "quá phổ biến", tránh dạy kẻ tấn công cách né).
     PASSWORD_TOO_WEAK = "PASSWORD_TOO_WEAK"
 
+    #: Turnstile không qua (§11.6, RR-1, T-2.6): thiếu token, token giả, token
+    #: đã tiêu, hoặc token của một site key khác. **Một** mã cho cả bốn, cùng
+    #: lý lẽ với `INVALID_CREDENTIALS` ở trên và với `TOKEN_INVALID` của
+    #: `reset-password`: việc FE phải làm giống hệt nhau ở mọi ca — gọi
+    #: `turnstile.reset()` rồi bảo người dùng thử lại — nên hai mã cho một
+    #: nghĩa là đúng thứ docstring của bảng này cấm. Lý do thật (`error-codes`
+    #: của Cloudflare) đi vào **log**, không vào response.
+    #:
+    #: KHÔNG dùng cho "không hỏi được Cloudflare": đó là `SERVICE_UNAVAILABLE`
+    #: (503) — xem `app/core/turnstile.py`, mục vì sao không cho qua.
+    TURNSTILE_FAILED = "TURNSTILE_FAILED"
+
     # ── email token (§11.5, T-2.2) ──
     #: `POST /auth/verify-email` với một token chưa từng tồn tại (không khớp
     #: `token_hash` nào) hoặc đúng hash nhưng sai `purpose`. KHÔNG dùng cho

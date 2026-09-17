@@ -34,5 +34,7 @@
   "chat.nhanhTruoc": "Nhánh trước",
   "chat.nhanhSau": "Nhánh sau",
 
+  "auth.turnstileLoi": "Không tải được ô xác minh. Kiểm tra kết nối rồi tải lại trang.",
+
   "loi.dong": "Đóng"
 }

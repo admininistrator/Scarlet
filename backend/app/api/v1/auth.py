@@ -42,8 +42,29 @@ lỗi 500 (DoD): token hợp lệ lần đầu và token đã dùng trước đ�
 không dựa vào mã lỗi, để quyết định hiện trang nào. Chỉ token chưa từng tồn
 tại (giả mạo/sai `purpose`) mới ra `400 TOKEN_INVALID`.
 
-Turnstile (T-2.6) CHƯA có ở `register` — nối tiếp đúng endpoint này, không
-viết lại nó.
+┌──────────────────────────────────────────────────────────────────────────┐
+│  TURNSTILE (T-2.6, §11.6, RR-1) — hai route, một hàm                     │
+└──────────────────────────────────────────────────────────────────────────┘
+
+`register` và `forgot-password` là hai route §11.6 chỉ định, và cả hai gọi
+đúng một hàm `core/turnstile.py::kiem_turnstile`. Ba điểm quyết định hình
+dạng của chúng (lý do đầy đủ ở docstring của module đó):
+
+1. **`turnstile_token` là `str | None = None`, không phải field bắt buộc.**
+   Field bắt buộc mà thiếu thì pydantic trả `422 VALIDATION_ERROR`, còn DoD
+   T-2.6 đòi `400` — và `400 TURNSTILE_FAILED` là câu nói đúng việc ("giải lại
+   captcha"), khác hẳn "body sai kiểu".
+2. **Kiểm TRƯỚC mọi thứ khác trong thân handler**, kể cả trước `hash_password`
+   (~100 ms, 192 MiB) và trước `SELECT` đầu tiên. Đây là cổng chống *máy*; để
+   nó sau bất cứ việc gì là trả tiền cho request mà mình sắp từ chối.
+3. **Không đổi một chữ nào trong hợp đồng chống dò của §11.5.** Phép kiểm
+   captcha không đọc `email`, nên nó không thêm được nhánh nào rẽ theo "email
+   này có tồn tại không" — `_PHAN_HOI_DANG_KY` và `_PHAN_HOI_QUEN_MAT_KHAU`
+   vẫn là một hằng số cho mọi đường.
+
+Hệ quả UX đã biết: mật khẩu quá yếu → `422`, và token Turnstile vừa gửi kèm
+**đã tiêu** (Cloudflare chỉ nhận một lần). FE phải gọi `turnstile.reset()` sau
+mọi response lỗi, không riêng `400` — ghi rõ ở `components/auth/Turnstile.tsx`.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  CẠM BẪY CỦA T-2.3: xoay vòng refresh + phát hiện tái sử dụng             │
@@ -177,9 +198,10 @@ from app.core.blacklist import chan_jti, thu_hoi_moi_phien
 from app.core.deps import SESSION_COOKIE_NAME, get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.mailer import mailer
-from app.core.ratelimit import gioi_han_auth, gioi_han_gui_email
+from app.core.ratelimit import dia_chi_ip, gioi_han_auth, gioi_han_gui_email
 from app.core.redis import get_redis
 from app.core.security import hash_password, mat_khau_qua_pho_bien, verify_password
+from app.core.turnstile import kiem_turnstile
 from app.db.models import EmailTokenPurpose, UserRole, UserStatus
 from app.db.repositories.email_tokens import ConsumeResult, EmailTokenRepository
 from app.db.repositories.refresh_tokens import RefreshTokenRepository, RotateResult
@@ -212,6 +234,9 @@ _MAT_KHAU_GIA = "mat-khau-gia-chi-de-giu-thoi-gian-phan-hoi-dong-deu-000"
 class DangKyRequest(BaseModel):
     email: EmailStr
     password: str
+    #: `cf-turnstile-response` của widget (T-2.6). Tuỳ chọn ở tầng schema chứ
+    #: KHÔNG phải tuỳ chọn ở tầng luật — xem điểm 1 của docstring module.
+    turnstile_token: str | None = None
 
 
 class DangKyResponse(BaseModel):
@@ -278,19 +303,30 @@ async def _gui_email_xac_thuc(email: str, raw_token: str) -> None:
     status_code=status.HTTP_200_OK,
     response_model=DangKyResponse,
     responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "thieu token Turnstile hoac token khong hop le (TURNSTILE_FAILED)",
+        },
         422: {
             "model": ErrorEnvelope,
             "description": "mat khau qua ngan (PASSWORD_TOO_SHORT) "
             "hoac qua pho bien (PASSWORD_TOO_WEAK)",
-        }
+        },
+        503: {
+            "model": ErrorEnvelope,
+            "description": "khong hoi duoc Cloudflare de xac minh captcha (SERVICE_UNAVAILABLE)",
+        },
     },
 )
-async def register(body: DangKyRequest) -> DangKyResponse:
+async def register(body: DangKyRequest, request: Request) -> DangKyResponse:
     """Đăng ký (UC-01): tạo user `status='pending_email'`, tier mặc định,
     phát hành token verify và gửi email xác thực (T-2.2).
 
-    Không verify Turnstile (T-2.6) — nối tiếp sau, cùng một đường dẫn này.
+    Turnstile (§11.6, RR-1) chạy TRƯỚC mọi việc khác — xem điểm 2 của
+    docstring module. `TURNSTILE_SECRET` rỗng ⇒ bỏ qua (chỉ dev).
     """
+    await kiem_turnstile(body.turnstile_token, remote_ip=dia_chi_ip(request))
+
     if len(body.password) < settings.PASSWORD_MIN_LENGTH:
         raise ApiError(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -684,6 +720,9 @@ async def logout(
 
 class QuenMatKhauRequest(BaseModel):
     email: EmailStr
+    #: Cùng lối `DangKyRequest.turnstile_token` — §11.6 chỉ định captcha cho cả
+    #: hai form: đăng ký **và** quên mật khẩu.
+    turnstile_token: str | None = None
 
 
 class QuenMatKhauResponse(BaseModel):
@@ -735,15 +774,30 @@ async def _gui_email_dat_lai(email: str, raw_token: str) -> None:
     response_model=QuenMatKhauResponse,
     dependencies=[Depends(gioi_han_gui_email("forgot-password"))],
     responses={
-        429: {"model": ErrorEnvelope, "description": "qua 3 lan/gio tu mot IP (RATE_LIMITED)"}
+        400: {
+            "model": ErrorEnvelope,
+            "description": "thieu token Turnstile hoac token khong hop le (TURNSTILE_FAILED)",
+        },
+        429: {"model": ErrorEnvelope, "description": "qua 3 lan/gio tu mot IP (RATE_LIMITED)"},
+        503: {
+            "model": ErrorEnvelope,
+            "description": "khong hoi duoc Cloudflare de xac minh captcha (SERVICE_UNAVAILABLE)",
+        },
     },
 )
-async def forgot_password(body: QuenMatKhauRequest) -> QuenMatKhauResponse:
+async def forgot_password(body: QuenMatKhauRequest, request: Request) -> QuenMatKhauResponse:
     """Xin link đặt lại mật khẩu (§11.5). **Luôn** 200, luôn cùng một body.
 
     Không kiểm `status` tài khoản: bảng §11.1 là việc của T-2.7, và rẽ nhánh
     theo trạng thái ở đây sẽ làm response nói ra điều §11.5 cấm.
+
+    Turnstile (T-2.6) chạy trước phép `SELECT` đầu tiên và **không** đọc
+    `email`, nên nó không mở thêm nhánh nào cho §11.5 — xem điểm 3 của
+    docstring module. Hạn mức 3/giờ (NQ-43) vẫn chạy trước nó: dependency đếm
+    lượt *thử*, và một lượt thử bị captcha chặn cũng là một lượt thử.
     """
+    await kiem_turnstile(body.turnstile_token, remote_ip=dia_chi_ip(request))
+
     raw_token: str | None = None
     email_de_gui: str | None = None
     async with session_scope() as session:

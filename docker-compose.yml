@@ -201,6 +201,15 @@ services:
     build: ./frontend
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+      # T-2.6 — khoa CONG KHAI cua widget Turnstile. Anh xa tu chinh
+      # TURNSTILE_SITE_KEY chu KHONG them mot bien VITE_ thu hai trong .env:
+      # hai dong giu cung mot gia tri la hai cho de lech, va lech o day nghia
+      # la widget hien ra nhung token no sinh thuoc ve mot site khac -> backend
+      # tu choi bang 400 ma khong ai hieu vi sao.
+      #
+      # Rong thi widget tu an di (xem components/auth/Turnstile.tsx) - dung
+      # khop voi TURNSTILE_SECRET rong o backend.
+      VITE_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     healthcheck:
       # node:alpine co busybox wget, khong co curl.
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5173/"]
