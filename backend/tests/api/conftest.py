@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import httpx
 import pytest
@@ -201,6 +202,30 @@ def ratelimit_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRateLimitRedis:
     fake = FakeRateLimitRedis()
     monkeypatch.setattr("app.core.ratelimit.get_redis", lambda: fake)
     return fake
+
+
+@pytest.fixture(autouse=True)
+def quota_redis(monkeypatch: pytest.MonkeyPatch, quota_redis_fake: Any) -> Any:
+    """Redis giả cho `app/quota/`. **Autouse**, cùng lý do hai fixture trên.
+
+    Từ T-2.11, ba route sinh chữ đi qua cửa chặn §10.2, thứ đọc hai ZSET quota
+    **và** cache hạn mức tier. Mặc định cả hai đều rỗng nên đường đi thường là
+    "chưa tiêu gì, hạn mức đọc từ Postgres" — 60+ lời gọi POST có sẵn không
+    phải sửa. Test nào muốn kiểm chính cửa chặn thì tự nạp vào `zset`.
+
+    Vá **cả hai** module vì `estimator` và `tiers` dùng chung một `get_redis`;
+    một module bị bỏ sót là một test **treo** ở lần nối `redis:6379` chứ không
+    đỏ (đúng bài học `idempotency_redis` của T-2.8).
+
+    Lớp `FakeQuotaRedis` sống ở `tests/conftest.py` chứ không ở đây, và nó
+    đi qua **fixture** chứ không qua `import`: `tests/` không phải package
+    (không có `__init__.py`) nên `from tests.conftest import ...` không chạy —
+    cùng lý do đã ghi ở `event_hooks` ngay dưới. Đó cũng là lý do kiểu ở đây
+    là `Any`.
+    """
+    monkeypatch.setattr("app.quota.estimator.get_redis", lambda: quota_redis_fake)
+    monkeypatch.setattr("app.quota.tiers.get_redis", lambda: quota_redis_fake)
+    return quota_redis_fake
 
 
 async def _attach_idempotency_key(request: httpx.Request) -> None:

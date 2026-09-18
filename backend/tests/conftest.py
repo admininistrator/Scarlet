@@ -227,6 +227,92 @@ async def session(
         yield db_session
 
 
+class FakeQuotaRedis:
+    """Redis giả cho `app/quota/` — bốn lệnh, cả bốn mô phỏng THẬT (T-2.11).
+
+    Cùng lối `FakeIdempotencyRedis` chứ không phải `FakeRateLimitRedis`: ở đây
+    không có script Lua nào, chỉ có `ZREMRANGEBYSCORE`/`ZRANGEBYSCORE` và cặp
+    `get`/`set` của cache tier — bốn lệnh mà một bản mô phỏng bằng Python
+    *đúng* được, nên mô phỏng đúng luôn. Nhờ vậy test kiểm được đúng thứ cần
+    kiểm: phần quá hạn có bị dọn TRƯỚC khi đọc không, và phần còn trong cửa sổ
+    có được cộng đủ không.
+
+    Một `get_redis` cho cả `estimator` lẫn `tiers`, nên fixture dưới đây vá cả
+    hai — một module thiếu là một test **treo** ở lần nối `redis:6379` chứ
+    không đỏ (đúng bài học `idempotency_redis` của T-2.8 và `ratelimit_redis`
+    của T-2.9).
+    """
+
+    def __init__(self) -> None:
+        #: `{khoá: {member: score}}` — hai ZSET `quota:5h:*`/`quota:weekly:*`.
+        self.zset: dict[str, dict[str, float]] = {}
+        #: Cặp key/value của cache tier (`tier:limits:*`).
+        self.store: dict[str, str] = {}
+        #: Mỗi lời gọi `zremrangebyscore`, theo thứ tự — test đọc để chứng minh
+        #: bước dọn chạy TRƯỚC bước đọc.
+        self.da_don: list[tuple[str, object, object]] = []
+        #: Bật lên để mô phỏng Redis chết giữa chừng.
+        self.fail = False
+
+    @staticmethod
+    def _diem(bien: object) -> tuple[float, bool]:
+        """Một biên của `ZRANGEBYSCORE`: `-inf`, `+inf`, `12.5`, hoặc `(12.5`."""
+        raw = bien if isinstance(bien, str) else repr(bien)
+        mo = raw.startswith("(")
+        return float(raw[1:] if mo else raw), mo
+
+    async def zremrangebyscore(self, name: str, min: object, max: object) -> int:
+        if self.fail:
+            raise ConnectionError("redis chet (gia lap)")
+        self.da_don.append((name, min, max))
+        can_duoi, mo_duoi = self._diem(min)
+        can_tren, mo_tren = self._diem(max)
+        ghe = self.zset.get(name, {})
+        bo = [
+            member
+            for member, score in ghe.items()
+            if (score > can_duoi if mo_duoi else score >= can_duoi)
+            and (score < can_tren if mo_tren else score <= can_tren)
+        ]
+        for member in bo:
+            del ghe[member]
+        return len(bo)
+
+    async def zrangebyscore(
+        self, name: str, min: object, max: object, *, withscores: bool = False
+    ) -> list[tuple[str, float]]:
+        if self.fail:
+            raise ConnectionError("redis chet (gia lap)")
+        assert withscores, "`read_window` luon doc kem score — xem retry_after_s"
+        can_duoi, mo_duoi = self._diem(min)
+        can_tren, mo_tren = self._diem(max)
+        trong = [
+            (member, score)
+            for member, score in self.zset.get(name, {}).items()
+            if (score > can_duoi if mo_duoi else score >= can_duoi)
+            and (score < can_tren if mo_tren else score <= can_tren)
+        ]
+        return sorted(trong, key=lambda muc: muc[1])
+
+    # ── cache tier (T-2.10) — cùng client, nên cùng fake ──
+    async def get(self, name: str) -> str | None:
+        if self.fail:
+            raise ConnectionError("redis chet (gia lap)")
+        return self.store.get(name)
+
+    async def set(self, name: str, value: str, *, ex: int | None = None) -> bool:
+        if self.fail:
+            raise ConnectionError("redis chet (gia lap)")
+        self.store[name] = value
+        return True
+
+
+@pytest.fixture
+def quota_redis_fake() -> FakeQuotaRedis:
+    """Một `FakeQuotaRedis` rỗng. Vá nó vào module nào là việc của chỗ xin."""
+    return FakeQuotaRedis()
+
+
 # Đặt SAU khối MINIMAL_ENV (Phần 1) một cách cố ý: `app.db.repositories.users`
 # kéo theo `app.config.settings`, thứ khởi tạo `Settings()` ngay lúc import
 # (fail-fast, L2) — import này phải chạy SAU khi biến môi trường tối thiểu đã

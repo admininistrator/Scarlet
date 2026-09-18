@@ -86,10 +86,12 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.conversations import MessageTrenDuongDi
 from app.config import catalog
@@ -106,6 +108,7 @@ from app.db.repositories import (
     MessageRepository,
 )
 from app.db.session import session_scope
+from app.quota.estimator import QuotaWarning, check_quota
 from app.streaming.cancel import dat_co_huy
 
 logger = logging.getLogger(__name__)
@@ -141,6 +144,21 @@ _GIOI_HAN_CHAT = gioi_han_chat()
 _ROUTE_SINH_CHU = [Depends(require_chat_access), Depends(_GIOI_HAN_CHAT)]
 
 
+@dataclass(frozen=True, slots=True)
+class LuotSinhMoi:
+    """Thứ `_mo_luot_sinh` trả về: id của message assistant, cộng cảnh báo quota.
+
+    Là một khối chứ không phải một `uuid.UUID` trần như trước T-2.11: ba
+    endpoint sinh chữ đều phải mang cảnh báo của UC-07 ra body, và cảnh báo ấy
+    chỉ tính được ở **trong** hàm đã đọc hai cửa sổ. Trả thêm một giá trị thứ
+    hai rẻ hơn nhiều so với để ba handler tự gọi lại `check_quota` — đọc Redis
+    hai lần cho một request là hai câu trả lời có thể khác nhau.
+    """
+
+    assistant_message_id: uuid.UUID
+    quota_warning: QuotaWarning | None
+
+
 class TaoMessageRequest(BaseModel):
     """Body của §18.2. Ba trường, hai trong đó là tuỳ chọn có ý nghĩa riêng."""
 
@@ -169,6 +187,10 @@ class TaoMessageResponse(BaseModel):
     #: `true` = `parent_id` client gửi lên khác `active_leaf_id` lúc nhận
     #: request, tức vừa mở một nhánh. Không phải lỗi — xem C14.
     branched: bool
+    #: UC-07 dòng 1 — *"Còn ≤ 20% quota → hiện thanh cảnh báo, không chặn"*.
+    #: `null` là ca thường: còn nhiều tiền thì không có gì để nói. Xem
+    #: `app/quota/estimator.py::QuotaWarning` cho bốn con số bên trong.
+    quota_warning: QuotaWarning | None = None
 
 
 @router.post(
@@ -185,8 +207,9 @@ class TaoMessageResponse(BaseModel):
         409: {"model": ErrorEnvelope, "description": "Mot request cung khoa dang chay (§11.4)"},
         429: {
             "model": ErrorEnvelope,
-            "description": "Qua 20 luot/phut (RATE_LIMITED) hoac da co "
-            "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6",
+            "description": "Qua 20 luot/phut (RATE_LIMITED), da co "
+            "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6, "
+            "hoac het han muc chi tieu (QUOTA_EXCEEDED) — §10.2",
         },
         404: {"model": ErrorEnvelope, "description": "Hoi thoai hoac parent_id khong thay"},
         503: {"model": ErrorEnvelope, "description": "Khong day duoc job vao hang doi"},
@@ -247,21 +270,23 @@ async def create_message(
         # detached, và đọc thuộc tính của nó ngoài session là chỗ sinh
         # `DetachedInstanceError` nếu có ai lỡ bật `expire_on_commit`.
         uid = user_message.id
-        amid = await _mo_luot_sinh(
+        luot = await _mo_luot_sinh(
+            session=session,
             messages=messages,
             conversations=conversations,
             conversation_id=conversation_id,
             user_id=user_id,
             parent_id=uid,
-            model_id=model.id,
+            model=model,
         )
         await session.commit()
 
     return TaoMessageResponse(
         user_message_id=uid,
-        assistant_message_id=amid,
-        stream_url=_stream_url(request, amid),
+        assistant_message_id=luot.assistant_message_id,
+        stream_url=_stream_url(request, luot.assistant_message_id),
         branched=branched,
+        quota_warning=luot.quota_warning,
     )
 
 
@@ -272,21 +297,28 @@ def _stream_url(request: Request, message_id: uuid.UUID) -> str:
 
 async def _mo_luot_sinh(
     *,
+    session: AsyncSession,
     messages: MessageRepository,
     conversations: ConversationRepository,
     conversation_id: uuid.UUID,
     user_id: uuid.UUID,
     parent_id: uuid.UUID | None,
-    model_id: str,
-) -> uuid.UUID:
-    """Ba bước cuối của §7.2 ① — assistant `queued`, dời lá, đẩy job.
+    model: catalog.ModelEntry,
+) -> LuotSinhMoi:
+    """Bốn bước cuối của §7.2 ① — assistant `queued`, dời lá, KIỂM QUOTA, đẩy job.
 
     Dùng chung cho cả ba đường tạo một lượt sinh (`POST .../messages`,
     `retry`, `PATCH /messages/{id}`). Thứ tự bên trong là hợp đồng, không phải
     phong cách — xem docstring module: `enqueue` nằm **trong** transaction của
     caller và caller `commit()` sau khi hàm này trả về.
 
-    Trả `id` của message assistant vừa tạo, đọc ra **trước** khi session đóng.
+    Nhận cả `ModelEntry` chứ không chỉ `model.id` kể từ T-2.11: cửa chặn
+    §10.2 cần `max_output` và giá của model, và tra lại catalog từ một chuỗi
+    `id` ngay bên trong hàm là làm hai lần một việc caller vừa làm xong
+    (`_chon_model`).
+
+    Trả `id` của message assistant vừa tạo, đọc ra **trước** khi session đóng,
+    cộng cảnh báo quota của UC-07 (có thể `None`).
 
     Raise:
         ApiError 404 `PARENT_NOT_FOUND`: `parent_id` không nằm trong hội thoại
@@ -295,6 +327,8 @@ async def _mo_luot_sinh(
             nó nhận `parent_id` từ một hàng đã tồn tại từ trước.
         ApiError 429 `TOO_MANY_STREAMS`: người này đã có
             `MAX_CONCURRENT_STREAMS` lượt sinh chưa khép (§10.6, T-2.9).
+        ApiError 429 `QUOTA_EXCEEDED`: dự toán xấu nhất của lượt này cộng chi
+            tiêu đã có vượt hạn mức 5 giờ hoặc 7 ngày (§10.2, T-2.11).
         ApiError 503 `ENQUEUE_FAILED`: xem `_day_job`.
     """
     try:
@@ -311,7 +345,7 @@ async def _mo_luot_sinh(
             # Model chốt **tại đây**, không phải lúc worker chạy: đổi model mặc
             # định giữa lúc job còn trong hàng đợi không được đổi model của một
             # câu hỏi đã gửi. Worker đọc lại đúng cột này (§7.2 ③).
-            model_id=model_id,
+            model_id=model.id,
         )
     except MessageNotInConversationError as loi:
         raise ApiError(
@@ -326,6 +360,17 @@ async def _mo_luot_sinh(
     await conversations.set_active_leaf(conversation_id, user_id=user_id, message_id=assistant.id)
 
     amid = assistant.id
+
+    # §10.2 cửa TRƯỚC (T-2.11). Đứng **trước** `nhan_ghe_sinh` chứ không sau,
+    # và thứ tự ấy là hợp đồng: ghế bận nhả bằng phép đối chiếu Postgres sau
+    # `PHANTOM_GRACE_S`, nên từ chối *sau* khi đã nhận ghế là khoá một ghế 60
+    # giây cho một lượt sinh chưa từng tồn tại. Cửa quota thì không để lại gì
+    # khi nó ném — nó chỉ đọc.
+    #
+    # Và ở **đây** chứ không ở một dependency, cùng lý do với ghế: phép ước
+    # tính cần đúng ngữ cảnh worker sắp gửi, mà ngữ cảnh ấy đi từ `amid` —
+    # một id chỉ ra đời sau `create_message` phía trên.
+    canh_bao = await check_quota(session, user_id=user_id, leaf_id=amid, model=model)
 
     # §10.6 hàng "Đồng thời" (T-2.9, B-85, NQ-49). Ở **đây** chứ không ở một
     # dependency vì phép kiểm cần `message_id`, mà id đó chỉ ra đời ở dòng
@@ -345,7 +390,7 @@ async def _mo_luot_sinh(
         # một cái ghế trỏ vào hư không.
         await nha_ghe_sinh(user_id=user_id, message_id=amid)
         raise
-    return amid
+    return LuotSinhMoi(assistant_message_id=amid, quota_warning=canh_bao)
 
 
 def _chon_model(*uu_tien: str | None) -> catalog.ModelEntry:
@@ -572,6 +617,10 @@ class RetryResponse(BaseModel):
     assistant_message_id: uuid.UUID
     stream_url: str
     model_id: str
+    #: UC-07 dòng 1 — *"Còn ≤ 20% quota → hiện thanh cảnh báo, không chặn"*.
+    #: `null` là ca thường: còn nhiều tiền thì không có gì để nói. Xem
+    #: `app/quota/estimator.py::QuotaWarning` cho bốn con số bên trong.
+    quota_warning: QuotaWarning | None = None
 
 
 class SuaMessageRequest(BaseModel):
@@ -599,6 +648,10 @@ class SuaMessageResponse(BaseModel):
     user_message_id: uuid.UUID
     assistant_message_id: uuid.UUID
     stream_url: str
+    #: UC-07 dòng 1 — *"Còn ≤ 20% quota → hiện thanh cảnh báo, không chặn"*.
+    #: `null` là ca thường: còn nhiều tiền thì không có gì để nói. Xem
+    #: `app/quota/estimator.py::QuotaWarning` cho bốn con số bên trong.
+    quota_warning: QuotaWarning | None = None
 
 
 class AnhEmResponse(BaseModel):
@@ -635,8 +688,9 @@ class AnhEmResponse(BaseModel):
         409: {"model": ErrorEnvelope, "description": "Luot sinh cu con dang chay"},
         429: {
             "model": ErrorEnvelope,
-            "description": "Qua 20 luot/phut (RATE_LIMITED) hoac da co "
-            "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6",
+            "description": "Qua 20 luot/phut (RATE_LIMITED), da co "
+            "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6, "
+            "hoac het han muc chi tieu (QUOTA_EXCEEDED) — §10.2",
         },
         503: {"model": ErrorEnvelope, "description": "Khong day duoc job vao hang doi"},
     },
@@ -690,20 +744,22 @@ async def retry_message(
             goc.model_id,
             conversation.default_model,
         )
-        amid = await _mo_luot_sinh(
+        luot = await _mo_luot_sinh(
+            session=session,
             messages=messages,
             conversations=conversations,
             conversation_id=goc.conversation_id,
             user_id=user_id,
             parent_id=goc.parent_id,
-            model_id=model.id,
+            model=model,
         )
         await session.commit()
 
     return RetryResponse(
-        assistant_message_id=amid,
-        stream_url=_stream_url(request, amid),
+        assistant_message_id=luot.assistant_message_id,
+        stream_url=_stream_url(request, luot.assistant_message_id),
         model_id=model.id,
+        quota_warning=luot.quota_warning,
     )
 
 
@@ -718,8 +774,9 @@ async def retry_message(
         404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
         429: {
             "model": ErrorEnvelope,
-            "description": "Qua 20 luot/phut (RATE_LIMITED) hoac da co "
-            "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6",
+            "description": "Qua 20 luot/phut (RATE_LIMITED), da co "
+            "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6, "
+            "hoac het han muc chi tieu (QUOTA_EXCEEDED) — §10.2",
         },
         503: {"model": ErrorEnvelope, "description": "Khong day duoc job vao hang doi"},
     },
@@ -780,20 +837,22 @@ async def edit_message(
             ) from loi
 
         uid = user_message.id
-        amid = await _mo_luot_sinh(
+        luot = await _mo_luot_sinh(
+            session=session,
             messages=messages,
             conversations=conversations,
             conversation_id=goc.conversation_id,
             user_id=user_id,
             parent_id=uid,
-            model_id=model.id,
+            model=model,
         )
         await session.commit()
 
     return SuaMessageResponse(
         user_message_id=uid,
-        assistant_message_id=amid,
-        stream_url=_stream_url(request, amid),
+        assistant_message_id=luot.assistant_message_id,
+        stream_url=_stream_url(request, luot.assistant_message_id),
+        quota_warning=luot.quota_warning,
     )
 
 

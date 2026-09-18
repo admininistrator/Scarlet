@@ -188,6 +188,27 @@ class ApiErrorCode(StrEnum):
     #: `details` mang `{"limit", "active"}` để FE nói được câu đúng.
     TOO_MANY_STREAMS = "TOO_MANY_STREAMS"
 
+    # ── quota (§10.2, UC-07, S6, T-2.11) ──
+    #: Dự toán trường hợp xấu nhất của lượt sinh này cộng với chi tiêu đã có
+    #: vượt hạn mức của một trong hai cửa sổ trượt (§10.3). §18 dùng đúng mã
+    #: này làm ví dụ cho khung lỗi chung, nên tên nó là hợp đồng chứ không phải
+    #: một lựa chọn.
+    #:
+    #: `429` chứ không `402`/`403`, và mã RIÊNG chứ không dùng chung
+    #: `RATE_LIMITED` dù cả hai đều `429`: ba câu trả lời khác nhau cho người
+    #: dùng. `RATE_LIMITED` là "bạn bấm quá nhanh", `TOO_MANY_STREAMS` là "bạn
+    #: đang có ba câu trả lời cùng chảy", còn mã này là "bạn đã tiêu hết tiền
+    #: của kỳ này" — UC-07 đòi FE hiện **thời điểm chính xác** quota được hoàn
+    #: lại, một màn hình không màn nào kia cần.
+    #:
+    #: `details` mang `{"limit_type", "retry_after", "limit_usd", "spent_usd",
+    #: "estimate_usd"}`. `limit_type ∈ {"5h", "weekly"}` là chữ của UC-07.
+    #: `retry_after` **có thể `null`**: khi một lượt sinh đơn lẻ đã vượt trần
+    #: thì nhả hết cả cửa sổ cũng không đủ, và không có thời điểm nào để hẹn —
+    #: cùng lý lẽ đã chốt cho `TOO_MANY_STREAMS`, đoán một con số ở đó là nói
+    #: dối bằng một header client sẽ tin.
+    QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
+
     # ── idempotency (§11.4, ADR-15, T-2.8) ──
     #: POST vào một route bắt buộc `Idempotency-Key` mà thiếu header đó (A8
     #: gọi đích danh `POST /conversations/{id}/messages`). `400` chứ không

@@ -270,6 +270,13 @@ class Settings(BaseSettings):
     #: phải tới trong ngần ấy giây mà không restart gì. Đây là một *giới hạn*
     #: nên nó ở đây chứ không phải hằng trong `app/quota/tiers.py` (A3, L4).
     TIER_CACHE_TTL_S: int = Field(default=60, gt=0)
+    #: Ngưỡng cảnh báo "sắp hết quota" (T-2.11). UC-07 dòng 1 viết ra con số
+    #: này: *"Còn ≤ 20% quota → hiện thanh cảnh báo, không chặn"*. Nó là một
+    #: **giới hạn** nên nó ở đây chứ không phải hằng trong
+    #: `app/quota/estimator.py` (A3, §19.2 L4) — và nó là nút vặn đầu tiên
+    #: người vận hành muốn xoay khi cả nhóm kêu bị cảnh báo quá sớm hoặc quá
+    #: muộn. `le=100` vì "còn hơn 100% quota" không phải một trạng thái.
+    QUOTA_WARN_REMAINING_PCT: int = Field(default=20, ge=0, le=100)
 
     # ═══ Provider layer (§9.1) ═══
     #: Timeout HTTP của chặng backend → LiteLLM. Phải ≥ `request_timeout` trong
