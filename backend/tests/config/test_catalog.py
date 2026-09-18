@@ -394,3 +394,120 @@ def test_catalog_that_claude_haiku_co_gia_ghi_cache() -> None:
     assert gia is not None
     assert (gia.input_per_1m, gia.output_per_1m) == (1.00, 5.00)
     assert (gia.cached_input_per_1m, gia.cache_write_per_1m) == (0.10, 1.25)
+
+
+# ─────────────── Giá tự điền cho provider không báo giá (B-65) ───────────────
+
+
+def _voi_manual_pricing(entry: dict[str, Any] | None = None) -> dict[str, Any]:
+    """`VALID` cộng một model `unmetered` (`nr-gemini-flash`) và khối giá tự điền."""
+    data = deepcopy(VALID)
+    data["providers"]["ninerouter"] = {
+        "label": "9Router (local)",
+        "base_url": "http://host.docker.internal:20128/v1",
+        "availability": "host-dependent",
+        "byok_supported": False,
+        "cost_reporting": "unreliable",
+        "health_path": "/models",
+    }
+    data["models"].append(
+        {
+            "id": "nr-gemini-flash",
+            "display_name": "Gemini Flash (qua 9Router)",
+            "provider": "ninerouter",
+            "upstream_model": "openai/ag/gemini-3.8-flash-low",
+            "capabilities": [],
+            "context_window": 128000,
+            "max_output": 8192,
+            "pricing": None,
+            "pricing_mode": "unmetered",
+            "enabled": True,
+            "default": False,
+            "order": 30,
+        }
+    )
+    if entry is not None:
+        data["manual_pricing"] = {"nr-gemini-flash": entry}
+    return data
+
+
+def test_manual_pricing_vang_mat_van_nap_duoc() -> None:
+    cat = Catalog.model_validate(_voi_manual_pricing())
+    assert cat.manual_pricing == {}
+    assert cat.effective_pricing("nr-gemini-flash") is None
+
+
+def test_manual_pricing_da_dien_thanh_gia_cua_model() -> None:
+    cat = Catalog.model_validate(_voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40}))
+    gia = cat.effective_pricing("nr-gemini-flash")
+    assert gia is not None
+    assert (gia.input_per_1m, gia.output_per_1m) == (0.10, 0.40)
+
+
+def test_manual_pricing_de_trong_van_la_khong_co_gia() -> None:
+    """Ô còn `null` = chưa điền, KHÔNG phải 0 USD đã xác nhận."""
+    cat = Catalog.model_validate(_voi_manual_pricing({"input_per_1m": None, "output_per_1m": None}))
+    assert cat.effective_pricing("nr-gemini-flash") is None
+
+
+def test_manual_pricing_dien_mot_nua_bi_tu_choi() -> None:
+    """Nửa còn thiếu sẽ lặng lẽ thành 0 — đó là lý do nó phải nổ lúc nạp."""
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(_voi_manual_pricing({"input_per_1m": 0.10}))
+    assert "CẢ HAI" in str(exc.value)
+
+
+def test_manual_pricing_khoa_khong_khop_model_nao_bi_tu_choi() -> None:
+    data = _voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
+    data["manual_pricing"] = {"go-nham-ten": {"input_per_1m": 0.10, "output_per_1m": 0.40}}
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(data)
+    assert "go-nham-ten" in str(exc.value)
+
+
+def test_model_khong_duoc_co_hai_nguon_gia() -> None:
+    data = _voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
+    data["manual_pricing"] = {"deepseek-flash": {"input_per_1m": 9.0, "output_per_1m": 9.0}}
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(data)
+    assert "hai nguồn giá" in str(exc.value)
+
+
+def test_khoa_bat_dau_bang_gach_duoi_la_chu_thich() -> None:
+    data = _voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
+    data["manual_pricing"]["_huong_dan"] = "day la chu thich, khong phai mot model"
+    cat = Catalog.model_validate(data)
+    assert list(cat.manual_pricing) == ["nr-gemini-flash"]
+
+
+def test_prompt_overhead_doc_duoc_va_mac_dinh_0() -> None:
+    cat = Catalog.model_validate(
+        _voi_manual_pricing(
+            {"input_per_1m": 0.10, "output_per_1m": 0.40, "prompt_overhead_tokens": 2100}
+        )
+    )
+    assert cat.prompt_overhead_tokens("nr-gemini-flash") == 2100
+    assert cat.prompt_overhead_tokens("deepseek-flash") == 0
+    assert cat.prompt_overhead_tokens("khong-ton-tai") == 0
+
+
+def test_canh_bao_khi_model_khong_co_gia(caplog: pytest.LogCaptureFixture) -> None:
+    """Lỗ hổng "quota không trừ" phải TỰ KHAI lúc nạp, không đợi cuối tháng."""
+    with caplog.at_level("WARNING", logger="app.config.catalog"):
+        Catalog.model_validate(_voi_manual_pricing())
+    assert "nr-gemini-flash" in caplog.text
+    assert "cost_reporting=unreliable" in caplog.text
+
+
+def test_canh_bao_khi_da_co_gia_ma_pricing_mode_chua_doi(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", logger="app.config.catalog"):
+        Catalog.model_validate(_voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40}))
+    assert "flat" in caplog.text
+
+
+def test_catalog_that_co_o_dien_gia_cho_9router() -> None:
+    """File thật phải có sẵn ô trống cho 9Router — đó là sản phẩm của B-65."""
+    cat = catalog.get_catalog()
+    assert "nr-gemini-flash" in cat.manual_pricing

@@ -1,5 +1,19 @@
 {
-  "version": 2,
+  "version": 3,
+  "manual_pricing": {
+    "_huong_dan_1": "GIA UOC LUONG do nguoi van hanh TU DIEN TAY, cho model ma provider khong ban theo token hoac khong bao gia dang tin (9Router — xem KE-HOACH §9.5, tasks.md B-65). Gia NIEM YET cua provider thi dien o `models[].pricing`, KHONG dien o day.",
+    "_huong_dan_2": "Khoa = `id` cua model trong `models[]`. Don vi: USD tren 1 TRIEU token, giong `models[].pricing`. De `null` = chua dien; luc nap catalog app se in mot dong WARNING liet ke dung ten nhung model chua co gia, va quota se KHONG tru cho chung.",
+    "_huong_dan_3": "`input_per_1m` va `output_per_1m` phai dien CA HAI hoac de trong ca hai — dien mot nua thi app khong boot. `prompt_overhead_tokens` la so token provider tu bom them vao MOI request (9Router do duoc ~2000, B-65); bo uoc tinh cong no vao truoc khi nhan gia. Dien xong nen doi `pricing_mode` cua model do sang \"flat\" (§9.5).",
+    "_huong_dan_4": "Them provider moi sau nay: them mot khoi giong khoi duoi day cho tung model cua no. Khoa la ten bat ky bat dau bang dau gach duoi deu la chu thich va bi bo qua.",
+    "nr-gemini-flash": {
+      "input_per_1m": null,
+      "output_per_1m": null,
+      "cached_input_per_1m": null,
+      "cache_write_per_1m": null,
+      "prompt_overhead_tokens": null,
+      "note": "9Router (B-65): prompt 15 token do duoc 2015/2032/2089/2092 prompt_tokens trong bon lan goi khac nhau — con so doi theo tung luot nen day la mot UOC LUONG, khong phai mot hop dong gia."
+    }
+  },
   "pricing_schedules": {
     "deepseek-peak-vn": {
       "label": "DeepSeek — giờ cao điểm (giờ Việt Nam)",

@@ -22,7 +22,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config.settings import HttpUrlStr
 
@@ -210,6 +210,80 @@ class Pricing(PricingRates):
     off_peak: OffPeakPricing | None = None
 
 
+class ManualPricing(BaseModel):
+    """Giá **ước lượng do người vận hành tự điền** cho một model (B-65, §9.5).
+
+    Khác `Pricing` ở ngay chỗ quan trọng nhất: `Pricing` là giá **niêm yết**
+    chép từ trang giá của provider, còn khối này là một **con số đoán** cho
+    model mà provider không bán theo token hoặc không báo giá đáng tin.
+    §9.5 gọi đúng tên ca này: 9Router tự fallback sang tier khác nên model trả
+    lời có thể không phải model đã yêu cầu, và số token báo về có thể đã bị
+    RTK nén — hai lý do khiến giá trong `models[].pricing` sẽ **sai**.
+
+    **Vì sao là một khối RIÊNG chứ không điền thẳng vào `models[].pricing`.**
+    Hai con số có cùng đơn vị nhưng khác hẳn về thẩm quyền: một cái đối chiếu
+    được với hoá đơn (S13), một cái thì không. Trộn chúng vào cùng một trường
+    là xoá mất khác biệt ấy ngay tại chỗ duy nhất còn đọc được nó — và C16 nói
+    thẳng rằng phép tách `metered`/`unmetered` phải làm **từ đây**, không phải
+    sửa ở tầng hiển thị.
+
+    **Cả bốn mức giá đều `None` được, và `None` nghĩa là "chưa điền".** Model
+    chưa điền giá thì `effective_pricing()` trả `None` ⇒ cửa chặn §10.2 coi nó
+    là **0 USD** và quota không trừ. Đó là ca đúng cho model chạy tại chỗ
+    (Ollama, 0 USD thật) và là một lỗ hổng tạm cho model 9Router — nên lúc nạp
+    catalog app in một dòng WARNING gọi đúng tên từng model chưa có giá
+    (`_canh_bao_model_khong_co_gia`).
+
+    **`input_per_1m` và `output_per_1m` phải điền CẢ HAI hoặc để trống cả
+    hai.** Điền một nửa là một lỗi gõ, không phải một trạng thái: nửa còn
+    thiếu sẽ lặng lẽ thành 0 và cho ra một dự toán mà không ai từng viết ra.
+    Cùng chiều với `merge_override` của `app/quota/tiers.py` — bản ghi đè hỏng
+    thì rơi **cả** bản, không rơi một nửa.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_per_1m: float | None = Field(default=None, gt=0)
+    output_per_1m: float | None = Field(default=None, gt=0)
+    cached_input_per_1m: float | None = Field(default=None, ge=0)
+    cache_write_per_1m: float | None = Field(default=None, ge=0)
+    #: Số token provider tự bơm thêm vào **mọi** request, không nằm trong ngữ
+    #: cảnh Scarlet gửi lên. 9Router đo được ~2000 (B-65: prompt 15 token cho
+    #: `prompt_tokens` = 2015/2032/2089/2092 trong bốn lần gọi). Bộ ước tính
+    #: của §10.2 cộng nó vào `est_in` **trước** khi nhân giá; để trống = 0.
+    prompt_overhead_tokens: int | None = Field(default=None, ge=0)
+    #: Chỗ ghi con số này đến từ đâu. Không ai đọc bằng code — và đó là điểm:
+    #: một giá ước lượng không có xuất xứ thì sáu tháng sau không ai dám sửa.
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _hai_muc_chinh_di_cung_nhau(self) -> ManualPricing:
+        if (self.input_per_1m is None) != (self.output_per_1m is None):
+            raise ValueError(
+                "manual_pricing: input_per_1m và output_per_1m phải điền CẢ HAI "
+                "hoặc để trống cả hai (điền một nửa là một lỗi gõ, không phải "
+                "một trạng thái)"
+            )
+        return self
+
+    def as_rates(self) -> PricingRates | None:
+        """Bốn mức giá dưới hình dạng chung `PricingRates`, hoặc `None` nếu chưa điền.
+
+        Trả về đúng kiểu mà `Pricing` trả về, để `effective_pricing()` chỉ có
+        **một** kiểu đi ra và tầng gọi không phải hỏi "giá này đến từ đâu".
+        Xuất xứ của con số là chuyện của `cost_confidence` ở T-2.12, không phải
+        của phép nhân.
+        """
+        if self.input_per_1m is None or self.output_per_1m is None:
+            return None
+        return PricingRates(
+            input_per_1m=self.input_per_1m,
+            output_per_1m=self.output_per_1m,
+            cached_input_per_1m=self.cached_input_per_1m,
+            cache_write_per_1m=self.cache_write_per_1m,
+        )
+
+
 class ModelEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -242,6 +316,54 @@ class Catalog(BaseModel):
     models: list[ModelEntry]
     #: Vắng mặt = không model nào bán theo khung giờ (B-35).
     pricing_schedules: dict[str, PricingSchedule] = Field(default_factory=dict)
+    #: Giá người vận hành tự điền, khoá theo `ModelEntry.id` (B-65). Vắng mặt =
+    #: chưa model nào cần tới. Xem `ManualPricing`.
+    manual_pricing: dict[str, ManualPricing] = Field(default_factory=dict)
+
+    @field_validator("manual_pricing", mode="before")
+    @classmethod
+    def _bo_khoa_chu_thich(cls, raw: object) -> object:
+        """Khoá bắt đầu bằng `_` là chú thích cho người đọc, không phải dữ liệu.
+
+        JSON không có cú pháp chú thích, mà khối này là khối **người** sửa
+        thường xuyên nhất trong cả file — hướng dẫn dùng nó phải nằm ngay cạnh
+        nó, không phải trong một file `.md` mà người đang sửa giá không mở.
+        Quy ước `_ten` là cách duy nhất viết được ghi chú vào JSON chuẩn, và
+        nó bị bóc ở đây thay vì được khai thành trường: khai thành trường thì
+        thêm một dòng hướng dẫn lại phải sửa cả code.
+        """
+        if isinstance(raw, dict):
+            return {key: value for key, value in raw.items() if not str(key).startswith("_")}
+        return raw
+
+    @model_validator(mode="after")
+    def _manual_pricing_tro_dung_model(self) -> Catalog:
+        """Cùng luật với `_provider_phai_ton_tai`: một tên gõ sai phải chết lúc nạp.
+
+        Một khoá `manual_pricing` không khớp `id` nào là một bảng giá **không
+        bao giờ được đọc** — nó không làm gì sai, nó chỉ không làm gì cả, và
+        người điền sẽ tin là đã điền. Đây đúng là kiểu hỏng mà một con số tiền
+        không được phép có.
+
+        Và một model không được có **hai** nguồn giá: `models[].pricing` là giá
+        niêm yết, `manual_pricing` là giá đoán; có cả hai thì câu "model này
+        giá bao nhiêu" có hai câu trả lời, tức A3 bị vi phạm ngay trong file
+        cấu hình.
+        """
+        theo_id = {m.id: m for m in self.models}
+        for model_id in self.manual_pricing:
+            model = theo_id.get(model_id)
+            if model is None:
+                raise ValueError(
+                    f"manual_pricing: '{model_id}' không khớp model nào trong catalog "
+                    f"({sorted(theo_id)})"
+                )
+            if model.pricing is not None:
+                raise ValueError(
+                    f"model '{model_id}': vừa có `pricing` (giá niêm yết) vừa có "
+                    f"`manual_pricing` (giá tự điền) — hai nguồn giá cho một model"
+                )
+        return self
 
     @model_validator(mode="after")
     def _provider_phai_ton_tai(self) -> Catalog:
@@ -317,9 +439,17 @@ class Catalog(BaseModel):
         điểm gọi, và một lượt sinh lúc 09:00 phải giữ giá 09:00 kể cả khi hàm
         này được gọi lại lúc nửa đêm.
 
-        Trả `None` khi model không có giá (`pricing_mode` `unmetered`/`flat`) —
-        cùng câu trả lời với `model.pricing is None`, để tầng gọi chỉ phải xử
-        lý một ca rỗng chứ không hai.
+        **Hai nguồn giá, một câu trả lời (B-65).** `models[].pricing` là giá
+        **niêm yết** của provider; `manual_pricing[id]` là giá **ước lượng**
+        người vận hành tự điền cho model mà provider không báo giá đáng tin
+        (§9.5). `_manual_pricing_tro_dung_model` đã cấm một model có cả hai,
+        nên ở đây chúng không bao giờ tranh nhau — và tầng gọi không phải biết
+        con số nó nhận được đến từ nguồn nào. Xuất xứ là chuyện của
+        `cost_confidence` (T-2.12), không phải của phép nhân.
+
+        Trả `None` khi model **không có giá ở cả hai nguồn**. Tầng gọi đọc nó
+        là "0 USD, quota không trừ" — đúng cho model chạy tại chỗ, và là ca mà
+        `_canh_bao_model_khong_co_gia` gọi tên lúc nạp catalog.
 
         **KHÔNG lọc `enabled`**, khác `get_model` ngay dưới, và khác có chủ ý:
         `get_model` trả lời "có được *dùng* model này không", còn hàm này trả
@@ -328,14 +458,89 @@ class Catalog(BaseModel):
         phí không đổi theo catalog.
         """
         model = next((m for m in self.models if m.id == model_id), None)
-        if model is None or model.pricing is None:
+        if model is None:
             return None
+        if model.pricing is None:
+            manual = self.manual_pricing.get(model_id)
+            return manual.as_rates() if manual is not None else None
         off_peak = model.pricing.off_peak
         if off_peak is None:
             return model.pricing
         schedule = self.pricing_schedules[off_peak.schedule]
         moment = at if at is not None else datetime.now(UTC)
         return model.pricing if schedule.contains(moment) else off_peak
+
+    def prompt_overhead_tokens(self, model_id: str) -> int:
+        """Token provider tự bơm vào mỗi request, ngoài ngữ cảnh Scarlet gửi (B-65).
+
+        Trả `0` khi không ai điền — cùng lối `effective_pricing`: một ca rỗng,
+        không phải hai. `0` là con số **đúng** cho mọi provider hôm nay trừ
+        9Router, và con số của 9Router thì chỉ người vận hành đo được (nó đổi
+        theo từng lượt: 2015/2032/2089/2092 trong bốn lần gọi).
+
+        Là một hàm của `Catalog` chứ không phải một phép cộng nằm trong bộ ước
+        tính, cùng lý do với `effective_pricing`: luật "model này tốn thêm bao
+        nhiêu token" sống trong file catalog, không rải ra tầng app (A3).
+        """
+        manual = self.manual_pricing.get(model_id)
+        if manual is None or manual.prompt_overhead_tokens is None:
+            return 0
+        return manual.prompt_overhead_tokens
+
+    @model_validator(mode="after")
+    def _canh_bao_pricing_mode_chua_doi(self) -> Catalog:
+        """§9.5: điền một giá ước lượng cố định ⇒ `pricing_mode` là `"flat"`.
+
+        WARNING chứ không lỗi, và khác biệt ấy có lý do: không chỗ nào **đọc**
+        `pricing_mode` để quyết định giá — `effective_pricing()` là câu trả lời
+        duy nhất cho câu hỏi đó, và nó không hỏi cờ này. Cờ chỉ mang nghĩa §9.5
+        ("provider báo chi phí đáng tin tới đâu"), thứ T-2.12 dịch thành
+        `cost_confidence`. Để app chết vì một cái nhãn lệch là chặn người vận
+        hành ở đúng lúc họ vừa điền xong giá.
+        """
+        lech = [
+            m.id
+            for m in self.models
+            if m.id in self.manual_pricing
+            and self.manual_pricing[m.id].as_rates() is not None
+            and m.pricing_mode != "flat"
+        ]
+        if lech:
+            logger.warning(
+                "model %s đã có giá trong manual_pricing nhưng pricing_mode vẫn là "
+                "'unmetered' — §9.5 gọi ca 'một giá ước lượng cố định' là 'flat'",
+                ", ".join(sorted(lech)),
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _canh_bao_model_khong_co_gia(self) -> Catalog:
+        """Gọi đúng tên mọi model đang bật mà **không** có giá nào (B-65).
+
+        Không có giá ⇒ cửa chặn §10.2 tính `est_max = 0` ⇒ quota **không trừ**
+        cho model đó. Với Ollama chạy tại chỗ thì đó là sự thật (0 USD). Với
+        một model đi qua 9Router thì đó là một lỗ hổng, và lỗ hổng ấy **không
+        tự khai** — nó chỉ hiện ra ở cuối tháng. Dòng log này là chỗ nó khai.
+
+        In một dòng cho cả danh sách chứ không mỗi model một dòng: một dòng thì
+        đọc được "hôm nay có hai model chưa có giá", n dòng thì thành nhiễu.
+        """
+        chua_co_gia = [
+            (m.id, m.provider, self.providers[m.provider].cost_reporting)
+            for m in self.models
+            if m.enabled and self.effective_pricing(m.id) is None
+        ]
+        if chua_co_gia:
+            logger.warning(
+                "catalog: %d model đang bật KHÔNG có giá, quota sẽ không trừ cho "
+                "chúng: %s — điền ở `manual_pricing` nếu muốn trừ quota (B-65)",
+                len(chua_co_gia),
+                ", ".join(
+                    f"{mid} (provider {prov}, cost_reporting={rep})"
+                    for mid, prov, rep in chua_co_gia
+                ),
+            )
+        return self
 
     @model_validator(mode="after")
     def _canh_bao_verify_path_thieu(self) -> Catalog:
