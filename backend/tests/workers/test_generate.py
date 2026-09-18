@@ -25,6 +25,8 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -32,12 +34,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.db.session as db_session
+from app.config import catalog
 from app.config.catalog import get_model
 from app.config.settings import settings
-from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.db.models import (
+    Conversation,
+    CostConfidence,
+    Message,
+    MessageRole,
+    MessageStatus,
+    UsageEvent,
+)
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.llm import context as llm_context
 from app.llm.client import Chunk, ToolCall, Usage
+from app.quota.windows import parse_member, windows
 from app.streaming.cancel import FINISH_REASON_CANCELLED, cancel_key
 from app.streaming.producer import FIELD_DATA, FIELD_TYPE
 from app.workers.generate import CTX_LLM_CLIENT, KIEM_HUY_MOI_N_CHUNK, generate
@@ -57,19 +68,36 @@ NHIP_TEST_S = 0.02
 
 
 class RedisGia:
-    """Đủ `xadd`/`expire` (§7.2 ③) và `exists` (cờ huỷ §7.5).
+    """Đủ `xadd`/`expire` (§7.2 ③), `exists` (cờ huỷ §7.5) và `zadd` (quota §10.3).
 
     Trả `bytes` như pool arq dựng (không decode). `co_huy` là tập khoá đang
     "tồn tại" — test đặt tay thay cho `POST /messages/{id}/cancel`.
+
+    **`zadd` được thêm ở T-2.12, và việc thiếu nó từng làm cả bước ghi sổ hỏng
+    IM LẶNG.** `_record_usage` nuốt mọi ngoại lệ có chủ ý (một lỗi kế toán
+    không được biến câu trả lời đã sinh xong thành lỗi đỏ), nên một Redis giả
+    không biết `zadd` sẽ cho `AttributeError` → bị nuốt → không dòng
+    `usage_events` nào, mà **không test nào đỏ**. Đo thật: bỏ hai phương thức
+    dưới đây ra thì 812 test vẫn xanh trong khi sổ cái rỗng hoàn toàn. Đó là lý
+    do các phép kiểm của T-2.12 khẳng định thẳng vào hàng trong Postgres chứ
+    không chỉ vào dòng log.
     """
 
     def __init__(self) -> None:
         self.ban_ghi: list[dict[str, str]] = []
         self.expire_calls: list[tuple[str, int]] = []
+        self.zset: dict[str, dict[str, float]] = {}
         self.co_huy: set[str] = set()
         self.exists_calls: list[str] = []
         self.exists_no_ra = False
+        self.zadd_no_ra = False
         self._seq = 0
+
+    async def zadd(self, name: str, mapping: dict[str, float]) -> int:
+        if self.zadd_no_ra:
+            raise ConnectionError("redis chet giua chung (gia lap)")
+        self.zset.setdefault(name, {}).update(mapping)
+        return len(mapping)
 
     async def exists(self, name: str) -> int:
         self.exists_calls.append(name)
@@ -87,6 +115,16 @@ class RedisGia:
         return 1
 
     # ── đọc lại cho tiện khẳng định ──
+
+    @property
+    def expire_stream(self) -> list[tuple[str, int]]:
+        """Chỉ những `EXPIRE` đặt lên chính stream — phép kiểm C8 của DoD T-1.6.
+
+        Từ T-2.12, cùng một client còn nhận hai `EXPIRE` nữa cho hai khoá
+        `quota:*` (B-156), nên `expire_calls` trần không còn trả lời được câu
+        "TTL của stream có được đặt đúng MỘT lần không".
+        """
+        return [muc for muc in self.expire_calls if muc[0].startswith("stream:")]
 
     @property
     def loai(self) -> list[str]:
@@ -223,12 +261,15 @@ async def test_duong_chay_binh_thuong_ket_thuc_bang_done(
 
     assert redis_gia.loai == ["start", "delta", "delta", "delta", "usage", "done"]
     assert redis_gia.cuoi["type"] == "done"
-    assert redis_gia.cuoi["data"] == {
-        "finish_reason": "stop",
-        "usage": {"in": 214, "out": 3},
-    }
+    # `cost_usd` nằm TRONG khối `usage` (§7.4, B-78) và do meter của T-2.12
+    # tính; con số cụ thể được kiểm ở `test_cost_usd_len_event_done_va_khop_dong_so`.
+    data = redis_gia.cuoi["data"]
+    assert data["finish_reason"] == "stop"
+    assert data["usage"]["in"] == 214
+    assert data["usage"]["out"] == 3
+    assert data["usage"]["cost_usd"] > 0
     # C8 — TTL đặt sau event kết thúc, đúng một lần.
-    assert redis_gia.expire_calls == [(f"stream:{message.id}", settings.STREAM_TTL_S)]
+    assert redis_gia.expire_stream == [(f"stream:{message.id}", settings.STREAM_TTL_S)]
 
     lai = await _doc_lai(session_factory, message.id)
     assert lai.status is MessageStatus.COMPLETED
@@ -340,7 +381,7 @@ async def test_upstream_dut_giua_chung_ket_thuc_bang_error_co_ma(
     assert redis_gia.cuoi["data"]["code"] == "UPSTREAM_ERROR"
     assert "ConnectionResetError" in redis_gia.cuoi["data"]["message"]
     # C8 vẫn phải chạy trên đường lỗi — stream lỗi cũng chiếm RAM.
-    assert redis_gia.expire_calls == [(f"stream:{message.id}", settings.STREAM_TTL_S)]
+    assert redis_gia.expire_stream == [(f"stream:{message.id}", settings.STREAM_TTL_S)]
 
     lai = await _doc_lai(session_factory, message.id)
     assert lai.status is MessageStatus.FAILED
@@ -689,17 +730,22 @@ async def test_huy_thi_usage_de_NULL_chu_khong_bia_so(
 ) -> None:
     """Provider chỉ gửi `usage` ở chunk CUỐI, nên huỷ = không có usage thật.
 
-    Hai cột để NULL chứ không điền một con số tự đếm: NQ-23 dựa vào chỗ khác
-    nhau giữa "provider không báo" và "báo và bằng 0", và chưa có cột
-    `cost_confidence` nào để đánh dấu một con số ước tính. Việc đếm cho phần đã
-    huỷ thuộc T-2.12 (B-94); ở Phase 1 nó là một dòng log.
+    Hai cột để NULL chứ không điền một con số tự đếm, và **T-2.12 KHÔNG đổi
+    điều đó** (NQ-26): NQ-23 dựa vào chỗ khác nhau giữa "provider không báo" và
+    "báo và bằng 0", còn `messages` không có cột nào đánh dấu một con số ước
+    tính. Số tự đếm cho phần đã huỷ đi vào `usage_events` — nơi duy nhất có
+    `cost_confidence` (B-94) — xem `test_huy_van_ghi_mot_dong_usage_events`.
     """
     message = await _cay_toi_thieu(session, user_a)
     redis_gia.co_huy.add(cancel_key(message.id))
 
     await generate(_ctx(redis_gia, ClientGia(_chunks_dai(100))), str(message.id))
 
-    assert redis_gia.cuoi["data"]["usage"] is None
+    # Khối `usage` trên dây mang ĐÚNG MỘT khoá: `cost_usd` của meter. Hai khoá
+    # token **vắng mặt**, và "khoá vắng mặt nghĩa là provider KHÔNG báo" (NQ-23)
+    # — điền 0 vào đó mới là bịa. Xem docstring `DoneEvent`.
+    usage_tren_day = redis_gia.cuoi["data"]["usage"]
+    assert set(usage_tren_day) == {"cost_usd"}
     lai = await _doc_lai(session_factory, message.id)
     assert lai.prompt_tokens is None
     assert lai.completion_tokens is None
@@ -711,10 +757,12 @@ async def test_huy_ghi_mot_dong_log_cho_usage(
     redis_gia: RedisGia,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """DoD dòng 3: "ở phase này kiểm bằng log" — dòng log ấy phải TỒN TẠI.
+    """DoD dòng 3 của T-1.9: "ở phase này kiểm bằng log" — dòng log ấy phải TỒN TẠI.
 
-    Không có nó thì phần đã huỷ biến mất khỏi sổ sách một cách im lặng, và
-    T-2.12 không có chỗ nào để nối vào (Cạm bẫy của task: quota bị rò).
+    Từ T-2.12 nó không còn là nguồn duy nhất (sổ cái mới là), nhưng vẫn giữ: nó
+    in `usage` mà provider **không** báo, ngay cạnh dòng `ghi so` in con số
+    meter đã đếm thay — hai con số đứng cạnh nhau là cách đọc log thấy được
+    đường lùi C40 có chạy hay không.
     """
     message = await _cay_toi_thieu(session, user_a)
     redis_gia.co_huy.add(cancel_key(message.id))
@@ -739,7 +787,7 @@ async def test_huy_van_EXPIRE_stream(
 
     await generate(_ctx(redis_gia, ClientGia(_chunks_dai(100))), str(message.id))
 
-    assert redis_gia.expire_calls == [(f"stream:{message.id}", settings.STREAM_TTL_S)]
+    assert redis_gia.expire_stream == [(f"stream:{message.id}", settings.STREAM_TTL_S)]
 
 
 async def test_phan_da_huy_van_vao_ngu_canh_luot_sau(
@@ -765,3 +813,232 @@ async def test_phan_da_huy_van_vao_ngu_canh_luot_sau(
         wire = await llm_context.build(s, lai.id, model_meta, user_id=user_a)
 
     assert any(m["role"] == "assistant" and m.get("content") == lai.content for m in wire)
+
+
+# ──────────────────── ghi sổ ⑥.5 — §10.2 vế SAU (T-2.12) ────────────────────
+#
+# `tests/quota/test_meter.py` kiểm phép nhân tiền và hình dạng dòng sổ. Ở đây
+# chỉ kiểm một câu: **ngả khép sổ nào có ghi, ngả nào không** — thứ chỉ nhìn
+# thấy được từ trong `generate()`, và thứ mà Cạm bẫy của task gọi là quota rò.
+
+
+async def _doc_so(
+    session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
+) -> list[UsageEvent]:
+    async with session_factory() as s:
+        rows = await s.execute(select(UsageEvent).where(UsageEvent.user_id == user_id))
+        return list(rows.scalars().all())
+
+
+def _tong_zset(redis_gia: RedisGia, user_id: uuid.UUID) -> Decimal:
+    ghe = redis_gia.zset[windows()[0].key(user_id)]
+    return sum((parse_member(m) or Decimal(0) for m in ghe), Decimal(0))
+
+
+async def test_mot_luot_chat_xong_ra_dung_mot_dong_usage_events(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """DoD dòng 1, đo từ đầu vào thật của worker chứ không từ `record_usage`."""
+    message = await _cay_toi_thieu(session, user_a)
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_binh_thuong(["a", "b"]))), str(message.id))
+
+    so = await _doc_so(session_factory, user_a)
+    assert len(so) == 1
+    assert so[0].message_id == message.id
+    assert so[0].model_id == MODEL_ID
+    assert so[0].cost_usd > 0
+    assert so[0].cost_confidence == CostConfidence.EXACT
+    assert so[0].prompt_tokens == 214
+    assert so[0].completion_tokens == 2
+    assert so[0].price_snapshot["input_per_1m"] is not None
+
+
+async def test_cost_usd_len_event_done_va_khop_dong_so(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """B-78 + §7.4: `done` mang `cost_usd` NẰM TRONG khối `usage`."""
+    message = await _cay_toi_thieu(session, user_a)
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_binh_thuong(["a", "b"]))), str(message.id))
+
+    so = await _doc_so(session_factory, user_a)
+    usage_tren_day = redis_gia.cuoi["data"]["usage"]
+    assert usage_tren_day["cost_usd"] == float(so[0].cost_usd)
+    assert usage_tren_day["in"] == 214
+    assert usage_tren_day["out"] == 2
+
+
+async def test_ghi_so_xong_thi_ca_hai_cua_so_quota_deu_tang(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """DoD dòng 5 nhìn từ worker: SUM Postgres = tổng ZSET, ở **cả hai** cửa sổ."""
+    message = await _cay_toi_thieu(session, user_a)
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_binh_thuong(["a", "b"]))), str(message.id))
+
+    so = await _doc_so(session_factory, user_a)
+    tong_postgres = sum((e.cost_usd for e in so), Decimal(0))
+    for window in windows():
+        ghe = redis_gia.zset[window.key(user_a)]
+        tong_redis = sum((parse_member(m) or Decimal(0) for m in ghe), Decimal(0))
+        assert abs(tong_postgres - tong_redis) <= Decimal("0.000001")
+
+
+async def test_huy_van_ghi_mot_dong_usage_events_voi_phan_da_sinh(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """DoD dòng 4 — và đây là chỗ B-94 được đóng.
+
+    `messages.completion_tokens` vẫn NULL (NQ-23/NQ-26), nhưng sổ cái thì
+    **không** rỗng: `usage_events.completion_tokens` mang phần đã sinh do
+    `tiktoken` đếm, kèm `cost_confidence='low'` để không ai nhầm nó với một
+    con số provider gửi về.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.co_huy.add(cancel_key(message.id))
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_dai(100))), str(message.id))
+
+    lai = await _doc_lai(session_factory, message.id)
+    assert lai.status is MessageStatus.CANCELLED
+    assert lai.completion_tokens is None  # NQ-26 — không đổi
+
+    so = await _doc_so(session_factory, user_a)
+    assert len(so) == 1
+    assert so[0].cost_confidence == CostConfidence.LOW
+    assert so[0].completion_tokens > 0
+    # Nửa prompt cũng phải được đếm, không chỉ nửa output: nó là nửa ĐẮT của
+    # một hội thoại dài, và nó chỉ đếm được nếu worker thật sự trao ngữ cảnh
+    # đã gửi cho meter (`_KetQua.sent`). Phép kiểm ngược: đặt `sent = []` thì
+    # con số này về 0 trong khi mọi khẳng định khác vẫn xanh.
+    assert so[0].prompt_tokens > 0
+    assert so[0].cost_usd > 0
+    assert _tong_zset(redis_gia, user_a) == so[0].cost_usd
+
+
+async def test_upstream_dut_giua_chung_van_ghi_so_phan_da_chay(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Ngả `failed` của "Việc cần làm": chữ đã chảy thì provider đã tính tiền."""
+    message = await _cay_toi_thieu(session, user_a)
+    client = ClientGia(
+        [Chunk(kind="delta", text="Ha Noi mua thu ")], loi=RuntimeError("upstream dut")
+    )
+
+    await generate(_ctx(redis_gia, client), str(message.id))
+
+    assert redis_gia.cuoi["type"] == "error"
+    so = await _doc_so(session_factory, user_a)
+    assert len(so) == 1
+    assert so[0].cost_confidence == CostConfidence.LOW
+    assert so[0].completion_tokens > 0
+    assert so[0].prompt_tokens > 0
+
+
+async def test_chet_TRUOC_khi_goi_model_thi_KHONG_ghi_dong_nao(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Ngả thứ tư — `401` nổ ngay tại `await stream(...)`, chưa sinh một chữ nào.
+
+    Một dòng sổ 0 đồng ở đây là rác, và rác làm hỏng đúng phép đếm mà DoD dòng
+    1 đo. Phép kiểm ngược: bỏ `billable` đi thì test này đỏ.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+
+    await generate(_ctx(redis_gia, ClientNoNgay([])), str(message.id))
+
+    assert redis_gia.cuoi["type"] == "error"
+    assert await _doc_so(session_factory, user_a) == []
+    assert redis_gia.zset == {}
+
+
+async def test_model_khong_co_trong_catalog_thi_khong_ghi_dong_nao(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Cùng họ test trên: chết ở `_chuan_bi` thì chưa có model để tính giá."""
+    message = await _cay_toi_thieu(session, user_a, model_id="khong-ton-tai")
+
+    await generate(_ctx(redis_gia, ClientGia([])), str(message.id))
+
+    assert redis_gia.cuoi["data"]["code"] == "MODEL_UNKNOWN"
+    assert await _doc_so(session_factory, user_a) == []
+
+
+async def test_ghi_so_hong_thi_van_done_chu_khong_bien_thanh_loi_cua_nguoi_dung(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Khác hẳn `PERSIST_FAILED`: mất một khoản trong sổ khác mất câu trả lời.
+
+    Người dùng đã đọc xong câu trả lời và không có gì để họ làm khác đi. Sự cố
+    kế toán khai trong log, không khai trên màn hình họ. `cost_usd` khi đó
+    **vắng mặt** trên dây chứ không bằng 0.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    redis_gia.zadd_no_ra = True
+
+    with caplog.at_level("ERROR", logger="app.workers.generate"):
+        await generate(_ctx(redis_gia, ClientGia(_chunks_binh_thuong(["a"]))), str(message.id))
+
+    assert redis_gia.cuoi["type"] == "done"
+    assert "cost_usd" not in redis_gia.cuoi["data"]["usage"]
+    assert await _doc_so(session_factory, user_a) == []
+    assert any("usage_events" in r.getMessage() for r in caplog.records)
+    # Câu trả lời vẫn xuống đĩa nguyên vẹn — đó là điều phải giữ bằng mọi giá.
+    assert (await _doc_lai(session_factory, message.id)).status is MessageStatus.COMPLETED
+
+
+async def test_gia_lay_theo_thoi_diem_GOI_chu_khong_phai_luc_ghi_so(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A7 + B-35: một lượt sinh dài có thể vượt qua ranh giới khung giờ.
+
+    `deepseek-flash` đổi giá lúc 17:00 giờ Việt Nam. Bắt đầu 16:58 và kết thúc
+    17:08 thì giá phải là giá 16:58 — nếu không thì hai lượt sinh giống hệt
+    nhau sẽ có hai hoá đơn khác nhau tuỳ vào việc model trả lời nhanh hay chậm.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    da_hoi: list[datetime | None] = []
+    goc = catalog.Catalog.effective_pricing
+
+    def ghi_lai(self: catalog.Catalog, model_id: str, at: datetime | None = None) -> Any:
+        da_hoi.append(at)
+        return goc(self, model_id, at)
+
+    monkeypatch.setattr(catalog.Catalog, "effective_pricing", ghi_lai)
+    truoc = datetime.now(UTC)
+    await generate(_ctx(redis_gia, ClientGia(_chunks_binh_thuong(["a"]))), str(message.id))
+    sau = datetime.now(UTC)
+
+    assert da_hoi, "meter phai hoi bang gia dung mot lan"
+    moc = da_hoi[-1]
+    assert moc is not None, "None = 'bay gio', tuc bo mat moc gia cua A7"
+    assert truoc <= moc <= sau

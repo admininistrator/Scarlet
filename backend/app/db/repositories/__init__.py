@@ -18,6 +18,7 @@ from app.db.repositories.messages import (
     PathNode,
     path_statement,
 )
+from app.db.repositories.usage_events import UsageEventRepository
 from app.db.repositories.users import UserRepository
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "OwnedMessage",
     "PathNode",
     "RepositoryError",
+    "UsageEventRepository",
     "UserRepository",
     "path_statement",
 ]

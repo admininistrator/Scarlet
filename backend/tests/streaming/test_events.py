@@ -14,6 +14,7 @@ cho phép đổi lặng lẽ:
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -137,6 +138,58 @@ def test_done_mang_finish_reason_va_usage() -> None:
 
 def test_done_khong_dung_usage_gia_khi_provider_im_lang() -> None:
     assert DoneEvent().data() == {"finish_reason": None, "usage": None}
+
+
+# ─────────────── `cost_usd` trên event `done` — B-78, §7.4 (T-2.12) ───────────
+
+
+def test_cost_usd_nam_TRONG_khoi_usage_chu_khong_canh_no() -> None:
+    """§7.4 viết thẳng hình dạng ấy:
+
+        data: {"finish_reason":"stop","usage":{"in":1204,"out":389,"cost_usd":0.00231}}
+
+    Đặt nó cạnh `usage` thay vì trong đó sẽ làm `sse.ts` của T-1.14 đọc một hợp
+    đồng khác hợp đồng đã dán cho FE ở Phụ lục F.
+    """
+    data = DoneEvent(
+        finish_reason="stop",
+        usage=Usage(prompt_tokens=1204, completion_tokens=389, total_tokens=1593),
+        cost_usd=Decimal("0.002310"),
+    ).data()
+    assert data == {
+        "finish_reason": "stop",
+        "usage": {"in": 1204, "out": 389, "cost_usd": 0.00231},
+    }
+
+
+def test_provider_im_lang_ma_meter_van_dem_duoc_thi_usage_chi_co_cost_usd() -> None:
+    """Ca huỷ giữa chừng (B-94): không có token nào của provider, nhưng có tiền.
+
+    Hai khoá token **vắng mặt** chứ không bằng 0 — cùng luật với `UsageEvent`
+    (NQ-23), và đó là thứ cho FE phân biệt "chưa đo được" với "đã đo và bằng 0".
+    """
+    data = DoneEvent(finish_reason="cancelled", cost_usd=Decimal("0.000079")).data()
+    assert data == {"finish_reason": "cancelled", "usage": {"cost_usd": 7.9e-05}}
+
+
+def test_ghi_so_hong_thi_khoa_cost_usd_VANG_MAT_chu_khong_bang_0() -> None:
+    """`0` nghĩa là "lượt chat này miễn phí" — một câu khác hẳn "chưa ghi sổ được"."""
+    data = DoneEvent(
+        finish_reason="stop",
+        usage=Usage(prompt_tokens=10, completion_tokens=2, total_tokens=12),
+    ).data()
+    assert "cost_usd" not in data["usage"]
+
+
+def test_usage_giua_chung_KHONG_bao_gio_mang_cost_usd() -> None:
+    """Khác biệt duy nhất giữa `usage` và `done` — xem docstring `UsageEvent`.
+
+    Giá chỉ chốt được khi lượt sinh đã khép (A7); một con số tiền tạm ở giữa
+    stream là nguồn sự thật thứ hai cho hoá đơn, và là một thanh quota nhảy lùi
+    khi `done` tới với con số thật.
+    """
+    data = UsageEvent(usage=Usage(prompt_tokens=100, completion_tokens=7, total_tokens=107)).data()
+    assert "cost_usd" not in data
 
 
 def test_error_luon_co_ma() -> None:

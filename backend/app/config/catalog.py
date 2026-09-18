@@ -17,6 +17,7 @@ import json
 import logging
 import re
 from datetime import UTC, datetime, time
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -33,10 +34,27 @@ logger = logging.getLogger(__name__)
 #: tầng thay đổi theo triển khai.
 CATALOG_PATH = Path(__file__).resolve().parents[3] / "config" / "model_catalog.json"
 
+#: Mẫu số của mọi con số giá trong catalog (`*_per_1m`). Sống ở đây chứ không
+#: ở `app/quota/`: đơn vị là một thuộc tính của **dữ liệu**, và hai chỗ tính
+#: tiền (`quota/estimator.py` chặn trước, `quota/meter.py` ghi sau) phải chia
+#: cho đúng một con số. `Decimal` chứ không `1e6` — trộn một `float` vào phép
+#: nhân tiền là mời sai số nhị phân vào đúng chỗ A7 đòi chính xác.
+TOKENS_PER_PRICE_UNIT = Decimal(1_000_000)
+
+#: Giá trị `pricing_mode` nghĩa là "provider báo chi phí đáng tin" (§9.5). Có
+#: tên vì `ModelEntry.is_metered` và `_pricing_bat_buoc_khi_metered` cùng hỏi
+#: nó; chuỗi này KHÔNG được rời khỏi file catalog (xem `ModelEntry.is_metered`).
+PRICING_MODE_METERED = "metered"
+
+#: `pricing_mode` của một model đã điền giá ước lượng cố định (§9.5).
+PRICING_MODE_FLAT = "flat"
+
 AuthStyle = Literal["bearer", "x-api-key", "query"]
 Availability = Literal["always", "host-dependent"]
 CostReporting = Literal["exact", "unreliable"]
 PricingMode = Literal["metered", "unmetered", "flat"]
+#: Xuất xứ của con số giá — xem `Catalog.pricing_source`.
+PricingSource = Literal["catalog", "manual", "none"]
 Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 #: Tên thứ trong JSON, KHÔNG phải số: "0" là thứ Hai hay Chủ nhật thì tuỳ thư
@@ -301,10 +319,25 @@ class ModelEntry(BaseModel):
     order: int = 0
     badge: str | None = None
 
+    @property
+    def is_metered(self) -> bool:
+        """Provider có báo chi phí **đáng tin** cho model này không (§9.5).
+
+        Là một thuộc tính ở đây chứ không phải phép so sánh `pricing_mode ==
+        "metered"` rải ở tầng app, vì đó đúng là chỗ C16 nói phải tách:
+        *"trộn chung model `metered` và `unmetered` vào một con số làm bảng chi
+        phí vô nghĩa — phải tách từ đây, không phải sửa ở tầng hiển thị"*.
+        `app/quota/meter.py` dịch câu trả lời này thành `cost_confidence`, và
+        nó làm được điều đó mà không cần biết chuỗi `"metered"` trông ra sao.
+        """
+        return self.pricing_mode == PRICING_MODE_METERED
+
     @model_validator(mode="after")
     def _pricing_bat_buoc_khi_metered(self) -> ModelEntry:
-        if self.pricing_mode == "metered" and self.pricing is None:
-            raise ValueError(f"model '{self.id}': pricing bắt buộc khi pricing_mode='metered'")
+        if self.is_metered and self.pricing is None:
+            raise ValueError(
+                f"model '{self.id}': pricing bắt buộc khi pricing_mode='{PRICING_MODE_METERED}'"
+            )
         return self
 
 
@@ -470,6 +503,32 @@ class Catalog(BaseModel):
         moment = at if at is not None else datetime.now(UTC)
         return model.pricing if schedule.contains(moment) else off_peak
 
+    def pricing_source(self, model_id: str) -> PricingSource:
+        """Con số giá của model này **đến từ đâu** — giá niêm yết hay giá đoán.
+
+        `effective_pricing()` cố ý không trả lời câu này: tầng nhân tiền không
+        được phép rẽ nhánh theo xuất xứ, nếu không thì luật giá lại rải ra
+        ngoài file này (A3). Nhưng `usage_events.price_snapshot` **phải** giữ
+        nó: A7 nói dòng lịch sử đọc lại sau sáu tháng phải tự giải thích được,
+        và "1.00 USD/1M" chép từ trang giá Anthropic khác hẳn "1.00 USD/1M" do
+        người vận hành đoán cho một model 9Router (B-65, §9.5). Không giữ khác
+        biệt ấy thì C16 không tách được hai cột ở admin panel.
+
+        Ba giá trị, và `_manual_pricing_tro_dung_model` đã cấm một model có cả
+        hai nguồn nên chúng loại trừ nhau:
+
+        * `catalog` — `models[].pricing`, giá niêm yết của provider.
+        * `manual`  — `manual_pricing[id]`, giá người vận hành tự điền.
+        * `none`    — chưa ai điền; `effective_pricing()` trả `None`, chi phí 0.
+        """
+        model = next((m for m in self.models if m.id == model_id), None)
+        if model is None:
+            return "none"
+        if model.pricing is not None:
+            return "catalog"
+        manual = self.manual_pricing.get(model_id)
+        return "manual" if manual is not None and manual.as_rates() is not None else "none"
+
     def prompt_overhead_tokens(self, model_id: str) -> int:
         """Token provider tự bơm vào mỗi request, ngoài ngữ cảnh Scarlet gửi (B-65).
 
@@ -503,7 +562,7 @@ class Catalog(BaseModel):
             for m in self.models
             if m.id in self.manual_pricing
             and self.manual_pricing[m.id].as_rates() is not None
-            and m.pricing_mode != "flat"
+            and m.pricing_mode != PRICING_MODE_FLAT
         ]
         if lech:
             logger.warning(

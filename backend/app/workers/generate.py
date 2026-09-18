@@ -44,28 +44,40 @@ bấm Dừng thì phần chữ họ đã đọc là một câu trả lời ngắ
 Đó cũng là lý do `llm/context.py::USABLE_STATUSES` nhận `cancelled` — phần đã
 sinh vẫn đi vào ngữ cảnh lượt sau, vì người dùng đã nhìn thấy nó.
 
-**Chưa có ở Phase 1, cố ý:** `tools=None` (tool registry là §12/§13, Phase 6–7,
-và §7.2 ghi vòng lặp tool ở đó); `INSERT usage_events` + `cost_usd` là
-**T-2.12** (giá snapshot vào từng dòng usage — A7, ADR-08); `raw_response`
-(§17.2) chưa có người ghi. **Trên đường huỷ, `usage` là `None`** và hai cột
-`messages.prompt_tokens`/`completion_tokens` để NULL: cả bốn provider đang bật
-chỉ gửi `usage` ở **chunk cuối cùng** (đo lại trên fixture của T-1.3:
-135/135 · 533/533 · 11/11 · 602/602), mà huỷ nghĩa là bỏ stream trước chunk
-đó. Điền một con số tự đếm vào hai cột ấy sẽ biến "không đo được" thành "đo
-được" — đúng thứ NQ-23 cấm — trong khi chưa có cột `cost_confidence` nào để
-đánh dấu. Việc đếm ước tính cho phần đã huỷ thuộc **T-2.12** cùng với
-`cost_confidence='low'` (B-67, B-94); ở Phase 1 nó là **một dòng log**, đúng
-chữ của DoD T-1.9.
+**Ghi sổ là bước ⑥.5, giữa Postgres và `XADD done` (T-2.12).** `app/quota/
+meter.py` tính `cost_usd`, `INSERT usage_events` với `price_snapshot` (A7,
+ADR-08) rồi `ZADD` hai cửa sổ của §10.3. Nó chạy trên **cả ba** ngả khép sổ —
+xong, huỷ, lỗi giữa chừng — vì cả ba đều đã tiêu tiền thật. Thứ tự bắt buộc:
+ghi sổ **trước** `XADD done`, vì event `done` mang theo `cost_usd` (§7.4,
+B-78); ngược lại thì con số tiền lên dây trước khi nó có chỗ nào để đối chiếu.
+
+**Trên đường huỷ, `usage` của provider là `None` — và điều đó KHÔNG đổi từ
+T-2.12.** Cả bốn provider đang bật chỉ gửi `usage` ở **chunk cuối cùng** (đo
+lại trên fixture của T-1.3: 135/135 · 533/533 · 11/11 · 602/602), mà huỷ nghĩa
+là bỏ stream trước chunk đó. Hai cột `messages.prompt_tokens`/
+`completion_tokens` vì vậy vẫn để **NULL** (NQ-26): chúng chỉ chứa số thật của
+provider, và nhét một ước tính `tiktoken` vào đó là biến "không đo được" thành
+"đo được" (NQ-23). Số tự đếm đi vào `usage_events` — nơi **duy nhất** có cột
+`cost_confidence` để đánh dấu nó là `low` (B-67, B-94). Dòng log
+`NGUOI DUNG HUY …` của Phase 1 nay in thêm con số đã ghi sổ.
+
+**Chưa có, cố ý:** `tools=None` (tool registry là §12/§13, Phase 6–7, và §7.2
+ghi vòng lặp tool ở đó); `raw_response` (§17.2) chưa có người ghi — hoãn sang
+Phase 6, khi tool-call bắt đầu vỡ thật và hình dạng "response cuối" mới kiểm
+chứng được (B-79); `key_source='byok'` là T-2.15 (§10.5).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from app.config.catalog import ModelEntry, get_model
@@ -75,6 +87,7 @@ from app.db.repositories import MessageRepository
 from app.db.session import session_scope
 from app.llm import context
 from app.llm.client import Chunk, LLMClient, ToolCall, Usage
+from app.quota import meter
 from app.streaming.cancel import FINISH_REASON_CANCELLED, da_yeu_cau_huy
 from app.streaming.events import (
     DeltaEvent,
@@ -135,7 +148,28 @@ class _KetQua:
     worker: §5.2 cấm worker "giữ state trong RAM giữa các job".
     """
 
-    model_id: str | None = None
+    #: Model đã tra được trong catalog. Thay cho `model_id` trần của T-1.6:
+    #: bước ghi sổ (T-2.12) cần cả `provider`, `pricing_mode` và bảng giá, và
+    #: tra lại catalog lần thứ hai ở `_dong_so` là mời một kết quả khác — một
+    #: `POST /admin/catalog/reload` chen vào giữa lượt sinh là đủ.
+    model: ModelEntry | None = None
+    #: Chủ hội thoại. `messages` không có cột `user_id` (Phụ lục A) nên con số
+    #: này chỉ lấy được một lần, ở `_chuan_bi`, và `usage_events.user_id` là
+    #: cột NOT NULL cần nó.
+    user_id: uuid.UUID | None = None
+    #: Đúng danh sách message đã gửi lên. Giữ **tham chiếu**, không phải bản
+    #: sao: `_chay` vẫn đang giữ chính list đó suốt lượt sinh, nên nó không tốn
+    #: thêm gì. Chỉ được đọc trên đường lùi C40 — khi provider không báo
+    #: `usage` thì đây là thứ duy nhất đếm lại được phần prompt (B-67, B-94).
+    sent: list[dict[str, Any]] = field(default_factory=list)
+    #: Thời điểm **gọi model**, dùng để tra bảng giá theo khung giờ (A7, B-35).
+    #: KHÁC thời điểm ghi sổ: một lượt sinh mười phút có thể bắt đầu lúc 16:58
+    #: giờ cao điểm và kết thúc lúc 17:08 giờ thường — giá phải là giá 16:58.
+    started_at: datetime | None = None
+    #: Do `_record_usage` điền ở bước ⑥.5; đi tiếp lên event `done` (§7.4,
+    #: B-78). `None` = chưa ghi sổ được, và khi đó khoá `cost_usd` **vắng mặt**
+    #: trên dây chứ không bằng 0.
+    cost_usd: Decimal | None = None
     chu: list[str] = field(default_factory=list)
     reasoning: list[str] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
@@ -157,6 +191,31 @@ class _KetQua:
         với `bytes`. Ở đây không có chỗ nào như vậy.
         """
         return "".join(self.chu)
+
+    @property
+    def billable(self) -> bool:
+        """Có gì để ghi sổ không — cửa duy nhất vào bước ⑥.5.
+
+        Hai điều kiện, và cả hai đều là "đã thật sự chạm tới provider chưa".
+
+        `model`/`user_id`/`started_at` cùng được điền một lần ngay sau
+        `_chuan_bi`, nên thiếu một cái nghĩa là lượt sinh chết **trước** khi
+        gọi model: message không còn trong DB, model đã tắt trong catalog,
+        ngữ cảnh dựng không nổi, hoặc một worker khác đã nhận job. Không token
+        nào được tiêu, nên một dòng sổ 0 đồng ở đó chỉ là rác — và rác trong
+        sổ cái làm hỏng đúng phép đếm mà DoD dòng 1 đo ("**đúng 1** dòng cho
+        một lượt chat").
+
+        Vế sau là ca `401` nổ ngay tại `await client.stream(...)`: model đã tra
+        được nhưng request bị từ chối trước khi sinh một chữ nào. Có `usage`,
+        có chữ, có reasoning hoặc có tool call thì mới có cái để tính tiền.
+        `reasoning` đứng riêng vì nó là ca **đã quan sát được**: huỷ
+        `deepseek-flash` trong 112 chunk đầu cho `content` rỗng mà `reasoning`
+        thì không (B-97) — và provider vẫn tính tiền phần đó (B-33).
+        """
+        if self.model is None or self.user_id is None or self.started_at is None:
+            return False
+        return bool(self.usage or self.chu or self.reasoning or self.tool_calls)
 
 
 async def _vong_nhip_tim(mid: uuid.UUID) -> None:
@@ -237,7 +296,7 @@ async def generate(ctx: dict[str, Any], message_id: str) -> None:
         logger.exception("generate: %s loi khong phan loai duoc", mid)
     finally:
         # C19. Đường duy nhất ra khỏi hàm này đi qua đây.
-        await _dong_so(mid, producer, ket_qua)
+        await _dong_so(ctx, mid, producer, ket_qua)
 
 
 # ───────────────────────────── các bước ─────────────────────────────
@@ -250,8 +309,10 @@ async def _chay(
     ket_qua: _KetQua,
 ) -> None:
     """Bước ① → ⑤ của §7.2 ③. Ném `LoiSinh` cho mọi ngả không đi tiếp được."""
-    model_meta, wire_messages = await _chuan_bi(mid)
-    ket_qua.model_id = model_meta.id
+    model_meta, wire_messages, user_id = await _chuan_bi(mid)
+    ket_qua.model = model_meta
+    ket_qua.user_id = user_id
+    ket_qua.sent = wire_messages
 
     # Nhịp tim mở NGAY sau `_chuan_bi` (nơi `mark_streaming` chạy) chứ không
     # đợi chunk đầu: quãng `client.stream(...)` bên dưới chính là TTFT, và đó
@@ -260,6 +321,11 @@ async def _chay(
         await producer.emit(StartEvent(message_id=str(mid), model_id=model_meta.id))
 
         client: LLMClient = ctx[CTX_LLM_CLIENT]
+        # Mốc giá của A7: bảng giá dùng để ghi sổ là bảng giá của **lúc gọi**,
+        # không phải lúc lượt sinh kết thúc. Đặt ngay trước `await` chứ không
+        # ở đầu `_chay`: quãng `_chuan_bi` có thể mất vài chục mili-giây vì
+        # recursive CTE của §8.3, và mốc giá phải là mốc gửi request.
+        ket_qua.started_at = datetime.now(UTC)
         try:
             stream = await client.stream(
                 model=model_meta.id,
@@ -297,7 +363,7 @@ async def _chay(
             raise LoiSinh(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
 
 
-async def _chuan_bi(mid: uuid.UUID) -> tuple[ModelEntry, list[dict[str, Any]]]:
+async def _chuan_bi(mid: uuid.UUID) -> tuple[ModelEntry, list[dict[str, Any]], uuid.UUID]:
     """Bước ① → ③: đọc message, dựng ngữ cảnh, đổi trạng thái sang `streaming`.
 
     Cả ba trong **một** session rồi đóng ngay: một lượt sinh có thể kéo mười
@@ -345,7 +411,10 @@ async def _chuan_bi(mid: uuid.UUID) -> tuple[ModelEntry, list[dict[str, Any]]]:
             )
         await session.commit()
 
-    return model_meta, wire_messages
+    # `user_id` đi ra cùng hai thứ kia vì đây là chỗ DUY NHẤT đọc được nó:
+    # `messages` không có cột `user_id` (Phụ lục A), nó nằm ở hội thoại chứa
+    # message. Bước ghi sổ ⑥.5 cần nó cho `usage_events.user_id`.
+    return model_meta, wire_messages, owned.user_id
 
 
 async def _phat(producer: StreamProducer, ket_qua: _KetQua, chunk: Chunk) -> None:
@@ -412,16 +481,18 @@ def _dung_vi_huy(mid: uuid.UUID, ket_qua: _KetQua, so_chunk: int) -> None:
     rồi để `break` ở `_chay` đưa luồng về `_dong_so`, nơi nó ra dây thành
     `done` mang `finish_reason='cancelled'` đúng như §7.5 viết.
 
-    Dòng log này là thứ thay cho `usage_events` ở Phase 1 — DoD T-1.9 ghi
-    *"ở phase này kiểm bằng log"*. Nó in cả `usage` (gần như luôn là `None`,
-    xem docstring module) để chỗ trống ấy **nhìn thấy được** trong log thay vì
-    im lặng: T-2.12 là người lấp nó bằng `count_text()` + `cost_confidence`.
+    Dòng log này ra đời ở Phase 1 để thay cho `usage_events` khi chưa ai ghi
+    bảng đó (DoD T-1.9: *"ở phase này kiểm bằng log"*). Từ T-2.12 nó **không**
+    còn là nguồn duy nhất — `_record_usage` ở bước ⑥.5 mới là — nhưng vẫn giữ,
+    và vẫn in `usage` của provider (gần như luôn `None` trên ngả này, B-94) vì
+    đó là chỗ đọc log so được hai con số: cái provider **không** báo, và cái
+    meter đã đếm thay ở dòng `ghi so` ngay sau.
     """
     ket_qua.bi_huy = True
     ket_qua.finish_reason = FINISH_REASON_CANCELLED
     logger.info(
         "generate: %s NGUOI DUNG HUY sau %d chunk · %d ky tu da sinh · "
-        "usage tu provider: %s · usage_events: chua ghi (T-2.12, B-94)",
+        "usage tu provider: %s · phan da sinh se duoc ghi so o buoc ⑥.5",
         mid,
         so_chunk,
         len(ket_qua.content),
@@ -444,13 +515,25 @@ async def _ghi_heartbeat(mid: uuid.UUID) -> None:
         logger.warning("generate: %s khong ghi duoc heartbeat_at", mid, exc_info=True)
 
 
-async def _dong_so(mid: uuid.UUID, producer: StreamProducer, ket_qua: _KetQua) -> None:
-    """Bước ⑥ → ⑧: ghi Postgres, `XADD done|error`, `EXPIRE`. C19 + C8.
+async def _dong_so(
+    ctx: dict[str, Any], mid: uuid.UUID, producer: StreamProducer, ket_qua: _KetQua
+) -> None:
+    """Bước ⑥ → ⑧: ghi Postgres, ghi sổ, `XADD done|error`, `EXPIRE`. C19 + C8.
 
-    Ba việc, ba `try` riêng. Cố ý: Postgres hỏng **không** được phép nuốt luôn
-    event kết thúc, vì hậu quả của việc không ghi event là client treo vô hạn —
-    nặng hơn hẳn một dòng lịch sử bị mất. Cùng lẽ đó, `EXPIRE` hỏng không được
-    phép làm gì tới event đã phát.
+    Bốn việc, bốn `try` riêng. Cố ý: Postgres hỏng **không** được phép nuốt
+    luôn event kết thúc, vì hậu quả của việc không ghi event là client treo vô
+    hạn — nặng hơn hẳn một dòng lịch sử bị mất. Cùng lẽ đó, `EXPIRE` hỏng không
+    được phép làm gì tới event đã phát.
+
+    **Ghi sổ (⑥.5) hỏng thì event kết thúc vẫn là `done`, KHÔNG phải `error`.**
+    Khác hẳn ca `_ghi_ket_qua` hỏng ngay trên. Hai hỏng, hai người chịu hậu
+    quả: mất `messages.content` là mất **câu trả lời của người dùng** — họ F5
+    ra một message rỗng, nên phải nói thẳng bằng `PERSIST_FAILED`. Mất một dòng
+    `usage_events` là mất **một khoản trong sổ của mình**: người dùng đã đọc
+    xong câu trả lời và không có gì để họ làm khác đi. Đổi nó thành một lỗi đỏ
+    trên màn hình là bắt họ trả giá cho một sự cố kế toán. Dòng `logger.
+    exception` ở `_record_usage` là chỗ khai, và `rebuild_quota` của T-2.13 là
+    đường vá.
     """
     loi = ket_qua.loi
     try:
@@ -462,8 +545,15 @@ async def _dong_so(mid: uuid.UUID, producer: StreamProducer, ket_qua: _KetQua) -
             # riêng thay vì gửi `done` rồi để họ F5 ra một message rỗng.
             loi = LoiSinh(ErrorCode.PERSIST_FAILED, "UPDATE messages that bai")
 
+    # ⑥.5 — §10.2 vế SAU. Chạy TRƯỚC `XADD` vì `cost_usd` đi trên event `done`.
+    await _record_usage(ctx, mid, ket_qua)
+
     ket_thuc: Event = (
-        DoneEvent(finish_reason=ket_qua.finish_reason, usage=ket_qua.usage)
+        DoneEvent(
+            finish_reason=ket_qua.finish_reason,
+            usage=ket_qua.usage,
+            cost_usd=ket_qua.cost_usd,
+        )
         if loi is None
         else ErrorEvent(code=loi.code, message=loi.chi_tiet)
     )
@@ -478,12 +568,87 @@ async def _dong_so(mid: uuid.UUID, producer: StreamProducer, ket_qua: _KetQua) -
         logger.exception("generate: %s khong EXPIRE duoc %s (C8)", mid, producer.key)
 
     logger.info(
-        "generate: xong %s · %s · %d ky tu · finish_reason=%s · usage=%s",
+        "generate: xong %s · %s · %d ky tu · finish_reason=%s · usage=%s · cost_usd=%s",
         mid,
         "loi " + loi.code.value if loi is not None else "ok",
         len(ket_qua.content),
         ket_qua.finish_reason,
         ket_qua.usage,
+        ket_qua.cost_usd,
+    )
+
+
+async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, ket_qua: _KetQua) -> None:
+    """Bước ⑥.5 — §10.2 vế SAU. Điền `ket_qua.cost_usd`; hỏng thì **không** ném.
+
+    Gọi trên **cả ba** ngả khép sổ, vì cả ba đều đã tiêu tiền thật:
+
+    * xong bình thường — `usage` của provider, `cost_confidence='exact'` nếu
+      model `metered`;
+    * huỷ giữa chừng (§7.5) — `usage` là `None` **luôn luôn** (B-94), meter tự
+      đếm phần đã sinh bằng `tiktoken` rồi ghi `low`;
+    * lỗi giữa chừng (C19) — upstream đứt sau khi đã chảy được một đoạn; phần
+      chữ ấy provider đã tính tiền, nên nó phải có mặt trong sổ.
+
+    Ngả thứ tư — chết **trước** khi gọi model — không ghi gì, và `billable` là
+    chỗ chặn (xem docstring của nó).
+
+    **Nuốt mọi ngoại lệ**, cùng lý lẽ với `_ghi_heartbeat` và `_bi_huy` nhưng
+    đắt hơn: ở đây cái mất là một khoản trong sổ cái, không phải một nhịp tim.
+    Vẫn nuốt, vì thay thế duy nhất là để một lỗi Redis/Postgres biến một câu
+    trả lời đã sinh xong thành một lỗi đỏ trên màn hình người dùng — xem
+    docstring `_dong_so`. `logger.exception` là chỗ khai, và nó ghi đủ
+    `user_id`/`model` để người đọc log vá lại bằng tay được.
+    """
+    if not ket_qua.billable:
+        return
+    # `billable` đã khẳng định ba trường này khác `None`; khẳng định lại ở đây
+    # cho mypy thay vì `assert`, vì `assert` bị `python -O` xoá mất.
+    model = ket_qua.model
+    user_id = ket_qua.user_id
+    started_at = ket_qua.started_at
+    if model is None or user_id is None or started_at is None:  # pragma: no cover
+        return
+
+    try:
+        async with session_scope() as session:
+            record = await meter.record_usage(
+                session,
+                ctx["redis"],
+                user_id=user_id,
+                message_id=mid,
+                model=model,
+                at=started_at,
+                now=time.time(),
+                usage=ket_qua.usage,
+                sent=ket_qua.sent,
+                content=ket_qua.content,
+                reasoning="".join(ket_qua.reasoning),
+                tool_calls=[tc.to_wire() for tc in ket_qua.tool_calls] or None,
+            )
+            await session.commit()
+    except Exception:  # noqa: BLE001 — xem docstring
+        logger.exception(
+            "generate: %s KHONG ghi duoc usage_events (user=%s model=%s) — "
+            "quota KHONG bi tru cho luot nay, va cost_usd se vang mat tren event done",
+            mid,
+            user_id,
+            model.id,
+        )
+        return
+
+    ket_qua.cost_usd = record.cost_usd
+    logger.info(
+        "generate: %s ghi so %s · %s · in=%d out=%d cached=%d · %s USD · %s",
+        mid,
+        record.id,
+        model.id,
+        record.spent.prompt_tokens,
+        record.spent.completion_tokens,
+        record.spent.cached_tokens,
+        record.cost_usd,
+        record.confidence.value
+        + ("" if record.spent.measured else " (tiktoken tu dem, provider khong bao usage)"),
     )
 
 

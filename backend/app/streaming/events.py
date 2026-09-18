@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any, ClassVar, Literal
 
@@ -251,9 +252,12 @@ class UsageEvent(Event):
     chứng được. Điền 0 vào chỗ vắng sẽ biến "không đo được" thành "đo được và
     bằng không", tức một lượt chat miễn phí trong sổ sách.
 
-    `cost_usd` của §7.4 **chưa có ở đây**: giá snapshot vào `usage_events` tại
-    thời điểm gọi (A7, ADR-08) và đó là việc của T-2.12. Thêm một con số tiền
-    tính tạm ở tầng này sẽ tạo nguồn sự thật thứ hai cho hoá đơn.
+    **`cost_usd` cố ý KHÔNG có ở đây, kể cả sau T-2.12** — nó chỉ đi trên event
+    `done`. Event này phát ra **giữa** lúc stream còn chảy, mà giá thì snapshot
+    vào `usage_events` tại thời điểm gọi (A7, ADR-08) và chỉ chốt được khi lượt
+    sinh đã khép. Nhân một con số tiền tạm ở tầng streaming là dựng nguồn sự
+    thật thứ hai cho hoá đơn — và một thanh quota nhảy lùi khi `done` tới với
+    con số thật.
     """
 
     TYPE: ClassVar[EventType] = "usage"
@@ -274,18 +278,43 @@ class DoneEvent(Event):
 
     `usage` có thể `None` — provider không gửi chunk `usage` cuối (C40). Để
     `None` chứ không dựng một object toàn số 0, cùng lý do với `UsageEvent`.
+
+    **`cost_usd` nằm TRONG khối `usage`, không phải cạnh nó** — §7.4 viết thẳng
+    hình dạng đó:
+
+        data: {"finish_reason":"stop","usage":{"in":1204,"out":389,"cost_usd":0.00231}}
+
+    Đây là khác biệt duy nhất giữa `done` và `usage` giữa chừng (B-78): sự kiện
+    `usage` là *số token tạm tính* trong lúc còn chảy, còn `done` là lúc duy
+    nhất có một con số tiền đã **chốt** — nó do `app/quota/meter.py` tính rồi
+    ghi vào `usage_events` (A7, ADR-08), và đi lên dây chỉ để FE hiển thị. Tầng
+    streaming **không** tự nhân giá: làm thế là dựng nguồn sự thật thứ hai cho
+    hoá đơn.
+
+    **`usage=None` mà `cost_usd` có giá trị là một ca có thật, không phải lỗi.**
+    Huỷ giữa chừng thì provider chưa kịp gửi chunk `usage` (B-94) nhưng meter
+    vẫn đếm được phần đã sinh bằng `tiktoken` và vẫn ghi một dòng sổ. Khi đó
+    khối `usage` trên dây mang **đúng một khoá** `cost_usd`: token thì vắng
+    mặt, và "khoá vắng mặt nghĩa là provider KHÔNG báo" là luật đã có sẵn của
+    file này (NQ-23) — điền 0 vào đó mới là nói dối.
+
+    `float` chứ không chuỗi: §7.4 viết `0.00231`, một số JSON. Con số đã được
+    `quantize_cost` ép về 6 chữ số thập phân trước khi tới đây, nên nó đi qua
+    `float` mà vẫn in ra đúng chừng ấy chữ số. Nguồn sự thật của tiền là cột
+    `NUMERIC(12,6)` trong Postgres, không phải giá trị này.
     """
 
     TYPE: ClassVar[EventType] = "done"
 
     finish_reason: str | None = None
     usage: Usage | None = None
+    cost_usd: Decimal | None = None
 
     def data(self) -> dict[str, Any]:
-        return {
-            "finish_reason": self.finish_reason,
-            "usage": _usage_payload(self.usage) if self.usage is not None else None,
-        }
+        payload = _usage_payload(self.usage) if self.usage is not None else None
+        if self.cost_usd is not None:
+            payload = {**(payload or {}), "cost_usd": float(self.cost_usd)}
+        return {"finish_reason": self.finish_reason, "usage": payload}
 
 
 @dataclass(frozen=True, slots=True)

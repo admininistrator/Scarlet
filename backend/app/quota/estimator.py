@@ -90,6 +90,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import catalog
+from app.config.catalog import TOKENS_PER_PRICE_UNIT
 from app.config.settings import settings
 from app.core.errors import ApiError, ApiErrorCode
 from app.core.redis import get_redis
@@ -99,11 +100,6 @@ from app.quota.tiers import EffectiveLimits, get_effective_limits
 from app.quota.windows import LimitType, Window, WindowState, read_window, windows
 
 logger = logging.getLogger(__name__)
-
-#: Một triệu — mẫu số của mọi con số giá trong catalog (`*_per_1m`). `Decimal`
-#: chứ không `1e6`: trộn một `float` vào phép nhân tiền là mời sai số nhị phân
-#: vào đúng chỗ A7 đòi chính xác.
-TOKENS_PER_PRICE_UNIT = Decimal(1_000_000)
 
 
 @dataclass(frozen=True, slots=True)

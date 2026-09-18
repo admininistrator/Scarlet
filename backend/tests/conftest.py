@@ -228,14 +228,21 @@ async def session(
 
 
 class FakeQuotaRedis:
-    """Redis giả cho `app/quota/` — bốn lệnh, cả bốn mô phỏng THẬT (T-2.11).
+    """Redis giả cho `app/quota/` — sáu lệnh, cả sáu mô phỏng THẬT (T-2.11, T-2.12).
 
     Cùng lối `FakeIdempotencyRedis` chứ không phải `FakeRateLimitRedis`: ở đây
-    không có script Lua nào, chỉ có `ZREMRANGEBYSCORE`/`ZRANGEBYSCORE` và cặp
-    `get`/`set` của cache tier — bốn lệnh mà một bản mô phỏng bằng Python
-    *đúng* được, nên mô phỏng đúng luôn. Nhờ vậy test kiểm được đúng thứ cần
-    kiểm: phần quá hạn có bị dọn TRƯỚC khi đọc không, và phần còn trong cửa sổ
-    có được cộng đủ không.
+    không có script Lua nào, chỉ có `ZADD`/`ZREMRANGEBYSCORE`/`ZRANGEBYSCORE`,
+    `EXPIRE` và cặp `get`/`set` của cache tier — sáu lệnh mà một bản mô phỏng
+    bằng Python *đúng* được, nên mô phỏng đúng luôn. Nhờ vậy test kiểm được
+    đúng thứ cần kiểm: phần quá hạn có bị dọn TRƯỚC khi đọc không, phần còn
+    trong cửa sổ có được cộng đủ không, và (từ T-2.12) một lượt sinh vừa ghi sổ
+    có rơi vào **cả hai** cửa sổ với **đúng** con số Postgres đang giữ không.
+
+    `zadd` mô phỏng đúng ngữ nghĩa Redis ở chỗ quan trọng nhất: member trùng
+    thì **ghi đè** score chứ không thêm một phần tử thứ hai. Đó là lý do
+    `encode_member` phải mang `usage_id` (B-156) — bỏ nó đi thì hai lượt sinh
+    cùng giá đè lên nhau và tiền của một lượt biến mất, và phép mô phỏng này là
+    chỗ duy nhất trong bộ test nhìn thấy điều đó.
 
     Một `get_redis` cho cả `estimator` lẫn `tiers`, nên fixture dưới đây vá cả
     hai — một module thiếu là một test **treo** ở lần nối `redis:6379` chứ
@@ -251,6 +258,9 @@ class FakeQuotaRedis:
         #: Mỗi lời gọi `zremrangebyscore`, theo thứ tự — test đọc để chứng minh
         #: bước dọn chạy TRƯỚC bước đọc.
         self.da_don: list[tuple[str, object, object]] = []
+        #: Mỗi lời gọi `expire`, theo thứ tự — T-2.12 đọc để chứng minh nửa (b)
+        #: của B-156 (hai khoá quota có TTL) thật sự chạy ở **mỗi** lần ghi.
+        self.da_dat_ttl: list[tuple[str, int]] = []
         #: Bật lên để mô phỏng Redis chết giữa chừng.
         self.fail = False
 
@@ -293,6 +303,20 @@ class FakeQuotaRedis:
             and (score < can_tren if mo_tren else score <= can_tren)
         ]
         return sorted(trong, key=lambda muc: muc[1])
+
+    async def zadd(self, name: str, mapping: dict[str, float]) -> int:
+        if self.fail:
+            raise ConnectionError("redis chet (gia lap)")
+        ghe = self.zset.setdefault(name, {})
+        moi = sum(1 for member in mapping if member not in ghe)
+        ghe.update(mapping)
+        return moi
+
+    async def expire(self, name: str, ttl: int) -> bool:
+        if self.fail:
+            raise ConnectionError("redis chet (gia lap)")
+        self.da_dat_ttl.append((name, ttl))
+        return name in self.zset or name in self.store
 
     # ── cache tier (T-2.10) — cùng client, nên cùng fake ──
     async def get(self, name: str) -> str | None:
