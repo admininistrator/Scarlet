@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import jwt
+from jwt.types import Options
 
 from app.config.settings import settings
 from app.db.models import UserRole, UserStatus
@@ -79,8 +80,40 @@ def encode_access_token(
     return jwt.encode(payload, settings.JWT_SECRET.get_secret_value(), algorithm=_ALGORITHM)
 
 
+#: Tắt phép kiểm `iat` của PyJWT — B-194.
+#:
+#: Từ PyJWT 2.10, `api_jwt.py::_validate_iat` ném `ImmatureSignatureError` khi
+#: `iat > now + leeway`, và `leeway` mặc định là **0 giây**. Nghĩa là một token
+#: vừa ký xong sẽ tự từ chối chính nó nếu đồng hồ lùi lại dù chỉ một nhịp giữa
+#: lúc ký và lúc đọc. Đồng hồ WSL2 trên máy dev lùi thật — `dmesg` có
+#: `systemd-journald: Time jumped backwards, rotating.` lặp lại — và nó đã làm
+#: `tests/api/test_account_states.py` đỏ 1 trong 3 lần chạy cả bộ (rà P2,
+#: 2026-09-20): `rejected` nhận `401 UNAUTHENTICATED` thay vì `403`. Trên máy
+#: thật, mọi bước chỉnh giờ lùi (NTP step, máy ngủ dậy) cho đúng triệu chứng ấy
+#: với những phiên **vừa đăng nhập**.
+#:
+#: Tắt hẳn thay vì cho một `leeway`: tham số `leeway` của PyJWT áp cho **cả ba**
+#: claim `iat`, `nbf` và `exp`, nên mua dung sai cho `iat` là đồng thời **nới
+#: hạn dùng của token** thêm đúng bấy nhiêu giây — trả một thứ thuộc về bảo mật
+#: để mua một thứ thuộc về đồng hồ. `exp` vì vậy giữ nguyên nghĩa tuyệt đối ở
+#: dưới, và `iat` vẫn nằm trong payload cho `app/core/blacklist.py` đọc: phép so
+#: `iat < bl:user:{uid}` của §11.3 là phép so của **chúng ta**, không phải của
+#: PyJWT, và nó không mất gì khi PyJWT thôi gác cửa.
+#:
+#: KHÔNG phải một *giới hạn* nên KHÔNG thuộc `.env` (A3, §19.2 L4): đây là một
+#: hằng đúng/sai về cách đọc một định dạng, không phải một con số người vận hành
+#: có lý do để chỉnh.
+#: Kiểu `Options` của PyJWT chứ không phải `dict[str, bool]`: nó là một
+#: `TypedDict`, nên gõ sai tên khoá (`verify_iat_` chẳng hạn) sẽ bị mypy bắt
+#: ngay tại đây thay vì bị PyJWT bỏ qua lặng lẽ và phép kiểm vẫn bật.
+_DECODE_OPTIONS: Options = {"verify_iat": False}
+
+
 def decode_access_token(raw_token: str) -> AccessTokenClaims:
     """Xác minh chữ ký + `exp`, trả về claim đã ép kiểu.
+
+    `iat` **không** được PyJWT kiểm (xem `_DECODE_OPTIONS`, B-194); `exp` thì có
+    và giữ nguyên nghĩa tuyệt đối.
 
     Raise:
         TokenExpiredError: chữ ký đúng, `exp` đã qua.
@@ -89,7 +122,10 @@ def decode_access_token(raw_token: str) -> AccessTokenClaims:
     """
     try:
         payload = jwt.decode(
-            raw_token, settings.JWT_SECRET.get_secret_value(), algorithms=[_ALGORITHM]
+            raw_token,
+            settings.JWT_SECRET.get_secret_value(),
+            algorithms=[_ALGORITHM],
+            options=_DECODE_OPTIONS,
         )
     except jwt.ExpiredSignatureError as loi:
         raise TokenExpiredError from loi
