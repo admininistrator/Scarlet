@@ -33,10 +33,20 @@ services:
     volumes:
       - ./backend/app:/app/app
 
-  # `arq --watch` cần `watchfiles`, đã có sẵn trong image qua `uvicorn[standard]`.
-  # Khác uvicorn ở chỗ nó nhận thư mục làm tham số chứ không phải cờ riêng.
+  # B-196 — dev cũng phải đi qua `app/workers/run.py` như production.
+  #
+  # Trước đây dòng này là `arq … --watch /app/app`, tức file override **thay**
+  # `command` của `docker-compose.yml` và vô hiệu hoá luôn vòng nối lại: sửa
+  # `docker-compose.yml` mà quên file này thì bản vá chạy ở production còn máy
+  # dev vẫn giữ nguyên lỗi cũ — đúng loại lệch không ai nhìn thấy cho tới lúc
+  # gặp sự cố. `tests/workers/test_run_loop.py::test_compose_goi_dung_module`
+  # nay đọc **cả hai** file vì chính chỗ này.
+  #
+  # `arq --watch` tự gọi `watchfiles` bên trong; ở đây gọi thẳng CLI ấy cho
+  # `python -m app.workers.run`. `watchfiles` có sẵn trong image qua
+  # `uvicorn[standard]`; cú pháp là `watchfiles <lệnh> <thư mục>`.
   worker:
-    command: arq app.workers.main.WorkerSettings --watch /app/app
+    command: watchfiles "python -m app.workers.run" /app/app
     volumes:
       - ./backend/app:/app/app
 

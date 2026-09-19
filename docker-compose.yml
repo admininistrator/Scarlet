@@ -62,7 +62,13 @@ services:
     # khong noi toi (volumes + healthcheck), ly do ghi ngay duoi day.
     <<: *common
     build: ./backend
-    command: arq app.workers.main.WorkerSettings
+    # B-196 — KHONG goi thang `arq app.workers.main.WorkerSettings` nua.
+    # `Worker.run()` cua arq ket thuc bang `finally: run_until_complete(close())`,
+    # ma `close()` noi chuyen voi dung cai Redis vua chet -> tien trinh TREO
+    # thay vi thoat, nen `restart: unless-stopped` ngay duoi khong bao gio kich
+    # hoat duoc. Do 3 lan khi ra P2: PID khong doi, RestartCount=0, job nam mai
+    # o `queued`. `app/workers/run.py` la vong noi lai; doc docstring cua no.
+    command: python -m app.workers.run
     # Cung ly do voi `api`: §19.1 dat catalog, gia va prompt trong config/
     # MOUNTED, khong nam trong image. Worker la tien trinh doc ca hai thu do
     # (T-1.6 goi app/llm/context.py -> /config/prompts/system.jinja, va
@@ -78,8 +84,15 @@ services:
       # Bien nay TACH khoi WORKER_HEARTBEAT_S o T-1.10 (B-74 -> NQ-27):
       # WORKER_HEARTBEAT_S nay chi con nghia "nhip ghi messages.heartbeat_at"
       # cua §7.6, thu ma reaper doc — hai tang, hai nguoi doc, hai nut van.
+      #
+      # B-196 — interval 30s -> 10s. Khoa healthcheck het han sau
+      # WORKER_HEALTHCHECK_S + 1 = 16 s, nhung Docker chi lat sang `unhealthy`
+      # sau interval x retries; voi 30s x 3 thi co toi 90 GIAY `docker compose
+      # ps` khang dinh mot tien trinh da chet la khoe. Do duoc dung the khi ra
+      # P2: TTL khoa = -2 (mat hang) ma health van `healthy`. 10s x 3 = 30 s,
+      # tuc cua so noi doi ngan hon mot lan `docker compose ps` cua nguoi that.
       test: ["CMD", "arq", "app.workers.main.WorkerSettings", "--check"]
-      interval: 30s
+      interval: 10s
       timeout: 10s
       retries: 3
       start_period: 15s

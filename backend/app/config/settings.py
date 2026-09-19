@@ -233,6 +233,31 @@ class Settings(BaseSettings):
     #: sẽ **đồng thời** nới cửa sổ phát hiện worker chết và siết tỉ lệ nhịp
     #: được phép lỡ ở trên — ba hệ quả từ một nút vặn, không ai nhận ra.
     WORKER_HEALTHCHECK_S: int = Field(default=15, gt=0)
+    #: ─── Ba biến của vòng nối lại trong `app/workers/run.py` (B-196) ───
+    #:
+    #: Đo được ba lần khi rà P2: một lần Redis khởi động lại là đủ giết vòng
+    #: lặp chính của arq (`ConnectionError (104, 'Connection reset by peer')`),
+    #: mà **tiến trình không thoát** — `/proc/1/stat` vẫn `S`, `wchan` là
+    #: `do_epoll_wait`, `RestartCount=0`. `restart: unless-stopped` của Docker
+    #: chỉ nhìn mã thoát nên nó không bao giờ kích hoạt; job nằm mãi ở `queued`
+    #: và màn chat của người dùng kẹt mà không một dòng lỗi nào ở đâu cả.
+    #:
+    #: Cả ba là *giới hạn vận hành* nên chúng ở đây chứ không phải ba số trong
+    #: `run.py` (A3, §19.2 L4) — cùng họ `SMTP_TIMEOUT_S`, `ARQ_POLL_DELAY_S`.
+    #:
+    #: Khoảng chờ trước lần dựng lại ĐẦU TIÊN. Nhỏ, vì ca thường gặp nhất là
+    #: `docker compose restart redis` — Redis quay lại sau vài giây.
+    WORKER_RECONNECT_BACKOFF_S: float = Field(default=1.0, gt=0)
+    #: Trần của khoảng chờ khi nhân đôi. Ca nó phục vụ là Redis chết **lâu**:
+    #: không có trần thì sau một đêm khoảng chờ dài hơn cả sự cố, và worker
+    #: ngủ tiếp trong khi Redis đã sống lại từ lâu.
+    WORKER_RECONNECT_BACKOFF_MAX_S: float = Field(default=30.0, gt=0)
+    #: Trần cho lượt đóng worker cũ trước khi dựng bản mới. Có trần vì
+    #: `Worker.close()` của arq gọi `pool.delete(health_check_key)` và
+    #: `on_shutdown` — cả hai đều đi qua Redis, tức **đúng thứ vừa chết**.
+    #: Không kẹp thì vòng nối lại treo ngay ở bước dọn dẹp, và ta chỉ đổi một
+    #: kiểu treo lấy một kiểu treo khác.
+    WORKER_SHUTDOWN_TIMEOUT_S: float = Field(default=10.0, gt=0)
     #: Khoảng cách giữa hai lần worker hỏi Redis "có job mới không" (B-104).
     #:
     #: Mặc định của arq là **0.5 s**, và T-1.12 đo được đúng con số đó nằm
