@@ -261,6 +261,11 @@ class FakeQuotaRedis:
         #: Mỗi lời gọi `expire`, theo thứ tự — T-2.12 đọc để chứng minh nửa (b)
         #: của B-156 (hai khoá quota có TTL) thật sự chạy ở **mỗi** lần ghi.
         self.da_dat_ttl: list[tuple[str, int]] = []
+        #: Mỗi lời gọi `zadd` dưới dạng `(khoá, số member)` — T-2.13 đọc để
+        #: chứng minh `rebuild_quota` gửi **theo lô** chứ không một lệnh mỗi
+        #: dòng sổ. Đó là thứ đứng sau DoD dòng 3 (10k dòng dưới 2 giây), và
+        #: một bản giả không đếm gì sẽ xanh y hệt với 20 000 vòng đi-về.
+        self.da_ghi: list[tuple[str, int]] = []
         #: Bật lên để mô phỏng Redis chết giữa chừng.
         self.fail = False
 
@@ -307,6 +312,7 @@ class FakeQuotaRedis:
     async def zadd(self, name: str, mapping: dict[str, float]) -> int:
         if self.fail:
             raise ConnectionError("redis chet (gia lap)")
+        self.da_ghi.append((name, len(mapping)))
         ghe = self.zset.setdefault(name, {})
         moi = sum(1 for member in mapping if member not in ghe)
         ghe.update(mapping)

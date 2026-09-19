@@ -18,13 +18,14 @@ from app.db.repositories.messages import (
     PathNode,
     path_statement,
 )
-from app.db.repositories.usage_events import UsageEventRepository
+from app.db.repositories.usage_events import LedgerEntry, UsageEventRepository
 from app.db.repositories.users import UserRepository
 
 __all__ = [
     "ConversationNotFoundError",
     "ConversationRepository",
     "GenerationStates",
+    "LedgerEntry",
     "MessageNotInConversationError",
     "MessageRepository",
     "OwnedMessage",

@@ -67,13 +67,20 @@ có `await` nào tới model ở đây, và `check_quota` không gọi `llm/clie
 ╚══════════════════════════════════════════════════════════════════════════╝
 
 `quota/tiers.py` đi tiếp bằng Postgres khi Redis chết, vì ở đó Redis chỉ là
-một lối tắt. Ở đây thì không: ZSET là **nơi duy nhất** hôm nay biết một người
-đã tiêu bao nhiêu (`usage_events` chưa có ai ghi cho tới T-2.12, và
-`rebuild_quota` là T-2.13). Không hỏi được Redis nghĩa là **không biết** người
-này còn bao nhiêu tiền — và cho qua lúc đó là gỡ đúng lớp phòng thủ P2 vào
-lúc hệ thống đang hỏng. Cùng câu trả lời với năm chỗ đã chốt trước
-(`core/deps.py`, `core/blacklist.py`, `core/idempotency.py`, và cả hai lớp của
-`core/ratelimit.py`). Xem B-155 cho đường lùi qua Postgres mà T-2.13 mở.
+một lối tắt. Ở đây thì không: ZSET vẫn là nơi cửa chặn này **đọc** số tiền đã
+tiêu. Không hỏi được Redis nghĩa là **không biết** người này còn bao nhiêu
+tiền — và cho qua lúc đó là gỡ đúng lớp phòng thủ P2 vào lúc hệ thống đang
+hỏng. Cùng câu trả lời với năm chỗ đã chốt trước (`core/deps.py`,
+`core/blacklist.py`, `core/idempotency.py`, và cả hai lớp của
+`core/ratelimit.py`).
+
+**Redis CHẾT và Redis RỖNG là hai ca khác nhau, và T-2.13 chỉ đóng ca thứ
+hai.** Một `FLUSHDB` hay một `docker compose down -v` để lại một Redis **sống**
+với hai cửa sổ trống, và ca đó `read_window` trả về bình thường — nên nó đi
+qua `refill_if_empty` (`quota/rebuild.py`, RR-7) và được nạp lại từ
+`usage_events` trước khi cửa chặn so sánh. Ca Redis **chết** thì vẫn `503`
+đúng như đoạn trên: đường lùi "tính hạn mức thẳng từ Postgres khi Redis không
+trả lời" là **B-155**, và nó vẫn đang mở.
 """
 
 from __future__ import annotations
@@ -96,6 +103,7 @@ from app.core.errors import ApiError, ApiErrorCode
 from app.core.redis import get_redis
 from app.llm import context
 from app.llm.tokens import count_messages
+from app.quota.rebuild import refill_if_empty
 from app.quota.tiers import EffectiveLimits, get_effective_limits
 from app.quota.windows import LimitType, Window, WindowState, read_window, windows
 
@@ -224,6 +232,13 @@ async def check_quota(
     for window in windows():
         try:
             state = await read_window(redis, window, user_id=user_id, now=now)
+            # RR-7 (T-2.13): cửa sổ rỗng có HAI nghĩa — "chưa tiêu gì" và
+            # "Redis vừa mất dữ liệu" — và chúng trông giống hệt nhau từ đây.
+            # `refill_if_empty` hỏi Postgres để phân biệt, rồi nạp lại nếu
+            # cần. Nằm TRONG `try` cùng `read_window` có chủ ý: không hỏi
+            # được Postgres nghĩa là vẫn không biết người này còn bao nhiêu
+            # tiền, tức cùng một câu trả lời `503`.
+            state = await refill_if_empty(session, redis, state, user_id=user_id, now=now)
         except Exception as loi:
             logger.exception(
                 "khong doc duoc cua so quota %s cua user %s", window.limit_type, user_id
