@@ -740,6 +740,61 @@ async def test_job_id_bang_assistant_message_id(
 # ═════════════════════ body và Idempotency-Key (§11.4) ════════════════════
 
 
+# ══════════════ MESSAGE_MAX_CHARS — cửa chặn đầu tiên (T-3.0, B-205) ═══════
+
+
+async def test_content_dai_hon_tran_mot_ky_tu_tra_422_va_khong_ghi_gi(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _debug_bat: None,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """Đúng ca âm của DoD T-3.0: `MESSAGE_MAX_CHARS + 1` ký tự.
+
+    Trước NQ-78, cùng request này trả `202`, ghi **hai** hàng `messages` và chỉ
+    nổ `CONTEXT_TOO_LARGE` ở `llm/context.py` khi worker dựng ngữ cảnh — tức
+    sau khi đã tiêu một lượt `Idempotency-Key`. `_dem_message == 0` là phép đo
+    nói rằng trần nay đứng **trước** Postgres, không sau.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+
+    resp = await client.post(
+        DUONG_DAN.format(conversation.id),
+        headers={"X-User-Id": str(user_a)},
+        json={"content": "a" * (settings.MESSAGE_MAX_CHARS + 1)},
+    )
+
+    assert resp.status_code == 422
+    assert await _dem_message(session_factory, conversation.id) == 0
+    assert arq_gia.da_day == []
+
+
+async def test_content_dung_bang_tran_van_di_qua(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _debug_bat: None,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """Biên là `<=`, không phải `<` — một trần lệch một ký tự là một trần sai.
+
+    Cặp với test trên: không có nó thì `max_length=0` cũng làm test kia xanh.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+
+    resp = await client.post(
+        DUONG_DAN.format(conversation.id),
+        headers={"X-User-Id": str(user_a)},
+        json={"content": "a" * settings.MESSAGE_MAX_CHARS},
+    )
+
+    assert resp.status_code == 202
+    assert await _dem_message(session_factory, conversation.id) == 2
+
+
 @pytest.mark.parametrize("body", [{}, {"content": ""}, {"content": "a", "parent_id": "khong-uuid"}])
 async def test_body_sai_tra_422(
     client: AsyncClient,

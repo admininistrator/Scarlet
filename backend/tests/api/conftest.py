@@ -70,9 +70,11 @@ def quota_redis(monkeypatch: pytest.MonkeyPatch, quota_redis_fake: Any) -> Any:
     "chưa tiêu gì, hạn mức đọc từ Postgres" — 60+ lời gọi POST có sẵn không
     phải sửa. Test nào muốn kiểm chính cửa chặn thì tự nạp vào `zset`.
 
-    Vá **cả hai** module vì `estimator` và `tiers` dùng chung một `get_redis`;
-    một module bị bỏ sót là một test **treo** ở lần nối `redis:6379` chứ không
-    đỏ (đúng bài học `idempotency_redis` của T-2.8).
+    Vá **cả ba** module vì `estimator`, `tiers` và (từ T-3.0) `snapshot` dùng
+    chung một `get_redis`; một module bị bỏ sót là một test **treo** ở lần nối
+    `redis:6379` chứ không đỏ (đúng bài học `idempotency_redis` của T-2.8).
+    `snapshot` vào danh sách này từ lúc `GET /auth/me` đọc quota (B-158), tức
+    từ lúc một endpoint **không** sinh chữ cũng chạm hai ZSET.
 
     Lớp `FakeQuotaRedis` sống ở `tests/conftest.py` chứ không ở đây, và nó
     đi qua **fixture** chứ không qua `import`: `tests/` không phải package
@@ -81,4 +83,5 @@ def quota_redis(monkeypatch: pytest.MonkeyPatch, quota_redis_fake: Any) -> Any:
     """
     monkeypatch.setattr("app.quota.estimator.get_redis", lambda: quota_redis_fake)
     monkeypatch.setattr("app.quota.tiers.get_redis", lambda: quota_redis_fake)
+    monkeypatch.setattr("app.quota.snapshot.get_redis", lambda: quota_redis_fake)
     return quota_redis_fake

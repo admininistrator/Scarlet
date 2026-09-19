@@ -2,9 +2,12 @@
 §11.5, §11.6, UC-01) — T-2.1, T-2.2. `POST /auth/login`, `/refresh`,
 `GET /auth/me` (§11.2, ADR-07) — T-2.3. `POST /auth/logout` (§11.3, C21) — T-2.4.
 `POST /auth/forgot-password`, `/reset-password` (§11.5, §11.6) — T-2.5.
+`GET /auth/me` nở ra đủ bốn nhóm của §18.1 (quota, `message_max_chars`,
+`default_model`) — T-3.0.
 
-KH tham chiếu: §11.5, §11.2, §11.3, §11.6, §10.6, UC-01, ADR-07, C21 ·
-CLAUDE.md A3 · tasks.md T-2.2, T-2.3, T-2.4, T-2.5, NQ-36, NQ-43, NQ-44.
+KH tham chiếu: §11.5, §11.2, §11.3, §11.6, §10.6, §18.1, UC-01, UC-07,
+ADR-07, C21 · CLAUDE.md A3, A7 · tasks.md T-2.2, T-2.3, T-2.4, T-2.5, T-3.0,
+NQ-36, NQ-43, NQ-44, NQ-78, NQ-79, NQ-81.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  CẠM BẪY CỦA T-2.1: chống dò email (§11.5)                                │
@@ -213,6 +216,7 @@ from app.db.repositories.email_tokens import ConsumeResult, EmailTokenRepository
 from app.db.repositories.refresh_tokens import RefreshTokenRepository, RotateResult
 from app.db.repositories.users import UserRepository
 from app.db.session import session_scope
+from app.quota.snapshot import WindowSnapshot, read_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -480,6 +484,35 @@ class NguoiDungRa(BaseModel):
     status: UserStatus
     role: UserRole
     tier_name: str
+    #: Model mặc định của người này (§18.4, B-206) — `null` = chưa chọn, FE rơi
+    #: về `default: true` của catalog. Nằm ở **lớp chung** chứ không riêng
+    #: `/me` vì nó là một cột của chính hàng `users`, tức miễn phí ở cả ba
+    #: endpoint; và biết nó ngay sau `login` là bớt một vòng gọi trước khi vẽ
+    #: Model Picker. Xem `HoSoRa` cho hai trường chỉ `/me` mới trả.
+    default_model: str | None = None
+
+
+class HoSoRa(NguoiDungRa):
+    """`GET /auth/me` — *"User + tier + quota còn lại + trạng thái"* (§18.1).
+
+    Rộng hơn `NguoiDungRa` đúng hai trường, và đứng riêng vì hai trường ấy
+    **không** miễn phí: `quota` là hai lượt đọc Redis (và có thể một lượt dựng
+    lại từ Postgres, RR-7). `login`/`refresh` không có việc gì phải trả giá đó
+    — chúng trả lời "anh là ai", còn câu "anh còn bao nhiêu tiền" là câu FE hỏi
+    lại nhiều lần sau đó.
+
+    **Đừng đặt `Cache-Control` lên endpoint này.** `message_max_chars` tĩnh
+    nhưng `quota` đổi sau **mỗi** lượt sinh, và FE gọi lại chính `/auth/me` để
+    làm tươi thanh quota (UC-07). Một header cache ở đây đóng băng thanh ấy
+    đúng lúc nó phải động — Cạm bẫy ① của T-3.0.
+    """
+
+    #: `null` = chưa đo được lúc này (Redis không trả lời), **không** phải
+    #: "không có hạn mức" — xem `app/quota/snapshot.py`. FE ẩn thanh đi.
+    quota: list[WindowSnapshot] | None
+    #: Trần độ dài một message, tính bằng ký tự (B-205, NQ-78). Ô nhập của
+    #: T-3.4 đếm ngược về đúng con số này; không literal nào ở FE (A3/L4).
+    message_max_chars: int
 
 
 def _dat_cookie_phien(response: Response, nguoi_dung: NguoiDungRa) -> None:
@@ -943,7 +976,7 @@ async def reset_password(body: DatLaiMatKhauRequest, response: Response) -> DatL
 @router.get(
     "/me",
     status_code=status.HTTP_200_OK,
-    response_model=NguoiDungRa,
+    response_model=HoSoRa,
     # §11.1 (T-2.7) — cột "Xem UI". Route duy nhất của router `auth` đòi tài
     # khoản dùng được; `logout` cố ý KHÔNG (NQ-42), phần còn lại là công khai.
     # Xem `api/v1/__init__.py` cho danh sách router được gắn cả cụm.
@@ -955,7 +988,7 @@ async def reset_password(body: DatLaiMatKhauRequest, response: Response) -> DatL
         }
     },
 )
-async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> NguoiDungRa:
+async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> HoSoRa:
     """Thông tin user hiện tại — đi qua `get_current_user_id` như mọi route
     khác (§20), không tự đọc cookie.
 
@@ -963,6 +996,16 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> NguoiDun
     `status`: §11.1 để trống cả ô "Xem UI" của hai hàng ấy, và FE đọc được
     đúng câu chuyện từ mã lỗi — nó không cần đọc `status` rồi tự nghĩ ra luật
     lần thứ hai (đúng cạm bẫy "mỗi endpoint một luật" của task này).
+
+    **Bốn nhóm trong một response** (§18.1: *"User + tier + quota còn lại +
+    trạng thái"*, B-158/NQ-81): hồ sơ + trạng thái, `quota` hai cửa sổ,
+    `message_max_chars`, `default_model`. Ba task FE của P3 (T-3.4, T-3.6,
+    T-3.11) đọc ba nhóm khác nhau của **cùng** một response chứ không sửa
+    `NguoiDungRa` ở ba commit — đó là toàn bộ lý do gộp chúng vào đây.
+
+    `read_snapshot` đứng **trong** `session_scope` vì `refill_if_empty` (RR-7)
+    cần một session Postgres để phân biệt "chưa tiêu gì" với "Redis vừa mất
+    dữ liệu". Nó **không** ném khi Redis chết — xem `app/quota/snapshot.py`.
     """
     async with session_scope() as session:
         user = await UserRepository(session).get_by_id(user_id)
@@ -970,6 +1013,14 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> NguoiDun
             raise ApiError(
                 status.HTTP_401_UNAUTHORIZED, ApiErrorCode.UNAUTHENTICATED, "user khong con ton tai"
             )
-        ra = NguoiDungRa.model_validate(user)
+        # Đọc ra schema TRƯỚC khi làm bất cứ việc gì khác với session: sau đó
+        # `user` vẫn còn sống, nhưng thói quen ở cả `conversations.py` là chốt
+        # hình dạng ngay khi còn cầm hàng trong tay.
+        ho_so = NguoiDungRa.model_validate(user)
+        quota = await read_snapshot(session, user_id=user_id)
 
-    return ra
+    return HoSoRa(
+        **ho_so.model_dump(),
+        quota=quota,
+        message_max_chars=settings.MESSAGE_MAX_CHARS,
+    )

@@ -340,6 +340,25 @@ class Settings(BaseSettings):
     BYOK_VERIFY_TIMEOUT_S: int = Field(default=10, gt=0)
 
     # ═══ Context & vision (§9.6, §15.3) ═══
+    #: Trần độ dài MỘT message người dùng gửi lên, tính bằng ký tự (B-205,
+    #: NQ-78). Áp ở biên vào cho cả `POST /conversations/{id}/messages` lẫn
+    #: `PATCH /messages/{id}`, và FE đọc lại con số này qua `GET /auth/me` —
+    #: không ô nhập nào được tự đặt một trần riêng (A3, §19.2 L4).
+    #:
+    #: **Vì sao 24000.** Trước NQ-78, thứ chặn đầu tiên là `token_budget()` của
+    #: §9.6, tức một lần dán quá dài chỉ nổ ở `llm/context.py` **giữa lượt
+    #: sinh** — sau khi đã tạo hai hàng `messages` và đã tiêu một lượt
+    #: `Idempotency-Key`. Để trần này thật sự là cửa **đầu tiên**, nó phải nằm
+    #: dưới ngân sách token nhỏ nhất của catalog hôm nay: `ol-qwen-small` có
+    #: `min(32768, CONTEXT_WINDOW_CAP) - 4096 - 1000 = 27672` token. 24000 ký
+    #: tự nằm dưới con số đó **kể cả** ở tỷ lệ bi quan nhất 1 token/ký tự; đo
+    #: thật trên văn bản Latin của dự án là ~3.1 ký tự/token (24001 ký tự →
+    #: 7777 token), nên đây là một biên rộng chứ không phải một biên khít.
+    #:
+    #: Catalog sửa nóng được (§19.1), nên thêm một model có `context_window`
+    #: nhỏ hơn ~28k token là lúc phải hạ con số này xuống theo — đó là lý do nó
+    #: là một biến `.env` chứ không phải một hằng trong `api/v1/messages.py`.
+    MESSAGE_MAX_CHARS: int = Field(default=24000, gt=0)
     CONTEXT_WINDOW_CAP: int = Field(default=128000, gt=0)
     RESERVE_TOKENS: int = Field(default=1000, ge=0)
     VISION_MAX_EDGE_PX: int = Field(default=1568, gt=0)

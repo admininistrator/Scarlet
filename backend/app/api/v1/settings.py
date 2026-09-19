@@ -1,10 +1,24 @@
-"""Cài đặt cá nhân — BYOK CRUD (§18.4, §10.5) — T-2.14.
+"""Cài đặt cá nhân — BYOK CRUD (§18.4, §10.5) — T-2.14; `PUT /settings` — T-3.0.
 
-KH tham chiếu: §10.5, §18.4, §11.1, §20, §23 `api/v1/settings.py` · Cạm bẫy
-C20, C42 · CLAUDE.md A3 · tasks.md T-2.14.
+KH tham chiếu: §10.5, §18.4, §9.2, §11.1, §19.1, §20, §23 `api/v1/settings.py` ·
+Cạm bẫy C20, C42 · CLAUDE.md A3 · tasks.md T-2.14, T-3.0, B-206, NQ-79.
 
-Ba endpoint của hàng "keys" trong bảng §18.4. Ba endpoint còn lại của mục đó
-(`/settings`, `/settings/usage`) **chưa** có task nào — không dựng sẵn.
+Ba endpoint của hàng "keys" trong bảng §18.4, cộng `PUT /settings` từ T-3.0.
+`GET /settings` và `GET /settings/usage` **chưa** có task nào — không dựng sẵn.
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│  `PUT /settings` CÓ, `GET /settings` KHÔNG — và đó là một quyết định      │
+└──────────────────────────────────────────────────────────────────────────┘
+
+§18.4 ghi `GET/PUT /settings` trên cùng một hàng, nhưng T-3.0 chỉ dựng vế
+`PUT`. Lý do: vế `GET` đã có người trả lời rồi. `default_model` — hôm nay là
+**toàn bộ** nội dung của "cài đặt cá nhân" ở tầng server — đi ra trong
+`GET /auth/me` (§18.1, NQ-81), và theme thì sống trong `localStorage` từ
+T-0.10. Một `GET /settings` hôm nay vì thế là endpoint thứ hai trả lời đúng
+một câu hỏi, tức chỗ đầu tiên để hai câu trả lời lệch nhau.
+
+Tên endpoint giữ nguyên chữ của §18.4 để tuỳ chọn thứ hai ghép thẳng vào đây
+mà không phải đổi đường dẫn — và đó cũng là lúc `GET /settings` có việc để làm.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  BẢN RÕ SỐNG ĐÚNG MỘT LẦN, TRONG ĐÚNG MỘT HÀM                            │
@@ -67,7 +81,7 @@ from app.core.crypto import DecryptionError, Sealed, mask_secret, seal, unseal
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.db.models import UserProviderKey
-from app.db.repositories import ProviderKeyRepository
+from app.db.repositories import ProviderKeyRepository, UserRepository
 from app.db.session import session_scope
 from app.llm.byok_verify import VerifyOutcome, VerifyUnavailable, verify_key
 
@@ -293,3 +307,101 @@ async def delete_provider_key(
             )
         await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ═══════════════════ PUT /settings (§18.4, B-206, NQ-79) — T-3.0 ════════════
+
+
+class CaiDatIn(BaseModel):
+    """Body của `PUT /settings`. Đúng **một** trường, cố ý.
+
+    NQ-79 chốt "tối thiểu": không dựng sẵn khung cho tuỳ chọn chưa tồn tại.
+    Đó là cùng lý lẽ đã dùng để `quota/tiers.py` không có `invalidate()`
+    (NQ-51) — một chỗ cắm không ai cắm vào là một chỗ không ai kiểm.
+
+    `extra="forbid"` để một khoá gõ sai (`defaultModel`, `default_model_id`)
+    thành `422` chứ không thành một lần ghi im lặng không có tác dụng gì.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: `null` (hoặc vắng mặt) = **bỏ chọn**, quay về bậc thang mặc định của
+    #: §9.2. Đó là một ý định có thật, nên nó phải gửi được — và vì `PUT` thay
+    #: cả tài nguyên chứ không vá từng trường, vắng mặt đọc thành `null`. Hôm
+    #: nay tài nguyên ấy có đúng một trường nên hai cách đọc trùng nhau; ngày
+    #: có trường thứ hai thì `PATCH` mới là method phải thêm, không phải một
+    #: luật "vắng mặt nghĩa là giữ nguyên" nhét vào `PUT`.
+    default_model: str | None = None
+
+
+class CaiDatRa(BaseModel):
+    """`200` của `PUT /settings` — trạng thái sau khi ghi.
+
+    Trả lại giá trị thay vì `204`: FE vừa gửi một tên model và cần biết chắc
+    server đã nhận đúng tên ấy, chứ không phải suy ra từ một response rỗng.
+    Cùng hình dạng với trường `default_model` của `GET /auth/me`, để hai chỗ
+    nói về cùng một thứ bằng cùng một cái tên.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_model: str | None
+
+
+@router.put(
+    "",
+    status_code=status.HTTP_200_OK,
+    response_model=CaiDatRa,
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "model khong co trong catalog hoac da tat (MODEL_UNKNOWN)",
+        }
+    },
+)
+async def put_settings(
+    body: CaiDatIn,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> CaiDatRa:
+    """Ghi cài đặt cá nhân của **chính mình** (§18.4, UC-05).
+
+    Không có tham số nào trỏ sang người khác: `user_id` đến từ dependency và đi
+    thẳng vào `WHERE` của câu `UPDATE` (§20) — đường dẫn không có `{id}`, body
+    không có `user_id`, và `UserRepository.set_default_model` không nhận một
+    khoá nào khác để lọc.
+
+    **Validate catalog lúc GHI, không lúc đọc** (Cạm bẫy ③ của T-3.0). Catalog
+    là file sửa nóng (`POST /admin/catalog/reload`, §19.1), nên một model hợp
+    lệ hôm nay có thể biến mất ngày mai. Chặn ở đây thì người dùng chọn xong là
+    biết ngay; chặn lúc đọc thì một dòng cấu hình admin vừa sửa sẽ ném lỗi vào
+    mặt một người không làm gì cả. `GET /auth/me` vì vậy trả nguyên văn giá trị
+    đã lưu và để FE rơi về `default: true` của catalog.
+
+    `catalog.get_model` lọc luôn `enabled`, cùng lối `_chon_model` của
+    `api/v1/messages.py`: chọn mặc định một model đang tắt là hẹn trước một
+    `MODEL_UNKNOWN` cho mọi lượt chat sau đó.
+
+    Raises:
+        ApiError 400 `MODEL_UNKNOWN`: `default_model` không có trong catalog
+            hoặc đã `enabled: false`.
+        ApiError 401 `UNAUTHENTICATED`: tài khoản đã bị xoá giữa hai request.
+    """
+    if body.default_model is not None and catalog.get_model(body.default_model) is None:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ApiErrorCode.MODEL_UNKNOWN,
+            f"model khong co trong catalog hoac da tat: {body.default_model}",
+            details={"model_id": body.default_model},
+        )
+
+    async with session_scope() as session:
+        da_ghi = await UserRepository(session).set_default_model(user_id, body.default_model)
+        if not da_ghi:
+            raise ApiError(
+                status.HTTP_401_UNAUTHORIZED,
+                ApiErrorCode.UNAUTHENTICATED,
+                "user khong con ton tai",
+            )
+        await session.commit()
+
+    return CaiDatRa(default_model=body.default_model)

@@ -588,6 +588,84 @@ async def test_me_sau_khi_login_tra_dung_user(
     assert resp.json()["id"] == str(user_id)
 
 
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_me_tra_du_bon_nhom_cua_18_1(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """§18.1: *"User + tier + quota còn lại + trạng thái"* — T-3.0, B-158.
+
+    Một test cho cả bốn nhóm chứ không bốn test: NQ-81 gộp ba mảnh backend của
+    P3 vào **một** response schema chính vì chúng phải cùng có mặt trong cùng
+    một lần gọi; tách ra kiểm riêng là bỏ mất đúng tính chất ấy.
+    """
+    _, email = await _tao_user_that(session_factory)
+    await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+
+    body = (await client.get(DUONG_DAN_ME)).json()
+
+    assert body["tier_name"] == "free"
+    assert body["status"] == UserStatus.PENDING_EMAIL.value
+    assert body["message_max_chars"] == settings.MESSAGE_MAX_CHARS
+    assert body["default_model"] is None, "chua ai chon gi ⇒ FE roi ve default cua catalog"
+
+    assert [w["limit_type"] for w in body["quota"]] == ["5h", "weekly"], "du HAI cua so (§10.3)"
+    for cua_so in body["quota"]:
+        # A7/T-2.16: tiền đi tới FE dưới dạng CHUỖI, không `float`.
+        assert isinstance(cua_so["limit_usd"], str)
+        assert isinstance(cua_so["spent_usd"], str)
+        assert isinstance(cua_so["remaining_usd"], str)
+        assert cua_so["spent_usd"] == "0"
+        assert cua_so["retry_after"] is None, "chua tieu gi thi khong co gi de cho"
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_me_khi_redis_chet_van_tra_200_voi_quota_null(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    quota_redis: Any,
+) -> None:
+    """Redis chớp mắt KHÔNG được khoá cả giao diện (xem `app/quota/snapshot.py`).
+
+    Khác hẳn `check_quota`, nơi cùng sự cố ấy phải thành `503`: ở đó Redis chết
+    nghĩa là không biết người ta còn bao nhiêu tiền trước một lượt **tiêu tiền**;
+    ở đây nó chỉ nghĩa là một thanh trên màn hình chưa vẽ được. `/auth/me` còn
+    là endpoint FE dùng để định tuyến theo `status` (§11.1, T-3.1b).
+    """
+    _, email = await _tao_user_that(session_factory)
+    await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+    quota_redis.fail = True
+
+    resp = await client.get(DUONG_DAN_ME)
+
+    assert resp.status_code == 200
+    assert resp.json()["quota"] is None
+    assert resp.json()["email"] == email, "phan ho so van day du"
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_login_va_refresh_khong_tra_quota(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`quota` chỉ có ở `/me` — hai endpoint kia không trả giá hai lượt đọc Redis.
+
+    Đây là ranh giới giữa `NguoiDungRa` và `HoSoRa`, và nó là một hợp đồng chứ
+    không phải một chi tiết hiện thực: FE không được đọc `quota` từ response
+    của `login` rồi tin rằng nó có ở đó.
+    """
+    _, email = await _tao_user_that(session_factory)
+
+    dang_nhap = await client.post(
+        DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST}
+    )
+    lam_moi = await client.post(DUONG_DAN_REFRESH)
+
+    for resp in (dang_nhap, lam_moi):
+        assert resp.status_code == 200, resp.text
+        assert "quota" not in resp.json()
+        assert "message_max_chars" not in resp.json()
+        assert resp.json()["default_model"] is None, "cot cua chinh hang users ⇒ co o ca ba"
+
+
 async def test_me_khong_dang_nhap_tra_401(client: AsyncClient) -> None:
     """Không cookie, không header, `DEBUG=false` (mặc định test) → nhánh Phase 1
     đóng, và giờ nhánh mới cũng không có cookie phiên nào để thử."""

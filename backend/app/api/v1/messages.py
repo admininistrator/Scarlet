@@ -172,7 +172,15 @@ class TaoMessageRequest(BaseModel):
     #: Nội dung người dùng gõ. `min_length=1` vì một lượt rỗng không cho model
     #: thêm thông tin nào mà vẫn tốn một lượt sinh — và `llm/context.py::_to_wire`
     #: sẽ lặng lẽ loại nó khỏi ngữ cảnh, để lại một hoá đơn không có câu hỏi.
-    content: str = Field(min_length=1)
+    #:
+    #: `max_length` là **cửa chặn đầu tiên** của B-205/NQ-78, và nó phải nằm ở
+    #: đây chứ không ở FE: nginx cho qua tới 25 MB, nên một trần chỉ có trong ô
+    #: nhập thì `curl` đi vòng qua được. Trước bản vá, thứ chặn đầu tiên là
+    #: `token_budget()` của §9.6 — tức một lần dán quá dài tạo xong **hai** hàng
+    #: `messages`, tiêu một lượt `Idempotency-Key`, rồi mới nổ `CONTEXT_TOO_LARGE`
+    #: ở `llm/context.py` giữa lượt sinh. Nay nó là `422` ở biên vào, chưa chạm
+    #: Postgres.
+    content: str = Field(min_length=1, max_length=settings.MESSAGE_MAX_CHARS)
     #: C14 — lá client **đang thấy**. Vắng ⇒ dùng `active_leaf_id`; có (kể cả
     #: `null`) ⇒ dùng đúng giá trị đó. Xem docstring module.
     parent_id: uuid.UUID | None = None
@@ -670,14 +678,16 @@ class SuaMessageRequest(BaseModel):
     """Body của `PATCH /messages/{id}` — chỉ nội dung mới của câu hỏi.
 
     `min_length=1` cùng lý do với `TaoMessageRequest.content`: sửa thành rỗng
-    là trả tiền cho một lượt sinh không có câu hỏi.
+    là trả tiền cho một lượt sinh không có câu hỏi. `max_length` cũng vậy —
+    B-205 đếm được **hai** schema thiếu trần, và một nhánh sửa nội dung không
+    có trần là đúng đường vòng mà bản vá này đang đóng.
 
     **Không có `model_id`.** §18.2 ghi endpoint này là "Sửa nội dung message
     user → tạo nhánh mới", và `tasks.md` T-1.13 chỉ cho retry quyền đổi model.
     Nhánh mới dùng `conversations.default_model` như một lượt chat bình thường.
     """
 
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=settings.MESSAGE_MAX_CHARS)
 
 
 class SuaMessageResponse(BaseModel):

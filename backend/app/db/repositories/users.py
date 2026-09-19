@@ -148,6 +148,36 @@ class UserRepository:
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
 
+    # ═════════════ cài đặt cá nhân (§18.4) — T-3.0 ═════════════
+
+    async def set_default_model(self, user_id: uuid.UUID, model_id: str | None) -> bool:
+        """Ghi `users.default_model` cho CHÍNH người gọi (§18.4, B-206) — T-3.0.
+
+        Nhận `None` và ghi `None` thật: "bỏ chọn, dùng lại mặc định của
+        catalog" là một ý định có thật của người dùng, nên nó phải đi được qua
+        hàm này. Đó cũng là lý do tham số không có giá trị mặc định — bỏ quên
+        nó phải là lỗi cú pháp, không phải một lần xoá âm thầm.
+
+        **Không** kiểm `model_id` có trong catalog: đó là việc của tầng router
+        (`api/v1/settings.py::put_settings`), nơi có `ApiError` để nói với
+        người dùng. Repository nói chuyện với Postgres, không với người.
+
+        `deleted_at IS NULL` **trong câu SQL** (§20, cùng lối `get_by_id` và
+        `dat_mat_khau_moi`): một access token còn hạn của tài khoản vừa xoá
+        không được phép ghi tiếp vào hàng đó.
+
+        Trả `False` khi không có hàng nào khớp — router quyết định câu trả lời,
+        y như `mark_email_verified`.
+        """
+        stmt = (
+            update(User)
+            .where(User.id == user_id, User.deleted_at.is_(None))
+            .values(default_model=model_id)
+            .returning(User.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
     # ═════════════ ba câu của admin panel (§16.3, §18.5) — T-2.16 ═════════════
 
     async def list_for_admin(self, *, trang_thai: UserStatus | None = None) -> Sequence[User]:

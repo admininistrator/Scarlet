@@ -642,6 +642,36 @@ async def test_sua_message_assistant_tra_400(
     assert await _dem_message(session_factory, conversation.id) == truoc
 
 
+async def test_sua_message_dai_hon_tran_tra_422_va_khong_ghi_gi(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _debug_bat: None,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """`MESSAGE_MAX_CHARS` áp cho CẢ HAI schema (T-3.0, B-205).
+
+    B-205 đếm được hai chỗ thiếu trần, và một nhánh sửa câu hỏi không có trần
+    là đúng đường vòng mà bản vá đang đóng: `PATCH` cũng tạo một message mới
+    và cũng đẩy một job.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    u1, _ = await _mot_luot(client, session_factory, conversation.id, user_a, "a")
+    truoc = await _dem_message(session_factory, conversation.id)
+    arq_gia.da_day.clear()
+
+    resp = await client.patch(
+        SUA_MESSAGE.format(u1),
+        headers=_headers(user_a),
+        json={"content": "a" * (settings.MESSAGE_MAX_CHARS + 1)},
+    )
+
+    assert resp.status_code == 422
+    assert await _dem_message(session_factory, conversation.id) == truoc
+    assert arq_gia.da_day == []
+
+
 async def test_sua_message_cua_user_khac_tra_404_va_khong_ghi_gi(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],

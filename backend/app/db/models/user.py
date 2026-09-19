@@ -71,6 +71,19 @@ class User(Base):
         Text, ForeignKey("tiers.name"), nullable=False, server_default=text("'free'")
     )
     limit_override_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    #: Model mặc định của **người này** (§18.4, B-206, NQ-79) — T-3.0.
+    #:
+    #: `NULL` = chưa chọn ⇒ rơi về `conversations.default_model`, rồi về model
+    #: `default: true` của catalog (§9.2). Đó là cùng bậc thang mà
+    #: `api/v1/messages.py::_chon_model` đã đi, chỉ thêm một bậc ở trên.
+    #:
+    #: **Không** `ForeignKey` — catalog là một file JSON sửa nóng
+    #: (`POST /admin/catalog/reload`, §19.1), không phải một bảng. Phép kiểm
+    #: "model này có thật không" vì vậy nằm ở `PUT /settings`, tức lúc **GHI**;
+    #: lúc đọc thì một model vừa biến khỏi catalog trả về nguyên văn và FE rơi
+    #: về mặc định của catalog (T-3.6 Cạm bẫy ①). Ném lỗi lúc đọc nghĩa là một
+    #: dòng cấu hình admin vừa sửa làm hỏng màn hình của người khác.
+    default_model: Mapped[str | None] = mapped_column(Text)
     email_verified_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     approved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     approved_by: Mapped[uuid.UUID | None] = mapped_column(

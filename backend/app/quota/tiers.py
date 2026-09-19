@@ -62,6 +62,7 @@ from app.core.redis import get_redis
 from app.db.models import Tier
 from app.db.repositories.tiers import TierRepository
 from app.db.session import session_scope
+from app.quota.windows import LimitType, Window
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,20 @@ class EffectiveLimits(BaseModel):
     max_upload_mb: int
     max_attachments: int
     allowed_model_tags: list[str]
+
+    def for_window(self, window: Window) -> Decimal:
+        """Hạn mức USD của một cửa sổ trượt — hai cửa sổ, hai cột của `tiers`.
+
+        Là một method của chính `EffectiveLimits` chứ không phải một hàm rời ở
+        chỗ gọi, vì phép ánh xạ `5h → limit_5h_usd` / `weekly → limit_7d_usd`
+        là **một** luật và nó có hai người hỏi: cửa chặn trước một lượt sinh
+        (`quota/estimator.py`) và bản chụp để hiển thị (`quota/snapshot.py`).
+        Hai bản chép của cùng một `if` là hai chỗ để lệch, và chỗ lệch ấy sẽ là
+        một thanh quota đo cửa sổ này trong khi cửa chặn đo cửa sổ kia.
+        """
+        if window.limit_type is LimitType.SHORT:
+            return self.limit_5h_usd
+        return self.limit_7d_usd
 
 
 #: Những trường mà `users.limit_override_json` được phép đè. `tier_name` không

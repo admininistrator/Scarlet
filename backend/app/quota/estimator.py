@@ -105,7 +105,7 @@ from app.llm import context
 from app.llm.tokens import count_messages
 from app.quota.rebuild import refill_if_empty
 from app.quota.tiers import EffectiveLimits, get_effective_limits
-from app.quota.windows import LimitType, Window, WindowState, read_window, windows
+from app.quota.windows import LimitType, WindowState, read_window, windows
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +249,7 @@ async def check_quota(
                 "khong kiem duoc han muc chi tieu, hay thu lai",
             ) from loi
 
-        han_muc = _limit_for(limits, window)
+        han_muc = limits.for_window(window)
         if state.spent + du_toan.est_max_usd > han_muc:
             raise _qua_han_muc(state, du_toan, han_muc=han_muc, now=now)
         trang_thai.append(state)
@@ -290,13 +290,6 @@ async def _du_toan(
         )
         return estimate_from_tokens(model, tran)
     return estimate(model, messages)
-
-
-def _limit_for(limits: EffectiveLimits, window: Window) -> Decimal:
-    """Hạn mức USD của một cửa sổ. Hai cửa sổ, hai cột của `tiers` (§10.4)."""
-    if window.limit_type is LimitType.SHORT:
-        return limits.limit_5h_usd
-    return limits.limit_7d_usd
 
 
 def _qua_han_muc(
@@ -343,7 +336,7 @@ def _warning(trang_thai: list[WindowState], limits: EffectiveLimits) -> QuotaWar
     """
     ung_vien: list[QuotaWarning] = []
     for state in trang_thai:
-        han_muc = _limit_for(limits, state.window)
+        han_muc = limits.for_window(state.window)
         if han_muc <= 0:
             continue
         con_lai = max(Decimal(0), han_muc - state.spent)
