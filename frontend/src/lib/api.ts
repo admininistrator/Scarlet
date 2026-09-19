@@ -84,6 +84,9 @@ export const MA_LOI = {
   CHUA_XAC_THUC: "UNAUTHENTICATED",
   AUTH_CHUA_CO: "AUTH_NOT_IMPLEMENTED",
   DANG_SINH: "GENERATION_IN_PROGRESS",
+  SAI_MAT_KHAU: "INVALID_CREDENTIALS",
+  TAI_KHOAN_BI_KHOA: "ACCOUNT_DISABLED",
+  DOI_QUAN_TRI: "ADMIN_REQUIRED",
 } as const;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -217,6 +220,103 @@ export interface ModelRa {
   badge: string | null;
 }
 
+// ─────────────────── kieu cua §11.2 (auth) va §16.3 (admin) ──────────────────
+
+/** Nam trang thai cua §11.1. */
+export type TrangThaiUser =
+  | "pending_email"
+  | "pending_approval"
+  | "active"
+  | "rejected"
+  | "suspended";
+
+export type VaiTroUser = "user" | "admin";
+
+/** `NguoiDungRa` cua backend — hinh dang chung cua `/login`, `/refresh`, `/me`. */
+export interface NguoiDungRa {
+  id: string;
+  email: string;
+  display_name: string | null;
+  status: TrangThaiUser;
+  role: VaiTroUser;
+  tier_name: string;
+}
+
+/** Ba nut cua man "Duyet user" (§16.3) — khop `hanh_dong` cua backend. */
+export type HanhDongUser = "approve" | "reject" | "suspend";
+
+/** Mot hang cua bang "Nguoi dung" (§16.3). KHONG co truong nao suy ra mat khau. */
+export interface AdminUserRa {
+  id: string;
+  email: string;
+  display_name: string | null;
+  status: TrangThaiUser;
+  role: VaiTroUser;
+  tier_name: string;
+  limit_override_json: Record<string, unknown> | null;
+  email_verified_at: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
+  last_login_at: string | null;
+  created_at: string;
+}
+
+export interface AdminUserListRa {
+  users: AdminUserRa[];
+}
+
+/**
+ * `cost_usd` la CHUOI, khong phai `number`.
+ *
+ * Backend tra `Decimal` va pydantic tuan tu hoa no thanh chuoi — doc thang
+ * vao mot `number` la lam tron mot con so tien ngay tai bien vao cua FE. Cho
+ * duy nhat duoc phep doi sang so la ham dinh dang, va no doi mot lan de HIEN,
+ * khong de cong.
+ */
+export interface SoTien {
+  cost_usd: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  events: number;
+}
+
+/**
+ * Hai cot tach rieng cua C16 — khong bao gio co truong `tong`.
+ *
+ * Hinh dang nay chep dung `HaiCot` cua backend, ke ca cho no thieu: mot phep
+ * cong `metered + unmetered` o FE se dung lai chinh con so ma §9.5 cam tron.
+ */
+export interface HaiCot {
+  metered: SoTien;
+  unmetered: SoTien;
+}
+
+export interface HangChiPhi extends HaiCot {
+  key: string;
+  label: string | null;
+}
+
+/** `system` = tien cua nguoi van hanh, `byok` = tien cua nguoi dung (§10.5). */
+export type NguonKhoa = "system" | "byok";
+
+export interface ChiPhiRa {
+  since: string;
+  until: string;
+  /** Bo loc dang ap cho `totals`/`by_day`/`by_user`/`by_model`. `null` = moi nguon. */
+  key_source: NguonKhoa | null;
+  totals: HaiCot;
+  by_day: HangChiPhi[];
+  by_user: HangChiPhi[];
+  by_model: HangChiPhi[];
+  /** LUON du ca hai nguon, ke ca khi `key_source` khac `null` — xem `admin_usage`. */
+  by_key_source: HangChiPhi[];
+}
+
+export interface NapCatalogRa {
+  models: number;
+  version: number;
+}
+
 // ────────────────────────────── cac loi goi ──────────────────────────────
 
 export const api = {
@@ -271,4 +371,43 @@ export const api = {
     }),
 
   anhEm: (messageId: string) => request<AnhEmRa>(`/messages/${messageId}/siblings`),
+
+  // ───────────────────────────── §11.2 — phien ──────────────────────────────
+  //
+  // Khong mot loi goi nao duoi day cham toi JWT: ca access token lan refresh
+  // token deu nam trong cookie `HttpOnly` do server dat (NQ-36), tuc JS cua
+  // trang KHONG doc duoc chung — va do la ca diem cua NQ-36. FE chi biet "da
+  // dang nhap hay chua" qua `toiLaAi()`, khong qua mot bien trong bo nho.
+
+  dangNhap: (email: string, password: string) =>
+    request<NguoiDungRa>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+
+  dangXuat: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
+
+  toiLaAi: () => request<NguoiDungRa>("/auth/me"),
+
+  // ──────────────────────────── §16.3 — quan tri ────────────────────────────
+  //
+  // Bay loi goi nay deu di qua `require_admin` o phia server (§16.3: *"moi
+  // endpoint /api/v1/admin/* kiem lai quyen phia server"*). Viec FE co hien
+  // nut hay khong KHONG phai mot lop bao ve, va man `/admin` co dua ai do vao
+  // duoc thi cung khong doi duoc cau tra loi cua bay endpoint nay.
+
+  quanTriDanhSachUser: (trangThai?: TrangThaiUser) =>
+    request<AdminUserListRa>(
+      trangThai === undefined ? "/admin/users" : `/admin/users?status=${trangThai}`,
+    ),
+
+  quanTriDoiTrangThai: (userId: string, hanhDong: HanhDongUser) =>
+    request<AdminUserRa>(`/admin/users/${userId}/${hanhDong}`, { method: "POST" }),
+
+  /** `nguon === null` la "moi nguon" — xem `ChiPhiRa.key_source`. */
+  quanTriChiPhi: (nguon: NguonKhoa | null) =>
+    request<ChiPhiRa>(nguon === null ? "/admin/usage" : `/admin/usage?key_source=${nguon}`),
+
+  quanTriNapCatalog: () =>
+    request<NapCatalogRa>("/admin/catalog/reload", { method: "POST" }),
 };

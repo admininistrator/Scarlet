@@ -336,6 +336,7 @@ class UsageEventRepository:
         nhan: Any | None,
         since: datetime,
         until: datetime,
+        key_source: KeySource | None = None,
     ) -> Sequence[UsageBucket]:
         """`GROUP BY (nhom, cost_confidence)` trong cửa sổ `[since, until)`.
 
@@ -347,6 +348,12 @@ class UsageEventRepository:
 
         Biên `>= since` và `< until` (nửa mở), cùng luật với `list_since`: hai
         cửa sổ liền nhau không được đếm chung một dòng sổ hai lần.
+
+        `key_source` (T-2.19, B-178) lọc theo **tiền của ai** (§10.5): `None`
+        giữ nguyên hành vi của T-2.16 (mọi nguồn). Nó nằm ở đây chứ không ở
+        tầng hiển thị vì cùng lý do `cost_confidence` nằm trong `GROUP BY`:
+        một tổng đã cộng xong rồi mới trừ đi phần BYOK là một phép trừ ai cũng
+        có thể quên, còn một `WHERE` thì không quên được.
         """
         cot = [nhom.label("khoa")]
         if nhan is not None:
@@ -362,6 +369,8 @@ class UsageEventRepository:
             UsageEvent.created_at >= since,
             UsageEvent.created_at < until,
         )
+        if key_source is not None:
+            stmt = stmt.where(UsageEvent.key_source == key_source)
         if nhan is not None:
             stmt = stmt.join(User, User.id == UsageEvent.user_id, isouter=True)
         stmt = stmt.group_by(*cot[: 2 if nhan is not None else 1], UsageEvent.cost_confidence)
@@ -380,7 +389,9 @@ class UsageEventRepository:
             for r in rows
         ]
 
-    async def admin_by_day(self, *, since: datetime, until: datetime) -> Sequence[UsageBucket]:
+    async def admin_by_day(
+        self, *, since: datetime, until: datetime, key_source: KeySource | None = None
+    ) -> Sequence[UsageBucket]:
         """Chi phí theo NGÀY — §16.3 ("Biểu đồ theo ngày"), §18.5.
 
         `AT TIME ZONE 'UTC'` tường minh chứ không để `date_trunc` tự chọn: với
@@ -390,9 +401,13 @@ class UsageEventRepository:
         giữ đúng một đồng hồ chứ không phải thêm một quy ước.
         """
         ngay = func.date_trunc("day", func.timezone("UTC", UsageEvent.created_at))
-        return await self._tong_hop(nhom=ngay, nhan=None, since=since, until=until)
+        return await self._tong_hop(
+            nhom=ngay, nhan=None, since=since, until=until, key_source=key_source
+        )
 
-    async def admin_by_user(self, *, since: datetime, until: datetime) -> Sequence[UsageBucket]:
+    async def admin_by_user(
+        self, *, since: datetime, until: datetime, key_source: KeySource | None = None
+    ) -> Sequence[UsageBucket]:
         """Chi phí theo NGƯỜI DÙNG, kèm email — §16.3 ("bảng theo user").
 
         `LEFT JOIN users`: `usage_events.user_id` là `ON DELETE CASCADE`
@@ -401,12 +416,20 @@ class UsageEventRepository:
         mất vài dòng vì người ta vừa xoá tài khoản là một bảng nói dối.
         """
         return await self._tong_hop(
-            nhom=UsageEvent.user_id, nhan=User.email, since=since, until=until
+            nhom=UsageEvent.user_id,
+            nhan=User.email,
+            since=since,
+            until=until,
+            key_source=key_source,
         )
 
-    async def admin_by_model(self, *, since: datetime, until: datetime) -> Sequence[UsageBucket]:
+    async def admin_by_model(
+        self, *, since: datetime, until: datetime, key_source: KeySource | None = None
+    ) -> Sequence[UsageBucket]:
         """Chi phí theo MODEL — §16.3 ("bảng theo model")."""
-        return await self._tong_hop(nhom=UsageEvent.model_id, nhan=None, since=since, until=until)
+        return await self._tong_hop(
+            nhom=UsageEvent.model_id, nhan=None, since=since, until=until, key_source=key_source
+        )
 
     async def admin_by_key_source(
         self, *, since: datetime, until: datetime
@@ -419,5 +442,12 @@ class UsageEventRepository:
         phình lên đúng bằng phần BYOK mà §10.5 nói họ **không** trả. Cùng hình
         dạng, cùng hàm dựng câu, nên nó không thêm một luật nào mới: chỉ thêm
         một trục cho câu hỏi đã có.
+
+        **Cố ý KHÔNG nhận `key_source`** — ba trục kia nhận (T-2.19, B-178).
+        Lọc trục này theo chính cột nó nhóm là xoá đúng thứ nó sinh ra để nói:
+        màn "Chi phí" mặc định hiện `system` (hoá đơn thật), và cái giữ cho mặc
+        định ấy không thành một lời nói dối là bảng này vẫn kể đủ cả hai nguồn
+        ngay cạnh nó. Lọc nó đi thì người vận hành không còn đường nào biết là
+        có tồn tại phần BYOK mình vừa loại ra.
         """
         return await self._tong_hop(nhom=UsageEvent.key_source, nhan=None, since=since, until=until)

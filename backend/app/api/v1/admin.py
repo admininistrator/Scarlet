@@ -122,6 +122,7 @@ from app.db.models import (
     TARGET_USER,
     AuditAction,
     CostConfidence,
+    KeySource,
     User,
     UserRole,
     UserStatus,
@@ -260,6 +261,10 @@ class AdminUsageOut(BaseModel):
 
     since: datetime
     until: datetime
+    #: Bộ lọc §10.5 đang áp cho `totals`/`by_day`/`by_user`/`by_model`.
+    #: `None` = mọi nguồn. **`by_key_source` không bao giờ bị lọc** — xem
+    #: `admin_usage` và `UsageEventRepository.admin_by_key_source`.
+    key_source: KeySource | None
     totals: HaiCot
     by_day: list[UsageRow]
     by_user: list[UsageRow]
@@ -595,6 +600,7 @@ async def update_user(
 async def admin_usage(
     since: Annotated[datetime | None, Query()] = None,
     until: Annotated[datetime | None, Query()] = None,
+    key_source: Annotated[KeySource | None, Query()] = None,
 ) -> AdminUsageOut:
     """Bảng chi phí, **hai cột tách riêng** — §16.3, §18.5, C16.
 
@@ -610,6 +616,29 @@ async def admin_usage(
     Cửa sổ mặc định là `QUOTA_WINDOW_LONG_S` (7 ngày) — cùng con số mà §16.3
     dùng cho cột *"chi tiêu 7 ngày"* của bảng Người dùng, và nó đến từ cấu
     hình chứ không từ một hằng số gõ ở đây (A3).
+
+    ╔══════════════════════════════════════════════════════════════════════╗
+    ║  `key_source` — B-178, và nó KHÔNG áp cho cả bốn trục                ║
+    ╚══════════════════════════════════════════════════════════════════════╝
+
+    B-178 ghi lại rằng `totals` của T-2.16 là *"hoá đơn của người vận hành
+    cộng thêm tiền của người khác"*: §10.5 nói rõ lượt BYOK không tiêu tiền
+    của hệ thống, nhưng nó vẫn nằm trong cùng một tổng với lượt `system`. Từ
+    T-2.19 màn "Chi phí" mặc định hỏi `?key_source=system`, tức con số lớn
+    nhất trên màn hình là con số S13 đem đối chiếu với hoá đơn provider được.
+
+    Bộ lọc áp cho **ba trục hoá đơn** (`by_day`, `by_user`, `by_model`) và do
+    đó cho cả `totals` — nhưng **không** áp cho `by_key_source`, và đó là chủ
+    ý chứ không phải sót. Một mặc định lọc mà không để lại dấu vết gì của phần
+    bị loại ra chỉ đổi một kiểu nói dối này lấy một kiểu khác: hôm nay tổng
+    phình lên vì cộng nhầm tiền người khác, ngày mai nó tụt xuống mà không ai
+    biết là có một phần đã bị cắt. Giữ trục thứ tư đủ cả hai nguồn nghĩa là
+    một response trả lời được **cả hai** câu hỏi cùng lúc: "hoá đơn của tôi
+    bao nhiêu" và "phần không phải của tôi bao nhiêu".
+
+    `key_source` là `KeySource`, không phải `str`: `?key_source=abc` ra `422`
+    từ chính enum, cùng lối `?status=abc` của `list_users` ở trên — một bộ lọc
+    gõ sai mà im lặng trả về "mọi nguồn" sẽ đọc y hệt một hoá đơn phình to.
 
     Raises:
         ApiError 400 `BAD_REQUEST`: `since >= until`.
@@ -627,14 +656,21 @@ async def admin_usage(
 
     async with session_scope() as session:
         events = UsageEventRepository(session)
-        theo_ngay = _gop(list(await events.admin_by_day(since=tu, until=den)))
-        theo_user = _gop(list(await events.admin_by_user(since=tu, until=den)))
-        theo_model = _gop(list(await events.admin_by_model(since=tu, until=den)))
+        theo_ngay = _gop(
+            list(await events.admin_by_day(since=tu, until=den, key_source=key_source))
+        )
+        theo_user = _gop(
+            list(await events.admin_by_user(since=tu, until=den, key_source=key_source))
+        )
+        theo_model = _gop(
+            list(await events.admin_by_model(since=tu, until=den, key_source=key_source))
+        )
         theo_nguon = _gop(list(await events.admin_by_key_source(since=tu, until=den)))
 
     return AdminUsageOut(
         since=tu,
         until=den,
+        key_source=key_source,
         totals=_tong(theo_ngay),
         by_day=theo_ngay,
         by_user=theo_user,

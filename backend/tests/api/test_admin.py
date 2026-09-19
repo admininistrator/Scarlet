@@ -735,6 +735,103 @@ async def test_usage_tach_ca_theo_tien_cua_ai(
     assert Decimal(theo_nguon["byok"]["metered"]["cost_usd"]) == Decimal("9.0")
 
 
+# ═══════════ T-2.19 / B-178 — `?key_source=` lọc BA trục, không phải bốn ════
+
+
+async def _hai_nguon(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> uuid.UUID:
+    """Một user, hai dòng sổ: `0.5` tiền hệ thống và `9.0` tiền của chính họ."""
+    await _admin(client, session_factory)
+    user_id = await _tao_user(session_factory, UserStatus.ACTIVE)
+    for cost, nguon in (("0.5", KeySource.SYSTEM), ("9.0", KeySource.BYOK)):
+        await _ghi_so(
+            session_factory,
+            user_id=user_id,
+            model_id="m",
+            cost=cost,
+            confidence=CostConfidence.EXACT,
+            key_source=nguon,
+        )
+    return user_id
+
+
+async def test_usage_loc_system_tra_ve_hoa_don_that(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """B-178: `?key_source=system` ⇒ `totals` là con số S13 đem đối chiếu được.
+
+    Không lọc thì tổng là `9.5` — hoá đơn của người vận hành **cộng thêm** tiền
+    của người khác (§10.5). Đúng con số mà B-178 ghi lại, nên nó được đo ở đây
+    cạnh con số đã lọc chứ không phải ở một test khác: hai phép đo rời nhau thì
+    ngày một trong hai đổi, không ai thấy chúng lệch.
+    """
+    user_id = await _hai_nguon(client, session_factory)
+
+    tron = (await client.get(DUONG_DAN_USAGE)).json()
+    assert Decimal(tron["totals"]["metered"]["cost_usd"]) == Decimal("9.5")
+    assert tron["key_source"] is None
+
+    resp = await client.get(DUONG_DAN_USAGE, params={"key_source": "system"})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["key_source"] == "system"
+    assert Decimal(body["totals"]["metered"]["cost_usd"]) == Decimal("0.5")
+    # Cả BA trục hoá đơn, không riêng `totals`: một bảng "theo model" còn `9.5`
+    # trong khi tổng đã là `0.5` là một màn hình tự mâu thuẫn với chính nó.
+    assert Decimal(body["by_day"][0]["metered"]["cost_usd"]) == Decimal("0.5")
+    assert Decimal(body["by_model"][0]["metered"]["cost_usd"]) == Decimal("0.5")
+    theo_user = {h["key"]: h for h in body["by_user"]}
+    assert Decimal(theo_user[str(user_id)]["metered"]["cost_usd"]) == Decimal("0.5")
+
+
+async def test_usage_loc_khong_cham_toi_truc_theo_nguon(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`by_key_source` vẫn đủ **cả hai** nguồn kể cả khi ba trục kia đã bị lọc.
+
+    Đây là điều kiện để mặc định `system` của màn "Chi phí" không thành một
+    kiểu nói dối mới: lọc mà xoá sạch dấu vết phần bị loại ra thì người vận
+    hành không còn đường nào biết là có phần ấy. Xem `admin_by_key_source`.
+    """
+    await _hai_nguon(client, session_factory)
+
+    body = (await client.get(DUONG_DAN_USAGE, params={"key_source": "system"})).json()
+
+    theo_nguon = {h["key"]: h for h in body["by_key_source"]}
+    assert set(theo_nguon) == {"system", "byok"}
+    assert Decimal(theo_nguon["byok"]["metered"]["cost_usd"]) == Decimal("9.0")
+
+
+async def test_usage_loc_byok_tra_ve_dung_phan_khong_phai_tien_minh(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Chiều ngược lại — nút "BYOK" của màn Chi phí đi qua đúng đường này."""
+    await _hai_nguon(client, session_factory)
+
+    body = (await client.get(DUONG_DAN_USAGE, params={"key_source": "byok"})).json()
+
+    assert body["key_source"] == "byok"
+    assert Decimal(body["totals"]["metered"]["cost_usd"]) == Decimal("9.0")
+
+
+async def test_usage_key_source_la_khong_phai_chuoi_tu_do(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`?key_source=abc` ⇒ `422`, không phải im lặng trả về "mọi nguồn".
+
+    Cùng lý lẽ `?status=abc` của `list_users`: một bộ lọc gõ sai mà vẫn trả
+    `200` sẽ đọc y hệt một hoá đơn phình to, và không có gì trên màn hình nói
+    rằng bộ lọc đã bị bỏ qua.
+    """
+    await _admin(client, session_factory)
+
+    resp = await client.get(DUONG_DAN_USAGE, params={"key_source": "abc"})
+
+    assert resp.status_code == 422
+
+
 async def test_usage_bo_qua_dong_ngoai_cua_so(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
