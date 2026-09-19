@@ -88,6 +88,23 @@ class Provider(BaseModel):
     #: Thiếu → BYOK lưu key mà không kiểm được (C42); cảnh báo lúc nạp catalog.
     verify_path: str | None = None
     health_path: str | None = None
+    #: Header BẮT BUỘC khác header xác thực, do provider đòi (B-166, T-2.15).
+    #:
+    #: Trường này ra đời vì một phép đo: `GET https://api.anthropic.com/v1/models`
+    #: trả `400 "anthropic-version: header is required"` với **cả** hai
+    #: `auth_style` đang có, nên `byok_supported: true` của provider ấy là một
+    #: lời hứa không giữ được. Tên header và giá trị của nó là **dữ liệu của
+    #: provider**, đúng loại thứ A3 bắt sống trong catalog — ghi một `if` cho
+    #: một provider vào `byok_verify.py` là mở lại đúng cửa đó.
+    #:
+    #: Đi vào **cả hai** đường dùng khoá BYOK và phải đi cả hai: đường KIỂM
+    #: (`llm/byok_verify.py`) và đường GỌI (`llm/adapters/byok.py`). Thiếu một
+    #: vế thì lưu được khoá mà không chat được, hoặc ngược lại.
+    #:
+    #: **Không bao giờ mang credential.** Khoá đi qua `auth_style` — một
+    #: đường, một chỗ để soi (C20). Header xác thực được gắn **sau** khối này
+    #: nên một `Authorization` viết nhầm vào đây cũng không ghi đè được nó.
+    extra_headers: dict[str, str] = Field(default_factory=dict)
 
 
 class PricingWindow(BaseModel):
@@ -331,6 +348,35 @@ class ModelEntry(BaseModel):
         nó làm được điều đó mà không cần biết chuỗi `"metered"` trông ra sao.
         """
         return self.pricing_mode == PRICING_MODE_METERED
+
+    @property
+    def provider_model(self) -> str:
+        """Tên model mà **chính provider** hiểu — đường BYOK gọi thẳng (§9.1, T-2.15).
+
+        Hai đường gọi, hai cái tên khác nhau, và đó không phải chuyện tuỳ chọn:
+
+        * `SystemAdapter` đi qua LiteLLM, nên tên phải là **alias** trong
+          `config/litellm.config.yaml` — chính là `id` ở trên.
+        * `ByokAdapter` gọi thẳng `provider.base_url`, nơi LiteLLM không có
+          mặt để dịch, nên tên phải là tên gốc của provider.
+
+        `upstream_model` viết theo quy ước `<provider litellm>/<tên gốc>`
+        (`deepseek/deepseek-flash`, `openai/ag/gemini-3.8-flash-low`) — đó là
+        **định dạng của LiteLLM**, và thứ nó bỏ đi trước khi gửi đi cũng đúng
+        là đoạn đầu ấy. Cắt ở dấu `/` **đầu tiên** chứ không phải dấu cuối:
+        phần còn lại của 9Router (`ag/gemini-3.8-flash-low`) tự nó có một dấu
+        gạch chéo, và cắt ở dấu cuối sẽ vứt mất tiền tố `ag/` mà provider đòi.
+
+        Không có dấu `/` nào ⇒ trả nguyên văn: một provider OpenAI-compatible
+        khai tên trần vẫn gọi được, không cần một trường thứ hai trong catalog.
+
+        Đây là **suy ra**, không phải một cột dữ liệu mới, vì hai tên ấy hôm
+        nay luôn là một chuỗi và một tiền tố của nó — thêm một trường là thêm
+        một chỗ để hai giá trị lệch nhau trong im lặng. Ngày một provider phá
+        quy ước đó thì mới đáng đổi (Backlog).
+        """
+        _, sep, after_prefix = self.upstream_model.partition("/")
+        return after_prefix if sep else self.upstream_model
 
     @model_validator(mode="after")
     def _pricing_bat_buoc_khi_metered(self) -> ModelEntry:

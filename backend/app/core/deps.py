@@ -384,6 +384,28 @@ async def _has_byok(user_id: uuid.UUID) -> bool:
         return await UserRepository(session).has_provider_key(user_id)
 
 
+async def get_current_user_status(
+    claims: Annotated[AccessTokenClaims | None, Depends(get_access_claims)] = None,
+) -> UserStatus | None:
+    """Trạng thái tài khoản của người gọi, hoặc `None` khi không có claim (T-2.15).
+
+    Dùng cho phép kiểm §11.1 **chính xác** mà `require_chat_access` không làm
+    nổi: nó chạy trước khi handler đọc body nên nó không biết `model_id`, tức
+    không biết provider, tức chỉ hỏi được "có khoá **nào đó** không" thay vì
+    "có khoá cho provider này không" (**B-140**). Ba route sinh chữ vì vậy xin
+    thêm trạng thái để hỏi lại câu đúng ở `_mo_luot_sinh`, nơi model đã chốt.
+
+    Hằng `STATUSES_CAN_*` vẫn là nguồn sự thật duy nhất của bảng §11.1 — hàm
+    này chỉ chở một giá trị, nó không phán xét gì; phép so sánh vẫn là
+    `ensure_status_allowed(...)` như ở `POST /auth/login`.
+
+    `None` = nhánh tạm Phase 1 (header `X-User-Id` / cookie dev, `DEBUG=true`)
+    — không có trạng thái để kiểm, y hệt cách `require_status` cho nhánh ấy đi
+    thẳng qua. Xem docstring module và B-128.
+    """
+    return None if claims is None else claims.status
+
+
 def require_status(
     allowed: frozenset[UserStatus],
     *,

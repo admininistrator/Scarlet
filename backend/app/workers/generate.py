@@ -61,10 +61,19 @@ provider, và nhét một ước tính `tiktoken` vào đó là biến "không �
 `cost_confidence` để đánh dấu nó là `low` (B-67, B-94). Dòng log
 `NGUOI DUNG HUY …` của Phase 1 nay in thêm con số đã ghi sổ.
 
+**Đường BYOK là bước ①.5, ngay sau khi đọc được chủ sở hữu (T-2.15, §10.5).**
+`llm/credentials.py` trả lời "lượt này tiêu tiền của ai", và câu trả lời quyết
+định **hai** thứ, không phải một: adapter nào gọi model (§9.1 — `ByokAdapter`
+trỏ thẳng `provider.base_url`, `SystemAdapter` qua LiteLLM) và `key_source`
+nào đi vào `usage_events` ở bước ⑥.5 (§10.5 — `byok` thì **không** `ZADD` vào
+hai cửa sổ quota). Cùng hàm mà `api/v1/messages.py` đã hỏi lúc nhận request,
+nên hai tiến trình không thể quyết hai kiểu — xem docstring `credentials.py`
+cho khe đua giữa hai lần hỏi và vì sao nó được chấp nhận.
+
 **Chưa có, cố ý:** `tools=None` (tool registry là §12/§13, Phase 6–7, và §7.2
 ghi vòng lặp tool ở đó); `raw_response` (§17.2) chưa có người ghi — hoãn sang
 Phase 6, khi tool-call bắt đầu vỡ thật và hình dạng "response cuối" mới kiểm
-chứng được (B-79); `key_source='byok'` là T-2.15 (§10.5).
+chứng được (B-79).
 """
 
 from __future__ import annotations
@@ -82,11 +91,13 @@ from typing import Any
 
 from app.config.catalog import ModelEntry, get_model
 from app.config.settings import settings
-from app.db.models import MessageStatus
+from app.db.models import KeySource, MessageStatus
 from app.db.repositories import MessageRepository
 from app.db.session import session_scope
 from app.llm import context
+from app.llm.adapters.byok import ByokAdapter
 from app.llm.client import Chunk, LLMClient, ToolCall, Usage
+from app.llm.credentials import Credential, resolve_credential
 from app.quota import meter
 from app.streaming.cancel import FINISH_REASON_CANCELLED, da_yeu_cau_huy
 from app.streaming.events import (
@@ -166,6 +177,12 @@ class _KetQua:
     #: KHÁC thời điểm ghi sổ: một lượt sinh mười phút có thể bắt đầu lúc 16:58
     #: giờ cao điểm và kết thúc lúc 17:08 giờ thường — giá phải là giá 16:58.
     started_at: datetime | None = None
+    #: Credential nào trả tiền cho lượt này (§10.5, T-2.15). Mặc định là
+    #: `system` chứ không `None`: một lượt sinh chết **trước** `_chuan_bi`
+    #: không ghi sổ gì cả (xem `billable`), nên giá trị này chỉ có nghĩa khi
+    #: nó đã được điền — và mặc định chặt hơn (trừ quota) là mặc định đúng
+    #: chiều nếu có ngày nào đó một nhánh quên điền.
+    key_source: KeySource = KeySource.SYSTEM
     #: Do `_record_usage` điền ở bước ⑥.5; đi tiếp lên event `done` (§7.4,
     #: B-78). `None` = chưa ghi sổ được, và khi đó khoá `cost_usd` **vắng mặt**
     #: trên dây chứ không bằng 0.
@@ -309,18 +326,18 @@ async def _chay(
     ket_qua: _KetQua,
 ) -> None:
     """Bước ① → ⑤ của §7.2 ③. Ném `LoiSinh` cho mọi ngả không đi tiếp được."""
-    model_meta, wire_messages, user_id = await _chuan_bi(mid)
+    model_meta, wire_messages, user_id, credential = await _chuan_bi(mid)
     ket_qua.model = model_meta
     ket_qua.user_id = user_id
     ket_qua.sent = wire_messages
+    ket_qua.key_source = credential.key_source
 
     # Nhịp tim mở NGAY sau `_chuan_bi` (nơi `mark_streaming` chạy) chứ không
     # đợi chunk đầu: quãng `client.stream(...)` bên dưới chính là TTFT, và đó
     # đúng là quãng mà bản cũ để trống — xem `_nhip_tim` (B-122).
-    async with _nhip_tim(mid):
+    async with _nhip_tim(mid), _turn_client(ctx, credential) as client:
         await producer.emit(StartEvent(message_id=str(mid), model_id=model_meta.id))
 
-        client: LLMClient = ctx[CTX_LLM_CLIENT]
         # Mốc giá của A7: bảng giá dùng để ghi sổ là bảng giá của **lúc gọi**,
         # không phải lúc lượt sinh kết thúc. Đặt ngay trước `await` chứ không
         # ở đầu `_chay`: quãng `_chuan_bi` có thể mất vài chục mili-giây vì
@@ -328,7 +345,9 @@ async def _chay(
         ket_qua.started_at = datetime.now(UTC)
         try:
             stream = await client.stream(
-                model=model_meta.id,
+                # Alias LiteLLM hay tên gốc của provider — tuỳ credential, và
+                # `Credential` là chỗ biết cả hai (T-2.15).
+                model=credential.model_name(model_meta),
                 messages=wire_messages,
                 # Tool registry là §12/§13 (Phase 6–7). `None` chứ không `[]`:
                 # adapter đổi nó thành `omit`, model không có capability `tools`
@@ -363,12 +382,44 @@ async def _chay(
             raise LoiSinh(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
 
 
-async def _chuan_bi(mid: uuid.UUID) -> tuple[ModelEntry, list[dict[str, Any]], uuid.UUID]:
-    """Bước ① → ③: đọc message, dựng ngữ cảnh, đổi trạng thái sang `streaming`.
+@asynccontextmanager
+async def _turn_client(ctx: dict[str, Any], credential: Credential) -> AsyncIterator[LLMClient]:
+    """`LLMClient` của lượt này — dùng chung (system) hay dựng riêng (BYOK). §9.1.
 
-    Cả ba trong **một** session rồi đóng ngay: một lượt sinh có thể kéo mười
+    Hai vòng đời khác nhau, và khác biệt ấy là lý do có context manager này
+    thay vì một dòng `ctx[CTX_LLM_CLIENT]`:
+
+    * **system** — một instance cho cả tiến trình, dựng ở `main.on_startup`,
+      đóng ở `on_shutdown`. **Không** đóng ở đây: đóng nó là vứt connection
+      pool của mọi lượt sinh sau.
+    * **BYOK** — credential thuộc về một người dùng cụ thể, nên instance chỉ
+      được sống đúng một lượt (xem docstring `adapters/byok.py`). `finally`
+      đóng nó trên **mọi** đường thoát, kể cả huỷ giữa chừng và
+      `CancelledError` của arq: một `AsyncOpenAI` không đóng để lại kết nối
+      treo tới lúc timeout, và với BYOK thì đó là kết nối *mang khoá của
+      người dùng* nằm mở.
+    """
+    if credential.provider is None or credential.api_key is None:
+        yield ctx[CTX_LLM_CLIENT]
+        return
+
+    adapter = ByokAdapter.for_provider(credential.provider, api_key=credential.api_key)
+    try:
+        yield adapter
+    finally:
+        await adapter.close()
+
+
+async def _chuan_bi(
+    mid: uuid.UUID,
+) -> tuple[ModelEntry, list[dict[str, Any]], uuid.UUID, Credential]:
+    """Bước ① → ③ (+ ①.5): đọc message, chọn credential, dựng ngữ cảnh, `streaming`.
+
+    Cả bốn trong **một** session rồi đóng ngay: một lượt sinh có thể kéo mười
     phút, và giữ một kết nối Postgres suốt thời gian đó chỉ để chờ model là
-    cách nhanh nhất làm cạn pool khi có vài người cùng chat.
+    cách nhanh nhất làm cạn pool khi có vài người cùng chat. `resolve_credential`
+    đi nhờ đúng session ấy (T-2.15) thay vì mở một kết nối thứ hai cho một câu
+    `SELECT` một hàng.
 
     Dựng ngữ cảnh **trước** khi đổi trạng thái, đúng thứ tự §7.2: ngữ cảnh
     hỏng (lá không tồn tại, ngân sách không đủ) thì message còn nguyên
@@ -401,6 +452,13 @@ async def _chuan_bi(mid: uuid.UUID) -> tuple[ModelEntry, list[dict[str, Any]], u
         except context.BudgetTooSmallError as exc:
             raise LoiSinh(ErrorCode.CONTEXT_TOO_LARGE, str(exc)) from exc
 
+        # ①.5 §10.5 — ai trả tiền cho lượt này. **Trước** `mark_streaming`
+        # chứ không sau: cả hai ngả lùi của nó (khoá bị xoá, khoá không giải
+        # mã được) chỉ là "đi bằng system key", nhưng một ngoại lệ Postgres ở
+        # đây mà đứng sau `mark_streaming` sẽ để lại một message `streaming`
+        # không ai sinh — đúng món ăn của reaper §7.6.
+        credential = await resolve_credential(session, user_id=owned.user_id, model=model_meta)
+
         if not await repo.mark_streaming(mid, model_id=model_meta.id):
             # Không còn `queued`: một worker khác đã nhận, hoặc message đã
             # `failed`/`cancelled` trong lúc chờ hàng đợi. Bỏ lượt là đúng —
@@ -411,10 +469,10 @@ async def _chuan_bi(mid: uuid.UUID) -> tuple[ModelEntry, list[dict[str, Any]], u
             )
         await session.commit()
 
-    # `user_id` đi ra cùng hai thứ kia vì đây là chỗ DUY NHẤT đọc được nó:
+    # `user_id` đi ra cùng ba thứ kia vì đây là chỗ DUY NHẤT đọc được nó:
     # `messages` không có cột `user_id` (Phụ lục A), nó nằm ở hội thoại chứa
     # message. Bước ghi sổ ⑥.5 cần nó cho `usage_events.user_id`.
-    return model_meta, wire_messages, owned.user_id
+    return model_meta, wire_messages, owned.user_id, credential
 
 
 async def _phat(producer: StreamProducer, ket_qua: _KetQua, chunk: Chunk) -> None:
@@ -593,6 +651,10 @@ async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, ket_qua: _KetQua) -
     Ngả thứ tư — chết **trước** khi gọi model — không ghi gì, và `billable` là
     chỗ chặn (xem docstring của nó).
 
+    **BYOK vẫn ghi sổ, chỉ không trừ quota (§10.5, T-2.15).** Dòng
+    `usage_events` có mặt để người dùng tự xem chi tiêu của mình; thứ vắng
+    mặt là hai lệnh `ZADD` của §10.3, và chỗ quyết là `quota/meter.py`.
+
     **Nuốt mọi ngoại lệ**, cùng lý lẽ với `_ghi_heartbeat` và `_bi_huy` nhưng
     đắt hơn: ở đây cái mất là một khoản trong sổ cái, không phải một nhịp tim.
     Vẫn nuốt, vì thay thế duy nhất là để một lỗi Redis/Postgres biến một câu
@@ -625,6 +687,10 @@ async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, ket_qua: _KetQua) -
                 content=ket_qua.content,
                 reasoning="".join(ket_qua.reasoning),
                 tool_calls=[tc.to_wire() for tc in ket_qua.tool_calls] or None,
+                # §10.5 — `byok` thì `record_usage` ghi dòng sổ nhưng KHÔNG
+                # `ZADD` hai cửa sổ quota. Luật nằm ở `quota/meter.py`, chỗ
+                # duy nhất biết cả hai vế; ở đây chỉ chở giá trị (B-157).
+                key_source=ket_qua.key_source,
             )
             await session.commit()
     except Exception:  # noqa: BLE001 — xem docstring
@@ -639,10 +705,11 @@ async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, ket_qua: _KetQua) -
 
     ket_qua.cost_usd = record.cost_usd
     logger.info(
-        "generate: %s ghi so %s · %s · in=%d out=%d cached=%d · %s USD · %s",
+        "generate: %s ghi so %s · %s · key_source=%s · in=%d out=%d cached=%d · %s USD · %s",
         mid,
         record.id,
         model.id,
+        ket_qua.key_source.value,
         record.spent.prompt_tokens,
         record.spent.completion_tokens,
         record.spent.cached_tokens,

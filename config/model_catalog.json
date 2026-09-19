@@ -41,8 +41,9 @@
       "availability": "always",
       "byok_supported": true,
       "cost_reporting": "exact",
-      "auth_style": "bearer",
-      "verify_path": "/models"
+      "auth_style": "x-api-key",
+      "verify_path": "/models",
+      "extra_headers": { "anthropic-version": "2023-06-01" }
     },
     "ninerouter": {
       "label": "9Router (local)",

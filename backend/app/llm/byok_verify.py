@@ -115,12 +115,17 @@ _BEARER_PREFIX = "Bearer "
 
 
 def _headers_for(provider: Provider, key: str) -> dict[str, str] | None:
-    """Header mang khoá, hoặc `None` nếu `auth_style` này chưa kiểm được."""
+    """Header mang khoá, hoặc `None` nếu `auth_style` này chưa kiểm được.
+
+    `extra_headers` của catalog đi trước, header xác thực đi **sau** (B-166,
+    T-2.15): thứ tự ấy làm cho một `Authorization` gõ nhầm vào `extra_headers`
+    không bao giờ ghi đè được credential thật — xem `Provider.extra_headers`.
+    """
     ten_header = _AUTH_HEADER.get(provider.auth_style)
     if ten_header is None:
         return None
     gia_tri = f"{_BEARER_PREFIX}{key}" if provider.auth_style == "bearer" else key
-    return {ten_header: gia_tri}
+    return {**provider.extra_headers, ten_header: gia_tri}
 
 
 def _client() -> httpx.AsyncClient:

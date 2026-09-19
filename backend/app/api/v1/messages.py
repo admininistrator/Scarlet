@@ -96,18 +96,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.conversations import MessageTrenDuongDi
 from app.config import catalog
 from app.config.settings import settings
-from app.core.deps import get_current_user_id, require_chat_access
+from app.core.deps import (
+    STATUSES_CAN_CHAT_SYSTEM_KEY,
+    ensure_status_allowed,
+    get_current_user_id,
+    get_current_user_status,
+    require_chat_access,
+)
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.queue import GENERATE_JOB_NAME, get_arq_pool
 from app.core.ratelimit import gioi_han_chat, nha_ghe_sinh, nhan_ghe_sinh
 from app.core.redis import get_redis
-from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.db.models import Conversation, KeySource, Message, MessageRole, MessageStatus, UserStatus
 from app.db.repositories import (
     ConversationRepository,
     MessageNotInConversationError,
     MessageRepository,
 )
 from app.db.session import session_scope
+from app.llm.credentials import resolve_key_source
 from app.quota.estimator import QuotaWarning, check_quota
 from app.streaming.cancel import dat_co_huy
 
@@ -220,6 +227,7 @@ async def create_message(
     conversation_id: uuid.UUID,
     body: TaoMessageRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    user_status: Annotated[UserStatus | None, Depends(get_current_user_status)],
 ) -> TaoMessageResponse:
     """Ghi hai message, dời con trỏ nhánh, đẩy job, trả `202`. Không gọi model.
 
@@ -276,6 +284,7 @@ async def create_message(
             conversations=conversations,
             conversation_id=conversation_id,
             user_id=user_id,
+            user_status=user_status,
             parent_id=uid,
             model=model,
         )
@@ -302,6 +311,7 @@ async def _mo_luot_sinh(
     conversations: ConversationRepository,
     conversation_id: uuid.UUID,
     user_id: uuid.UUID,
+    user_status: UserStatus | None,
     parent_id: uuid.UUID | None,
     model: catalog.ModelEntry,
 ) -> LuotSinhMoi:
@@ -317,10 +327,20 @@ async def _mo_luot_sinh(
     `id` ngay bên trong hàm là làm hai lần một việc caller vừa làm xong
     (`_chon_model`).
 
+    **Nhận thêm `user_status` kể từ T-2.15, và đó là chỗ B-140 được đóng.**
+    `require_chat_access` gắn ở route chạy **trước** khi body được đọc, nên nó
+    chỉ hỏi được "người này có khoá **nào đó** không". Câu đúng của §11.1 là
+    "có khoá cho provider của model **đang gọi** không", và chỗ duy nhất trả
+    lời được là đây — sau `_chon_model`. Hai lớp, thô rồi tinh: lớp ngoài chặn
+    sớm mà không cần đọc DB thêm cho `active`, lớp trong chặn đúng.
+
     Trả `id` của message assistant vừa tạo, đọc ra **trước** khi session đóng,
     cộng cảnh báo quota của UC-07 (có thể `None`).
 
     Raise:
+        ApiError 403 `PENDING_APPROVAL`: trạng thái chỉ chat được bằng khoá
+            riêng (§11.1), mà lượt này lại đi bằng system key vì chưa có khoá
+            dùng được cho provider của model đã chọn (B-140).
         ApiError 404 `PARENT_NOT_FOUND`: `parent_id` không nằm trong hội thoại
             này (hoặc vừa bị xoá mềm). Với `POST .../messages` ca này không thể
             xảy ra — cha là message vừa ghi ở dòng trên — nhưng `retry` thì có:
@@ -328,9 +348,22 @@ async def _mo_luot_sinh(
         ApiError 429 `TOO_MANY_STREAMS`: người này đã có
             `MAX_CONCURRENT_STREAMS` lượt sinh chưa khép (§10.6, T-2.9).
         ApiError 429 `QUOTA_EXCEEDED`: dự toán xấu nhất của lượt này cộng chi
-            tiêu đã có vượt hạn mức 5 giờ hoặc 7 ngày (§10.2, T-2.11).
+            tiêu đã có vượt hạn mức 5 giờ hoặc 7 ngày (§10.2, T-2.11) — chỉ
+            trên nhánh system key.
         ApiError 503 `ENQUEUE_FAILED`: xem `_day_job`.
     """
+    # §10.5 — ai trả tiền cho lượt này. Hỏi TRƯỚC `create_message`: cả hai
+    # phép kiểm ngay dưới đều có thể ném, và ném trước khi ghi nghĩa là không
+    # có hàng nào phải rollback (cùng tinh thần với thứ tự quota/ghế bên dưới).
+    key_source = await resolve_key_source(session, user_id=user_id, model=model)
+
+    # B-140 — phép kiểm §11.1 CHÍNH XÁC, xem docstring. Bảng vẫn sống ở
+    # `core/deps.py`: ở đây chỉ hỏi nó, bằng đúng hàm mà `POST /auth/login`
+    # dùng. Nhánh tạm Phase 1 (`user_status is None`) đi thẳng qua, y như
+    # `require_status` cho nó đi qua — xem `get_current_user_status`.
+    if user_status is not None and key_source is KeySource.SYSTEM:
+        ensure_status_allowed(user_status, STATUSES_CAN_CHAT_SYSTEM_KEY)
+
     try:
         assistant = await messages.create_message(
             conversation_id=conversation_id,
@@ -370,7 +403,17 @@ async def _mo_luot_sinh(
     # Và ở **đây** chứ không ở một dependency, cùng lý do với ghế: phép ước
     # tính cần đúng ngữ cảnh worker sắp gửi, mà ngữ cảnh ấy đi từ `amid` —
     # một id chỉ ra đời sau `create_message` phía trên.
-    canh_bao = await check_quota(session, user_id=user_id, leaf_id=amid, model=model)
+    #
+    # **BYOK bỏ qua HẲN cửa này (§10.5, B-157)** — không phải "ước tính rồi
+    # tha": tiền của lượt này không phải tiền của người vận hành, nên không
+    # có hạn mức nào để so. Bỏ qua cả phép đọc Redis luôn, vì một `read_window`
+    # ở đây chỉ để vứt đi là một lần `503` không đáng có khi Redis chớp. Cảnh
+    # báo UC-07 cũng vắng mặt: thanh "còn ~X USD" nói về quota hệ thống, và
+    # hiện nó cho một lượt không trừ quota là nói sai. Rate limit của §10.6
+    # thì **vẫn** áp — nó là dependency của route, không đi qua đây.
+    canh_bao = None
+    if key_source is KeySource.SYSTEM:
+        canh_bao = await check_quota(session, user_id=user_id, leaf_id=amid, model=model)
 
     # §10.6 hàng "Đồng thời" (T-2.9, B-85, NQ-49). Ở **đây** chứ không ở một
     # dependency vì phép kiểm cần `message_id`, mà id đó chỉ ra đời ở dòng
@@ -699,6 +742,7 @@ async def retry_message(
     request: Request,
     message_id: uuid.UUID,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    user_status: Annotated[UserStatus | None, Depends(get_current_user_status)],
     body: RetryRequest | None = None,
 ) -> RetryResponse:
     """Sinh lại một câu trả lời thành ANH EM của nó — §8.2, UC-04.
@@ -750,6 +794,7 @@ async def retry_message(
             conversations=conversations,
             conversation_id=goc.conversation_id,
             user_id=user_id,
+            user_status=user_status,
             parent_id=goc.parent_id,
             model=model,
         )
@@ -786,6 +831,7 @@ async def edit_message(
     message_id: uuid.UUID,
     body: SuaMessageRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    user_status: Annotated[UserStatus | None, Depends(get_current_user_status)],
 ) -> SuaMessageResponse:
     """Sửa một câu hỏi = thêm một câu hỏi ANH EM rồi sinh lại — §8.2, UC-04.
 
@@ -843,6 +889,7 @@ async def edit_message(
             conversations=conversations,
             conversation_id=goc.conversation_id,
             user_id=user_id,
+            user_status=user_status,
             parent_id=uid,
             model=model,
         )

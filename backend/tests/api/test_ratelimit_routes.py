@@ -36,11 +36,13 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import catalog
 from app.config.settings import settings
 from app.core import ratelimit
+from app.core.crypto import mask_secret, seal
 from app.core.errors import ApiErrorCode
 from app.db.models import Conversation, Message, MessageRole, MessageStatus
-from app.db.repositories import ConversationRepository, MessageRepository
+from app.db.repositories import ConversationRepository, MessageRepository, ProviderKeyRepository
 from app.main import app
 
 #: Kiểu thật là `FakeRateLimitRedis` của `tests/api/conftest.py`, nhưng `tests/`
@@ -418,3 +420,55 @@ async def test_ghe_cap_cho_dung_message_assistant_vua_tao(
     assert ten == "slot"
     assert argv[0] == ratelimit.stream_slot_key(user_a)
     assert argv[4] == resp.json()["assistant_message_id"]
+
+
+# ═══════ BYOK không mua được quyền miễn rate limit (§10.5, T-2.15) ═══════
+
+
+@pytest.mark.usefixtures("_debug_bat", "_db_cua_test", "arq_gia")
+async def test_byok_van_bi_token_bucket_chan(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    ratelimit_redis: FakeRateLimitRedis,
+    arq_gia: _ArqGia,
+) -> None:
+    """**DoD dòng 4 của T-2.15.** §10.5 hàng "Rate limit": *"Vẫn áp dụng"*.
+
+    Quota giới hạn **tiền của người vận hành**, rate limit giới hạn **tần
+    suất** (§10.6) — hai thứ khác nhau, và BYOK chỉ mua được miễn thứ nhất.
+    Người dùng BYOK vẫn dùng worker, vẫn chiếm kết nối Postgres/Redis, vẫn
+    gửi được 1000 request/phút nếu không ai chặn.
+
+    Lớp chặn là một **dependency** của route (`_ROUTE_SINH_CHU`), tức nó chạy
+    xong trước khi handler biết BYOK tồn tại — nên tính chất này giữ được
+    "miễn phí". Test canh đúng chiều đó: chuyển nó thành một phép kiểm bên
+    trong `_mo_luot_sinh` là mở đường cho một nhánh `if byok: bo_qua`.
+    """
+    conversation, _, _ = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
+    model = catalog.get_default_model()
+    assert model is not None
+    khoa = "sk-" + "0123456789abcdef" * 2
+    async with session_factory() as session:
+        await ProviderKeyRepository(session).upsert(
+            user_id=user_a,
+            provider=model.provider,
+            sealed=seal(khoa),
+            masked=mask_secret(khoa),
+            verified_at=None,
+        )
+        await session.commit()
+    truoc = await _dem_message(session_factory, conversation.id)
+    ratelimit_redis.bucket = XO_CAN
+
+    resp = await client.post(
+        DUONG_DAN_TAO.format(conversation.id),
+        headers={"X-User-Id": str(user_a)},
+        json={"content": "xin chao"},
+    )
+
+    assert resp.status_code == 429
+    assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
+    assert resp.headers["retry-after"] == "3"
+    assert await _dem_message(session_factory, conversation.id) == truoc
+    assert arq_gia.da_day == []

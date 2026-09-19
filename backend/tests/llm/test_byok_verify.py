@@ -92,6 +92,42 @@ async def test_auth_style_x_api_key_gan_header_x_api_key(
     assert "authorization" not in da_gui[0].headers
 
 
+async def test_extra_headers_cua_catalog_di_kem_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**B-166** — Anthropic đòi `anthropic-version`, thiếu là `400` rồi `503`.
+
+    Đo trên API thật ở T-2.14: `GET https://api.anthropic.com/v1/models` trả
+    `400 "anthropic-version: header is required"` với **cả** hai `auth_style`.
+    Catalog nay khai được header ấy, và đây là phép kiểm rằng nó đi kèm thật.
+    """
+    da_gui = _dat_transport(monkeypatch, _tra(200))
+    provider = _provider(auth_style="x-api-key", extra_headers={"anthropic-version": "2023-06-01"})
+
+    await verify_key(TEN_PROVIDER, provider, KHOA_GIA)
+
+    assert da_gui[0].headers["anthropic-version"] == "2023-06-01"
+    assert da_gui[0].headers["x-api-key"] == KHOA_GIA
+
+
+async def test_extra_headers_KHONG_de_len_duoc_header_xac_thuc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`extra_headers` merge TRƯỚC, header mang khoá ghi đè SAU — thứ tự là hợp đồng.
+
+    Một `Authorization` gõ nhầm vào catalog mà thắng được credential thật
+    nghĩa là mọi phép kiểm khoá từ đó trở đi đo một khoá khác.
+    """
+    da_gui = _dat_transport(monkeypatch, _tra(200))
+    provider = _provider(
+        auth_style="bearer", extra_headers={"Authorization": "Bearer khoa-cua-nguoi-khac"}
+    )
+
+    await verify_key(TEN_PROVIDER, provider, KHOA_GIA)
+
+    assert da_gui[0].headers["authorization"] == f"Bearer {KHOA_GIA}"
+
+
 async def test_khoa_khong_di_vao_query_string(monkeypatch: pytest.MonkeyPatch) -> None:
     """C20: một khoá trong URL là một khoá trong access log của nginx."""
     da_gui = _dat_transport(monkeypatch, _tra(200))

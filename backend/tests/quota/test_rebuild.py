@@ -78,6 +78,7 @@ async def _ghi_so(
     *,
     cost: str,
     tuoi_giay: float = 0.0,
+    key_source: KeySource = KeySource.SYSTEM,
 ) -> uuid.UUID:
     """Một dòng `usage_events` có tuổi cho trước. Trả `id` của nó.
 
@@ -93,7 +94,7 @@ async def _ghi_so(
         message_id=None,
         model_id=MODEL_CO_GIA,
         provider="deepseek",
-        key_source=KeySource.SYSTEM,
+        key_source=key_source,
         prompt_tokens=100,
         completion_tokens=10,
         cached_tokens=0,
@@ -592,3 +593,89 @@ async def test_lenh_rebuild_quota_all_nap_lai_zset_va_tra_ma_thoat_0(
     assert ma_thoat == 0
     assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.330000")
     assert str(user_a) in capsys.readouterr().out
+
+
+# ════════ T-2.15 — dòng sổ BYOK KHÔNG được quay lại ZSET quota (§10.5) ════════
+#
+# Trước T-2.15 mọi dòng `usage_events` đều là `system`, nên ba câu đọc của
+# `rebuild_quota` không cần lọc gì. Từ khi đường BYOK sống thật, **không lọc**
+# nghĩa là §10.5 bị phá một nhịp sau: lúc ghi sổ thì đúng (không `ZADD`), rồi
+# lần đầu tiên ZSET rỗng — `FLUSHDB`, `down -v`, hết TTL — `refill_if_empty`
+# nạp khoản BYOK ấy vào như một khoản system.
+#
+# Ca này đo được trên stack thật ở DoD T-2.15 dòng 3 **trước** khi có bộ lọc:
+# ZSET dựng lại ra 2 member, một trong đó là đúng khoản BYOK vừa tiêu.
+
+
+async def test_dong_BYOK_khong_vao_ZSET_khi_dung_lai(
+    session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
+) -> None:
+    """`rebuild_quota` chỉ dựng lại phần tiền của NGƯỜI VẬN HÀNH."""
+    await _ghi_so(session, user_a, cost="0.100000", tuoi_giay=TRONG_5H)
+    await _ghi_so(session, user_a, cost="0.900000", tuoi_giay=TRONG_5H, key_source=KeySource.BYOK)
+    await session.commit()
+
+    await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
+
+    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.100000")
+    assert len(_zset(quota_redis_fake, LimitType.SHORT, user_a)) == 1
+    assert _tong(quota_redis_fake, LimitType.LONG, user_a) == Decimal("0.100000")
+
+
+async def test_chi_co_dong_BYOK_thi_KHONG_HOI_postgres_lan_thu_hai(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    quota_redis_fake: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`has_events_since` cũng phải lọc, không chỉ `list_since` — và cái giá là SỐ CÂU SQL.
+
+    Chỉ nhìn kết quả thì hai bản giống hệt nhau: `list_since` đã lọc rồi nên
+    dù `has_events_since` nói "có tiền", lượt dựng lại vẫn nạp **không** dòng
+    nào và ZSET vẫn rỗng. Thứ khác nhau là **cái giá**: mỗi request của một
+    người dùng BYOK thuần sẽ kéo theo một lượt đọc cả cửa sổ để không ghi gì
+    — đúng cái mà điều kiện hai vế của T-2.13 sinh ra để tránh (RR-7).
+
+    Vì vậy phép kiểm đếm câu SQL, không đếm kết quả: bỏ bộ lọc khỏi
+    `has_events_since` thì `list_since` bị gọi và test đỏ.
+    """
+    await _ghi_so(session, user_a, cost="0.900000", tuoi_giay=TRONG_5H, key_source=KeySource.BYOK)
+    await session.commit()
+    state = await read_window(quota_redis_fake, windows()[0], user_id=user_a, now=time.time())
+    so_lan_doc_ca_cua_so = 0
+    goc = UsageEventRepository.list_since
+
+    async def dem(self: UsageEventRepository, **kwargs: Any) -> Any:
+        nonlocal so_lan_doc_ca_cua_so
+        so_lan_doc_ca_cua_so += 1
+        return await goc(self, **kwargs)
+
+    monkeypatch.setattr(UsageEventRepository, "list_since", dem)
+
+    sau = await refill_if_empty(session, quota_redis_fake, state, user_id=user_a, now=time.time())
+
+    assert sau.spent == Decimal(0)
+    assert _zset(quota_redis_fake, LimitType.SHORT, user_a) == {}
+    assert so_lan_doc_ca_cua_so == 0, (
+        "chỉ có tiền BYOK thì `has_events_since` phải nói KHÔNG, và lượt đọc cả "
+        "cửa sổ không được xảy ra"
+    )
+
+
+async def test_rebuild_all_bo_qua_nguoi_chi_tieu_bang_BYOK(
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    user_b: uuid.UUID,
+    quota_redis_fake: Any,
+) -> None:
+    """`user_ids_since` là vế thứ ba — bỏ sót nó thì `--all` vẫn nạp nhầm."""
+    async with session_factory() as ghi:
+        await _ghi_so(ghi, user_a, cost="0.200000", tuoi_giay=TRONG_5H)
+        await _ghi_so(ghi, user_b, cost="0.700000", tuoi_giay=TRONG_5H, key_source=KeySource.BYOK)
+        await ghi.commit()
+
+    async with session_factory() as doc:
+        da_dung = await rebuild_all(doc, quota_redis_fake, now=time.time())
+
+    assert [bao_cao.user_id for bao_cao in da_dung] == [user_a]
+    assert _zset(quota_redis_fake, LimitType.SHORT, user_b) == {}

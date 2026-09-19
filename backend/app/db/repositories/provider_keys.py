@@ -1,9 +1,9 @@
 """Repository của bảng `user_provider_keys` — BYOK (KH §10.5, §20) — T-2.14.
 
-Ba câu SQL, mỗi câu tương ứng đúng một endpoint của §18.4 (`GET
-/settings/keys`, `PUT` và `DELETE /settings/keys/{provider}`). Không có câu
-thứ tư: đường **đọc để dùng** (giải mã rồi gọi model) là việc của T-2.15, và
-một hàm không có người gọi hôm nay là một hàm không ai kiểm được.
+Ba câu đầu ứng đúng ba endpoint của §18.4 (`GET /settings/keys`, `PUT` và
+`DELETE /settings/keys/{provider}`). Câu thứ tư — `get`, đường **đọc để
+dùng** — ra đời ở T-2.15 cùng với người gọi của nó
+(`app/llm/credentials.py`), đúng như T-2.14 đã hẹn.
 
 **`user_id` lọc trong câu SQL, cả ba câu** (§20, CLAUDE.md). Bảng này chứa
 credential của người khác, nên "lọc ở tầng Python sau khi đã SELECT" ở đây
@@ -51,6 +51,23 @@ class ProviderKeyRepository:
             .order_by(UserProviderKey.provider)
         )
         return (await self._session.execute(stmt)).scalars().all()
+
+    async def get(self, *, user_id: uuid.UUID, provider: str) -> UserProviderKey | None:
+        """Khoá BYOK của một người cho ĐÚNG một provider — đường gọi model (T-2.15).
+
+        Khác `list_for_user` ở chỗ nó trả về hàng để **giải mã rồi dùng**, nên
+        nó lọc thêm `provider` **trong câu SQL**: đọc cả danh sách rồi chọn ở
+        Python là kéo bản mã của mọi provider khác vào tiến trình mà không
+        việc gì tới chúng (§20, C20).
+
+        `None` = chưa cấu hình khoá cho provider này ⇒ lượt sinh đi bằng
+        system key (§10.5). Đó cũng là đường mà DoD dòng 3 của T-2.15 đi: xoá
+        khoá xong thì câu này trả `None` ở lượt kế tiếp.
+        """
+        stmt = select(UserProviderKey).where(
+            UserProviderKey.user_id == user_id, UserProviderKey.provider == provider
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def upsert(
         self,

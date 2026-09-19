@@ -9,6 +9,29 @@ không đổi, mà cách rẻ nhất để giữ lời hứa đó là không vi�
 nó nằm ở đây thay vì ở `quota/` vì §20 bắt mọi câu SQL sống trong tầng này —
 nhất là câu có `WHERE user_id`, thứ phải đọc được bằng mắt trong vài phút.
 
+╔══════════════════════════════════════════════════════════════════════════╗
+║  BA CÂU DỰNG LẠI QUOTA CHỈ ĐỌC `key_source='system'` (§10.5, T-2.15)     ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Bảng này chứa **cả hai** loại chi tiêu: tiền của người vận hành (`system`) và
+tiền của chính người dùng (`byok`, §10.5). Hai câu hỏi khác nhau đọc nó, và
+chúng cần hai tập hàng khác nhau:
+
+* *"người này đã tiêu bao nhiêu **của mình**"* — cả hai loại. Đó là lý do
+  §10.5 bắt ghi dòng sổ cho BYOK ngay cả khi không trừ quota.
+* *"hạn mức 5 giờ của người này còn bao nhiêu"* — **chỉ** `system`.
+
+`list_since`/`has_events_since`/`user_ids_since` trả lời câu **thứ hai**, nên
+cả ba lọc `key_source='system'` trong câu SQL. Thiếu bộ lọc ấy thì mọi khoản
+BYOK quay lại ZSET ở lần `refill_if_empty` đầu tiên (RR-7) — tức §10.5 bị phá
+**một nhịp sau**, không phải lúc ghi sổ: `docker compose down -v` hay một
+`FLUSHDB` là đủ. Đo được ở DoD T-2.15 dòng 3 trước khi có bộ lọc: sau khi xoá
+khoá và xoá hai khoá quota, ZSET dựng lại ra **2** member trong đó có đúng
+khoản BYOK 0.000068 USD vừa tiêu.
+
+`sum_since` **không** lọc, vì nó trả lời câu thứ nhất và người gọi của nó
+(T-2.17, cảnh báo chi tiêu) chưa tồn tại để nói nó muốn tập nào — xem Backlog.
+
 **T-2.13 thêm ba câu đọc, và KHÔNG dùng `sum_since`.** Một tổng không dựng lại
 được ZSET: §10.3 đặt `score` là epoch của **từng** dòng sổ, nên bản dựng lại
 phải biết mỗi khoản tiền ra đời lúc nào — một con số gộp chỉ nói được "tổng
@@ -114,6 +137,11 @@ class UsageEventRepository:
         lần nào phải ra `0` chứ không phải `None` — chỗ gọi sẽ cộng con số này
         vào một `Decimal`, và `None` ở đó là một `TypeError` giữa đường tính
         hạn mức.
+
+        **KHÔNG lọc `key_source`, khác ba câu dưới** — có chủ ý, xem docstring
+        module: đây là "người này đã tiêu bao nhiêu", một câu gồm cả BYOK.
+        Người gọi duy nhất của nó (T-2.17) chưa tồn tại, nên chọn hộ nó một
+        tập hàng hôm nay là đoán; ngày nó ra đời, nó nói ra tập nó muốn.
         """
         stmt = select(func.coalesce(func.sum(UsageEvent.cost_usd), 0)).where(
             UsageEvent.user_id == user_id,
@@ -135,10 +163,15 @@ class UsageEventRepository:
         Redis — tức phần sắp rơi khỏi cửa sổ, chỗ mất mát rẻ nhất.
 
         Lọc `user_id` **trong câu SQL** (§20), đi đúng index `ix_usage_user_time`.
+        Lọc `key_source='system'` ở cùng chỗ — xem docstring module (§10.5).
         """
         stmt = (
             select(UsageEvent.id, UsageEvent.cost_usd, UsageEvent.created_at)
-            .where(UsageEvent.user_id == user_id, UsageEvent.created_at >= since)
+            .where(
+                UsageEvent.user_id == user_id,
+                UsageEvent.created_at >= since,
+                UsageEvent.key_source == KeySource.SYSTEM,
+            )
             .order_by(UsageEvent.created_at)
         )
         rows = (await self._session.execute(stmt)).all()
@@ -159,7 +192,11 @@ class UsageEventRepository:
         """
         stmt = (
             select(UsageEvent.id)
-            .where(UsageEvent.user_id == user_id, UsageEvent.created_at >= since)
+            .where(
+                UsageEvent.user_id == user_id,
+                UsageEvent.created_at >= since,
+                UsageEvent.key_source == KeySource.SYSTEM,
+            )
             .limit(1)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
@@ -172,5 +209,12 @@ class UsageEventRepository:
         là hai câu truy vấn để không ghi gì. Tập đúng là tập người có tiền
         trong cửa sổ, và nó đọc thẳng từ chính bảng sẽ được dựng lại.
         """
-        stmt = select(UsageEvent.user_id).where(UsageEvent.created_at >= since).distinct()
+        stmt = (
+            select(UsageEvent.user_id)
+            .where(
+                UsageEvent.created_at >= since,
+                UsageEvent.key_source == KeySource.SYSTEM,
+            )
+            .distinct()
+        )
         return list((await self._session.execute(stmt)).scalars().all())

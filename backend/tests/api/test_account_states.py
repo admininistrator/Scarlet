@@ -29,12 +29,15 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import LargeBinary, bindparam, text, update
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import catalog
+from app.config.settings import settings
 from app.core.access_token import encode_access_token
+from app.core.crypto import mask_secret, seal
 from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiErrorCode
 from app.core.security import hash_password
@@ -132,11 +135,39 @@ async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
         yield http
 
 
+#: Khoá BYOK giả, GHÉP lúc chạy. Một chuỗi khớp `sk-[a-zA-Z0-9]{20,}` nằm
+#: nguyên văn trong repo làm `scripts/check_hardcode.sh` lệnh 4 đỏ vĩnh viễn —
+#: cùng lý do và cùng cách làm với `tests/core/test_log_redact.py` (T-2.14).
+_KHOA_GIA = "sk-" + "abcdefghij" * 3
+
+
 def _provider_byok() -> str:
-    """Tên một provider có `byok_supported` trong catalog — A3: không gõ tay."""
-    ho_tro = [ten for ten, p in catalog.get_catalog().providers.items() if p.byok_supported]
-    assert ho_tro, "catalog phải có ít nhất một provider hỗ trợ BYOK"
-    return sorted(ho_tro)[0]
+    """Provider của model MẶC ĐỊNH, và nó phải hỗ trợ BYOK — A3: không gõ tay.
+
+    **Đổi từ "một provider byok bất kỳ" sang "provider của model mặc định" ở
+    T-2.15 (B-140).** Ba route sinh chữ không truyền `model_id` nên chúng dùng
+    model `default` của catalog; từ T-2.15, cột "Chat bằng BYOK" của §11.1 hỏi
+    *"có khoá cho provider của model **đang gọi**"* chứ không còn là *"có khoá
+    nào đó"*. Một khoá của provider khác vì vậy **không** mở cửa ấy nữa — xem
+    `test_pending_approval_co_byok_sai_provider_van_403`, phép kiểm ngược của
+    chính khe hở này.
+    """
+    model = catalog.get_default_model()
+    assert model is not None, "catalog phải có model default"
+    provider = catalog.get_catalog().providers[model.provider]
+    assert provider.byok_supported, (
+        f"model default '{model.id}' thuộc provider '{model.provider}' không hỗ trợ BYOK — "
+        "bảng §11.1 cột 'Chat bằng BYOK' không đo được bằng model mặc định nữa"
+    )
+    return model.provider
+
+
+def _provider_khac_voi_mac_dinh() -> str:
+    """Một provider **khác** provider của model mặc định — nguyên liệu của B-140."""
+    mac_dinh = _provider_byok()
+    khac = [ten for ten in sorted(catalog.get_catalog().providers) if ten != mac_dinh]
+    assert khac, "catalog phải có ít nhất hai provider để đo khe hở B-140"
+    return khac[0]
 
 
 async def _tao_user(
@@ -144,14 +175,18 @@ async def _tao_user(
     trang_thai: UserStatus,
     *,
     co_byok: bool = False,
+    provider_byok: str | None = None,
 ) -> tuple[uuid.UUID, str]:
     """User với hash Argon2 thật, đặt sẵn `status`, tuỳ chọn thêm một khoá BYOK.
 
-    Hàng `user_provider_keys` chèn bằng SQL thô vì bảng chưa có ORM model —
-    cùng lý do đã ghi ở `UserRepository.has_provider_key`: hình dạng thật của
-    nó là việc của T-2.14. Giá trị `key_cipher`/`key_nonce` chỉ cần **tồn tại**
-    (phép kiểm của §11.1 là "có khoá hay không"), và cố ý là hai chuỗi byte vô
-    nghĩa — không có khoá thật nào đi qua bộ test này.
+    Hàng `user_provider_keys` chèn bằng SQL thô vì đây là file test của T-2.7,
+    không phải của T-2.14 — nhưng bản mã thì **thật** (`crypto.seal`) kể từ
+    T-2.15: khoá không giải mã được nay bị `llm/credentials.py` coi như không
+    có (`MASTER_ENCRYPTION_KEY` đã xoay ⇒ bảo người dùng nhập lại), nên hai
+    chuỗi byte vô nghĩa của bản cũ sẽ đo nhầm đúng thứ nó định đo.
+
+    `provider_byok` để một test chỉ đích danh **provider khác** với provider
+    của model mặc định — đó là khe hở B-140, và nó phải đo được.
     """
     email = f"{uuid.uuid4().hex}@scarlet.example"
     async with session_factory() as session:
@@ -161,6 +196,7 @@ async def _tao_user(
         assert user is not None
         await session.execute(update(User).where(User.id == user.id).values(status=trang_thai))
         if co_byok:
+            sealed = seal(_KHOA_GIA)
             await session.execute(
                 text(
                     "INSERT INTO user_provider_keys "
@@ -173,10 +209,10 @@ async def _tao_user(
                 ),
                 {
                     "user_id": user.id,
-                    "provider": _provider_byok(),
-                    "cipher": b"khong-phai-ban-ma-that",
-                    "nonce": b"khong-phai-nonce-that",
-                    "last4": "0000",
+                    "provider": provider_byok or _provider_byok(),
+                    "cipher": sealed.cipher,
+                    "nonce": sealed.nonce,
+                    "last4": mask_secret(_KHOA_GIA),
                 },
             )
         await session.commit()
@@ -326,6 +362,62 @@ async def test_pending_approval_co_byok_tra_202(
 
     assert resp.status_code == 202, resp.text
     assert len(arq_gia.da_day) == 1
+
+
+async def test_pending_approval_co_byok_SAI_PROVIDER_van_403(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], arq_gia: _ArqGia
+) -> None:
+    """**B-140 đóng ở T-2.15**: khoá phải là khoá của provider model đang gọi.
+
+    Trước T-2.15, `require_chat_access` chỉ hỏi "có khoá **nào đó** không",
+    nên một `pending_approval` lưu khoá của provider A rồi chat bằng model
+    của provider B sẽ đi lọt — và đi lọt bằng **system key**, tức tiêu tiền
+    của người vận hành đúng thứ §11.1 cấm.
+
+    Gỡ phép kiểm chính xác ở `_mo_luot_sinh` ra thì test này thành `202`.
+    """
+    khac = _provider_khac_voi_mac_dinh()
+    user_id, _ = await _tao_user(
+        session_factory, UserStatus.PENDING_APPROVAL, co_byok=True, provider_byok=khac
+    )
+    _dat_cookie_phien(client, user_id, UserStatus.PENDING_APPROVAL)
+    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+
+    resp = await client.post(
+        DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "xin chao"}
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["error"]["code"] == ApiErrorCode.PENDING_APPROVAL
+    assert arq_gia.da_day == [], "0 job ⇒ 0 USD của người vận hành"
+
+
+async def test_pending_approval_khoa_KHONG_GIAI_MA_DUOC_van_403(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    arq_gia: _ArqGia,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Khoá có hàng nhưng `MASTER_ENCRYPTION_KEY` đã xoay ⇒ coi như KHÔNG có.
+
+    Hỏng về phía chặt hơn, có chủ ý (xem docstring `llm/credentials.py`): mở
+    cửa cho một khoá không dùng được là để lượt sinh ấy rơi xuống system key
+    — tức đúng cái §11.1 cấm, chỉ chậm hơn một bước.
+    """
+    user_id, _ = await _tao_user(session_factory, UserStatus.PENDING_APPROVAL, co_byok=True)
+    _dat_cookie_phien(client, user_id, UserStatus.PENDING_APPROVAL)
+    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+    monkeypatch.setattr(
+        settings, "MASTER_ENCRYPTION_KEY", SecretStr("khoa-khac-hoan-toan-de-xoay-vong")
+    )
+
+    resp = await client.post(
+        DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "xin chao"}
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["error"]["code"] == ApiErrorCode.PENDING_APPROVAL
+    assert arq_gia.da_day == []
 
 
 async def test_byok_cua_NGUOI_KHAC_khong_mo_cua_cho_minh(

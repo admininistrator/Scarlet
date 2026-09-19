@@ -511,3 +511,65 @@ def test_catalog_that_co_o_dien_gia_cho_9router() -> None:
     """File thật phải có sẵn ô trống cho 9Router — đó là sản phẩm của B-65."""
     cat = catalog.get_catalog()
     assert "nr-gemini-flash" in cat.manual_pricing
+
+
+# ══════════ T-2.15 — `extra_headers` (B-166) và `provider_model` (§9.1) ══════════
+
+
+def test_extra_headers_vang_mat_la_dict_rong() -> None:
+    """Trường mới không được bắt mọi provider cũ phải khai lại (§9.2)."""
+    cat = Catalog.model_validate(VALID)
+    assert cat.providers["deepseek"].extra_headers == {}
+
+
+def test_extra_headers_doc_duoc_tu_json() -> None:
+    raw = deepcopy(VALID)
+    raw["providers"]["anthropic"]["extra_headers"] = {"anthropic-version": "2023-06-01"}
+    cat = Catalog.model_validate(raw)
+    assert cat.providers["anthropic"].extra_headers == {"anthropic-version": "2023-06-01"}
+
+
+def test_extra_headers_sai_kieu_thi_app_khong_boot() -> None:
+    """Một header không phải chuỗi là một request hỏng lúc chạy — L2 bắt ở đây."""
+    raw = deepcopy(VALID)
+    raw["providers"]["anthropic"]["extra_headers"] = {"anthropic-version": 20230601}
+    with pytest.raises(ValidationError):
+        Catalog.model_validate(raw)
+
+
+def test_catalog_that_anthropic_khai_du_de_dung_byok() -> None:
+    """**B-166 đóng ở T-2.15.** Đo được, không phải một lời hứa trong docstring.
+
+    `GET /v1/models` của Anthropic đòi `anthropic-version` và chỉ nhận
+    `x-api-key`; thiếu một trong hai thì `PUT /settings/keys/anthropic` trả
+    `503` và một trong hai provider `byok_supported` là không dùng được.
+    """
+    provider = catalog.get_catalog().providers["anthropic"]
+    assert provider.byok_supported
+    assert provider.auth_style == "x-api-key"
+    assert "anthropic-version" in provider.extra_headers
+
+
+@pytest.mark.parametrize(
+    ("upstream", "mong_doi"),
+    [
+        ("deepseek/deepseek-flash", "deepseek-flash"),
+        ("anthropic/claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001"),
+        # 9Router: phần tên gốc TỰ NÓ có một dấu gạch chéo — cắt ở dấu cuối
+        # sẽ vứt mất tiền tố `ag/` mà provider đòi.
+        ("openai/ag/gemini-3.8-flash-low", "ag/gemini-3.8-flash-low"),
+        # Không có tiền tố litellm nào ⇒ nguyên văn.
+        ("qwen2.5:0.5b", "qwen2.5:0.5b"),
+    ],
+)
+def test_provider_model_cat_dung_tien_to_cua_litellm(upstream: str, mong_doi: str) -> None:
+    raw = deepcopy(VALID)
+    raw["models"][0]["upstream_model"] = upstream
+    cat = Catalog.model_validate(raw)
+    assert cat.models[0].provider_model == mong_doi
+
+
+def test_provider_model_khac_id_o_it_nhat_mot_model_that() -> None:
+    """Hai tên trùng nhau ở MỌI model thì `Credential.model_name` không đo được."""
+    cat = catalog.get_catalog()
+    assert any(m.id != m.provider_model for m in cat.models)

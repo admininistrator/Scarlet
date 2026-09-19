@@ -349,9 +349,10 @@ async def record_usage(
     )
 
     # §10.5: request BYOK **không** trừ quota, nhưng vẫn có dòng sổ ở trên để
-    # người dùng tự xem chi tiêu. Nhánh này chưa chạy được tới T-2.15 (chưa có
-    # đường nào đặt `key_source='byok'`), nhưng luật nằm ở đây — chỗ duy nhất
-    # biết cả hai vế — chứ không phải ở chỗ gọi.
+    # người dùng tự xem chi tiêu. Từ T-2.15 nhánh này chạy thật:
+    # `workers/generate.py` chở `key_source` xuống từ `llm/credentials.py`.
+    # Luật vẫn ở đây — chỗ duy nhất biết cả hai vế — chứ không ở chỗ gọi, nên
+    # một đường ghi sổ thứ hai sinh ra sau này không thể quên nó (B-157).
     if key_source is KeySource.SYSTEM:
         await add_to_windows(redis, user_id=user_id, usage_id=event.id, cost_usd=cost, now=now)
 

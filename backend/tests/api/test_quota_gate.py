@@ -27,9 +27,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import catalog
 from app.config.settings import settings
+from app.core.crypto import mask_secret, seal
 from app.db.models import Conversation, Message, MessageRole, MessageStatus
-from app.db.repositories import ConversationRepository, MessageRepository
+from app.db.repositories import ConversationRepository, MessageRepository, ProviderKeyRepository
 from app.main import app
 from app.quota.windows import LimitType, Window, encode_member
 
@@ -338,3 +340,120 @@ async def test_bi_chan_thi_KHONG_nhan_ghe_sinh(
     assert [ten for ten, _ in ratelimit_redis.calls] == ["bucket"], (
         "chỉ token bucket được chạy; script giữ ghế (`slot`) KHÔNG được chạm tới"
     )
+
+
+# ═══════════ BYOK bỏ qua cửa quota, KHÔNG bỏ qua gì khác (§10.5, B-157) ═══════════
+#
+# §10.5 hàng "Quota": *"Request dùng BYOK **không** trừ quota, nhưng **vẫn**
+# ghi `usage_events` với `key_source='byok'`"*, và hàng "Rate limit": *"Vẫn áp
+# dụng"*. Ba test dưới đây đo đúng ba vế đó nhìn từ ngoài HTTP; vế ghi sổ nằm
+# ở `tests/quota/test_meter.py` và `tests/workers/test_generate.py`.
+
+
+async def _luu_khoa_byok(
+    session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
+) -> str:
+    """Khoá BYOK cho provider của model MẶC ĐỊNH — đúng model mà request sẽ gọi."""
+    model = catalog.get_default_model()
+    assert model is not None
+    khoa = "sk-" + "0123456789abcdef" * 2
+    async with session_factory() as session:
+        await ProviderKeyRepository(session).upsert(
+            user_id=user_id,
+            provider=model.provider,
+            sealed=seal(khoa),
+            masked=mask_secret(khoa),
+            verified_at=None,
+        )
+        await session.commit()
+    return model.provider
+
+
+async def test_byok_van_chat_duoc_khi_het_quota_he_thong(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    quota_redis: Any,
+    _debug_bat: None,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """**DoD dòng 1 của T-2.15** (UC-07) ở mức HTTP: hết quota vẫn `202`.
+
+    Cùng một người, cùng một hội thoại, cùng một cửa sổ quota đã đầy như
+    `test_post_messages_bi_chan_khi_het_quota` — khác đúng một thứ: có khoá
+    riêng. Gỡ nhánh `if key_source is KeySource.SYSTEM` ở `_mo_luot_sinh` ra
+    thì test này thành `429`.
+    """
+    conversation = await _hoi_thoai(session_factory, user_a)
+    await _het_quota(session_factory, quota_redis, user_a)
+    await _luu_khoa_byok(session_factory, user_a)
+
+    resp = await client.post(
+        DUONG_DAN_TAO.format(conversation.id),
+        headers={"X-User-Id": str(user_a)},
+        json={"content": "xin chao"},
+    )
+
+    assert resp.status_code == 202, resp.text
+    assert len(arq_gia.da_day) == 1, "lượt sinh phải thật sự mở ra"
+
+
+async def test_byok_khong_kem_canh_bao_quota_trong_body(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    quota_redis: Any,
+    _debug_bat: None,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """Thanh cảnh báo UC-07 nói về quota **hệ thống** — hiện nó ở đây là nói sai.
+
+    Cùng trạng thái ZSET với `test_con_it_quota_thi_202_kem_canh_bao_trong_body`
+    (còn 15%), nhưng lượt này không trừ quota nên không có gì để cảnh báo.
+    """
+    conversation = await _hoi_thoai(session_factory, user_a)
+    window = Window(LimitType.SHORT, settings.QUOTA_WINDOW_SHORT_S)
+    quota_redis.zset[window.key(user_a)] = {
+        encode_member(uuid.uuid4(), Decimal("0.425")): time.time() - 60
+    }
+    await _luu_khoa_byok(session_factory, user_a)
+
+    resp = await client.post(
+        DUONG_DAN_TAO.format(conversation.id),
+        headers={"X-User-Id": str(user_a)},
+        json={"content": "xin chao"},
+    )
+
+    assert resp.status_code == 202, resp.text
+    assert resp.json()["quota_warning"] is None
+
+
+async def test_byok_khong_doc_ZSET_quota(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    quota_redis: Any,
+    _debug_bat: None,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """Bỏ qua HẲN cửa chặn, không phải "ước tính rồi tha".
+
+    Một `read_window` chỉ để vứt đi là một lần `503` không đáng có mỗi khi
+    Redis chớp — cho một lượt mà quota không có quyền chặn.
+    """
+    conversation = await _hoi_thoai(session_factory, user_a)
+    await _luu_khoa_byok(session_factory, user_a)
+    quota_redis.zset.clear()
+    truoc = len(quota_redis.zset)
+
+    resp = await client.post(
+        DUONG_DAN_TAO.format(conversation.id),
+        headers={"X-User-Id": str(user_a)},
+        json={"content": "xin chao"},
+    )
+
+    assert resp.status_code == 202, resp.text
+    assert len(quota_redis.zset) == truoc, "không cửa sổ nào được đụng tới"

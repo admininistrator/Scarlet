@@ -40,6 +40,7 @@ from app.config.settings import settings
 from app.db.models import (
     Conversation,
     CostConfidence,
+    KeySource,
     Message,
     MessageRole,
     MessageStatus,
@@ -1042,3 +1043,190 @@ async def test_gia_lay_theo_thoi_diem_GOI_chu_khong_phai_luc_ghi_so(
     moc = da_hoi[-1]
     assert moc is not None, "None = 'bay gio', tuc bo mat moc gia cua A7"
     assert truoc <= moc <= sau
+
+
+# ══════════ T-2.15 — đường BYOK: adapter nào, tên model nào, quota nào ══════════
+#
+# Ba câu chỉ nhìn thấy được từ **trong** `generate()`:
+#
+# 1. có khoá ⇒ worker dựng `ByokAdapter` và **không** dùng client dùng chung
+#    trong `ctx` (dùng nhầm nó là gọi model bằng tiền của người vận hành, trong
+#    khi sổ sách ghi `byok` — tức mất tiền mà không ai thấy);
+# 2. dòng `usage_events` mang `key_source='byok'` và **hai cửa sổ quota không
+#    tăng** (§10.5, B-157);
+# 3. adapter riêng ấy được `close()` trên **mọi** đường thoát, kể cả lỗi.
+
+
+async def _luu_khoa_byok(
+    session_factory: async_sessionmaker[AsyncSession],
+    user_id: uuid.UUID,
+    provider: str | None = None,
+) -> None:
+    from app.core.crypto import mask_secret, seal
+    from app.db.repositories import ProviderKeyRepository
+
+    model = get_model(MODEL_ID)
+    assert model is not None
+    khoa = "sk-" + "0123456789abcdef" * 2
+    async with session_factory() as s:
+        await ProviderKeyRepository(s).upsert(
+            user_id=user_id,
+            provider=provider or model.provider,
+            sealed=seal(khoa),
+            masked=mask_secret(khoa),
+            verified_at=None,
+        )
+        await s.commit()
+
+
+class _ByokGia(ClientGia):
+    """Đứng thay `ByokAdapter`: nhớ cách nó được dựng và có được đóng không."""
+
+    def __init__(self, chunks: list[Chunk], *, loi: BaseException | None = None) -> None:
+        super().__init__(chunks, loi=loi)
+        self.dung_voi: dict[str, Any] = {}
+        self.da_dong = False
+
+    async def close(self) -> None:
+        self.da_dong = True
+
+
+@pytest.fixture
+def byok_gia(monkeypatch: pytest.MonkeyPatch) -> _ByokGia:
+    """Vá `ByokAdapter.for_provider` ngay tại chỗ `generate` nhìn thấy nó."""
+    gia = _ByokGia(_chunks_binh_thuong(["a", "b"]))
+
+    def _dung(provider: Any, *, api_key: str, **_: Any) -> _ByokGia:
+        gia.dung_voi = {"provider": provider, "api_key": api_key}
+        return gia
+
+    monkeypatch.setattr("app.workers.generate.ByokAdapter.for_provider", _dung)
+    return gia
+
+
+async def test_byok_dung_adapter_rieng_chu_khong_phai_client_dung_chung(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    byok_gia: _ByokGia,
+) -> None:
+    """§9.1 hàng 2: `base_url` từ catalog, credential là khoá của user."""
+    message = await _cay_toi_thieu(session, user_a)
+    await _luu_khoa_byok(session_factory, user_a)
+    he_thong = ClientGia(_chunks_binh_thuong(["khong-duoc-dung"]))
+
+    await generate(_ctx(redis_gia, he_thong), str(message.id))
+
+    assert he_thong.goi is None, "client dùng chung KHÔNG được chạm tới"
+    assert byok_gia.goi is not None
+    model = get_model(MODEL_ID)
+    assert model is not None
+    assert byok_gia.dung_voi["provider"] is catalog.get_catalog().providers[model.provider]
+    assert byok_gia.dung_voi["api_key"].startswith("sk-")
+
+
+async def test_byok_gui_TEN_GOC_cua_provider_chu_khong_phai_alias_litellm(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    byok_gia: _ByokGia,
+) -> None:
+    """LiteLLM không có mặt trên đường này để dịch alias — xem `provider_model`."""
+    message = await _cay_toi_thieu(session, user_a)
+    await _luu_khoa_byok(session_factory, user_a)
+    model = get_model(MODEL_ID)
+    assert model is not None
+
+    await generate(_ctx(redis_gia, ClientGia([])), str(message.id))
+
+    assert byok_gia.goi is not None
+    assert byok_gia.goi["model"] == model.provider_model
+
+
+async def test_byok_ghi_dong_so_key_source_byok_va_ZSET_KHONG_TANG(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    byok_gia: _ByokGia,
+) -> None:
+    """**DoD dòng 2 của T-2.15** (§10.5, B-157).
+
+    Hai vế phải cùng đúng: dòng sổ **có** (người dùng tự xem chi tiêu của
+    mình) và hai cửa sổ quota **không** tăng (tiền không phải của người vận
+    hành). Bỏ `key_source=` ở `_record_usage` ra thì vế thứ hai đỏ.
+    """
+    message = await _cay_toi_thieu(session, user_a)
+    await _luu_khoa_byok(session_factory, user_a)
+
+    await generate(_ctx(redis_gia, ClientGia([])), str(message.id))
+
+    so = await _doc_so(session_factory, user_a)
+    assert len(so) == 1
+    assert so[0].key_source == KeySource.BYOK
+    assert so[0].cost_usd > 0, "vẫn tính tiền để người dùng xem được chi tiêu"
+    assert redis_gia.zset == {}, "§10.5: BYOK không trừ quota"
+
+
+async def test_khong_co_khoa_thi_van_la_system_va_ZSET_TANG(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+) -> None:
+    """Đối chứng của test ngay trên: không khoá ⇒ đường cũ không đổi một ly."""
+    message = await _cay_toi_thieu(session, user_a)
+
+    await generate(_ctx(redis_gia, ClientGia(_chunks_binh_thuong(["a"]))), str(message.id))
+
+    so = await _doc_so(session_factory, user_a)
+    assert so[0].key_source == KeySource.SYSTEM
+    assert _tong_zset(redis_gia, user_a) == so[0].cost_usd
+
+
+async def test_khoa_cua_provider_KHAC_thi_van_di_system(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    byok_gia: _ByokGia,
+) -> None:
+    """B-140 ở tầng worker: một khoá của provider khác không trả tiền hộ được."""
+    message = await _cay_toi_thieu(session, user_a)
+    model = get_model(MODEL_ID)
+    assert model is not None
+    khac = next(t for t in sorted(catalog.get_catalog().providers) if t != model.provider)
+    await _luu_khoa_byok(session_factory, user_a, provider=khac)
+    he_thong = ClientGia(_chunks_binh_thuong(["a"]))
+
+    await generate(_ctx(redis_gia, he_thong), str(message.id))
+
+    assert he_thong.goi is not None, "phải dùng client dùng chung"
+    assert byok_gia.goi is None
+    so = await _doc_so(session_factory, user_a)
+    assert so[0].key_source == KeySource.SYSTEM
+
+
+async def test_adapter_byok_duoc_dong_ca_khi_upstream_no(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    redis_gia: RedisGia,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Không đóng là để một kết nối MANG KHOÁ nằm treo tới lúc timeout."""
+    gia = _ByokGia([], loi=RuntimeError("upstream dut giua chung"))
+
+    def _dung(provider: Any, *, api_key: str, **_: Any) -> _ByokGia:
+        return gia
+
+    monkeypatch.setattr("app.workers.generate.ByokAdapter.for_provider", _dung)
+    message = await _cay_toi_thieu(session, user_a)
+    await _luu_khoa_byok(session_factory, user_a)
+
+    await generate(_ctx(redis_gia, ClientGia([])), str(message.id))
+
+    assert gia.da_dong, "adapter riêng phải được close() trên mọi đường thoát"
+    assert redis_gia.cuoi["type"] == "error"
