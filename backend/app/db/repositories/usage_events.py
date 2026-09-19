@@ -8,6 +8,7 @@ không đổi, mà cách rẻ nhất để giữ lời hứa đó là không vi�
 (`rebuild_quota`, §10.3) và **T-2.17** (cảnh báo chi tiêu, RR-1) cùng cần, và
 nó nằm ở đây thay vì ở `quota/` vì §20 bắt mọi câu SQL sống trong tầng này —
 nhất là câu có `WHERE user_id`, thứ phải đọc được bằng mắt trong vài phút.
+(T-2.13 rồi cũng **không** dùng nó — xem dưới; người gọi thật ra đời ở T-2.17.)
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  BA CÂU DỰNG LẠI QUOTA CHỈ ĐỌC `key_source='system'` (§10.5, T-2.15)     ║
@@ -29,8 +30,16 @@ BYOK quay lại ZSET ở lần `refill_if_empty` đầu tiên (RR-7) — tức �
 khoá và xoá hai khoá quota, ZSET dựng lại ra **2** member trong đó có đúng
 khoản BYOK 0.000068 USD vừa tiêu.
 
-`sum_since` **không** lọc, vì nó trả lời câu thứ nhất và người gọi của nó
-(T-2.17, cảnh báo chi tiêu) chưa tồn tại để nói nó muốn tập nào — xem Backlog.
+`sum_since` trả lời **cả hai** câu, và nó bắt người gọi nói ra mình hỏi câu
+nào: tham số `key_source` **bắt buộc**, không có giá trị mặc định (T-2.17,
+B-172). Một mặc định ở đây là chọn hộ người gọi tiếp theo — đúng hình dạng đã
+sinh ra B-168, nơi ba câu dựng lại quota im lặng gom cả tiền BYOK vào hạn mức.
+`None` nghĩa là *"cả hai loại"* và phải được gõ ra tường minh.
+
+Nó cũng trả về **hai** con số chứ không một (`CostSplit`), vì C16 nói thẳng
+`exact` và `low` phải tách **từ tầng dữ liệu**, không phải sửa ở tầng hiển thị.
+Người gọi đầu tiên của nó — cron `spend_alert` (T-2.17) — cần cả hai: ngưỡng
+so trên tổng, còn lá thư in riêng từng cột.
 
 **T-2.13 thêm ba câu đọc, và KHÔNG dùng `sum_since`.** Một tổng không dựng lại
 được ZSET: §10.3 đặt `score` là epoch của **từng** dòng sổ, nên bản dựng lại
@@ -75,6 +84,27 @@ class LedgerEntry:
     id: uuid.UUID
     cost_usd: Decimal
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class CostSplit:
+    """Chi tiêu của MỘT người trong MỘT cửa sổ, tách theo `cost_confidence` (T-2.17).
+
+    Hai trường, và **không** có trường thứ ba tên `total` — cùng lý lẽ đã ghi
+    cho `HaiCot` của T-2.16: C16 nói chính con số gộp ấy làm bảng chi phí vô
+    nghĩa, và một trường tiện tay thì sẽ có người dùng. Nơi duy nhất trong app
+    được phép cộng hai cột là `workers/spend_alert.py::_combined`, một hàm có
+    tên để `grep` ra được, đứng ở đúng chỗ người dùng đã chốt là "ngưỡng so
+    trên tổng, nhưng thư in tách hai con số".
+
+    Vì sao `sum_since` trả về cái này chứ không một `Decimal`: người gọi của nó
+    cần **cả hai** con số cho cùng một cửa sổ, và đường rẻ nhất để có chúng là
+    một câu `GROUP BY cost_confidence` — hỏi hai lần với hai bộ lọc là hai lần
+    quét cho một câu hỏi, và là hai chỗ để `WHERE` lệch nhau.
+    """
+
+    exact: Decimal
+    low: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,28 +197,53 @@ class UsageEventRepository:
         await self._session.flush()
         return event
 
-    async def sum_since(self, *, user_id: uuid.UUID, since: datetime) -> Decimal:
-        """`SUM(cost_usd)` của một người kể từ `since` — §10.3 ("Postgres là sự thật").
+    async def sum_since(
+        self, *, user_id: uuid.UUID, since: datetime, key_source: KeySource | None
+    ) -> CostSplit:
+        """`SUM(cost_usd)` của một người kể từ `since`, tách theo `cost_confidence`.
+
+        §10.3 ("Postgres là sự thật") · C16 · B-172 (chốt ở T-2.17).
 
         Lọc `user_id` **trong câu SQL**, không phải bằng một vòng `if` ở Python
         (§20). Đi đúng index `ix_usage_user_time` (`user_id, created_at DESC`)
         mà Phụ lục A dựng sẵn cho việc này.
 
+        **`key_source` là tham số bắt buộc, không có mặc định** (B-172). Ba câu
+        dưới đây ghim cứng `system` vì chúng trả lời *"hạn mức của người này
+        còn bao nhiêu"*; câu này trả lời được **cả hai** câu hỏi của docstring
+        module, nên nó bắt người gọi nói ra mình hỏi câu nào. `None` = cả hai
+        loại (dành cho *"tôi đã tiêu bao nhiêu"* của §18.4, gồm cả tiền BYOK
+        của chính họ); `KeySource.SYSTEM` = tiền của người vận hành, tập mà
+        cron `spend_alert` (T-2.17, RR-1) đo.
+
         `COALESCE` vì `SUM` trên tập rỗng trả `NULL`, và một người chưa chat
         lần nào phải ra `0` chứ không phải `None` — chỗ gọi sẽ cộng con số này
         vào một `Decimal`, và `None` ở đó là một `TypeError` giữa đường tính
-        hạn mức.
-
-        **KHÔNG lọc `key_source`, khác ba câu dưới** — có chủ ý, xem docstring
-        module: đây là "người này đã tiêu bao nhiêu", một câu gồm cả BYOK.
-        Người gọi duy nhất của nó (T-2.17) chưa tồn tại, nên chọn hộ nó một
-        tập hàng hôm nay là đoán; ngày nó ra đời, nó nói ra tập nó muốn.
+        tiền. Với `GROUP BY` thì tập rỗng không trả **dòng** nào, nên phép bù
+        `0` nằm ở bước dựng `CostSplit` bên dưới chứ không ở `COALESCE`; giữ
+        `COALESCE` vì nó vẫn đúng cho một nhóm có tổng `NULL`.
         """
-        stmt = select(func.coalesce(func.sum(UsageEvent.cost_usd), 0)).where(
-            UsageEvent.user_id == user_id,
-            UsageEvent.created_at >= since,
+        stmt = (
+            select(
+                UsageEvent.cost_confidence,
+                func.coalesce(func.sum(UsageEvent.cost_usd), 0),
+            )
+            .where(
+                UsageEvent.user_id == user_id,
+                UsageEvent.created_at >= since,
+            )
+            .group_by(UsageEvent.cost_confidence)
         )
-        return Decimal(str((await self._session.execute(stmt)).scalar_one()))
+        if key_source is not None:
+            stmt = stmt.where(UsageEvent.key_source == key_source)
+        theo_do_tin = {
+            CostConfidence(do_tin): Decimal(str(tong))
+            for do_tin, tong in (await self._session.execute(stmt)).all()
+        }
+        return CostSplit(
+            exact=theo_do_tin.get(CostConfidence.EXACT, Decimal(0)),
+            low=theo_do_tin.get(CostConfidence.LOW, Decimal(0)),
+        )
 
     async def list_since(self, *, user_id: uuid.UUID, since: datetime) -> Sequence[LedgerEntry]:
         """Mọi dòng sổ của một người kể từ `since`, cũ nhất trước — T-2.13, §10.3.

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cảnh báo chi tiêu - Scarlet</title>
+  </head>
+  <body style="margin:0; padding:24px; background:#f4f4f5; font-family:Arial, sans-serif; color:#18181b;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0"
+                 style="background:#ffffff; border-radius:8px; padding:32px;">
+            <tr>
+              <td>
+                <h1 style="font-size:18px; margin:0 0 16px;">Chi tiêu {{ window }} đã vượt ngưỡng</h1>
+
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                       style="font-size:14px; line-height:1.6; margin:0 0 24px;">
+                  <tr>
+                    <td style="padding:4px 0;">Tổng ({{ window }})</td>
+                    <td align="right" style="padding:4px 0; font-weight:bold;">{{ total_usd }} USD</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 0 4px 16px; color:#71717a;">đo chính xác</td>
+                    <td align="right" style="padding:4px 0; color:#71717a;">{{ exact_usd }} USD</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 0 4px 16px; color:#71717a;">chỉ ước lượng</td>
+                    <td align="right" style="padding:4px 0; color:#71717a;">{{ low_usd }} USD</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 0; border-top:1px solid #e4e4e7;">Ngưỡng cảnh báo</td>
+                    <td align="right" style="padding:4px 0; border-top:1px solid #e4e4e7;">{{ limit_usd }} USD</td>
+                  </tr>
+                </table>
+
+                <p style="font-size:14px; line-height:1.5; margin:0 0 24px;">
+                  Tiêu nhiều nhất:
+                  <strong>{% if top_email %}{{ top_email }}{% else %}(không rõ){% endif %}</strong>
+                  — {{ top_usd }} USD
+                </p>
+
+                <p style="font-size:12px; line-height:1.5; color:#71717a; margin:0 0 8px;">
+                  Chỉ tính chi tiêu bằng khoá của hệ thống; phần người dùng trả bằng khoá riêng
+                  (BYOK) không nằm trong các con số trên.
+                </p>
+                <p style="font-size:12px; line-height:1.5; color:#71717a; margin:0 0 8px;">
+                  Phần “chỉ ước lượng” là những lượt gọi mà giá trong catalog không đối chiếu được
+                  với hoá đơn provider — đừng so nó với dashboard của họ.
+                </p>
+                <p style="font-size:12px; line-height:1.5; color:#71717a; margin:0;">
+                  Số liệu tính lúc {{ as_of }} (UTC). Thư này gửi tối đa một lần mỗi ngày.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

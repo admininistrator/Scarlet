@@ -20,13 +20,19 @@ from app.db.repositories.messages import (
     path_statement,
 )
 from app.db.repositories.provider_keys import ProviderKeyRepository
-from app.db.repositories.usage_events import LedgerEntry, UsageBucket, UsageEventRepository
+from app.db.repositories.usage_events import (
+    CostSplit,
+    LedgerEntry,
+    UsageBucket,
+    UsageEventRepository,
+)
 from app.db.repositories.users import UserRepository
 
 __all__ = [
     "AuditLogRepository",
     "ConversationNotFoundError",
     "ConversationRepository",
+    "CostSplit",
     "GenerationStates",
     "LedgerEntry",
     "MessageNotInConversationError",

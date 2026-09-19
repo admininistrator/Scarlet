@@ -52,9 +52,17 @@ _jinja_env = Environment(
 #: Tiêu đề mail theo tên template — chuỗi hiển thị tiếng Việt, không phải loại
 #: literal mà A3 cấm (tên model/giá/URL provider/hạn mức), nên nằm thẳng ở
 #: đây thay vì một bảng cấu hình riêng.
+#:
+#: Hai dòng cuối là của cron `spend_alert` (T-2.17, RR-1). Tiêu đề phải **khác
+#: nhau** chứ không phải một template mang cờ `khan`: "Việc cần làm" gọi lá
+#: thứ hai là *"mail khẩn"*, mà thứ duy nhất phân biệt được hai lá trong một
+#: danh sách hộp thư chưa mở là dòng tiêu đề. Không nhét số ngày của cửa sổ
+#: vào đây — nó sống ở `BUDGET_WINDOW_DAYS` và đi vào **thân** thư (A3).
 _SUBJECTS: dict[str, str] = {
     "verify_email": "Xac thuc email - Scarlet",
     "reset_password": "Dat lai mat khau - Scarlet",
+    "spend_daily": "Canh bao chi tieu - Scarlet",
+    "spend_budget": "KHAN: vuot ngan sach chi tieu - Scarlet",
 }
 
 

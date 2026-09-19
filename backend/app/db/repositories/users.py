@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import User, UserStatus
+from app.db.models import User, UserRole, UserStatus
 
 
 class UserRepository:
@@ -241,3 +241,30 @@ class UserRepository:
             .execution_options(synchronize_session="fetch")
         )
         return (await self._session.execute(stmt)).scalars().one_or_none()
+
+    # ═════════════ người nhận thư cảnh báo chi tiêu (RR-1) — T-2.17 ═════════════
+
+    async def list_admins(self) -> Sequence[User]:
+        """Những ai nhận thư cảnh báo chi tiêu — `role='admin'`, chưa xoá tài khoản.
+
+        Đọc từ **bảng `users`** chứ không từ một biến `.env` kiểu `ALERT_TO`:
+        R7 chốt *"một admin, không RBAC"*, và người ấy đã có một hàng trong
+        bảng này với đúng một cột nói lên điều đó. Một biến môi trường song
+        song là chỗ thứ hai để trả lời cùng một câu hỏi, và chỗ thứ hai luôn là
+        chỗ lệch — admin đổi email trong app xong vẫn không nhận được thư.
+
+        **Không** lọc `status`. Một admin đang `suspended` vẫn là người trả hoá
+        đơn, và cảnh báo ngân sách là thứ cuối cùng nên im lặng vì một trạng
+        thái tài khoản; `deleted_at IS NULL` thì có lọc, vì gửi thư cho một
+        địa chỉ đã yêu cầu xoá là chuyện khác hẳn (§20 "Quyền riêng tư").
+
+        `ORDER BY created_at` để thứ tự người nhận ổn định giữa hai lần chạy —
+        thứ duy nhất đọc nó là log, và một danh sách đảo thứ tự mỗi giờ làm
+        `diff` hai dòng log thành vô nghĩa.
+        """
+        stmt = (
+            select(User)
+            .where(User.role == UserRole.ADMIN, User.deleted_at.is_(None))
+            .order_by(User.created_at)
+        )
+        return list((await self._session.execute(stmt)).scalars())

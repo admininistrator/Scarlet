@@ -56,6 +56,11 @@ from app.db.session import dispose_engine
 from app.llm.adapters.system import SystemAdapter
 from app.workers.generate import CTX_LLM_CLIENT, generate
 from app.workers.reaper import REAPER_GIAY_TRONG_PHUT, REAPER_JOB_NAME, reaper
+from app.workers.spend_alert import (
+    SPEND_ALERT_JOB_NAME,
+    SPEND_ALERT_PHUT_TRONG_GIO,
+    spend_alert,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +85,20 @@ FUNCTIONS: list[Function] = [
 #: `unique=True` (mặc định) giữ nguyên: nó là thứ khiến hai worker không cùng
 #: quét một tick. Hôm nay chỉ có một replica, nhưng đây là loại giả định rẻ
 #: khi giữ và đắt khi phát hiện ra đã mất.
+#:
+#: `spend_alert` (T-2.17, RR-1) chạy **hằng giờ**, tức `minute={0}` — arq mặc
+#: định `second=0` nên nó nổ đúng một lần ở phút 0 của mỗi giờ. Cũng
+#: `run_at_startup=False`: ngưỡng là chi tiêu tích luỹ của cả ngày, không phải
+#: một sự kiện lúc khởi động, và một lần `docker compose up -d` lúc 23 giờ
+#: không nên tiêu mất lá thư duy nhất của ngày hôm đó.
 CRON_JOBS: list[CronJob] = [
     cron(reaper, name=REAPER_JOB_NAME, second=set(REAPER_GIAY_TRONG_PHUT), run_at_startup=False),
+    cron(
+        spend_alert,
+        name=SPEND_ALERT_JOB_NAME,
+        minute=set(SPEND_ALERT_PHUT_TRONG_GIO),
+        run_at_startup=False,
+    ),
 ]
 
 
@@ -115,7 +132,14 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         conn.port,
         conn.database,
         ", ".join(f"{f.name}(timeout={f.timeout_s}s, max_tries={f.max_tries})" for f in FUNCTIONS),
-        ", ".join(f"{c.name}(second={c.second}, max_tries={c.max_tries})" for c in CRON_JOBS),
+        # In cả `minute` lẫn `second`: từ T-2.17 có hai cron với hai độ phân
+        # giải khác nhau (`reaper` ghim giây, `spend_alert` ghim phút), nên một
+        # dòng chỉ in `second=` sẽ nói `spend_alert(second={0})` — đọc ra là
+        # "mỗi phút một lần", sai đúng 60 lần.
+        ", ".join(
+            f"{c.name}(minute={c.minute}, second={c.second}, max_tries={c.max_tries})"
+            for c in CRON_JOBS
+        ),
     )
 
 
