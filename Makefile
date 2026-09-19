@@ -8,8 +8,17 @@ up:
 down:
 	$(COMPOSE) down
 
+# B-199 — HAI tang, mot lenh. Truoc no, `make test` chi chay pytest cua backend
+# va 12 task cua §7 (Phase 3) deu gia dinh co mot cho de dat test FE ma khong
+# cho nao ton tai.
+#
+# Vi sao FE chay TRONG container `web` chu khong tren host: WSL nay khong co
+# `node` (`pnpm` tro nham sang shim Windows), va `node_modules` that nam trong
+# image. `make test` VON DA doi stack chay san — `tests/conftest.py` cua backend
+# noi Postgres that (NQ-17) — nen day khong phai mot hop dong moi.
 test:
 	cd backend && .venv/bin/pytest
+	$(COMPOSE) exec -T web pnpm test
 
 # T-1.11 / S3 — ngắt giữa lúc stream rồi nối lại, so byte-by-byte với
 # `messages.content`. KHÁC `make test`: cần cả stack đang chạy (`make up`) và
@@ -28,6 +37,7 @@ bench:
 lint:
 	cd backend && .venv/bin/ruff check .
 	cd backend && .venv/bin/mypy app
+	$(COMPOSE) exec -T web pnpm typecheck
 
 fmt:
 	cd backend && .venv/bin/ruff format .
