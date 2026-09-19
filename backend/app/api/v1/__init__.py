@@ -9,6 +9,11 @@ chỗ đọc hết được trong một màn hình. Endpoint thứ mười một
 `conversations.py` sẽ được bảo vệ vì nó nằm trong router, không phải vì ai đó
 nhớ chép thêm một dòng.
 
+`settings` (T-2.14) gia nhập danh sách ấy với **cột "Xem UI"**, không phải
+cột "Chat": §11.1 cho `pending_approval` chat bằng BYOK, và khoá BYOK vào được
+DB qua đúng router này — gắn `require_chat_access` ở đây là khoá vòng (muốn có
+khoá thì phải đã có khoá).
+
 Ba router KHÔNG có mặt trong danh sách đó, mỗi cái một lý do:
 
 * `models` — `GET /models` hôm nay công khai (T-0.7, chưa lọc theo user như
@@ -37,6 +42,7 @@ không được biết tên route của `api/` (luật lớp §5.3).
 from fastapi import APIRouter, Depends
 
 from app.api.v1 import admin, auth, conversations, health, messages, models, stream
+from app.api.v1 import settings as settings_router
 from app.config.settings import settings
 from app.core.deps import require_app_access
 from app.core.idempotency import require_idempotency
@@ -47,7 +53,7 @@ ROUTE_BAT_BUOC_IDEMPOTENCY = frozenset({messages.TEN_ROUTE_TAO_MESSAGE})
 
 _idempotency = require_idempotency(ROUTE_BAT_BUOC_IDEMPOTENCY)
 
-#: Hai luật đi cùng nhau ở cả ba router có danh tính. Thứ tự là chủ ý:
+#: Hai luật đi cùng nhau ở mọi router có danh tính. Thứ tự là chủ ý:
 #: `require_app_access` chạy trước, nên một tài khoản `suspended` nhận `403`
 #: mà **không** để lại khoá `idem:` nào trong Redis.
 _CO_DANH_TINH = [Depends(require_app_access), Depends(_idempotency)]
@@ -59,6 +65,7 @@ router.include_router(health.router)
 router.include_router(stream.router, dependencies=_CO_DANH_TINH)
 router.include_router(conversations.router, dependencies=_CO_DANH_TINH)
 router.include_router(messages.router, dependencies=_CO_DANH_TINH)
+router.include_router(settings_router.router, dependencies=_CO_DANH_TINH)
 router.include_router(auth.router)
 
 # §18.6 — `/_debug/*` CHỈ tồn tại khi DEBUG=true. Gắn router có điều kiện thay

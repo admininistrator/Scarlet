@@ -16,6 +16,9 @@ Nó phải chạy **trên `app`**, không phải trên router: 404-không-có-ro
 `idempotency.register(app)` gắn handler phát lại response đã lưu của §11.4
 (T-2.8) — cùng lý do phải ở mức `app`.
 
+`install_log_redaction()` (T-2.14) cài bộ che secret vào record factory của
+tiến trình — C20, xem `app/core/log_redact.py`.
+
 **Thứ tự hai middleware là chủ ý.** `add_middleware` chèn vào đầu danh sách,
 nên cái gọi **sau** nằm **ngoài**: `OriginCheckMiddleware` ở ngoài cùng, và
 một POST cross-site bị chặn `403` trước khi `IdempotencyMiddleware` kịp làm
@@ -32,10 +35,17 @@ from fastapi import FastAPI
 from app.api.v1 import router as api_v1_router
 from app.core import errors, idempotency
 from app.core.idempotency import IdempotencyMiddleware
+from app.core.log_redact import install_log_redaction
 from app.core.origin import OriginCheckMiddleware
 from app.core.queue import dispose_arq_pool
 from app.core.redis import dispose_redis
 from app.db.session import dispose_engine
+
+# C20 (T-2.14) — phải chạy TRƯỚC khi có dòng log đầu tiên của tiến trình, nên
+# nó ở mức module chứ không trong `lifespan`: uvicorn import file này rồi mới
+# gọi lifespan, và giữa hai mốc đó `app/config/settings.py` đã kịp cảnh báo về
+# `TURNSTILE_SECRET`. Xem `app/core/log_redact.py`.
+install_log_redaction()
 
 
 @asynccontextmanager

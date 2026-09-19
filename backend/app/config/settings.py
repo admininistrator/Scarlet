@@ -292,6 +292,18 @@ class Settings(BaseSettings):
     #: duy nhất mà các model reasoning không từ chối. Tuỳ chọn theo từng người
     #: dùng thuộc `user_settings` (§18.4, Phase 2), không phải biến này.
     LLM_TEMPERATURE: float = Field(default=1.0, ge=0.0, le=2.0)
+    #: Trần thời gian cho MỘT lần gọi `GET {base_url}{verify_path}` để xác nhận
+    #: một khoá BYOK còn sống trước khi lưu (§10.5, T-2.14,
+    #: `app/llm/byok_verify.py`). Là một *giới hạn* nên nó ở đây chứ không phải
+    #: một số trong module đó (A3, §19.2 L4) — cùng họ `TURNSTILE_TIMEOUT_S`,
+    #: `SMTP_TIMEOUT_S`, `FETCH_TIMEOUT_S`.
+    #:
+    #: Biến RIÊNG chứ không dùng lại `LLM_REQUEST_TIMEOUT_S` (600 s): đó là trần
+    #: của một lượt **sinh chữ** đi qua LiteLLM, thứ có quyền chảy mười phút.
+    #: Người dùng ở đây đang ngồi nhìn một nút "Lưu khoá" quay, nên chặng này
+    #: phải bỏ cuộc theo đơn vị giây. Gộp hai biến thì nới cái kia sẽ treo màn
+    #: hình cài đặt.
+    BYOK_VERIFY_TIMEOUT_S: int = Field(default=10, gt=0)
 
     # ═══ Context & vision (§9.6, §15.3) ═══
     CONTEXT_WINDOW_CAP: int = Field(default=128000, gt=0)

@@ -15,6 +15,11 @@ dependencies = [
     "openai>=1.50",
     "tiktoken>=0.8",
     "argon2-cffi>=23.1",
+    # AES-256-GCM + HKDF cho BYOK (§10.5, T-2.14, app/core/crypto.py).
+    # `pycryptodome` da co san trong image vi `minio` keo theo, nhung mot
+    # thu vien mat ma dung cho KHOA CUA NGUOI DUNG phai la phu thuoc TRUC
+    # TIEP: ngay `minio` doi backend, lop ma hoa khong duoc bien mat theo.
+    "cryptography>=43",
     "zxcvbn>=4.4",
     "pyjwt>=2.9",
     "email-validator>=2.0",

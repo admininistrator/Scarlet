@@ -43,6 +43,7 @@ from collections.abc import Coroutine
 from typing import Any
 
 from app.config.settings import settings
+from app.core.log_redact import install_log_redaction
 from app.core.redis import dispose_redis, get_redis
 from app.db.session import dispose_engine, session_scope
 from app.quota.rebuild import rebuild_all
@@ -59,6 +60,9 @@ def _dung_logging() -> None:
     `lastResort` của Python (chỉ WARNING trở lên, ra stderr, không timestamp)
     — tức một lệnh vận hành chạy xong mà không in ra nó đã làm gì.
     """
+    # C20 (T-2.14) — trước cả `return` sớm: bộ che là của TIẾN TRÌNH,
+    # không của handler, nên nó phải được cài kể cả khi handler đã có.
+    install_log_redaction()
     app_logger = logging.getLogger("app")
     if app_logger.handlers:
         return

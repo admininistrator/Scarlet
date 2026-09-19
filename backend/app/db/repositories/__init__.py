@@ -18,6 +18,7 @@ from app.db.repositories.messages import (
     PathNode,
     path_statement,
 )
+from app.db.repositories.provider_keys import ProviderKeyRepository
 from app.db.repositories.usage_events import LedgerEntry, UsageEventRepository
 from app.db.repositories.users import UserRepository
 
@@ -30,6 +31,7 @@ __all__ = [
     "MessageRepository",
     "OwnedMessage",
     "PathNode",
+    "ProviderKeyRepository",
     "RepositoryError",
     "UsageEventRepository",
     "UserRepository",

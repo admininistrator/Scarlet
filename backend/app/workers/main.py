@@ -50,6 +50,7 @@ from arq.cron import CronJob
 from arq.worker import Function
 
 from app.config.settings import settings
+from app.core.log_redact import install_log_redaction
 from app.core.queue import GENERATE_JOB_NAME, redis_settings
 from app.db.session import dispose_engine
 from app.llm.adapters.system import SystemAdapter
@@ -86,6 +87,9 @@ CRON_JOBS: list[CronJob] = [
 
 def _dung_logging() -> None:
     """Gắn handler cho cây logger `app.*`. Xem docstring module."""
+    # C20 (T-2.14) — trước cả `return` sớm: bộ che là của TIẾN TRÌNH,
+    # không của handler, nên nó phải được cài kể cả khi handler đã có.
+    install_log_redaction()
     app_logger = logging.getLogger("app")
     if app_logger.handlers:
         return

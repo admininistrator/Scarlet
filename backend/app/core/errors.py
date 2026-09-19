@@ -223,6 +223,28 @@ class ApiErrorCode(StrEnum):
     #: chưa khép chứ không về một request trùng.
     IN_PROGRESS = "IN_PROGRESS"
 
+    # ── BYOK (§10.5, §18.4, T-2.14) ──
+    #: `provider` trong đường dẫn `/settings/keys/{provider}` không có trong
+    #: `model_catalog.json::providers`. Mã riêng chứ không `NOT_FOUND` trần,
+    #: cùng lý lẽ với `MODEL_UNKNOWN`: FE hiện danh sách provider lấy từ
+    #: catalog, nên mã này nghĩa là "danh sách của bạn đã cũ, tải lại đi" —
+    #: một việc cụ thể, khác hẳn mọi 404 khác.
+    PROVIDER_UNKNOWN = "PROVIDER_UNKNOWN"
+    #: Provider có thật nhưng `byok_supported: false` (§9.2) — ví dụ một
+    #: gateway chạy nội bộ, nơi khoá riêng không có nghĩa gì. `400` chứ không
+    #: `404`: đường dẫn đúng, thứ sai là điều người gọi muốn làm với nó.
+    BYOK_NOT_SUPPORTED = "BYOK_NOT_SUPPORTED"
+    #: Provider đã trả lời và câu trả lời là khoá này không dùng được (401/403
+    #: ở `GET {base_url}{verify_path}`) — §10.5 "kiểm key sống trước khi lưu",
+    #: DoD T-2.14 dòng 4. Thông điệp đi kèm **không bao giờ** chứa chuỗi khoá
+    #: (C20). Không dùng cho "không hỏi được provider": đó là `503`
+    #: `SERVICE_UNAVAILABLE`, xem `app/llm/byok_verify.py`.
+    PROVIDER_KEY_REJECTED = "PROVIDER_KEY_REJECTED"
+    #: `DELETE /settings/keys/{provider}` cho một provider mà người này chưa
+    #: cấu hình khoá. Mã riêng với `PROVIDER_UNKNOWN`: ở đó FE phải tải lại
+    #: catalog, ở đây nó chỉ cần bỏ một dòng khỏi danh sách đang hiện.
+    PROVIDER_KEY_NOT_FOUND = "PROVIDER_KEY_NOT_FOUND"
+
     # ── nhánh (§8.2, T-1.13) ──
     #: Thao tác nhánh gọi nhầm `role`: `retry` chỉ chạy trên message
     #: `assistant`, `PATCH /messages/{id}` chỉ chạy trên message `user` (§18.2).
