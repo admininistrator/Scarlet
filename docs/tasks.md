@@ -63,14 +63,14 @@ Hai file, hai vai trò. **Đừng gộp, đừng chép nội dung của file kia
 | **P0** | Nền móng | 12 | 22.5 h | ✅ (2026-09-12) |
 | **P1** ⭐ | Chat lõi + resume | 14 | 39 h | ☐ |
 | **P2** | Auth, quota, admin | 20 | 44 h | ☐ |
-| **P3** | Giao diện | 12 | 34 h | ☐ |
+| **P3** | Giao diện | 16 | 53.5 h | ☐ |
 | **P4** | Ảnh & vision | 7 | 15 h | ☐ |
 | **P5** | Artifacts | 9 | 26 h | ☐ |
 | **P6** | Web tools | 8 | 20 h | ☐ |
 | **P7** | Skills & sandbox | 9 | 30 h | ☐ |
 | **P8** | Share, voice, export, PWA | 8 | 20 h | ☐ |
-| **P9** | Hoàn thiện | 7 | 16 h | ☐ |
-| | **Tổng** | **106** | **266.5 h** | |
+| **P9** | Hoàn thiện | 7 | 19 h | ☐ |
+| | **Tổng** | **110** | **289 h** | |
 
 > ⚠️ **Chênh lệch với KE-HOACH §24.2 là có chủ ý.** Kế hoạch ước 180–250 h khi nhìn từ trên xuống. Sau khi bẻ nhỏ thành 104 task, con số thật là ~262 h. Đây là hiện tượng bình thường: ước lượng từ trên xuống luôn lạc quan. **Dùng con số trong bảng này, không dùng con số trong kế hoạch.** Ghi vào Nhật ký quyết định NQ-01.
 
@@ -963,28 +963,379 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 
 ---
 
-## 7. Phase 3 — Giao diện *(dạng bảng — mở rộng bằng prompt §7.4 của META khi tới nơi)*
+## 7. Phase 3 — Giao diện
+
+**Mục tiêu:** M5 — *"dùng như sản phẩm"*. Hết phase này thì không còn màn hình nào phải giải thích bằng câu "chỗ tạm của Phase 1".
 
 **Đặc thù phase này:** phần lớn công việc thiết kế là của **bạn** qua Claude Design (T-HD1…T-HD5, T-HD7). Agent nối component vào state/API và viết test. Agent **không tự đổi màu, spacing, bố cục**.
 
-| ID | Task | Phụ thuộc | KH | Ước lượng |
-|---|---|---|---|---|
-| T-3.1 | Khung app: router, layout shell, error boundary, trang 404/500 | T-1.14 | §23 | 3h |
-| T-3.2 | Áp `theme.css` do T-HD1 giao; chuyển sáng/tối; kiểm tương phản bằng axe-core | **T-HD1** | §19.1, P5 | 2h |
-| T-3.3 | Sidebar: danh sách hội thoại, ẩn/hiện, ghim, xoá, đổi tên, tìm kiếm cục bộ | **T-HD2** | §18.2 | 4h |
-| T-3.4 | Ô nhập: gửi, Dừng, đếm ký tự, **Idempotency-Key theo lần soạn thảo** (C22) | T-2.8 | §11.4 | 3h |
-| T-3.5 | Bong bóng tin nhắn + markdown sanitize + code block có nút Copy | **T-HD3** | §20 | 4h |
-| T-3.6 | Model Picker đọc `GET /models`, badge capability, xám khi `available: false` | **T-HD4**, T-0.7 | §9.3, UC-05 | 3h |
-| T-3.7 | Nút dưới câu trả lời: Copy · Like · Dislike · Retry · Đổi model & retry | T-1.13 | UC-02 | 3h |
-| T-3.8 | Điều hướng nhánh `‹ n/m ›` + sửa message user tạo nhánh | T-1.13 | §8.2, UC-04 | 3h |
-| T-3.9 | Hoạt ảnh theo token của T-HD5; tôn trọng `prefers-reduced-motion` | **T-HD5** | P5 | 3h |
-| T-3.10 | Responsive 375 px → desktop; sidebar thành drawer trên mobile | T-3.3 | S8 | 3h |
-| T-3.11 | Thanh quota + cảnh báo còn ≤ 20% + màn hình hết quota có `retry_after` | T-2.11 | UC-07 | 2h |
-| T-3.12 | Admin UI hoàn chỉnh theo T-HD7 + trang Cài đặt (BYOK, theme, model mặc định) | **T-HD7**, T-2.19 | §16.3 | 4h |
+**Luật riêng của phase này — ba điều, tất cả đều do P0–P2 đo được:**
 
-**DoD của phase:** KE-HOACH §24.3 dòng P3. Bổ sung hai DoD cứng:
-- `npx lighthouse https://localhost --preset=mobile` → Accessibility ≥ 90, Performance ≥ 80 (S8)
-- `npx @axe-core/cli https://localhost` → 0 lỗi mức `serious` hoặc `critical`
+1. **P3 gần như TOÀN bề mặt mới**, và §14.2 đã đo được rằng bề mặt mới là thứ đắt. Sáu bề mặt mở cùng lúc: thư viện định tuyến (T-3.1a chốt), bàn giao hệ thống thiết kế, markdown + sanitizer (T-3.5 chốt), `lighthouse` + `axe-core` (T-3.2 dựng), responsive 375 px, hoạt ảnh. **Hai điểm đo FE duy nhất đang có đều ở ~100% ước lượng, không phải 35% của P1** — T-1.14 (~3 h phần code) và T-2.19 (est 3 h → thực tế ~3 h).
+2. **Việc của NGƯỜI chặn 6 trong 16 task.** T-HD1…T-HD5 và T-HD7 chặn T-3.2, T-3.3, T-3.5, T-3.6, T-3.9, T-3.12. **T-3.0, T-3.1a, T-3.1b, T-3.1c không chờ một T-HD nào** — bốn task ấy là đường vào của phase, làm theo đúng thứ tự đó.
+3. **Toàn bộ mảnh backend của phase gom vào MỘT task đứng đầu — T-3.0 (NQ-81).** Phiên mở rộng 2026-09-20 `grep` trên mã nguồn và tìm ra bốn thứ §18 đã hứa mà chưa ai viết: `/auth/me` không trả quota (B-158), không có `MESSAGE_MAX_CHARS` (B-205), không có `GET/PUT /settings` (B-206), không có `POST /messages/{id}/feedback` (B-207). Ba cái đầu cùng sửa **một** response schema nên gộp làm một; cái thứ tư đứng riêng ở **T-3.7a** vì nó là một migration khác và chỉ một task cần. Sau T-3.0 thì T-3.4, T-3.6, T-3.11 **thuần FE** và không task nào chặn task nào.
+
+**Ước lượng: 53.5 h cho 16 task**, không phải 34 h / 12 task của bảng §2 bản cũ. Nền là §14.3 (đo từ tốc độ THẬT của P2: ~61% ước lượng gốc, xu hướng đi **lên** qua từng phase — 23% ở P0, 35% ở P1, 61% ở P2). Phiên mở rộng và phiên chốt Backlog 2026-09-20 đổi bốn chỗ, mỗi chỗ có nguyên nhân đo được: T-3.1 tách ba (NQ-76), phần backend của T-3.6/T-3.11/T-3.12 dồn về T-3.0 (NQ-81) nên ba task ấy nhẹ đi, T-3.2 lên 4 h vì phải dựng service audit (NQ-77), T-3.7 tách đôi (NQ-80).
+
+**DoD của phase:** KE-HOACH §24.3 dòng P3. Bổ sung một DoD cứng:
+- `make audit` → `Accessibility ≥ 90` trên `/`, `/dang-nhap`, `/dang-ky`, `/admin`; và 0 lỗi mức `serious`/`critical` của `axe`
+
+> ⚠️ **`Performance ≥ 80` của S8 KHÔNG còn là DoD của P3 — nó chuyển sang P9 (NQ-77), và đây là một lệch có chủ ý so với KE-HOACH §2.3 dòng S8.** Lý do đo được ngày 2026-09-20: `frontend/Dockerfile` **không có stage build production** (chính file đó khai vậy), và nginx `location /` proxy thẳng vào **Vite dev server**. Một điểm Performance chấm trên ES module chưa minify cộng client HMR không nói gì về sản phẩm sẽ deploy. `Accessibility` thì không phụ thuộc bundling nên ở lại P3. **KE-HOACH.md là vùng cấm của agent**, nên §2.3 vẫn ghi S8 ở P3 — chỗ giải quyết lệch này là **T-9.4**, đã ghi thêm dòng tương ứng ở §13.
+
+---
+
+### T-3.0 — ⭐ Backend mở đường cho P3: `/auth/me` đủ trường, `PUT /settings`, `MESSAGE_MAX_CHARS`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-2.11, T-2.14 · **Ước lượng:** 2.5h
+- **KH:** §18.1, §18.4, §10.3
+- **Việc:**
+  - [ ] `GET /auth/me` trả thêm `quota` — ghép `quota.tiers.get_effective_limits` + `quota.windows.read_window` (**cả hai đã có** từ T-2.11; đây là việc ghép, không phải việc dựng). Đủ **hai** cửa sổ 5 h và 7 ngày (§10.3), mỗi cửa sổ có phần đã dùng, hạn mức, và **thời điểm hoàn lại** — B-158
+  - [ ] `MESSAGE_MAX_CHARS` vào `Settings` + `.env.example`; đặt `max_length` cho **cả hai** schema `TaoMessageRequest` và `SuaMessageRequest`; trả con số ấy trong `/auth/me` để FE khỏi đoán — B-205
+  - [ ] Migration: cột `users.default_model` (nullable, validate theo catalog lúc ghi); trả trong `/auth/me` — B-206
+  - [ ] `PUT /settings` **tối thiểu**: nhận đúng `default_model`, không dựng sẵn khung cho tuỳ chọn chưa tồn tại (L3, và đúng lý lẽ NQ-51 đã dùng để không viết `invalidate()`). Giữ tên endpoint của §18.4 để tính năng sau ghép vào
+  - [ ] Tiền trong response là **chuỗi**, không `float` — cùng luật `cost_usd` đã đi từ Postgres tới FE từ T-2.16
+- **Xong khi (DoD):**
+  - [ ] `curl -sk https://localhost/api/v1/auth/me -b <cookie>` trả đủ bốn nhóm: user + trạng thái (đã có), `quota` hai cửa sổ, `message_max_chars`, `default_model`. Dán nguyên văn JSON
+  - [ ] Đặt `limit_5h_usd=0.001` cho tier `free` → chờ ≤ 60 s → `/auth/me` trả phần còn lại ≈ 0 **và** `retry_after` khớp `Retry-After` của một lần `POST .../messages` bị `429`, sai số ≤ 2 s. Trả `0.5000` lại sau
+  - [ ] **Ca âm cho `MESSAGE_MAX_CHARS`:** gửi `content` dài hơn trần 1 ký tự ⇒ **`422` ở biên vào**, `SELECT count(*) FROM messages` **không đổi**. Trước bản vá, cùng request ấy tạo message rồi mới nổ ở `context.py` — dán cả hai lần đếm
+  - [ ] `PUT /settings {"default_model": "<id không có trong catalog>"}` ⇒ `400 MODEL_UNKNOWN`; với model hợp lệ ⇒ `200`, và `/auth/me` lần sau trả đúng giá trị mới
+  - [ ] **Ca IDOR:** `PUT /settings` không nhận bất kỳ tham số nào trỏ sang người khác — `grep -n "user_id" app/api/v1/settings.py` cho thấy `user_id` chỉ đến từ dependency và đi thẳng vào `WHERE` (§20)
+  - [ ] `cd backend && .venv/bin/pytest` xanh; `make lint` sạch; biến mới có **cả** trong `Settings` **và** `.env.example`
+- **Cạm bẫy:**
+  - ① **`/auth/me` từ nay có hai nhịp đọc trộn vào một response:** `message_max_chars` và `default_model` tĩnh, `quota` đổi sau **mỗi** lượt sinh. FE sẽ gọi lại `/auth/me` để làm tươi thanh quota, tức kéo cả hồ sơ mỗi lần. Chấp nhận được với R1 (15–20 người) và đúng chữ §18.1; nhưng **đừng đặt cache HTTP** lên endpoint này — một `Cache-Control` ở đây làm thanh quota đóng băng đúng lúc nó phải động.
+  - ② **Đổi hạn mức có hiệu lực ≤ 60 s, KHÔNG tức thì** (NQ-70 ①, cố ý không có `invalidate()`; §10.4 chỉ hứa "≤ 60 s"). Dòng DoD thứ hai vì thế phải **chờ**, và T-2.20 đo được ca xấu nhất là **59.3 s** — đừng kết luận "hỏng" ở giây thứ 30.
+  - ③ **Ghi `users.default_model` phải validate theo catalog lúc GHI, không lúc đọc.** Catalog là file sửa nóng (`POST /admin/catalog/reload`, §19.1), nên một model hợp lệ hôm nay có thể biến mất ngày mai — lúc đọc thì trả `null` và để FE rơi về `default: true` của catalog, **không** ném lỗi vào mặt người dùng vì một dòng cấu hình admin vừa sửa.
+  - ④ **`.env.example` và `Settings` phải đổi CÙNG một commit** — §15 DoD chung đòi vậy, và T-0.3 đã dựng fail-fast (A4/L2) nên thiếu một bên là app không boot ở máy tiếp theo.
+
+---
+
+### T-3.1a — 🔒⭐ Router, layout shell, error boundary, trang 404/500 — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-1.14, T-2.19 · **Ước lượng:** 4h
+- **KH:** §23 · **Mốc:** mở đường cho toàn bộ P3
+- **Việc:**
+  - [ ] **Chốt thư viện định tuyến trước khi viết dòng đầu** (`react-router` v7 · `@tanstack/router` · giữ bản tự viết và cho nó lớn lên). Số đường phải định tuyến là **11**, đã biết đủ nên không còn nguy cơ quyết hai lần: `/`, `/admin`, `/cai-dat`, `/dang-nhap`, `/dang-ky`, `/quen-mat-khau`, `/dat-lai-mat-khau`, `/verify-email`, `/cho-duyet`, 404, 500
+  - [ ] Xoá `frontend/src/lib/router.ts`. `duongDan()` và `dieuHuong()` là **toàn bộ** bề mặt phải thay (chính file đó khai như vậy ở cuối docstring)
+  - [ ] Layout shell: header + vùng nội dung. `App.tsx` **không còn** chuỗi ternary bốn tầng để chọn màn hình
+  - [ ] Error boundary bọc toàn app → trang 500. Trang 404 thay đúng nhánh `else → <ChatScreen/>` của `App.tsx` (**B-187** chỉ đích danh chỗ này)
+  - [ ] Khai chỗ trống cho 6 đường auth của T-3.1b (route tồn tại, component là một trang tạm có tên) — để T-3.1b chỉ phải điền, không phải đụng lại cấu hình router
+- **Xong khi (DoD):**
+  - [ ] `docker compose --profile core --profile tools exec -T web pnpm test src/app/routes.test.tsx` → render `/abcxyz` ra **trang 404**, `/dang-nhap` ra form đăng nhập, `/admin` ra màn quản trị. **Không được dùng `curl` cho dòng này** — xem Cạm bẫy ①
+  - [ ] `... exec -T web pnpm test src/app/ErrorBoundary.test.tsx` — một component ném lỗi lúc render → hiện trang 500, **không** phải màn trắng
+  - [ ] `grep -rn "lib/router" frontend/src/ | wc -l` → `0`
+  - [ ] Chrome: gõ thẳng `https://localhost/abcxyz` → trang 404 có đường về `/`; bấm Back → về đúng trang trước, không nạp lại cả app
+  - [ ] `make test && make lint && make check-hardcode` xanh
+- **Cạm bẫy:**
+  - ① **`curl` không phân biệt được 404 của một SPA.** Đo 2026-09-20: `curl -sk -o /dev/null -w '%{http_code}' https://localhost/abcxyz` trả **`200`**, thân là `index.html` — Vite trả trang gốc cho mọi đường và Nginx `location /` chỉ proxy thẳng. Mã HTTP ở đây đo Nginx+Vite chứ không đo router, nên một DoD viết bằng `curl` sẽ **xanh kể cả khi B-187 còn nguyên**. Phép đo thật nằm trong vitest.
+  - ② **B-189 sẽ cắn giữa phiên:** `docker compose up -d api` (lệnh tự nhiên nhất sau khi thêm một biến `.env`) làm Nginx trả `502` cho tới khi `docker compose restart nginx` — Nginx phân giải upstream theo tên **một lần lúc boot**. Đo được hai lần trong T-2.19, và triệu chứng `502` đọc y hệt "API chết".
+  - ③ **B-142 chưa chốt và task này đụng thẳng vào nó.** `lib/router.ts` là file đặc định-danh-tiếng-Việt-không-dấu nhất của FE (`duongDan`, `dieuHuong`, `nguoiNghe`, `docDuongDan`); nó bị **xoá** nên không mâu thuẫn. `App.tsx` thì có, và nó bị viết lại ở đây. **Hỏi trước, đừng đổi tên kèm theo** — một lần đổi tên trộn vào commit của một task là đúng thứ G4 cấm.
+
+---
+
+### T-3.1b — Sáu màn hình auth
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-3.1a, T-2.2, T-2.5, T-2.6 · **Ước lượng:** 4h
+- **KH:** §11.1, §11.6
+- **Việc:**
+  - [ ] `/dang-ky`: form + **mount `components/auth/Turnstile.tsx`** của T-2.6 — tới nay widget ấy **chưa được mount ở đâu** (B-185)
+  - [ ] `/verify-email?token=`, `/quen-mat-khau`, `/dat-lai-mat-khau?token=`, `/cho-duyet`; `/dang-nhap` đã có, đưa vào layout mới
+  - [ ] `api.ts`: `dangKy`, `xacThucEmail`, `guiLaiXacThuc`, `quenMatKhau`, `datLaiMatKhau` — năm endpoint backend **đã có** từ T-2.1/T-2.2/T-2.5, FE chưa gọi cái nào
+  - [ ] Điều hướng theo `status` của `GET /auth/me` đúng máy trạng thái §11.1: `pending_verification` → `/verify-email`, `pending_approval` → `/cho-duyet`, `suspended` → màn giải thích. **Không** rơi về màn chat
+  - [ ] Đăng ký với email đã tồn tại → màn hình nói **giống hệt** ca thành công (UC-01 dòng 1 — không lộ email nào đã đăng ký)
+  - [ ] Link verify dùng lần thứ hai → chuyển thẳng tới `/dang-nhap`, **không** phải lỗi (UC-01 dòng 5, backend đã idempotent)
+  - [ ] Khoá hiển thị mới vào `locales/vi.json` — `t()` gõ kiểu theo `keyof vi.json`, nên thiếu khoá là lỗi biên dịch chứ không phải chuỗi rỗng lúc chạy
+- **Xong khi (DoD):**
+  - [ ] **Chrome, một mạch, không `curl` một bước nào:** mở `/dang-ky` → widget Turnstile hiện → đăng ký → Mailpit (`http://localhost:8025`) có thư → bấm link → `/verify-email` báo đã xác thực → tự sang `/cho-duyet` → admin duyệt ở `/admin` → đăng nhập lại → chat được. **Đây là dòng đóng B-185**, và là lần đầu luồng ấy chạy được mà không cần khoá test "luôn đạt" của Cloudflare
+  - [ ] `... exec -T web pnpm test src/components/auth/` — ≥ 10 ca, trong đó: link verify hết hạn ⇒ hiện nút "gửi lại", **không** phải màn lỗi; `/cho-duyet` hiện khi `status=pending_approval` và biến mất sau khi được duyệt
+  - [ ] Đăng ký lại bằng **email đã tồn tại** → màn hình hiện đúng chữ như lần thành công; `psql`: `SELECT count(*) FROM users WHERE email='<email>'` vẫn **1**
+  - [ ] Bấm lại link verify lần hai → về `/dang-nhap`, không lỗi
+- **Cạm bẫy:**
+  - ① **B-188 chặn đúng dòng DoD dài nhất:** `register` giới hạn 3 lượt/giờ/IP (§10.6), nên đăng ký hai tài khoản test trong một phiên là chạm trần. Đường duy nhất đi tiếp hôm nay: `docker compose exec redis redis-cli DEL rl:ip:register:<ip>`.
+  - ② **`VITE_TURNSTILE_SITE_KEY` ánh xạ từ chính `TURNSTILE_SITE_KEY`, và rỗng thì widget TỰ ẨN** (`docker-compose.yml`, `Turnstile.tsx`). Một `.env` thiếu khoá cho ra một form đăng ký trông hoàn chỉnh mà backend từ chối bằng `400`, không một thông báo nào trỏ vào nguyên nhân.
+  - ③ **`resend-verification` có hạn mức 3/giờ (§18.1)**, nên nút "gửi lại" phải nói ra điều đó khi bị từ chối. Một nút bấm được mà không có chuyện gì xảy ra là cách chắc nhất để người dùng bấm thêm bốn lần.
+
+---
+
+### T-3.1c — Dọn nhánh danh tính tạm của Phase 1
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-3.1b · **Ước lượng:** 3h *(B-128 ước theo "sáu file test"; đếm thật 2026-09-20 là **10 file test + 6 script** — xem Cạm bẫy ③)*
+- **KH:** §11.2 · **Đóng:** B-128, B-186
+- **Việc:**
+  - [ ] `app/core/deps.py::get_current_user_id`: xoá nhánh `X-User-Id` và cookie `scarlet_dev_user` (giữ lại ở T-2.3 theo NQ-41, điều kiện gỡ nay đã đủ)
+  - [ ] `api.ts`: xoá `TEN_COOKIE_DEV`, `docDanhTinhDev`, `datDanhTinhDev`, và hằng `MA_LOI.AUTH_CHUA_CO` (trỏ `ApiErrorCode.AUTH_NOT_IMPLEMENTED` — mã này chỉ còn phát ra từ đúng nhánh sắp bị xoá)
+  - [ ] Gỡ `components/chat/DanhTinhDev.tsx` và mọi chỗ render nó (B-186 — một trình duyệt đang mang hai danh tính, và ô hiện rõ hơn lại là ô không còn tác dụng)
+  - [ ] **Mười** file test backend đổi từ `headers={"X-User-Id": …}` sang mint access JWT qua `encode_access_token` rồi `client.cookies.set(SESSION_COOKIE_NAME, …)`, **đúng khuôn `test_auth.py` đã dùng ở T-2.3**: `test_admin_authz.py`, `test_branching.py`, `test_conversations.py`, `test_errors.py`, `test_idempotency.py`, `test_messages.py`, `test_messages_cancel.py`, `test_quota_gate.py`, `test_ratelimit_routes.py`, `test_stream.py` (`_debug_bat` nằm trong `test_quota_gate.py`)
+  - [ ] **Sáu script** cũng gửi `X-User-Id` và sẽ chết cùng lúc: `scripts/test_resume.py`, `scripts/bench_ttft.py`, `scripts/test_idempotency.sh`, `scripts/test_metering.sh`, `scripts/test_ratelimit.sh`, `scripts/test_rebuild_quota.sh` — sửa **trong cùng commit**
+- **Xong khi (DoD):**
+  - [ ] `grep -rnE "X-User-Id|scarlet_dev_user|AUTH_NOT_IMPLEMENTED|DanhTinhDev|docDanhTinhDev" backend/app frontend/src backend/tests | wc -l` → `0`
+  - [ ] `cd backend && .venv/bin/pytest` xanh, **số test không giảm** so với lần chạy trước (dán cả hai con số — xoá một test thay vì sửa nó là cách rẻ nhất để làm dòng trên xanh)
+  - [ ] `curl -sk https://localhost/api/v1/conversations -H "X-User-Id: <uuid thật>"` ⇒ **`401 UNAUTHENTICATED`**, không phải `200`
+  - [ ] `make test-resume` chạy lại và đạt (S3, byte-by-byte) — đây là phép đo duy nhất chứng minh sáu script đã sửa đúng chứ không chỉ sửa cho hết lỗi cú pháp
+  - [ ] Chrome: mở màn chat khi đã đăng nhập → **không còn** ô nhập `user_id` nào trên trang
+- **Cạm bẫy:**
+  - ① **Đây là commit thuần backend + test, và nó phải đứng riêng** (NQ-76). Trộn nó vào T-3.1b nghĩa là một commit vừa dựng 6 màn hình vừa đổi cách 16 file gửi danh tính — nếu có bug lộ ra ở T-3.5 thì `git bisect` chỉ trỏ được vào khối đó.
+  - ② **`_debug_bat` nằm trong `test_quota_gate.py`, không phải một file riêng.** B-128 gọi đích danh nó vì nó là chỗ dễ sót nhất khi `grep` theo tên file.
+  - ③ **B-128 ĐẾM THIẾU, và con số thật đổi cả ước lượng.** Nó viết "sáu file test"; đếm ngày 2026-09-20: `grep -rln 'X-User-Id' backend/tests --include=*.py` ra **10** file, và `scripts/` ra thêm **6** file nữa mà B-128 không nhắc tới. `test_resume.py` và `bench_ttft.py` là hai `make` target không ai chạy hằng ngày, nên chúng sẽ hỏng trong im lặng tới đúng lúc cần nhất — đó là lý do `make test-resume` nằm trong DoD ở trên.
+
+---
+
+### T-3.2 — ⭐ Áp `theme.css` do T-HD1 giao; chuyển sáng/tối; dựng `make audit`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD1, T-0.10, T-3.1a · **Ước lượng:** 4h *(§14.3 giữ 2 h; NQ-77 nâng lên vì task này dựng luôn service audit cho cả phase)*
+- **KH:** §19.1, §2.3 (P5, S8)
+- **Việc:**
+  - [ ] **Service `audit` ở `profiles: [dev]`** (NQ-77) dùng một image có sẵn Chrome + node, `networks: [internal]`. Nó đo **`http://web:5173`** chứ không `https://localhost`: đo thẳng trên network nội bộ thì không chạm vào chứng chỉ `mkcert` (CA nằm trên host Windows theo T-H1, không trong container) — một lớp rắc rối bị xoá bằng cách không tạo ra nó
+  - [ ] Target `make audit` gọi `lighthouse` (chỉ đọc điểm **Accessibility**) và `@axe-core/cli` trên bốn đường `/`, `/dang-nhap`, `/dang-ky`, `/admin`; mã thoát ≠ 0 khi trượt ngưỡng — cùng khuôn `make bench` của T-1.12
+  - [ ] Thay giá trị tạm trong `frontend/src/styles/theme.css` bằng bản T-HD1 giao. **Giữ nguyên tên biến** đang dùng (`--color-background`, `--color-foreground`, `--color-muted`, `--color-border`, `--color-accent`, `--color-accent-foreground`, `--color-danger`) — đổi tên là sửa `className` trong cả 9 component đang có
+  - [ ] Bổ sung token còn thiếu theo §19.1: thang chữ, shadow, radius, spacing (T-HD1 giao giá trị)
+  - [ ] `ThemeToggle` đọc `prefers-color-scheme` làm mặc định lần đầu — hôm nay nó chỉ đọc `data-theme` đã đặt sẵn, tức "mặc định theo hệ điều hành" của T-0.10 nằm ở `index.html` chứ không ở component
+  - [ ] Cập nhật **cả hai** khối màu: `@theme` và `[data-theme="dark"]`
+- **Xong khi (DoD):**
+  - [ ] `make audit` chạy hết và in điểm cho cả bốn đường: `Accessibility ≥ 90`, 0 lỗi `serious`/`critical`. Dán nguyên văn
+  - [ ] **Ca âm, bắt buộc:** tạm đặt `--color-muted: var(--color-background)` → `make audit` phải **ĐỎ** và phải nói được lỗi tương phản ở đâu. Không đỏ nghĩa là `make audit` đang không đo gì và dòng DoD phía trên là đồ trang trí. Trả giá trị lại sau
+  - [ ] `make check-hardcode` → `check-hardcode: OK` (lệnh 3 của `scripts/check_hardcode.sh` quét `#rrggbb|rgb(` trong `frontend/src/components/`)
+  - [ ] `grep -rnE "#[0-9a-fA-F]{6}|rgb\(|hsl\(" frontend/src/components/ frontend/src/features/` → **rỗng**, và `grep -cE "#[0-9a-fA-F]{6}" frontend/src/styles/theme.css` → **> 0**. Hai dòng đi cùng nhau: màu phải tồn tại, chỉ không được tồn tại ở chỗ sai
+  - [ ] Sửa `--color-accent` trong `theme.css` → màu đổi trên `https://localhost` **không rebuild, không restart** (giữ đúng dòng DoD của T-0.10)
+  - [ ] `docker compose --profile core --profile tools ps` — service `audit` **không** xuất hiện (nó ở `profile: dev`, không được chạy thường trực)
+- **Cạm bẫy:**
+  - ① **Đừng thêm `chromium` vào image `web`.** NQ-77 chốt service riêng đúng vì `web` chạy suốt ngày và mỗi lần đổi `package.json` là một lần rebuild kéo lại ~400 MB. `web` ở `profile: core`, `audit` ở `profile: dev` — cùng khuôn `mailpit`/`adminer` đã dùng từ T-0.4.
+  - ② **Tailwind v4 dùng `@theme` chứ không `tailwind.config.js`** — cạm bẫy của T-0.10, vẫn đúng. Đừng chép cấu hình v3.
+  - ③ **Khối `[data-theme="dark"]` nằm NGOÀI `@theme`.** Đổi biến trong `@theme` mà quên khối tối thì chế độ tối giữ nguyên màu cũ, và triệu chứng đọc y hệt "HMR không chạy" — người sửa sẽ đi restart container thay vì mở file.
+  - ④ **`make audit` đo Vite dev server, nên KHÔNG đọc điểm Performance ở đây** (NQ-77). Nếu lệnh in ra con số đó thì nó phải bị bỏ qua tường minh trong script, không phải bị lờ đi bằng cách không nhìn — người chạy tiếp theo sẽ nhìn.
+
+---
+
+### T-3.3 — Sidebar: danh sách hội thoại, ẩn/hiện, ghim, xoá, đổi tên, tìm kiếm cục bộ
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD2, T-3.1a · **Ước lượng:** 4h
+- **KH:** §18.2, §17.4
+- **Việc:**
+  - [ ] `components/sidebar/Sidebar.tsx` theo bản T-HD2 giao; danh sách từ `GET /conversations` (đã có), tải thêm bằng `next_cursor` → `?updated_before=`
+  - [ ] Ghim / bỏ ghim: `PATCH /conversations/{id}` `{pinned}` — backend **đã nhận** trường này, và `pinned: null` là `400` chứ không phải một lần bỏ qua im lặng
+  - [ ] Đổi tên: `PATCH {title}`. Xoá: `DELETE` (soft delete, đã có)
+  - [ ] Tìm kiếm **cục bộ** trên phần đã nạp; nói rõ trên màn hình rằng nó chỉ tìm trong phần đã tải (B-09 là tìm kiếm toàn văn thật, chưa làm)
+  - [ ] Ẩn/hiện sidebar, nhớ trạng thái trong `localStorage` — **bọc `try/catch`** đúng khuôn `ThemeToggle` (chế độ riêng tư chặn `localStorage`)
+  - [ ] `api.ts`: thêm `xoaHoiThoai`, và mở rộng `suaHoiThoai` — hôm nay nó chỉ khai `active_leaf_id` và `title`, thiếu `pinned` lẫn `default_model`
+- **Xong khi (DoD):**
+  - [ ] `... exec -T web pnpm test src/components/sidebar/Sidebar.test.tsx` — ≥ 8 ca, trong đó: `next_cursor: null` ⇒ **không** gọi trang kế; xoá ⇒ mất khỏi danh sách ngay, không đợi tải lại; tìm kiếm lọc đúng và **không** gọi mạng
+  - [ ] Xoá một hội thoại trên Chrome → `docker compose exec -T postgres psql -U scarlet -d scarlet -c "SELECT deleted_at FROM conversations WHERE id='<id>'"` khác `NULL`, và `GET /conversations` không còn nó
+  - [ ] Tải thêm: DevTools → Network thấy đúng `?updated_before=<cursor của trang trước>`, và **không hội thoại nào xuất hiện hai lần** sau hai trang
+  - [ ] Ghim 2 hội thoại, F5 → cả hai vẫn ở đầu. **Báo cáo phải ghi rõ chỗ nào sắp xếp** — xem Cạm bẫy ①
+- **Cạm bẫy:**
+  - ① **Backend KHÔNG sắp theo `pinned`.** Đọc được ở `app/db/repositories/conversations.py`: `.order_by(Conversation.updated_at.desc(), Conversation.id.desc())`, không một chữ `pinned` nào. FE tự đẩy ghim lên đầu thì chỉ đúng **trong phạm vi đã tải**: một hội thoại ghim từ tháng trước nằm ở trang 3 sẽ vắng mặt ở đầu danh sách cho tới khi người dùng cuộn tới nó. Hai ngả — thêm `pinned DESC` vào `ORDER BY` (kèm sửa con trỏ phân trang cho khớp thứ tự mới), hay ghi rõ trên UI rằng ghim chỉ nổi trong phần đã tải. **Chốt trước khi viết dòng đầu.**
+  - ② **Con trỏ phân trang là `updated_at` trong khi `ORDER BY` là `(updated_at, id)`** — hai hàng cùng `updated_at` thì `< cursor` bỏ mất hàng thứ hai. **T-2.20 gặp đúng chuyện này với `audit_logs` và đã chọn `id`**, vì hai dòng ghi trong cùng một transaction mang cùng một `now()`. Ở đây `updated_at` đổi mỗi lần gửi tin nhắn nên trùng là hiếm — và "hiếm" nghĩa là nó sẽ hỏng ở máy người dùng chứ không ở phép đo của bạn.
+  - ③ **Nút "Xoá" không xoá gì trong DB** (soft delete). §20 hứa với người dùng *"xoá được hội thoại của mình"*; chữ trên nút phải nói đúng thứ nó làm, hoặc `PURGE_AFTER_DAYS` phải được nhắc ở đâu đó trên màn hình.
+
+---
+
+### T-3.4 — 🔒 Ô nhập: gửi, Dừng, đếm ký tự, Idempotency-Key theo lần soạn thảo — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-2.8, T-3.0, T-3.1a · **Ước lượng:** 3h
+- **KH:** §11.4 (C22), UC-02
+- **Việc:**
+  - [ ] Chuyển `khoaGuiRef` từ `features/chat/useChat.ts` lên **lần soạn thảo** ở `Composer`: khoá sinh khi người dùng gõ ký tự đầu của một câu, giữ nguyên qua **mọi** lần thử lại, chỉ đổi sau khi `202` về. Giữ nguyên đường lui của `khoaMoi()` — `crypto.randomUUID` chỉ có trong secure context
+  - [ ] Nút Gửi ⇄ Dừng đã có; chốt **một** quy ước phím (`Ctrl/Cmd+Enter` như hiện tại, hay `Enter` gửi / `Shift+Enter` xuống dòng) và chỉ một
+  - [ ] Đếm ký tự ngược về `message_max_chars` — con số đến từ `GET /auth/me` (T-3.0 đã đặt nó ở đó, NQ-78). **Không** một literal nào ở FE (A3/L4)
+  - [ ] Màn hình phải có **đường thoát khỏi `409 IN_PROGRESS`** — xem Cạm bẫy ①
+- **Xong khi (DoD):**
+  - [ ] `bash scripts/test_idempotency.sh` → đúng 1 message trong DB, lần gửi thứ hai trả **cùng** `message_id` (S5). Dán nguyên văn output
+  - [ ] `... exec -T web pnpm test src/components/chat/Composer.test.tsx` — **ca âm bắt buộc:** gõ → gửi hỏng (mock `500`) → bấm gửi lại ⇒ **cùng** `Idempotency-Key`; gửi thành công → gõ câu mới ⇒ khoá **khác**. Hai khẳng định ngược chiều nhau; thiếu một cái thì test xanh cả với bản sinh khoá mới mỗi lần gọi
+  - [ ] Chrome: bấm Gửi hai lần trong 300 ms → DevTools Network thấy **hai** request mang **một** giá trị `Idempotency-Key`; `psql` đếm `messages` ⇒ tăng đúng **1**
+  - [ ] Bấm Dừng giữa lúc stream → chữ ngừng trong ≤ 500 ms; `psql`: `finish_reason='cancelled'` và `usage_events` có đúng **1** dòng cho lượt đó (UC-02 dòng 2–3)
+  - [ ] Gõ vượt `message_max_chars` → nút Gửi `disabled`; và `curl` vượt trần ⇒ `422` (T-3.0 đã đóng đường vòng này)
+  - [ ] `grep -rnE "[0-9]{4,}" frontend/src/components/chat/Composer.tsx` → không có con số nào là trần ký tự viết tay
+- **Cạm bẫy:**
+  - ① **Đọc B-143 TRƯỚC khi viết dòng đầu.** Bản ghi `in_progress` sống đủ **24 giờ** (`IDEMPOTENCY_TTL_S`, đúng chữ §11.4). Một tiến trình `api` bị giết giữa `SET NX` và lúc response đi ra sẽ khoá luôn lần soạn thảo ấy tới hết ngày — mà C22 bảo FE **giữ nguyên khoá**, nên người dùng nhận `409 IN_PROGRESS` cho đúng câu vừa gõ, liên tục, không nút nào thoát ra. Đây là ca người ta gặp khi bấm Gửi lần thứ hai, không phải ca lý thuyết.
+  - ② **Đọc B-144 cùng lúc.** `PATCH /messages/{id}` (sửa câu hỏi ⇒ nhánh mới ⇒ một lượt sinh tốn tiền) **không** đi qua dependency của T-2.8: nó chỉ gác `POST`. `POST /messages/{id}/retry` thì có đi qua nhưng ở diện **tuỳ chọn**. T-3.7 và T-3.8 dùng đúng hai đường đó, nên quyết định "có mở `GUARDED_METHOD` sang `PATCH` không" thuộc về task này chứ không về chúng.
+  - ③ **Trạng thái "đang chạy" đến từ event `done`/`error` của §7.4, không từ một bộ đếm thời gian** — `Composer.tsx` đã viết đúng, đừng làm hỏng khi tách khoá ra. Và `error` là **hai chuyện trên một tên**: `event: error` do server gửi khác sự kiện đứt đường truyền của `EventSource` (T-1.14 ①).
+
+---
+
+### T-3.5 — 🔒 Bong bóng tin nhắn + markdown sanitize + code block có nút Copy — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD3, T-3.1a · **Ước lượng:** 4h
+- **KH:** §20 (XSS), §7.4
+- **Việc:**
+  - [ ] **Chốt cặp markdown + sanitizer trước khi cài** (ứng viên: `react-markdown` + `rehype-sanitize`; `marked` + `DOMPurify`). Đây là **biên XSS của cả app**: đầu vào là chữ do một model bên ngoài sinh ra
+  - [ ] Allowlist tag/thuộc tính. **Không** `dangerouslySetInnerHTML` ở bất cứ đâu ngoài renderer đã sanitize (§20)
+  - [ ] Code block: nhãn ngôn ngữ, số dòng, nút Copy (UC-02 dòng 4)
+  - [ ] Bốn trạng thái của T-HD3 — đang gõ · đang stream · xong · lỗi — đọc từ `node.status`, `finish_reason`, `error_code` đã có sẵn trong `MessageItem.tsx`
+  - [ ] Render **tăng dần**: markdown chưa đóng (fence chưa có cặp, bảng đang dở) không được làm vỡ bố cục giữa lúc chữ đang chảy
+- **Xong khi (DoD):**
+  - [ ] `... exec -T web pnpm test src/components/chat/Markdown.test.tsx` — ≥ 12 ca, trong đó **≥ 5 ca tấn công**: `<img src=x onerror=alert(1)>`, `<script>alert(1)</script>`, `[x](javascript:alert(1))`, `<a href="data:text/html,…">`, `<iframe src=…>`. Khẳng định bằng `container.querySelector("script") === null` **và** chuỗi `onerror` không còn trong `container.innerHTML`
+  - [ ] **Ca âm:** tạm tắt sanitizer → đúng năm ca trên phải **ĐỎ**. Một bộ test XSS xanh cả khi không có sanitizer là một bộ test đang đo chỗ khác
+  - [ ] Nút Copy: `pnpm test` với `navigator.clipboard.writeText` mock → nhận đúng nội dung code, **không** kèm số dòng
+  - [ ] Chrome: hỏi một câu sinh code dài → chữ chảy **từng chữ** qua Nginx (C1 vẫn đứng) và code block không nhấp nháy mỗi delta
+- **Cạm bẫy:**
+  - ① **`start` nghĩa là "bắt đầu từ đầu", không phải "nối tiếp"** (T-1.14 ④): đường dựng lại từ Postgres cũng phát `start`, nên FE phải **xoá** chữ cũ của message đó. Renderer markdown mới **không được** giữ một bản chữ riêng cạnh `dangBay` — hai nguồn sự thật cho cùng một chuỗi là chỗ chữ nhân đôi sau một lần F5.
+  - ② **Chữ đang bay KHÔNG nằm trong `path`** (T-1.14 ①): worker chỉ ghi `content` xuống Postgres lúc kết thúc (§7.2 ③), nên giữa lượt sinh `path[i].content` là chuỗi **rỗng**. Component đọc nhầm chỗ thì mỗi lần `lamTuoi()` là một lần chữ trên màn hình biến mất.
+  - ③ **Thư viện highlight là mối đe doạ thật với S8.** T-1.14 đo được **309 delta trong 3.768 s** cho một câu dài; highlight lại cả code block ở mỗi delta là 309 lần phân tích cú pháp, cộng vài trăm KB tải về. NQ-77 đã dời `Performance ≥ 80` sang P9, nên **không có phép đo nào ở P3 bắt được chỗ này** — đó là lý do phải cân nhắc lúc chọn thư viện chứ không lúc chạy DoD.
+
+---
+
+### T-3.6 — Model Picker đọc `GET /models`, badge capability, xám khi `available: false`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD4, T-0.7, T-3.0, T-3.1a · **Ước lượng:** 3h
+- **KH:** §9.3, §9.4, UC-05
+- **Việc:**
+  - [ ] Đọc `GET /models` — đã có đủ trường: `available`, `unavailable_reason`, `capabilities`, `badge`, `default`, `provider`
+  - [ ] Badge capability; model `available: false` → **xám, không chọn được**, tooltip lấy nguyên văn `unavailable_reason`
+  - [ ] Model mặc định **theo user**: đọc `default_model` từ `/auth/me`, ghi bằng `PUT /settings` (T-3.0 đã dựng cả hai, NQ-79). Rơi về `default: true` của catalog khi `null`
+  - [ ] Model mặc định **theo hội thoại**: `conversations.default_model` qua `PATCH` (đã có). Hai tầng, thứ tự rõ ràng: hội thoại thắng user, user thắng catalog
+  - [ ] Chừa chỗ cho cảnh báo "model không có `vision` mà hội thoại đã có ảnh" — **không làm ở đây**, đó là T-4.5
+  - [ ] Chốt **khi nào** gọi lại `GET /models` — xem Cạm bẫy ②
+- **Xong khi (DoD):**
+  - [ ] **S7 chạy đầu-cuối:** thêm một model vào `config/model_catalog.json` → `curl -sk -X POST https://localhost/api/v1/admin/catalog/reload -b <cookie admin>` → `curl -sk https://localhost/api/v1/models` có model mới → **picker hiện nó mà không rebuild image, không sửa một dòng code**. Dán cả ba output; gỡ model thử ra sau
+  - [ ] Đổi model mặc định trong picker → F5 → **vẫn là model vừa chọn**; `psql`: `SELECT default_model FROM users WHERE id='<id>'` đúng giá trị đó (UC-05 dòng 4, đóng phần FE của B-206)
+  - [ ] Tắt 9Router trên host Windows → `GET /models` trả `available:false` cho các model local; `... exec -T web pnpm test src/features/models/ModelPicker.test.tsx` với fixture `available:false` → mục đó `aria-disabled`, bấm **không** đổi model, tooltip là `unavailable_reason`
+  - [ ] `grep -rnE '"(deepseek|claude|gpt|gemini|ol)-[a-z0-9.-]+"' frontend/src/ --include=*.ts --include=*.tsx | grep -v "\.test\."` → **rỗng** (A3). Lệnh 2 của `check_hardcode.sh` chỉ quét `backend/`, nên dòng này là phép kiểm duy nhất cho FE
+- **Cạm bẫy:**
+  - ① **Model mặc định của user có thể trỏ vào một model đã biến mất khỏi catalog.** T-3.0 validate lúc **ghi**, không lúc đọc (cố ý — catalog là file sửa nóng), nên picker phải tự xử ca `default_model` không còn trong danh sách: rơi về `default: true`, **không** hiện một ô trống hay một id trần.
+  - ② **Đừng gọi `GET /models` mỗi lần mở dropdown.** B-192 đã đo giá của thói quen ấy ở `/admin/system`: `run_checks()` mất ~850 ms chỉ riêng chặng 9Router (`854 / 806 / 941 ms` ba lần liên tiếp). Model Picker mở nhiều hơn màn Hệ thống rất nhiều lần.
+  - ③ **9Router tắt là ca THƯỜNG, không phải ca lạ** (RR-5, `availability: host-dependent`). Picker phải xám được các model đó mà không cần F5; và "không chọn được" phải đúng cả khi ai đó gọi hàm đổi model từ Console — FE không phải lớp bảo vệ, nhưng nó cũng không được tự mâu thuẫn.
+
+---
+
+### T-3.7a — Backend cho Like/Dislike: hai cột trên `messages` + `POST /messages/{id}/feedback`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-1.1 · **Ước lượng:** 1.5h
+- **KH:** §18.2, §20 · **Đóng:** B-207
+- **Việc:**
+  - [ ] Migration: hai cột nullable trên `messages` — `feedback` (`like`/`dislike`, enum hoặc `TEXT` có `CHECK`) và `feedback_reason` (`TEXT`). NQ-80 chọn cột thay vì bảng riêng vì phép kiểm quyền tái dùng nguyên vẹn thứ đã có
+  - [ ] `POST /messages/{id}/feedback` nhận `{value, reason?}`; **idempotent theo message**: Like rồi Like lại vẫn một dòng, Like rồi Dislike thì đổi giá trị
+  - [ ] Cho phép **gỡ** đánh giá (`value: null` hoặc `DELETE`) — bấm nhầm Dislike mà không rút lại được là một nút chỉ bấm được một lần trong đời
+  - [ ] Trả `feedback` trong `MessageRa` để FE vẽ đúng trạng thái sau khi F5
+  - [ ] Quyền: message thuộc một hội thoại, hội thoại lọc `user_id` **trong câu SQL** (§20) — tái dùng `ConversationRepository`, **không** viết đường tra quyền thứ hai
+- **Xong khi (DoD):**
+  - [ ] `cd backend && .venv/bin/pytest tests/api/test_feedback.py` xanh, gồm **ca IDOR**: user A gửi feedback cho message của B ⇒ **`404`**, không `403` (§20 — `403` xác nhận tài nguyên tồn tại)
+  - [ ] Like → Like lại → Dislike → gỡ: `SELECT feedback FROM messages WHERE id='<id>'` sau mỗi bước ⇒ `like`, `like`, `dislike`, `NULL`. Dán cả bốn
+  - [ ] `GET /conversations/{id}` trả `feedback` trong mỗi phần tử của `path` (FE cần nó để vẽ lại sau F5)
+  - [ ] `.venv/bin/alembic upgrade head` rồi `downgrade -1` rồi `upgrade head` lại — chạy sạch cả hai chiều
+  - [ ] `cd backend && .venv/bin/pytest` toàn bộ xanh, số test **tăng**; `make lint` sạch
+- **Cạm bẫy:**
+  - ① **`messages` là bảng nóng nhất của app** — mọi truy vấn đường đi (§8.3, recursive CTE) đọc nó. Hai cột nullable thì rẻ, nhưng `feedback_reason` là `TEXT` không giới hạn: đặt một trần độ dài ngay ở schema, đừng để một trường tự do đi vào bảng mà mọi câu truy vấn đường đi đều kéo về.
+  - ② **Đây là commit thuần backend và nó đứng riêng** (NQ-80) — đúng lý lẽ NQ-67 đã dùng để tách T-2.20 khỏi T-2.19. Trộn nó vào T-3.7 nghĩa là một commit vừa migration vừa năm nút giao diện.
+  - ③ **Ngày P8 mở share/fork, câu "ai đánh giá" sẽ không trả lời được** — hai cột nằm trên `messages` chứ không mang `user_id`. Đây là cái giá NQ-80 đã nhìn thấy và chấp nhận; ghi lại ở đây để ngày ấy không ai đi tìm một bug không tồn tại.
+
+---
+
+### T-3.7 — Nút dưới câu trả lời: Copy · Like · Dislike · Retry · Đổi model & retry
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-3.7a, T-1.13, T-3.5 · **Ước lượng:** 2.5h
+- **KH:** UC-02, §18.2
+- **Việc:**
+  - [ ] Năm nút theo thiết kế T-HD3: Copy (clipboard) · Like · Dislike · Retry (`POST /messages/{id}/retry`, đã có) · Đổi model & retry (`{model_id}`, đã có)
+  - [ ] `api.ts`: `danhGia(messageId, "like" | "dislike" | null, lyDo?)` — gọi endpoint T-3.7a vừa mở
+  - [ ] Trạng thái Like/Dislike vẽ từ `feedback` trong `MessageRa`, **không** giữ một bản riêng ở state FE (F5 phải ra đúng thứ vừa bấm)
+  - [ ] Nút Copy dùng **chung một hàm** với nút Copy của code block (T-3.5)
+- **Xong khi (DoD):**
+  - [ ] `... exec -T web pnpm test src/components/chat/NutDuoiCauTraLoi.test.tsx` — Copy gọi `writeText` đúng nội dung; Retry gọi đúng endpoint; "Đổi model & retry" gửi `model_id` **khác** model đang dùng; bấm Like hai lần ⇒ lần hai **gỡ** đánh giá
+  - [ ] Chrome: bấm Like → F5 → nút vẫn sáng (đọc từ `path`, không từ state)
+  - [ ] Chrome: Retry bằng model khác → `psql` hai dòng `messages` cùng `parent_id`, `model_id` **khác nhau**, nhánh cũ giữ nguyên model cũ (UC-04 dòng 4)
+- **Cạm bẫy:**
+  - ① **B-144 áp thẳng vào hai nút của task này.** `POST /messages/{id}/retry` chỉ đi qua idempotency ở diện **tuỳ chọn** (chỉ khi FE gửi header), và mỗi lần bấm tạo một `assistant_message_id` mới nên lớp `_job_id` của B-92 **không** đỡ được. Hai nút Retry cạnh nhau, bấm nhanh hai lần = hai hoá đơn. Quyết cùng T-3.4.
+  - ② **`sibling_count` đổi sau mỗi Retry, và C13 cấm FE tự đếm.** Sau mọi thao tác đổi cây phải đọc lại đường đi **từ server** (T-1.14 ②) — nút Retry ở đây, không phải ở T-3.8, là chỗ sinh anh em nhiều nhất.
+  - ③ **Một hàm Copy, hai chỗ gọi.** Chép hai bản là chép luôn cái bẫy `navigator.clipboard` không tồn tại ngoài secure context vào cả hai — rồi chỉ sửa một.
+
+---
+
+### T-3.8 — Điều hướng nhánh `‹ n/m ›` + sửa message user tạo nhánh
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-1.13, T-3.5 · **Ước lượng:** 3h
+- **KH:** §8.2, UC-04
+- **Việc:**
+  - [ ] Đưa `‹ n/m ›` thô của `MessageItem.tsx` vào thiết kế T-HD3. **Giữ nguyên `chiSoHienThi()`** — B-60 chốt 0-based và phép `+1` sống ở **đúng một hàm**
+  - [ ] Chuyển nhánh = `PATCH /conversations/{id}` `{active_leaf_id}` (đã có, và nó trả luôn đường đi mới — không gọi thêm một `GET`)
+  - [ ] Sửa message user = `PATCH /messages/{id}` (đã có) → nhánh mới; UI sửa tại chỗ theo T-HD3
+  - [ ] Sau mọi thao tác: dựng lại đường đi **từ response**, không tự ghép
+- **Xong khi (DoD):**
+  - [ ] `... exec -T web pnpm test src/lib/tree.test.ts` vẫn **24/24** xanh (đo 2026-09-20: `24 tests · 9 ms`) + ≥ 6 ca mới cho component điều hướng
+  - [ ] Chrome: Retry → hiện `‹ 2/2 ›`; bấm `‹` → `‹ 1/2 ›` **và nội dung phía dưới đổi theo**; F5 → vẫn ở nhánh vừa chọn (`active_leaf_id` đã nằm trong Postgres)
+  - [ ] Sửa một message ở **giữa** hội thoại → `psql`: message cũ còn nguyên, message mới cùng `parent_id`, `sibling_count = 2`
+  - [ ] **Ca âm:** `SELECT count(*) FROM messages WHERE conversation_id='<id>'` trước và sau khi sửa → **tăng**, không giảm (C12: không `ON DELETE CASCADE` trên `parent_id`; một lần giảm nghĩa là một nhánh vừa mất)
+- **Cạm bẫy:**
+  - ① **Thấy `1/2` thì đừng đi sửa off-by-one.** T-1.14 đã đo tận nơi: sau Retry, `active_leaf_id` trỏ anh em **mới**, node cuối đường đi có `index=1 count=2` ⇒ màn hình vẽ đúng `2/2`. `1/2` là con số của nhánh **cũ**, tức ảnh chụp sau khi đã bấm `‹`. Một lần "sửa" ở đây làm hỏng `chiSoHienThi()` cho mọi chỗ khác.
+  - ② **Cây phải giữ thêm ở một `ref`** (T-1.14 ③): hàm cập nhật của React chạy lúc *render* chứ không lúc gọi, nên `setCay(cu => …)` không trả cây mới cho dòng lệnh kế tiếp — mà C14 đòi `parent_id` gửi lên là lá **mới nhất client đang thấy**.
+  - ③ **B-109 đã chốt ngả (a) nhưng CHƯA hiện thực.** Với ngả ấy, FE vẫn `PATCH {active_leaf_id: sibling.id}` và **không phải sửa một dòng nào** khi backend đi xuống lá sâu nhất. Đừng "sửa trước" ở FE cho một thay đổi backend chưa xảy ra.
+  - ④ **Đường sửa message đi qua `PATCH`, tức ngoài vùng phủ idempotency** (B-144). Bấm Lưu hai lần = hai nhánh = hai hoá đơn.
+
+---
+
+### T-3.9 — Hoạt ảnh theo token của T-HD5; tôn trọng `prefers-reduced-motion`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD5, T-3.5 · **Ước lượng:** 3h
+- **KH:** §19.1, §2.3 (P5)
+- **Việc:**
+  - [ ] Token thời lượng + easing của T-HD5 vào `theme.css` — §19.1 xếp hoạt ảnh cùng hạng với màu: token, không phải số rời trong component
+  - [ ] Áp cho: nút bấm, hover icon, mở/đóng sidebar, chữ xuất hiện khi stream
+  - [ ] `@media (prefers-reduced-motion: reduce)` → **tắt**, không phải "giảm còn một nửa"
+- **Xong khi (DoD):**
+  - [ ] `grep -rnE "transition:|animation:|[0-9]+ms|duration-\[" frontend/src/components/ frontend/src/features/ | grep -v "var(--"` → **rỗng** (mọi thời lượng đến từ token)
+  - [ ] `... exec -T web pnpm test src/components/sidebar/HoatAnh.test.tsx` với `window.matchMedia` mock trả `matches: true` cho `(prefers-reduced-motion: reduce)` → component đặt đúng thuộc tính "không hoạt ảnh"; mock `matches: false` → không đặt
+  - [ ] **Ca âm:** xoá khối `@media` đi → đúng test trên phải **ĐỎ**
+  - [ ] Chrome DevTools → Rendering → Emulate `prefers-reduced-motion: reduce` → sidebar mở/đóng **tức thì**, chữ stream không fade
+- **Cạm bẫy:**
+  - ① **Hoạt ảnh trên chữ đang stream là chỗ dễ giết C1 nhất.** Mỗi delta là một lần re-render; T-1.14 đo **309 delta, khoảng lớn nhất 22 ms**, tức một `transition` đặt trên phần tử chứa chữ nghĩa là trình duyệt vẽ lại 300+ lần trong 3.7 giây. Hoạt ảnh ở **vùng** (bong bóng xuất hiện), không ở **từng chữ**.
+  - ② **`make audit` không bắt được `prefers-reduced-motion` sai.** Cả `lighthouse` lẫn `axe` đều không chấm nó. Nếu dòng test ở DoD không tồn tại thì tính năng này hỏng trong im lặng — và người chịu hậu quả là đúng người không chịu được chuyển động.
+
+---
+
+### T-3.10 — Responsive 375 px → desktop; sidebar thành drawer trên mobile
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-3.3, T-3.2 · **Ước lượng:** 3h
+- **KH:** §2.3 (S8), §23
+- **Việc:**
+  - [ ] Sidebar → drawer trên mobile: overlay, đóng bằng `Esc` và bằng chạm ra ngoài, trả tiêu điểm về nút mở
+  - [ ] Ô nhập không bị bàn phím ảo che (`dvh` chứ không `vh` trên iOS)
+  - [ ] Bảng của `/admin` (T-2.19 đang là `<table>` thô, và T-3.12 sẽ thêm ba bảng nữa) phải cuộn ngang được, không tràn
+  - [ ] Vùng chạm ≥ 44 px
+- **Xong khi (DoD):**
+  - [ ] Chrome DevTools → iPhone SE (375×667), chạy trong Console trên bốn đường `/`, `/dang-nhap`, `/dang-ky`, `/admin`: `document.documentElement.scrollWidth <= window.innerWidth` → dán **bốn** kết quả `true`
+  - [ ] **Ca âm:** đặt tạm `min-width: 500px` cho vùng chat → dòng trên phải ra `false`; bỏ ra sau
+  - [ ] `... exec -T web pnpm test src/components/sidebar/Drawer.test.tsx` — mở drawer ⇒ nội dung phía sau không cuộn được; `Esc` ⇒ đóng và tiêu điểm về nút mở
+  - [ ] `make audit` (T-3.2 đã dựng) → `Accessibility ≥ 90` trên cả bốn đường ở kích thước mobile. Dán bảng điểm
+- **Cạm bẫy:**
+  - ① **`Performance ≥ 80` KHÔNG phải DoD của task này nữa** (NQ-77) — nó đo Vite dev server nên không nói gì về sản phẩm. Nó sống ở **T-9.4**, sau khi có stage build production. Đừng chạy nó rồi báo một con số thấp như thể đó là một lỗi giao diện.
+  - ② **`make audit` đo `http://web:5173`, không `https://localhost`** (NQ-77) — tức nó **không** đi qua Nginx. Mọi thứ thuộc về Nginx (header bảo mật, nén, HTTP/2) không nằm trong phép đo này; chỗ kiểm chúng là T-9.4.
+  - ③ **`/admin` là màn hình mobile tệ nhất và dễ bị bỏ quên nhất** — bốn bảng số và một công tắc nguồn tiền. Nó nằm trong DoD ở trên đúng vì lý do đó.
+
+---
+
+### T-3.11 — Thanh quota + cảnh báo còn ≤ 20% + màn hình hết quota có `retry_after`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-3.0, T-3.1a · **Ước lượng:** 2h *(§14.3 đề xuất 4 h khi B-158 còn là nợ; NQ-81 dời phần backend sang T-3.0 nên task này thuần FE)*
+- **KH:** UC-07, §10.3
+- **Việc:**
+  - [ ] Thanh quota cho **cả hai** cửa sổ 5 h và 7 ngày, đọc `quota` từ `GET /auth/me` (T-3.0 đã đặt ở đó)
+  - [ ] Cảnh báo khi còn ≤ 20%, **không chặn** (UC-07 dòng 1)
+  - [ ] Hết quota: nút gửi vô hiệu hoá + hiện **thời điểm chính xác** quota được hoàn lại (UC-07 dòng 2)
+  - [ ] Làm tươi sau mỗi lượt sinh xong — quota chỉ đổi khi `usage_events` có dòng mới, nên nhịp đúng là "sau `done`/`error`", **không** phải một bộ đếm thời gian
+  - [ ] `quota_warning` trong body `202` (đã có từ T-2.11) là **nguồn thứ hai** cho cùng một con số — hai nguồn phải khớp
+- **Xong khi (DoD):**
+  - [ ] `docker compose exec -T postgres psql -U scarlet -d scarlet -c "UPDATE tiers SET limit_5h_usd=0.001 WHERE name='free'"` → chờ ≤ 60 s (T-2.20 đo **59.3 s** ở ca xấu nhất) → màn hình vô hiệu hoá nút gửi **mà không cần F5** nếu vừa gửi xong một lượt. Trả `0.5000` lại sau
+  - [ ] `curl` ép gửi khi đã hết ⇒ `429` + `Retry-After` + body có `limit_type ∈ {5h, weekly}`, và `SELECT count(*) FROM usage_events` **không đổi** trước/sau (S6 — 0 USD phát sinh). Dán cả hai lần đếm
+  - [ ] Thời điểm hoàn lại **trên màn hình** khớp `Retry-After` của `curl` trong ±2 s. Hai nguồn, một con số — đây là phép đo duy nhất bắt được chúng lệch
+  - [ ] `... exec -T web pnpm test src/features/quota/ThanhQuota.test.tsx` — 21% ⇒ không cảnh báo; 20% ⇒ cảnh báo; 0% ⇒ nút `disabled`. Hai ca ở hai bên ngưỡng, không phải một ca ở giữa
+- **Cạm bẫy:**
+  - ① **BYOK vẫn gửi được khi hết quota system key** (UC-07 dòng 4; T-2.15 đã làm). Một thanh quota vô hiệu hoá nút gửi **vô điều kiện** khoá nhầm đúng người đang tự trả tiền bằng khoá của mình.
+  - ② **Đổi hạn mức có hiệu lực ≤ 60 s, KHÔNG tức thì** — NQ-70 ① cố ý không viết `invalidate()`, và §10.4 chỉ hứa "≤ 60 s". Màn hình không được nói "đã áp dụng".
+  - ③ **Tiền là CHUỖI suốt từ Postgres tới `Intl.NumberFormat`**, đổi sang `number` đúng một lần và chỉ để hiển thị (T-2.19). Một `Number(a) + Number(b)` ở tầng FE là làm tròn tiền ngay tại biên vào.
+  - ④ **`quota_warning` của `202` và thanh quota của `/auth/me` đọc hai cửa sổ ở hai thời điểm khác nhau**, nên chúng sẽ lệch — và lệch là đúng. Thứ phải tránh là màn hình hiện **hai con số cạnh nhau** mà không nói cái nào cũ.
+
+---
+
+### T-3.12 — 🔒 Admin UI hoàn chỉnh theo T-HD7 + trang Cài đặt — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD7, T-3.0, T-2.19, T-2.20 · **Ước lượng:** 7h *(§14.3 đề xuất 7 h; phần `/settings` đã dời sang T-3.0 theo NQ-81, nhưng NQ-66 vẫn nằm lại đây)*
+- **KH:** §16.3, §18.5
+- **Việc:**
+  - [ ] Ba màn còn thiếu của §16.3: **Người dùng** (đổi tier, ghi đè hạn mức, bật `can_execute_skills`, suspend — `PATCH /admin/users/{id}` đã có từ T-2.16), **Hệ thống** (`GET /admin/system`), **Audit log** (`GET /admin/audit-logs`). Hai endpoint sau mở ở T-2.20, và T-2.20 ghi rõ *"UI cho bốn endpoint này → T-3.12"*
+  - [ ] Màn **Model**: health từng provider + nút reload catalog (nút đã có ở T-2.19)
+  - [ ] **NQ-66 — hai cột "số hội thoại" và "chi tiêu 7 ngày" bằng MỘT câu JOIN trong `GET /admin/users`.** Hướng đã chốt, **chưa viết một dòng nào**. Đây là mảnh backend còn lại của task này
+  - [ ] **B-191** — `target_id` của audit log là `TEXT` thô (UUID cho `users`, chuỗi cho `tiers`). Chốt: FE tra tên từ `GET /admin/users` mà nó đằng nào cũng tải, hay backend thêm `target_label` rẽ theo `target_type`
+  - [ ] **B-192** — `run_checks()` chạy mỗi lần mở màn Hệ thống (9Router ~850 ms). Chốt: cache vài giây (và khi ấy "vài giây" là một biến `.env`, A3), hay FE tự giãn nhịp và **ghi rõ trên màn hình** số liệu cũ mấy giây
+  - [ ] **B-193** — `health.<mục>.error` là chuỗi **rỗng** khi mục đó chết vì timeout. Một dòng ở `app/core/health_checks.py::_timed`, cộng một test cho ca "exception không có thông điệp"
+  - [ ] **B-175** — `/admin/usage` chưa phân trang; chốt trần độ dài cửa sổ hay phân trang thật
+  - [ ] Trang **Cài đặt** cá nhân: BYOK (`/settings/keys*` đã có từ T-2.14), theme (localStorage đã có), model mặc định (`PUT /settings` của T-3.0) — ba mảnh đều đã có backend, task này chỉ dựng màn hình
+- **Xong khi (DoD):**
+  - [ ] Hai cột mới đi bằng **một** câu SQL: bật `echo=True` (hoặc `log_statement=all` ở Postgres), mở màn Người dùng → đếm số câu `SELECT` chạm `conversations`/`usage_events` ⇒ **1**, không N+1. Dán log
+  - [ ] `cd backend && .venv/bin/pytest tests/api/test_admin.py` xanh, thêm ca: user chưa có hội thoại ⇒ cột trả **`0`**, không `null`
+  - [ ] Chrome: bấm Duyệt một user rồi mở Audit log → dòng mới nói được **cả "ai" lẫn "với ai" bằng chữ người đọc được**, không UUID (đóng B-191)
+  - [ ] Mở màn Hệ thống **hai lần liên tiếp** → DevTools Network đếm số lần gọi `/admin/system`; dán con số kèm đường đã chốt ở Việc (đóng B-192)
+  - [ ] Dừng `redis` → màn Hệ thống hiện **lý do** hỏng, không phải chuỗi rỗng (đóng B-193). Đọc Cạm bẫy ① trước khi chọn cách đo
+  - [ ] `curl` bằng cookie của **user thường** vào cả bốn endpoint mới ⇒ `403 ADMIN_REQUIRED` cả bốn — lặp đúng phép đo thứ hai của T-2.19, vì ẩn menu ở FE không phải phân quyền
+  - [ ] Trang Cài đặt: thêm một khoá BYOK → hiện 4 ký tự cuối, **không** bao giờ hiện lại bản rõ (§20, T-2.14); đổi model mặc định → F5 vẫn đúng
+  - [ ] Đổi tier của một user trên UI → `psql`: `users.tier_name` đổi **và** `audit_logs` có dòng mới; ≤ 60 s sau, hạn mức mới có hiệu lực
+- **Cạm bẫy:**
+  - ① **C21 chặn `/admin/*` TRƯỚC khi endpoint kịp trả lời.** `require_app_access` tra blacklist ở Redis và T-2.7 chốt *"Redis chết ⇒ 503, KHÔNG cho qua"*, nên khi Redis chết thì màn Hệ thống nhận `503` chứ không nhận bản báo hỏng — nó chết cùng thứ nó có nhiệm vụ báo cáo. T-2.20 đo được điều này và ghi **B-190**, còn mở. **Đừng thiết kế màn hình quanh một câu trả lời không tới được**, và đừng tự nới C21: đó là cánh cửa quyền lực nhất của app.
+  - ② **`PATCH /admin/tiers` KHÔNG gỡ cache** (NQ-70 ①, cố ý). UI không được hiện "đã áp dụng" — nó phải nói "có hiệu lực trong ≤ 60 s", vì đó là điều thật.
+  - ③ **`PATCH /admin/tiers` không nhận `is_default`** dù `GET` có trả (B-152): đừng vẽ một công tắc không nối với gì. Tám trường sửa được **bằng đúng** `OVERRIDABLE_FIELDS`, và đã có test canh đẳng thức đó.
+  - ④ **`streams_dang_chay` là tên khoá JSON cố ý giữ tiếng Việt không dấu** (NQ-70 ②, vì DoD của T-2.20 gọi đích danh nó). Đọc nó ở FE là đọc đúng tên ấy; đừng "sửa lại cho nhất quán" — B-142 chưa chốt.
+  - ⑤ **Task này vẫn còn một mảnh backend (câu JOIN của NQ-66, một dòng của B-193) cạnh sáu màn hình.** NQ-81 đã dời được phần `/settings` đi, nhưng NQ-66 thì không dời được vì nó là một câu SQL viết riêng cho đúng màn hình này. Nếu phần backend phình quá một buổi thì **dừng và hỏi**, đừng tự gộp tiếp.
 
 ---
 
@@ -1065,7 +1416,7 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 - **T-9.1** Bộ eval golden-set 12 case §21.3 + `make eval MODEL=...`; **model chưa qua eval không được `enabled: true`**
 - **T-9.2** Chuyển Mailpit → SMTP thật *(chặn bởi T-H8)*; test gửi thư thật tới hộp thư ngoài
 - **T-9.3** Backup: cron `pg_dump` + `mc mirror`, giữ 14/7 bản *(§22.7)*
-- **T-9.4** Lên domain: Let's Encrypt, `artifacts.<domain>`, cập nhật `.env`, bật HSTS *(chặn bởi T-H10)*
+- **T-9.4** Lên domain: Let's Encrypt, `artifacts.<domain>`, cập nhật `.env`, bật HSTS *(chặn bởi T-H10)*. **Kèm hai việc chuyển từ P3 sang theo NQ-77:** ① thêm **stage build production** vào `frontend/Dockerfile` và cho nginx phục vụ file tĩnh khi không ở dev — hôm nay `location /` proxy thẳng vào Vite dev server; ② dòng DoD `Performance ≥ 80` của **S8** chạy ở đây, trên bản build thật và qua Nginx thật, chứ không ở P3 *(KE-HOACH §2.3 vẫn ghi S8 ở P3 — `docs/KE-HOACH.md` là vùng cấm của agent, nên lệch này sống ở đây)*
 - **T-9.5** Rà soát log: không secret, không nội dung message đầy đủ; middleware redact có test
 - **T-9.6** Trang thông tin cho người dùng: dữ liệu gửi tới provider nào, admin đọc được gì *(§20)*
 - **T-9.7** README + hướng dẫn vận hành: khởi động lại, xem log, thêm model, thêm user
@@ -1270,7 +1621,7 @@ P1 **nghiêng hẳn về nhóm B** (Redis stream, SSE qua Nginx, trình duyệt,
 | B-160 | **Không có ràng buộc nào cấm hai dòng `usage_events` cho cùng một `message_id`.** DoD dòng 1 đòi "**đúng 1** dòng cho một lượt chat" và hôm nay điều đó đúng nhờ **ba** lớp rời nhau, không nhờ schema: `max_tries=1` của arq, `WHERE status='queued'` trong `mark_streaming` (B-72), và `_dong_so` chạy đúng một lần trong `finally`. Mất bất kỳ lớp nào — ví dụ một task sau cho `retry` dùng lại cùng `message_id` (T-1.13), hoặc ai đó nâng `max_tries` — thì hoá đơn nhân đôi một cách **im lặng**, và phép đối chiếu của DoD dòng 5 vẫn xanh vì Redis cũng nhân đôi theo. Một `CREATE UNIQUE INDEX … ON usage_events(message_id) WHERE message_id IS NOT NULL` biến nó thành một lỗi ghi nhìn thấy được. **Không** thêm ở T-2.12 vì một migration mới nằm ngoài "Việc cần làm", và vì cần chốt trước: ca `retry` của T-1.13 có được phép sinh dòng sổ **thứ hai** cho cùng message hay không (nếu có thì ràng buộc phải là `(message_id, …)`, không phải `message_id`) | T-2.12, B-72 |
 | B-161 | **`docker compose restart api` đổi IP container, và Nginx giữ IP cũ ⇒ `502` cho tới khi restart luôn Nginx.** Cắn thật khi đo DoD T-2.12: sau `restart api`, container lên `healthy`, `getent hosts api` trong Nginx phân giải **đúng** IP mới, nhưng `proxy_pass http://api:8000` vẫn nối vào IP cũ — log Nginx: `connect() failed (111: Connection refused) … upstream: http://192.168.224.6:8000` trong khi `api` đã ở `192.168.224.9`. Nguyên nhân là Nginx phân giải upstream **một lần lúc nạp cấu hình**. Mất ~10 phút cho một triệu chứng trông y hệt "app hỏng". Hai đường sửa: `resolver 127.0.0.11 valid=10s;` + đặt upstream vào một biến trong `nginx.conf`, hoặc ghi vào README vận hành rằng restart `api`/`worker` phải kèm restart `nginx`. **Cần chốt** đường nào — cái đầu sửa thật nhưng đụng Phụ lục D, cái sau rẻ nhưng là một luật người phải nhớ | Quan sát khi đo DoD T-2.12 |
 | ~~B-157~~ | **ĐÃ ĐÓNG 2026-09-19 ở T-2.15 (NQ-58).** `_mo_luot_sinh` hỏi `llm/credentials.py::resolve_key_source` rồi **bỏ qua hẳn** `check_quota` khi nguồn là `byok` — không đọc ZSET, không cảnh báo UC-07 (thanh 'còn ~X USD' nói về quota hệ thống). Worker hỏi **cùng lõi** qua `resolve_credential` rồi chở `key_source` xuống `meter.record_usage`, nơi nhánh bỏ `ZADD` đã nằm sẵn từ T-2.12. Đo trên stack thật: hết quota (999 USD trong cả hai cửa sổ) vẫn `202`, dòng sổ `key_source=byok cost_usd=0.000067`, hai ZSET **không đổi một member**. Phép kiểm ngược: bỏ nhánh ⇒ 2 đỏ; worker không chở `key_source` ⇒ 1 đỏ. **Một lỗ hổng thứ hai lòi ra khi đo, đã vá cùng task: xem B-168** | T-2.11 → đóng 2026-09-19 |
-| B-158 | **`GET /auth/me` không trả tier/quota như §18.1 hứa, nên UC-07 dòng 2 chưa có đường dữ liệu.** §18.1 tả `/auth/me` là *"User + tier + quota còn lại + trạng thái"*; `NguoiDungRa` hiện chỉ có phần User + trạng thái. UC-07 dòng 2 đòi FE **vô hiệu hoá nút gửi** khi hết quota 5 giờ và hiện **thời điểm chính xác** quota được hoàn lại — mà hôm nay FE chỉ biết mình hết quota **sau khi** bấm gửi và nhận `429`. Hai mảnh cần thiết đều đã tồn tại sau T-2.11 (`quota.tiers.get_effective_limits` + `quota.windows.read_window`), nên đây là việc ghép chứ không phải việc dựng. **Cần chốt:** thêm vào `/auth/me` hay làm một endpoint riêng (`GET /settings/usage` của §18.4 là ứng viên thứ hai, nhưng nó tả "chi tiêu của chính mình" tức lịch sử, không phải hạn mức còn lại); và task nào nhận — **T-2.17 đã chạy xong và KHÔNG nhận** (nó đo chi tiêu của **cả hệ thống** cho admin, không đo hạn mức còn lại của **một** người; hai câu hỏi khác nhau, hai tập hàng khác nhau — xem NQ-62), nên ứng viên còn lại là **T-3.11** (thanh quota của UC-07, đang phụ thuộc T-2.11) hoặc một task backend riêng trước nó | T-2.11 |
+| ~~B-158~~ | **DA DONG 2026-09-20 -> NQ-81: `/auth/me` trả thêm quota, và phần backend ấy thuộc T-3.0 chứ không T-3.11.** Người dùng chọn phương án 1/3. Lý do không để T-3.11 tự gánh: NQ-78 và NQ-79 vừa đặt thêm `message_max_chars` và `default_model` vào **cùng** response schema ấy, nên để riêng thì ba task (T-3.4, T-3.6, T-3.11) sửa `NguoiDungRa` ở ba commit và hai task chạy sau phải merge với task chạy trước ở đúng một file. Ngả `GET /quota` riêng bị loại vì nó lệch §18.1 (*"User + tier + quota còn lại + trạng thái"*) và thêm một endpoint phải vào §18 của KE-HOACH — vùng cấm. Hai mảnh cần thiết (`get_effective_limits`, `read_window`) đã có từ T-2.11 nên đây là việc ghép | Noi dung goc: **`GET /auth/me` không trả tier/quota như §18.1 hứa, nên UC-07 dòng 2 chưa có đường dữ liệu.** §18.1 tả `/auth/me` là *"User + tier + quota còn lại + trạng thái"*; `NguoiDungRa` hiện chỉ có phần User + trạng thái. UC-07 dòng 2 đòi FE **vô hiệu hoá nút gửi** khi hết quota 5 giờ và hiện **thời điểm chính xác** quota được hoàn lại — mà hôm nay FE chỉ biết mình hết quota **sau khi** bấm gửi và nhận `429`. Hai mảnh cần thiết đều đã tồn tại sau T-2.11 (`quota.tiers.get_effective_limits` + `quota.windows.read_window`), nên đây là việc ghép chứ không phải việc dựng. **Cần chốt:** thêm vào `/auth/me` hay làm một endpoint riêng (`GET /settings/usage` của §18.4 là ứng viên thứ hai, nhưng nó tả "chi tiêu của chính mình" tức lịch sử, không phải hạn mức còn lại); và task nào nhận — **T-2.17 đã chạy xong và KHÔNG nhận** (nó đo chi tiêu của **cả hệ thống** cho admin, không đo hạn mức còn lại của **một** người; hai câu hỏi khác nhau, hai tập hàng khác nhau — xem NQ-62), nên ứng viên còn lại là **T-3.11** (thanh quota của UC-07, đang phụ thuộc T-2.11) hoặc một task backend riêng trước nó | T-2.11 |
 | B-163 | **`python -m app.cli` chỉ có `--all`, và ngày lệnh thứ hai ra đời thì cả vỏ CLI phải cân lại.** T-2.13 dựng `app/cli.py` bằng `argparse` với đúng một lệnh (`rebuild-quota --all`, `required=True` làm phanh) vì "Việc cần làm" chỉ ghi ngần ấy, và với 15–20 người dùng (R1) thì `--all` đã bao trọn mọi ca — dựng `--user <uuid>` hôm nay là viết một nhánh không có ai gọi. Hai thứ sẽ đến cùng lúc và nên quyết cùng nhau: ① cờ `--user <uuid>` (`rebuild_quota` đã nhận `user_id`, nên là một `add_argument` cộng ba dòng), ② lệnh thứ hai, thứ ba (ứng viên đã thấy: dọn `messages` mồ côi, in quota còn lại của một người để đối chiếu với `/auth/me` của B-158, chạy tay `reaper`). **Cần chốt khi tới đó:** giữ `argparse` hay đổi sang `typer`/`click` — đổi là thêm một dependency vào `pyproject.toml`, và lý lẽ "một lệnh thì thư viện chuẩn đủ" hết hiệu lực ở lệnh thứ tư chứ không phải lệnh thứ hai | T-2.13 |
 | B-164 | **`score` của một member SAU khi dựng lại không bằng `score` lúc ghi — hôm nay lệch 2 ms, và khoảng đó có thể lớn lên trong im lặng.** Đường ghi (`add_to_windows`) dùng `now = time.time()` của worker; đường dựng lại dùng `usage_events.created_at`, mà đó là `now()` của Postgres, tức thời điểm **bắt đầu transaction** của câu `INSERT` chứ không phải thời điểm câu lệnh chạy. Đo trên stack ở DoD T-2.13 dòng 1: **0.00204 s** — vô hại trên một cửa sổ 5 giờ, và nó nhỏ **chỉ vì** `workers/generate.py::_record_usage` mở một `session_scope` **riêng** ngay tại chỗ ghi sổ. Ngày nào một task gộp việc ghi sổ vào transaction đã mở từ trước (ví dụ gộp với `UPDATE messages` của bước ⑥ để giảm một vòng commit), `created_at` lùi về đầu transaction ấy — với một lượt sinh mười phút thì bản dựng lại đặt khoản tiền **sớm hơn mười phút**, tức nó rơi khỏi cửa sổ sớm hơn mười phút. Hỏng về phía **lỏng hơn**, và không phép kiểm nào hiện có thấy được (test dùng tuổi tự đặt, DoD đo đúng một lượt ngắn). **Cần chốt:** ① dùng `clock_timestamp()` làm `server_default` của `usage_events.created_at` thay cho `now()` (một migration, và nó cũng làm cột này nói đúng nghĩa "lúc ghi dòng này"), ② hoặc ghi `score` gốc thành một cột riêng, ③ hoặc chốt rằng transaction ghi sổ **không bao giờ** được gộp với việc khác và ghi luật đó cạnh `_record_usage` | T-2.13, đo ở DoD dòng 1 |
 | B-165 | **`auth_style="query"` của catalog chưa có đường kiểm khoá BYOK, và đó là một lựa chọn chứ không phải một thiếu sót.** `app/llm/byok_verify.py` (T-2.14) hiện thực `bearer` và `x-api-key` — hai **header**, tên là hợp đồng, không phải đoán. Giá trị thứ ba gắn khoá vào **query string**, nơi tên tham số khác nhau theo từng nhà cung cấp; hôm nay **không provider nào** trong `model_catalog.json` dùng nó, nên mọi lựa chọn đều là đoán — và một khoá trong query string là một khoá trong access log của Nginx, trong dòng `INFO` của `httpx`, và trong mọi proxy trên đường đi, tức chính đường rò mà C20 sinh ra để đóng. Vì vậy nó rơi vào nhánh C42: **lưu mà không kiểm**, `verified_at = NULL`, một dòng `WARNING` gọi tên provider (có test canh). **Cần chốt khi provider đầu tiên dùng kiểu này xuất hiện:** ① tên tham số khai ở đâu (một trường mới trong `providers`, cùng họ với `verify_path`), và ② có chấp nhận cho khoá đi trong URL của một request do backend tự phát không — nếu không thì kiểu xác thực ấy phải để nguyên ở nhánh C42 chứ không phải hiện thực nửa vời | T-2.14 |
@@ -1310,6 +1661,12 @@ P1 **nghiêng hẳn về nhóm B** (Redis stream, SSE qua Nginx, trình duyệt,
 | ~~B-199~~ | **DA DONG 2026-09-20 -> NQ-75: `vitest` + `@testing-library/react` + `jsdom`, chay TRONG container `web`.** Nguoi dung chon phuong an 1/2. Ly do quyet dinh cho chay: WSL nay **khong co `node`** (`pnpm` tro nham sang shim Windows qua `/mnt/c/...`), va `make test` von da doi stack chay san (pytest noi Postgres that, NQ-17) nen day khong phai mot hop dong moi. Da them: `vite.config.ts` khoi `test` (khong tach `vitest.config.ts` — hai file la hai ban `plugins` phai giu khop), `src/test/setup.ts`, script `test`, va **29 test that** (`lib/tree.test.ts` 24 ca — cay message §8.2/§8.3, `ThemeToggle.test.tsx` 5 ca — chung minh ca chuoi jsdom + testing-library chay). `Makefile`: `make test` them `pnpm test`, `make lint` them `pnpm typecheck`. Image `web` da build lai. **Chua lam:** eslint (ngoai de xuat), va do phu — hom nay chi 2 trong 12 file `src/` co test. Noi dung goc: **Frontend KHÔNG có bộ chạy test nào, mà 12 task của §7 đều giả định có.** `frontend/package.json` chỉ có `dev`/`build`/`preview`/`typecheck`; không `vitest`, không `@testing-library/*`, không `playwright`. `make test` chỉ gọi `pytest` của backend, `make lint` chỉ gọi `ruff`+`mypy` của backend — `pnpm typecheck` **không** nằm trong target nào. Quy tắc phân vai ở §7 viết *"agent nối component vào state, API và **test**"*, tức mọi task P3 đều nợ một chỗ để đặt test. Hai dòng DoD cứng của P3 (`npx lighthouse`, `npx @axe-core/cli`) cũng chưa từng chạy lần nào trên máy này. **Cần chốt trước T-3.1:** chọn bộ chạy test FE (đề xuất: `vitest` + `@testing-library/react`) và đưa nó vào `make test`/`make lint`, hay tuyên bố rõ P3 không có test tự động ở tầng FE | Rà P2, 2026-09-20 |
 | B-200 | **Mật khẩu của `admin-t220@scarlet-dod.dev` đã bị GHI ĐÈ trong lúc rà P2 để chạy phần UI của DoD dòng 1, và hash cũ không khôi phục được.** Giá trị mới là `mot-mat-khau-admin-du-manh-cho-dod-p2` — một chuỗi đã nằm trong nhật ký hội thoại, tức **không còn là bí mật**. Tài khoản này là `role=admin`, `status=active` trên stack dev. Cùng họ với lý do T-2.20 giữ lại tài khoản ấy (`audit_logs.actor_id` trỏ vào nó). **Cần làm trước khi stack này nhìn thấy mạng ngoài:** đổi lại mật khẩu, hoặc hạ `status` xuống `suspended` | Rà P2, 2026-09-20 |
 | B-201 | **Dong ho cua WSL2 tren may nay NHAY LUI lien tuc — `dmesg` dem duoc **561** dong `systemd-journald: Time jumped backwards, rotating.`** Day la **goc** cua B-194, va no khong dung o JWT: trong cung phien ra P2, `tests/workers/test_generate.py::test_nhip_tim_dap_ca_khi_model_CHUA_tra_mot_chunk_nao` do **1 lan** voi hai moc `20:00:49.005208` roi `20:00:48.491228` — nhip tim thu HAI som hon nhip thu NHAT 0.5 giay; chay rieng 3 lan deu xanh. Hai trieu chung, mot nguyen nhan. **Vi sao no dang lo hon mot test nhap nhay:** `score` cua hai ZSET quota la **epoch giay** (§10.3), `usage_events.created_at` va `messages.created_at` deu la thoi gian tuong (Postgres chay tren cung kernel WSL2 nen dong ho cua no nhay y het), va ca hai deu duoc **so sanh** chu khong chi luu. **Chua sua** — day la cau hinh MAY, khong phai cua repo, nen can nguoi quyet: bat `systemd-timesyncd` trong WSL, tat Hyper-V time sync o phia Windows, hay chap nhan va ghi vao RR. | Ra P2, 2026-09-20 |
+| ~~B-202~~ | **DA DONG 2026-09-20 -> NQ-82: `make check-docs`.** Người dùng chọn phương án 1/4. Một script cộng cột Ước lượng của từng phase, đếm số task, so với bảng §2, exit ≠ 0 khi lệch; thêm một dòng vào §15. Lý do không chọn "bỏ cột ước lượng khỏi §2": NQ-01 trỏ thẳng vào con số tổng ấy. Không chọn "sinh bảng tự động" vì đó là một script GHI vào `docs/` — vùng CLAUDE.md cấm agent sửa. **Chưa có chủ:** một commit chore riêng, không gắn vào task nào, nên chạy trước T-3.0 — xem NQ-82 | Noi dung goc: **Cột "đề xuất" của §14.3 cộng ra 48 h nhưng dòng tổng của chính khối đó ghi 44 h; cột gốc cộng ra 37 h nhưng bảng §2 ghi 34 h.** Cùng họ **B-198** (P2: bảng ghi 44 h, §6 cộng ra 47.5 h) và **B-121**, nhưng đây là lần thứ ba nên nó không còn là một lỗi cộng — nó là một quy trình thiếu. Phiên mở rộng P3 (2026-09-20) đã đặt bảng §2 về **53 h** cho P3 và tổng về **285.5 h**, tức chỉ sửa đúng hàng vừa đổi; **hai chênh lệch cũ (P3 gốc 37 vs 34, §14.3 48 vs 44) để nguyên, không sửa lén**. **Cần chốt:** một phép kiểm tự động cộng cột ước lượng của từng phase và so với bảng §2 (ứng viên: thêm vào `scripts/check_hardcode.sh` hay một target `make check-docs`), hay tiếp tục sửa tay mỗi lần rà phase | Mở rộng P3, 2026-09-20 · cùng họ B-198, B-121 |
+| ~~B-203~~ | **DA DONG 2026-09-20 -> NQ-77: service `audit` ở `profiles: [dev]`, đo `http://web:5173`; và `Performance ≥ 80` chuyển sang P9.** Người dùng chọn phương án 1/4 cho vế nơi chạy và 1/3 cho vế đo cái gì. T-3.2 dựng service, T-3.10 dùng lại. Hai hệ quả đã ghi vào task: DoD của phase nay chỉ còn `Accessibility ≥ 90` + 0 lỗi `serious`/`critical`, và T-9.4 ở §13 nhận thêm stage build production | Noi dung goc: **Hai dòng DoD cứng của P3 không có chỗ nào chạy được: `lighthouse` và `@axe-core/cli` đều lái một Chrome thật, và không máy nào trong hệ có Chrome ở nơi chúng chạy được.** Đo 2026-09-20 trong container `web`: `which node npx` ⇒ `/usr/local/bin/node`, `/usr/local/bin/npx`; `ls /usr/bin | grep -E "chrom|firefox"` ⇒ **rỗng** (`node:22-alpine`). WSL host thì không có `node` (NQ-75) — đó chính là lý do `make test` chạy FE bằng `docker compose exec`. Ba ngả và cái giá của từng ngả nằm ở Cạm bẫy ① của T-3.2; ngả `axe-core`-làm-thư-viện **không** bao được `lighthouse` của T-3.10, nên chốt một ngả phải chốt cho cả hai task. **Cần chốt trước T-3.2** | Mở rộng P3, 2026-09-20 · nối tiếp B-199/NQ-75 |
+| ~~B-204~~ | **DA DONG 2026-09-20 -> NQ-76: tách T-3.1 thành T-3.1a / T-3.1b / T-3.1c.** Người dùng chọn phương án 1/3. B-128 đếm thiếu — xem T-3.1c Cạm bẫy ③: "sáu file test" thực tế là **10 file test + 6 script**, nên T-3.1c là 3 h chứ không 2 h | Noi dung goc: **T-3.1 được ước 10 h, tức vượt xa trần "1–4 giờ, task > 1 buổi phải tách nhỏ" của META §4.2 — và đó là hệ quả trực tiếp của NQ-71.** NQ-71 gộp sáu màn auth vào T-3.1 vì T-3.1 sở hữu lựa chọn router và số đường cần định tuyến là đầu vào của lựa chọn ấy; lý lẽ đó vẫn đúng và không đòi gộp luôn **B-128** (xoá nhánh danh tính tạm + sáu file test backend), thứ §14.3 ghi chú 2 đề nghị đi cùng. Điểm tách đã có tên: **T-3.1a** (chốt router + layout shell + error boundary + 404/500, đóng B-187) và **T-3.1b** (sáu màn auth + B-128 + B-186, đóng B-185). Giá của việc tách: bảng §2 lên 13 task và mọi ID sau đó vẫn giữ nguyên, nên rẻ hơn lần nào khác. **Cần chốt trước khi bắt đầu T-3.1** — agent không tự tách, vì đổi số task là đổi bảng §2 | Mở rộng P3, 2026-09-20 · NQ-71, §14.3 ghi chú 2 |
+| ~~B-205~~ | **DA DONG 2026-09-20 -> NQ-78: `MESSAGE_MAX_CHARS` trong `Settings`, FE đọc qua `/auth/me`.** Người dùng chọn phương án 1/4. Hiện thực ở **T-3.0**, tiêu thụ ở T-3.4 | Noi dung goc: **"Đếm ký tự" của T-3.4 chưa có trần nào để đếm: backend không giới hạn độ dài `content`.** Đo 2026-09-20: `POST /conversations/{id}/messages` khai `content: str = Field(min_length=1)` và `PATCH /messages/{id}` cũng vậy — cả hai **không có `max_length`**, và `Settings` không có biến nào họ `MESSAGE_MAX_CHARS`. Hôm nay vô hại vì §9.6 cắt ngân sách token lúc dựng context, nhưng một ô nhập đếm ngược tới một con số do FE tự đặt vi phạm A3/L4 ("mọi con số ma đều phải có tên"), và một trần chỉ có ở FE thì `curl` đi vòng qua được. **Cần chốt:** thêm `MESSAGE_MAX_CHARS` vào `Settings` + `.env.example` + `max_length` của cả hai schema (và khi ấy FE lấy con số từ đâu — một trường trong `GET /models`, hay một endpoint cấu hình), hay bỏ phần "đếm ký tự" khỏi T-3.4 và ghi rõ lý do | Mở rộng P3, 2026-09-20 · T-3.4 |
+| ~~B-206~~ | **DA DONG 2026-09-20 -> NQ-79: cột `users.default_model` + `PUT /settings` tối thiểu.** Người dùng chọn phương án 1/3. Hiện thực ở **T-3.0**, tiêu thụ ở T-3.6 và trang Cài đặt của T-3.12 | Noi dung goc: **`GET/PUT /settings` của §18.4 không tồn tại, nên "model mặc định nhớ theo user" của UC-05 và trang Cài đặt của T-3.12 đều không có chỗ lưu.** Đo 2026-09-20: `backend/app/api/v1/settings.py` chỉ có `GET /keys`, `PUT /keys/{provider}`, `DELETE /keys/{provider}` (T-2.14); bảng `users` không có cột nào cho tuỳ chọn cá nhân, và không có bảng `user_settings`. Theme thì đã sống được bằng `localStorage` (T-0.10), nên phần thiếu thật chỉ là **model mặc định** — cộng mọi tuỳ chọn cá nhân sau này (§18.4 ghi "bật/tắt tính năng"). **Cùng hình dạng B-158** và nên quyết cùng lúc với nó, vì cả hai đều là "một endpoint §18 đã hứa mà chưa ai viết, và task FE đầu tiên chạm vào nó phải quyết có gánh hay không". **Cần chốt:** nhớ model theo **hội thoại** là đủ cho v1 (rẻ, `conversations.default_model` đã có), hay dựng `/settings` + nơi lưu; và nếu dựng thì T-3.6 hay T-3.12 gánh | Mở rộng P3, 2026-09-20 · cùng họ B-158 |
+| ~~B-207~~ | **DA DONG 2026-09-20 -> NQ-80: hai cột trên `messages`, và tách **T-3.7a** (backend) khỏi T-3.7 (FE).** Người dùng chọn phương án 1/2 cho cả hai vế | Noi dung goc: **`POST /messages/{id}/feedback` của §18.2 không tồn tại, nên hai nút Like/Dislike của UC-02 và T-3.7 chưa có đường dữ liệu.** Đo 2026-09-20: `grep -rn feedback backend/app` ⇒ **0 dòng** — không route, không schema, không bảng, không cột trên `messages`. §18.2 tả rõ `like`/`dislike` + lý do tuỳ chọn, và UC-02 dòng 5 liệt kê hai nút ấy trong hàng nút bắt buộc dưới mỗi câu trả lời. **Cần chốt cùng T-3.7:** nơi lưu (bảng `message_feedback` riêng với khoá duy nhất `(message_id, user_id)`, hay hai cột trên `messages` — bảng riêng đúng hơn nếu sau này nhiều người cùng xem một hội thoại share, cột rẻ hơn hôm nay); và ai gánh — T-3.7 làm cả backend, hay một task backend riêng trước nó. Ca IDOR phải có test ngay từ đầu (user A đánh giá message của B ⇒ **404**, §20) | Mở rộng P3, 2026-09-20 · T-3.7, §18.2 |
 
 **Ghi chú lệch nhỏ:** B-28 ghi "chưa nghiệm thu được vì `ANTHROPIC_API_KEY` rỗng" — **đã cũ**, key nay có giá trị (kiểm hôm nay, không in giá trị). T-1.3 không còn bị chặn vì lý do đó.
 
@@ -1447,6 +1804,7 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 - [ ] `make test` xanh, **không** có test nào bị `skip` mà không có lý do ghi trong code
 - [ ] `make lint` sạch (ruff + mypy)
 - [ ] `make check-hardcode` exit 0
+- [ ] `make check-docs` exit 0 — tổng cột ước lượng và số task của mỗi phase khớp bảng §2 (NQ-82; B-121/B-198/B-202 là ba lần nó đã lệch)
 - [ ] `docker compose ps` — mọi service `healthy`
 - [ ] Biến mới (nếu có) đã thêm vào **cả** `Settings` **và** `.env.example`
 - [ ] Endpoint mới (nếu có) đã thêm vào KE-HOACH §18
@@ -1538,6 +1896,13 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 | **NQ-73** | 2026-09-20 | **B-196 — wrapper `app/workers/run.py` tu noi lai; loai ca 'ep tien trinh chet han' lan sidecar `autoheal`** | Nguoi dung chon phuong an 1/3. Nga 'ep chet han' phu thuoc noi bo arq (`Worker.run()` co nem lai khong, `close()` co thoat khong) — thu ta khong kiem soat va co the doi khi nang arq; do duoc hom nay: `/proc/1` ket o `do_epoll_wait`, tuc no **khong** thoat. Nga `autoheal` doi mount `/var/run/docker.sock`, tuc doi mot loi van hanh lay mot container co quyen ngang root tren host. Gia phai tra cho nga da chon: ta so huu mot supervisor ~60 dong, va no co test rieng (`tests/workers/test_run_loop.py`, 13 ca) |
 | **NQ-74** | 2026-09-20 | **B-197 — `.gitattributes` phu `*.toml`, CO Y khong phu `*.md`** | Nguoi dung chon phuong an 1/2. `docs/*.md` dang nam trong git duoi dang CRLF, nen phu `*.md` la viet lai ~5000 dong markdown trong mot commit thuan xuong dong — va no dung dung file dang duoc sua trong cung phien. Nua quyen file **khong dong duoc** bang `.gitattributes`; duong duy nhat (`core.fileMode false`) se giau ca thay doi quyen that, nen de mo trong B-197 |
 | **NQ-75** | 2026-09-20 | **B-199 — bo chay test FE la `vitest` + `@testing-library/react` + `jsdom`, chay TRONG container `web`** | Nguoi dung chon phuong an 1/2. Quyet dinh cho chay khong phai so thich: WSL nay khong co `node` (`pnpm` tro nham sang shim Windows qua `/mnt/c/...`), va `make test` von da doi stack chay san vi pytest cua backend noi Postgres that (NQ-17) — nen `docker compose exec web` khong them mot hop dong nao. Cai `node` len host se tao ban `node_modules` thu hai phai giu khop voi ban trong image |
+| **NQ-76** | 2026-09-20 | **B-204 — tách T-3.1 thành BA task: T-3.1a (router + shell + 404/500, 4 h 🔒⭐) · T-3.1b (sáu màn auth, 4 h) · T-3.1c (dọn nhánh danh tính tạm, 3 h)** | Người dùng chọn phương án 1/3. **Không đảo NQ-71, mà tiêu thụ nó:** NQ-71 gộp vì *"quyết router trước rồi mới biết mình có 8 đường là quyết hai lần"* — nhưng phiên mở rộng đã đếm ra **11 đường** và viết chúng vào task, nên đầu vào của lựa chọn router nay đã nằm trong tay trước khi mở màn hình đầu tiên. Tách ba chứ không hai vì B-128 là việc **backend + test**, và NQ-67 đã từ chối đúng kiểu trộn ấy một lần rồi khi tách T-2.20 khỏi T-2.19. Mỗi mảnh ≤ 4 h, đúng trần META §4.2 mà bản 10 h đã vượt. **Phát hiện kèm theo, đổi luôn ước lượng:** B-128 viết "sáu file test"; đếm ngày 2026-09-20 bằng `grep -rln 'X-User-Id'` ra **10** file trong `backend/tests` và thêm **6** file trong `scripts/` mà B-128 không nhắc tới — nên T-3.1c là 3 h, và `make test-resume` vào DoD của nó |
+| **NQ-77** | 2026-09-20 | **B-203 — service `audit` ở `profiles: [dev]` đo `http://web:5173`; và `Performance ≥ 80` của S8 chuyển từ P3 sang P9** | Người dùng chọn phương án 1/4 (nơi chạy) và 1/3 (đo cái gì). Vế ①: container `web` là `node:22-alpine` có `node`/`npx` nhưng `ls /usr/bin | grep -E "chrom|firefox"` **rỗng**, và WSL host không có `node` (NQ-75) — tức hai dòng DoD cứng của P3 không có chỗ nào chạy được. Service riêng thay vì thêm `chromium` vào `web` vì `web` chạy suốt ngày và mỗi lần đổi `package.json` là một lần kéo lại ~400 MB; ngả `axe-core`-làm-thư-viện bị loại vì jsdom không tính được màu thừa kế từ stylesheet (tức phép đo tương phản — thứ T-3.2 tồn tại để kiểm — sẽ câm) và vì nó không chạy được `lighthouse`. Đo `http://web:5173` trên network `internal` **xoá luôn vấn đề mkcert** (CA nằm trên host Windows theo T-H1, không trong container) bằng cách không tạo ra nó. Vế ② là một phát hiện của phiên mở rộng chứ không nằm trong B-203 gốc: `frontend/Dockerfile` **không có stage build production** (chính file đó khai vậy) và nginx `location /` proxy thẳng vào Vite dev server, nên một điểm Performance chấm trên ES module chưa minify cộng client HMR không nói gì về sản phẩm sẽ deploy. `Accessibility` không phụ thuộc bundling nên ở lại P3. **Đây là lệch có chủ ý với KE-HOACH §2.3 dòng S8**, và vì `docs/KE-HOACH.md` là vùng cấm của agent nên chỗ giải quyết là T-9.4 ở §13, đã ghi thêm hai dòng |
+| **NQ-78** | 2026-09-20 | **B-205 — `MESSAGE_MAX_CHARS` sống trong `Settings`, FE đọc con số qua `/auth/me`** | Người dùng chọn phương án 1/4. Không chọn cột trong bảng `tiers` dù §19.1 xếp "hạn mức theo tier" vào đó và dù tiền lệ `max_upload_mb`/`max_attachments` nằm ngay cạnh: hôm nay chưa ai cần trần khác nhau giữa `free` và `trusted`, và một cột như thế kéo theo migration + `OVERRIDABLE_FIELDS` + `PATCH /admin/tiers` + UI ở T-3.12. Vấn đề thật mà quyết định này đóng được đo được: `content` không có `max_length` ở cả hai schema, nginx cho qua tới 25 MB, nên thứ chặn đầu tiên là `token_budget()` — tức một lần dán quá dài nổ ở `context.py` **giữa lượt sinh**, sau khi đã tạo message và đã tiêu một lượt idempotency. Sau NQ-78 nó là `422` ở biên vào |
+| **NQ-79** | 2026-09-20 | **B-206 — cột `users.default_model` + `PUT /settings` **tối thiểu** (chỉ nhận đúng trường ấy)** | Người dùng chọn phương án 1/3. Giữ đúng lời hứa của UC-05 dòng 4 (*"được nhớ theo user"*) mà không dựng cả bề mặt §18.4: theme đã sống bằng `localStorage` từ T-0.10, và "bật/tắt tính năng" hôm nay chưa có tính năng nào để bật — dựng sẵn là viết những nhánh không ai gọi (L3, và đúng lý lẽ NQ-51 dùng để không viết `invalidate()`). Giữ tên endpoint của §18.4 để tính năng sau ghép vào mà không phải đổi hợp đồng. Validate theo catalog lúc **ghi**, không lúc đọc — catalog là file sửa nóng (§19.1) nên một model hợp lệ hôm nay có thể biến mất ngày mai, và lúc đó picker rơi về `default: true` chứ không ném lỗi |
+| **NQ-80** | 2026-09-20 | **B-207 — Like/Dislike lưu bằng HAI CỘT trên `messages`, và phần backend tách thành T-3.7a riêng** | Người dùng chọn phương án 1/2 cho cả hai vế. Cột chứ không bảng `message_feedback` riêng vì phép kiểm quyền **tái dùng nguyên vẹn** thứ đã có: message thuộc một hội thoại, hội thoại lọc `user_id` trong câu SQL (§20) — không đường guard thứ hai nào phải viết và tự canh, nên ca IDOR đóng bằng đúng repository đang chạy. **Giá đã nhìn thấy và chấp nhận:** ngày P8 mở share/fork thì câu *"ai đánh giá"* không trả lời được, vì hai cột không mang `user_id` — ghi ở T-3.7a Cạm bẫy ③ để ngày ấy không ai đi tìm một bug không tồn tại. Tách T-3.7a vì một commit trộn migration với năm nút giao diện là đúng thứ NQ-76 vừa tách ra ở T-3.1 |
+| **NQ-81** | 2026-09-20 | **B-158 — toàn bộ mảnh backend của P3 (trừ feedback) gom vào MỘT task đứng đầu phase: T-3.0** | Người dùng chọn phương án 1/3. NQ-78 và NQ-79 vừa đặt thêm hai trường vào **cùng** response schema mà B-158 định đặt trường thứ ba, nên để mỗi task tự gánh nghĩa là T-3.4, T-3.6 và T-3.11 cùng sửa `NguoiDungRa` ở ba commit, và hai task chạy sau phải merge với task chạy trước ở đúng một file. Ngả `GET /quota` riêng sạch hơn về ngữ nghĩa (`/auth/me` tĩnh, quota đổi sau mỗi lượt sinh) nhưng lệch §18.1 và thêm một endpoint phải vào §18 của KE-HOACH — vùng cấm. Hệ quả trên ước lượng: T-3.11 từ 4 h về **2 h** và T-3.12 từ 8 h về **7 h** vì phần backend của chúng đã đi nơi khác; T-3.0 là 2.5 h |
+| **NQ-82** | 2026-09-20 | **B-202 — `make check-docs`: một lệnh canh bảng §2 khớp với tổng cột ước lượng của từng phase** | Người dùng chọn phương án 1/4. Ba lần lệch liên tiếp (B-121 ở P1, B-198 ở P2, và P3 lệch ở **cả hai** chỗ: bảng ghi 34 h khi cột cộng ra 37 h, §14.3 ghi 44 h khi cột cộng ra 48 h) thì không còn là lỗi cộng mà là một quy trình thiếu — chính phiên này cũng trượt một lần (viết 52 h rồi cộng lại mới ra 53 h). Không bỏ cột ước lượng khỏi §2 vì NQ-01 trỏ thẳng vào con số tổng ấy; không sinh bảng tự động vì đó là một script **ghi** vào `docs/`. Thêm một dòng vào §15 DoD chung. **Chưa có ID task — quyết định của agent, nói rõ để bác được:** nó là hạ tầng cùng họ `make check-hardcode` (T-0.9 đã dựng lệnh đó), không thuộc về T-3.0 vốn là một task API, nên nó là **một commit chore riêng chạy trước T-3.0**. Nếu muốn nó có ID thì phải mở thêm một dòng task và bảng §2 lên 111 |
 
 ---
 
