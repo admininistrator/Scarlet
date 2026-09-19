@@ -5,11 +5,18 @@ Một luật riêng so với `conversations.py`/`messages.py`: hàm tạo user �
 Lý do là §11.5 — "chống dò": đăng ký với email đã tồn tại phải cho ra đúng
 đường đi (và đúng response) với đăng ký thành công, nên tầng gọi (router)
 không được thấy hai nhánh khác nhau ở đây.
+
+**T-2.16 thêm ba câu của admin panel** ở cuối file (`list_for_admin`,
+`set_status`, `update_by_admin`). Chúng là nhóm duy nhất ở đây không lọc theo
+danh tính người gọi — §16.3 cho admin nhìn mọi tài khoản, và cánh cửa canh
+chuyện đó là `require_admin` ở tầng router, không phải một `WHERE` ở đây.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import bindparam, func, select, text, update
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
@@ -140,3 +147,97 @@ class UserRepository:
             .execution_options(synchronize_session=False)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    # ═════════════ ba câu của admin panel (§16.3, §18.5) — T-2.16 ═════════════
+
+    async def list_for_admin(self, *, trang_thai: UserStatus | None = None) -> Sequence[User]:
+        """Danh sách user cho `GET /admin/users`, mới nhất trước — §16.3.
+
+        **Câu duy nhất của file này KHÔNG có `WHERE user_id`**, vì câu hỏi ở
+        đây là "ai đang chờ duyệt" chứ không phải "của tôi có gì". Cánh cửa canh
+        nó là `require_admin` ở tầng router (§16.3: *"mọi endpoint
+        `/api/v1/admin/*` kiểm lại quyền phía server"*).
+
+        `deleted_at IS NULL` **trong SQL**, cùng lối `get_by_id`: một người đã
+        xoá tài khoản không quay lại màn hình duyệt để admin bấm Duyệt cho một
+        tài khoản không còn tồn tại.
+
+        Lọc `status` cũng trong SQL chứ không `[u for u in ... if ...]` ở
+        Python — §20 viết luật đó cho `user_id`, nhưng lý do của nó (dữ liệu
+        không rời khỏi DB nhiều hơn mức cần) không đổi khi cột đổi tên.
+
+        **Không phân trang.** R1 chốt 15–20 người dùng; một `LIMIT/OFFSET` ở
+        đây là một tham số mà không màn hình nào của §16.3 truyền vào, và mỗi
+        tham số không ai dùng là một nhánh không ai kiểm. Xem Backlog cho ngày
+        con số R1 đổi.
+        """
+        stmt = select(User).where(User.deleted_at.is_(None))
+        if trang_thai is not None:
+            stmt = stmt.where(User.status == trang_thai)
+        return list((await self._session.execute(stmt.order_by(User.created_at.desc()))).scalars())
+
+    async def set_status(
+        self,
+        user_id: uuid.UUID,
+        *,
+        tu: UserStatus,
+        sang: UserStatus,
+        approved_by: uuid.UUID | None = None,
+    ) -> User | None:
+        """Đổi trạng thái tài khoản, **có điều kiện trên trạng thái cũ** — §11.1.
+
+        `WHERE status = :tu` cùng lý lẽ với `mark_email_verified` ngay trên:
+        phép chuyển trạng thái nằm **trong** câu UPDATE chứ không phải một
+        `if` chạy trước nó. Hai admin cùng mở màn duyệt, một người bấm Duyệt và
+        một người bấm Từ chối trong cùng một giây thì chỉ một câu thắng — câu
+        kia trả `None` và router nói "trạng thái đã đổi, tải lại đi" thay vì
+        ghi đè kết quả của đồng nghiệp mà không ai biết.
+
+        `approved_at`/`approved_by` chỉ ghi khi chỗ gọi truyền `approved_by`,
+        tức chỉ ở nhánh duyệt: hai cột ấy trả lời *"ai đã nhận người này vào"*,
+        và ghi chúng cho một lần từ chối là làm hỏng câu trả lời đó.
+
+        `func.now()` (mốc mở transaction) chứ không `clock_timestamp()`, cùng
+        lý do đã ghi ở `dat_mat_khau_moi`: không ai so cột này với thời gian
+        thực để quyết định điều gì.
+        """
+        gia_tri: dict[str, Any] = {"status": sang}
+        if approved_by is not None:
+            gia_tri["approved_at"] = func.now()
+            gia_tri["approved_by"] = approved_by
+        stmt = (
+            update(User)
+            .where(User.id == user_id, User.deleted_at.is_(None), User.status == tu)
+            .values(**gia_tri)
+            .returning(User)
+            .execution_options(synchronize_session="fetch")
+        )
+        return (await self._session.execute(stmt)).scalars().one_or_none()
+
+    async def update_by_admin(self, user_id: uuid.UUID, *, thay_doi: dict[str, Any]) -> User | None:
+        """Đổi `tier_name` / `limit_override_json` cho một user — §10.4, §16.3.
+
+        Hai cột, không hơn: §10.4 nói *"đổi tier"* là sửa `users.tier_name`, và
+        *"ghi đè hạn mức"* là sửa `users.limit_override_json` — trong đó có cả
+        `can_execute_skills` mà §16.3 gọi tên riêng. `status` **không** đi qua
+        đây; nó có ba endpoint riêng vì mỗi lần đổi nó là một sự kiện phải ghi
+        sổ với một cái tên (`set_status` ở trên).
+
+        **Không có bước gỡ cache.** `app/quota/tiers.py` cố ý không có
+        `invalidate()`: TTL 60 s là luật duy nhất và nó chạy kể cả khi không ai
+        nhớ tới nó (§10.4 — "có hiệu lực ≤ 60 s", AC của UC-07).
+
+        `thay_doi` rỗng thì **không** chạy câu UPDATE nào — nhưng vẫn trả về
+        hàng hiện tại, để `PATCH` với body rỗng cư xử như `GET` (cùng lối
+        `update_conversation`).
+        """
+        if not thay_doi:
+            return await self.get_by_id(user_id)
+        stmt = (
+            update(User)
+            .where(User.id == user_id, User.deleted_at.is_(None))
+            .values(**thay_doi)
+            .returning(User)
+            .execution_options(synchronize_session="fetch")
+        )
+        return (await self._session.execute(stmt)).scalars().one_or_none()

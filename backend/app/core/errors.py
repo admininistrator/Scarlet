@@ -151,6 +151,32 @@ class ApiErrorCode(StrEnum):
     #: `/auth/login`, hoặc một access token còn hạn ở mọi route khác).
     ACCOUNT_DISABLED = "ACCOUNT_DISABLED"
 
+    # ── admin (§16.3, §18.5, §20, T-2.16) ──
+    #: Danh tính hợp lệ nhưng `role != admin` (§16.3 — *"mọi endpoint
+    #: `/api/v1/admin/*` kiểm lại quyền phía server, không tin FE"*). Mã riêng
+    #: chứ không `FORBIDDEN` trần vì việc FE phải làm khác hẳn mọi 403 khác của
+    #: bảng này: không có nút nào để bấm, không có thư nào để gửi lại — nó gỡ
+    #: mục `/admin` khỏi menu và đưa người dùng về trang chính (T-2.19 DoD dòng
+    #: 2). `403` chứ không `404`: che đường dẫn `/admin/*` không giấu được gì
+    #: (§16.3 công bố chúng), và một `404` ở đây sẽ làm admin thật tưởng mình
+    #: gõ nhầm URL.
+    ADMIN_REQUIRED = "ADMIN_REQUIRED"
+    #: `POST /admin/users/{id}/approve|reject|suspend` cho một tài khoản đang ở
+    #: trạng thái mà §11.1 không có mũi tên nào đi từ đó tới đích — ví dụ duyệt
+    #: một `pending_email` (họ phải bấm link xác thực trước, không ai bấm hộ
+    #: được). `409` chứ không `400`: dữ liệu gửi lên hoàn toàn hợp lệ, thứ sai
+    #: là **trạng thái hiện tại** của tài nguyên — và nó đổi được, nên FE có
+    #: một hành động cụ thể (tải lại danh sách). `details` mang
+    #: `{"status", "target_status", "allowed_from"}` để màn hình nói được câu
+    #: đúng thay vì "thao tác không hợp lệ".
+    INVALID_STATUS_TRANSITION = "INVALID_STATUS_TRANSITION"
+    #: `id` trong đường dẫn `/admin/users/{id}` không có hàng nào (chưa từng
+    #: tồn tại, hoặc đã xoá mềm). Mã riêng với `NOT_FOUND` trần cùng lý lẽ
+    #: `PROVIDER_KEY_NOT_FOUND`: nó nghĩa là "danh sách đang hiện đã cũ", một
+    #: việc cụ thể. **Không** phải một ca §20/IDOR — admin được phép hỏi về mọi
+    #: tài khoản, nên ở đây `404` nói đúng sự thật chứ không che giấu gì.
+    USER_NOT_FOUND = "USER_NOT_FOUND"
+
     # ── chat (§18.2) ──
     #: `Last-Event-ID` / `?cursor=` không phải một Redis Stream ID.
     CURSOR_INVALID = "CURSOR_INVALID"

@@ -1,7 +1,12 @@
 """Dependency dùng chung của tầng HTTP (§23 `core/deps.py`).
 
-KH tham chiếu: §18.1, §20, §11.1, §11.2, §11.3, §10.5, UC-01, Phụ lục F ·
-CLAUDE.md A10 · tasks.md T-2.3, T-2.4, T-2.7 · B-83, B-114, NQ-36.
+KH tham chiếu: §18.1, §20, §11.1, §11.2, §11.3, §10.5, §16.3, UC-01, Phụ lục F ·
+CLAUDE.md A10 · tasks.md T-2.3, T-2.4, T-2.7, T-2.16 · B-34, B-83, B-114, NQ-36.
+
+**T-2.16 thêm `require_admin` ở CUỐI file** — cùng hình dạng và cùng chỗ gắn
+với `require_app_access` (lời gọi `include_router`), nhưng ngược nó ở đúng một
+điểm: nhánh tạm Phase 1 **không** đi qua được. Lý do đầy đủ nằm trong docstring
+của chính hàm đó.
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  T-2.7: MÁY TRẠNG THÁI TÀI KHOẢN — bảng §11.1 sống ở ĐÚNG MỘT CHỖ        ║
@@ -163,7 +168,7 @@ from app.core.access_token import (
 from app.core.blacklist import bi_chan
 from app.core.errors import ApiError, ApiErrorCode
 from app.core.redis import get_redis
-from app.db.models import UserStatus
+from app.db.models import UserRole, UserStatus
 from app.db.repositories.users import UserRepository
 from app.db.session import session_scope
 
@@ -456,3 +461,65 @@ require_app_access = require_status(STATUSES_CAN_VIEW_APP)
 require_chat_access = require_status(
     STATUSES_CAN_CHAT_SYSTEM_KEY, allowed_with_byok=STATUSES_CAN_CHAT_BYOK
 )
+
+
+# ═══════════════ §16.3 — cánh cửa của `/admin/*` (T-2.16) ═══════════════════
+
+
+async def require_admin(
+    claims: Annotated[AccessTokenClaims | None, Depends(get_access_claims)] = None,
+) -> None:
+    """Chặn mọi request không phải của một admin — §16.3, §20.
+
+    Gắn ở **lời gọi `include_router`** của `api/v1/__init__.py`, không rải vào
+    từng `@router.get/post`. Cạm bẫy của T-2.16 viết nguyên văn *"quên
+    `require_admin` ở MỘT endpoint là đủ"*, và nó là cùng một cạm bẫy mà
+    `require_app_access` ngay trên đã đóng bằng cùng một cách: endpoint
+    `/admin/*` thứ tám sinh ra sau này được bảo vệ vì **vị trí** của nó, không
+    vì ai đó nhớ chép thêm một dòng.
+
+    **Đọc `role` từ CLAIM, không từ một `SELECT`** — cùng lý lẽ `require_status`
+    (§11.2 ghi sẵn `role` vào JWT từ T-2.3). Cửa sổ cũ ≤ `ACCESS_TOKEN_TTL_MIN`
+    của nó ở đây **hẹp hơn** hai chiều so với `status`: không có endpoint nào
+    phong/gỡ chức admin (R7: một admin, đặt bằng SQL), nên không có sự kiện nào
+    trong app sinh ra một claim `role` cũ.
+
+    ╔══════════════════════════════════════════════════════════════════════╗
+    ║  NHÁNH TẠM PHASE 1 **KHÔNG** ĐI QUA ĐƯỢC — ngược `require_status`    ║
+    ╚══════════════════════════════════════════════════════════════════════╝
+
+    `require_status` cho `claims is None` (header `X-User-Id` / cookie dev của
+    NQ-24) đi thẳng qua, vì chặn nó làm 110 test đỏ mà không đóng lỗ nào. Ở đây
+    thì ngược lại, và cả hai vế đều đo được:
+
+    * **Chặn là bắt buộc.** `X-User-Id` là một chuỗi người gọi tự gõ. Cho nhánh
+      ấy qua nghĩa là bất kỳ ai gọi được `api` lúc `DEBUG=true` đều duyệt được
+      tài khoản, đổi được tier, và đọc được bảng chi phí của cả hệ thống — tức
+      chính lỗ hổng mà B-34 đã ghi lại từ T-0.7 và giao cho task này đóng.
+    * **Chặn gần như không tốn gì.** Đúng **một** test có sẵn gọi `/admin/*`
+      bằng danh tính dev (`tests/api/test_models.py`), và nó sửa bằng một cookie
+      phiên thật.
+
+    Vì vậy `claims is None` ⇒ `401`, không phải `403`: chưa có danh tính nào
+    được chứng minh thì chưa tới lượt hỏi quyền. Đó cũng là đúng chữ DoD dòng
+    1 của T-2.16 (*"`curl` không token → `401`"*) — và với `DEBUG=false` thì
+    `get_current_user_id` đã `503` trước đó, nên không có đường nào lọt.
+
+    Raise:
+        ApiError 401 `UNAUTHENTICATED`: không có cookie phiên (kể cả khi nhánh
+            tạm Phase 1 có mang một danh tính tới).
+        ApiError 403 `ADMIN_REQUIRED`: có danh tính, nhưng `role != admin`.
+    """
+    if claims is None:
+        raise ApiError(
+            status.HTTP_401_UNAUTHORIZED,
+            ApiErrorCode.UNAUTHENTICATED,
+            "can dang nhap bang tai khoan quan tri",
+        )
+    if claims.role is not UserRole.ADMIN:
+        raise ApiError(
+            status.HTTP_403_FORBIDDEN,
+            ApiErrorCode.ADMIN_REQUIRED,
+            "chuc nang nay danh cho quan tri vien",
+            details={"role": claims.role.value},
+        )

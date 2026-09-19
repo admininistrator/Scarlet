@@ -2,9 +2,16 @@
 
 Bảng nào chưa có task nào dùng tới thì chưa có model — không khai sẵn bảng
 chết. `users` ra đời ở T-2.1 (§11.1, §11.6), `tiers` ở T-2.10 (§10.4),
-`usage_events` ở T-2.12 (§10.2, A7), `user_provider_keys` ở T-2.14 (§10.5).
+`usage_events` ở T-2.12 (§10.2, A7), `user_provider_keys` ở T-2.14 (§10.5),
+`audit_logs` ở T-2.16 (§16.3, §20).
 """
 
+from app.db.models.audit_log import (
+    TARGET_CATALOG,
+    TARGET_USER,
+    AuditAction,
+    AuditLog,
+)
 from app.db.models.base import Base
 from app.db.models.conversation import Conversation
 from app.db.models.email_token import EmailToken, EmailTokenPurpose
@@ -16,6 +23,10 @@ from app.db.models.user import User, UserRole, UserStatus
 from app.db.models.user_provider_key import UserProviderKey
 
 __all__ = [
+    "TARGET_CATALOG",
+    "TARGET_USER",
+    "AuditAction",
+    "AuditLog",
     "Base",
     "Conversation",
     "CostConfidence",

@@ -14,6 +14,13 @@ cột "Chat": §11.1 cho `pending_approval` chat bằng BYOK, và khoá BYOK và
 DB qua đúng router này — gắn `require_chat_access` ở đây là khoá vòng (muốn có
 khoá thì phải đã có khoá).
 
+`admin` (T-2.16) có danh sách **riêng** (`_QUAN_TRI`), không dùng
+`_CO_DANH_TINH`: nó cần thêm `require_admin` (§16.3) và **không** cần luật
+§11.4 — mọi POST của nó nhắm vào một tài nguyên đã tồn tại (`{user_id}` trong
+đường dẫn) chứ không tạo ra cái gì, nên bấm hai lần là hai lần đổi cùng một
+hàng về cùng một trạng thái, không phải hai hàng mới. `change_user_status` tự
+lo phần đó bằng nhánh "đích đã đạt ⇒ 200, không ghi sổ".
+
 Ba router KHÔNG có mặt trong danh sách đó, mỗi cái một lý do:
 
 * `models` — `GET /models` hôm nay công khai (T-0.7, chưa lọc theo user như
@@ -44,7 +51,7 @@ from fastapi import APIRouter, Depends
 from app.api.v1 import admin, auth, conversations, health, messages, models, stream
 from app.api.v1 import settings as settings_router
 from app.config.settings import settings
-from app.core.deps import require_app_access
+from app.core.deps import require_admin, require_app_access
 from app.core.idempotency import require_idempotency
 
 #: A8: "Bắt buộc với POST /conversations/{id}/messages". Một tên route, không
@@ -58,9 +65,15 @@ _idempotency = require_idempotency(ROUTE_BAT_BUOC_IDEMPOTENCY)
 #: mà **không** để lại khoá `idem:` nào trong Redis.
 _CO_DANH_TINH = [Depends(require_app_access), Depends(_idempotency)]
 
+#: §16.3 + cạm bẫy T-2.16 ("quên `require_admin` ở MỘT endpoint là đủ"): cả hai
+#: luật gắn ở ĐÂY, không rải vào `admin.py`. `require_app_access` đi trước —
+#: một admin mà tài khoản vừa bị khoá không còn là một admin, và để `/admin/*`
+#: không thành cánh cửa duy nhất của app không chịu bảng §11.1.
+_QUAN_TRI = [Depends(require_app_access), Depends(require_admin)]
+
 router = APIRouter(prefix="/api/v1")
 router.include_router(models.router)
-router.include_router(admin.router)
+router.include_router(admin.router, dependencies=_QUAN_TRI)
 router.include_router(health.router)
 router.include_router(stream.router, dependencies=_CO_DANH_TINH)
 router.include_router(conversations.router, dependencies=_CO_DANH_TINH)
