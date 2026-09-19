@@ -65,16 +65,36 @@ API_PREFIX = "/api/v1"
 #: Số endpoint `/admin/*` mà T-2.16 dựng: `users` (GET), `users/{id}/{hành
 #: động}` (POST), `users/{id}` (PATCH), `usage` (GET), `catalog/reload` (POST).
 #: **Tối thiểu**, không phải bằng đúng: thêm endpoint là chuyện bình thường, còn
-#: mất endpoint (hoặc bộ lọc dưới đây hỏng) thì không.
+#: mất endpoint (hoặc bộ lọc dưới đây hỏng) thì không. T-2.20 thêm bốn cái nữa
+#: (`tiers` GET/PATCH, `system`, `audit-logs`) và cố ý **không** nâng con số
+#: này — nâng nó mỗi lần có endpoint mới là biến một lưới đỡ thành một danh
+#: sách chép tay, đúng thứ file này tồn tại để không phải có.
 _TOI_THIEU = 5
 
-#: Giá trị điền vào tham số đường dẫn. `hanh_dong` phải khớp `pattern` của route
-#: (`^(approve|reject|suspend)$`), nếu không FastAPI trả `404` và ca kiểm mất
-#: nghĩa — nó sẽ "đạt" mà không chạm tới `require_admin` lần nào.
-_THAM_SO: dict[str, str] = {
-    "user_id": str(uuid.uuid4()),
-    "hanh_dong": "approve",
-}
+
+class _ThamSo(dict[str, str]):
+    """Giá trị điền vào tham số đường dẫn, **có mặc định cho tên chưa biết**.
+
+    `hanh_dong` phải khớp `pattern` của route (`^(approve|reject|suspend)$`),
+    nếu không FastAPI trả `404` và ca kiểm mất nghĩa — nó sẽ "đạt" mà không
+    chạm tới `require_admin` lần nào. `user_id` phải là một UUID hợp lệ vì cùng
+    lý do.
+
+    `__missing__` là thứ giữ đúng lời hứa của file này. Không có nó,
+    `"{name}".format(**_THAM_SO)` ném `KeyError` ngay lúc **thu thập test**,
+    nên một endpoint `/admin/*` mang tham số đường dẫn mới sẽ làm cả file đỏ ở
+    chỗ không liên quan gì tới phân quyền — và người sửa sẽ sửa bằng cách thêm
+    một dòng vào đây, tức bằng tay, tức đúng thứ docstring module vừa nói là
+    không được phép. Một chuỗi bất kỳ là đủ cho mọi ca ở đây: cả ba cột dừng
+    lại ở `require_admin`, **trước** khi FastAPI kịp kiểm kiểu tham số đường
+    dẫn, nên giá trị của nó không bao giờ được đọc tới.
+    """
+
+    def __missing__(self, key: str) -> str:
+        return "x"
+
+
+_THAM_SO = _ThamSo({"user_id": str(uuid.uuid4()), "hanh_dong": "approve"})
 
 
 #: Tiền tố mà mọi endpoint của §16.3 nằm dưới.
@@ -113,9 +133,16 @@ def _tu_router() -> set[tuple[str, str]]:
 
 
 def _duong_dan_admin() -> list[tuple[str, str]]:
-    """Mọi `(method, path)` dưới `/api/v1/admin`, từ HAI nguồn hợp lại."""
+    """Mọi `(method, path)` dưới `/api/v1/admin`, từ HAI nguồn hợp lại.
+
+    `format_map` chứ không `format(**...)`: `**` dựng một `dict` phẳng từ
+    `_THAM_SO` và ném luôn `__missing__` đi cùng, nên một tham số đường dẫn mới
+    lại thành `KeyError` lúc thu thập test — đúng cái mà `_ThamSo` vừa dựng ra
+    để không xảy ra.
+    """
     return sorted(
-        (method, duong_dan.format(**_THAM_SO)) for method, duong_dan in _tu_openapi() | _tu_router()
+        (method, duong_dan.format_map(_THAM_SO))
+        for method, duong_dan in _tu_openapi() | _tu_router()
     )
 
 

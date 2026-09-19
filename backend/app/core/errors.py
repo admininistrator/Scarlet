@@ -177,6 +177,13 @@ class ApiErrorCode(StrEnum):
     #: tài khoản, nên ở đây `404` nói đúng sự thật chứ không che giấu gì.
     USER_NOT_FOUND = "USER_NOT_FOUND"
 
+    #: `PATCH /admin/tiers/{name}` cho một tên không có trong bảng `tiers`
+    #: (T-2.20, §10.4). Mã riêng chứ không dùng `NOT_FOUND` chung: màn hình
+    #: §16.3 gọi endpoint này ngay cạnh `PATCH /admin/users/{id}`, và một mã
+    #: chung sẽ bắt người đọc lỗi đoán xem thứ không tìm thấy là tài khoản hay
+    #: hạn mức — cùng lý lẽ đã tách `USER_NOT_FOUND` khỏi `NOT_FOUND`.
+    TIER_NOT_FOUND = "TIER_NOT_FOUND"
+
     # ── chat (§18.2) ──
     #: `Last-Event-ID` / `?cursor=` không phải một Redis Stream ID.
     CURSOR_INVALID = "CURSOR_INVALID"

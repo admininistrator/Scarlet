@@ -331,6 +331,32 @@ class MessageRepository:
                 in_flight.add(mid)
         return GenerationStates(known=frozenset(known), in_flight=frozenset(in_flight))
 
+    async def count_streaming(self) -> int:
+        """Bao nhiêu lượt sinh đang chảy ngay lúc này — §16.3 màn "Hệ thống".
+
+        Đây là hàm thứ ba **không** nhận `user_id`, và cùng lý do với
+        `reap_stale_*`: người hỏi là hệ thống, không phải một người dùng đứng
+        trước hội thoại của mình. Nó chỉ trả về một **con số**, không trả về
+        hàng nào, nên không có gì của người này rò sang màn hình người kia.
+
+        **Đếm `streaming`, không đếm `queued`.** §16.3 tách hai chỉ số cạnh
+        nhau — *"độ dài hàng đợi arq, số stream đang chạy"* — nên gộp `queued`
+        vào đây là đếm cùng một job hai lần trên cùng một màn hình. Hai con số
+        ấy cũng đo hai thứ khác nhau: hàng đợi nói worker có theo kịp không
+        (§21.2), còn con số này nói đang có bao nhiêu câu trả lời thật sự chảy.
+
+        **Không** lọc `deleted_at`: một hội thoại bị xoá giữa lúc đang stream
+        thì lượt sinh ấy vẫn đang tiêu CPU của worker và tiền của provider cho
+        tới khi nó tự khép hoặc reaper §7.6 dọn. Màn hình "Hệ thống" đo tải
+        thật, và tải thật không quan tâm ai đã bấm nút xoá.
+        """
+        stmt = (
+            select(func.count())
+            .select_from(Message)
+            .where(Message.status == MessageStatus.STREAMING)
+        )
+        return (await self._session.execute(stmt)).scalar_one()
+
     async def reap_stale_streaming(
         self, *, stale_after_s: int, error_code: str
     ) -> Sequence[uuid.UUID]:

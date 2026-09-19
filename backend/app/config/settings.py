@@ -173,6 +173,15 @@ class Settings(BaseSettings):
     #: Một biến chứ không phải hai (mặc định + trần): chưa màn hình nào cần xin
     #: nhiều hơn một trang, và hai nút vặn cho một con số là hai chỗ để lệch.
     CONVERSATION_PAGE_SIZE: int = Field(default=30, gt=0)
+    #: Số dòng tối đa một trang của `GET /admin/audit-logs` (§16.3, T-2.20) —
+    #: vừa là mặc định, vừa là trần cho `?limit=`, cùng lối
+    #: `CONVERSATION_PAGE_SIZE` ngay trên. Một biến **riêng** chứ không dùng
+    #: chung con số của sidebar: hai màn hình khác nhau về hình dạng (một danh
+    #: sách tiêu đề ngắn, một bảng sổ nhiều cột) và về người xoay nút — người
+    #: vận hành đang dò một sự cố muốn 200 dòng một trang, còn sidebar thì
+    #: không. 50 là con số §16.3 không viết ra, nên nó là một *giới hạn* và
+    #: thuộc về đây chứ không phải `api/v1/admin.py` (A3, §19.2 L4).
+    AUDIT_LOG_PAGE_SIZE: int = Field(default=50, gt=0)
     #: Tuổi thọ bản ghi `idem:{user_id}:{route}:{key}` của §11.4 — dùng cho cả
     #: hai trạng thái (`in_progress` lúc `SET NX`, `done` lúc ghi response).
     #: Giá trị 86400 là con số §11.4/ADR-15 viết ra ("Redis `SET NX` TTL 24h").

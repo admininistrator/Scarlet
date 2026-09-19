@@ -1,4 +1,4 @@
-"""Admin panel — bảy endpoint của §18.5 mà T-2.16 sở hữu.
+"""Admin panel — **cả mười một** endpoint của §18.5.
 
     GET    /api/v1/admin/users                   danh sách, lọc theo status
     POST   /api/v1/admin/users/{id}/approve      pending_approval → active
@@ -7,12 +7,18 @@
     PATCH  /api/v1/admin/users/{id}              tier · ghi đè hạn mức
     GET    /api/v1/admin/usage                   chi phí, TÁCH metered/unmetered
     POST   /api/v1/admin/catalog/reload          nạp lại model_catalog.json
+    GET    /api/v1/admin/tiers                   bảng hạn mức          (T-2.20)
+    PATCH  /api/v1/admin/tiers/{name}            đổi hạn mức CẢ tier   (T-2.20)
+    GET    /api/v1/admin/system                  hàng đợi · stream · health
+    GET    /api/v1/admin/audit-logs              sổ audit, lọc + con trỏ
 
-KH tham chiếu: §16.3, §18.5, §20, §11.1, §11.3, §10.4, §10.5, §9.5 · Cạm bẫy
-C16 · CLAUDE.md A3, A7 · tasks.md T-2.16, B-34, B-141 (NQ-61).
+KH tham chiếu: §16.3, §18.5, §20, §11.1, §11.3, §10.4, §10.5, §9.5, §21.2 ·
+Cạm bẫy C16 · CLAUDE.md A3, A7 · tasks.md T-2.16, T-2.20, B-34, B-141 (NQ-61),
+B-177 (NQ-67).
 
-Bốn endpoint còn lại của §18.5 (`GET/PATCH /admin/tiers`, `GET /admin/system`,
-`GET /admin/audit-logs`) **chưa** có task nào — không dựng sẵn.
+Bảy endpoint đầu là T-2.16; bốn endpoint cuối là T-2.20, và chúng đóng nốt ba
+màn hình của §16.3 mà T-2.16/T-2.19 cố ý để lại ("Hệ thống", "Audit log", và
+nửa "đổi" của hạn mức). Màn "Người dùng" đầy đủ vẫn là T-3.12 (NQ-66).
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  QUYỀN GẮN Ở ROUTER, KHÔNG Ở TỪNG ENDPOINT                               ║
@@ -96,29 +102,74 @@ thứ hai trả `200` và **không** ghi dòng nào: trạng thái đích đã �
 việc gì xảy ra để mà ghi. Ngả kia (`409` cho lần thứ hai) biến một cú double
 click thành một lỗi đỏ trên màn hình admin, còn ngả "ghi thêm một dòng" thì
 làm sổ nói rằng cùng một người được duyệt hai lần.
+
+Luật ấy áp nguyên cho `PATCH /admin/tiers/{name}` của T-2.20, và bốn endpoint
+mới chia đúng theo nó: một cái **đổi** thứ gì đó nên ghi sổ, ba cái chỉ **đọc**
+nên không ghi dòng nào — kể cả `GET /admin/audit-logs`, thứ mà ghi sổ mỗi lần
+mở sẽ tự bơm cho chính nó đầy những dòng "có người vừa đọc sổ".
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║  T-2.20: ĐỔI HÀNG `tiers` KHÔNG ĐỤNG TỚI CACHE — TTL 60 s LÀ LUẬT DUY NHẤT ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Cạm bẫy của task viết thẳng ra: cache của T-2.10 nhớ `tier:limits:{user_id}`,
+tức **kết quả đã gộp của từng người**, không nhớ hàng `tiers`. Nên xoá một
+khoá đặt theo *tên tier* là xoá một khoá chưa từng tồn tại — một lời gọi chạy
+xong, không báo lỗi, và để lại cảm giác đã gỡ cache.
+
+Ba đường đi tiếp, và đường đã chọn là đường **không làm gì cả** (NQ-51 lần
+nữa): §10.4 hứa "có hiệu lực ≤ 60 s", `TIER_CACHE_TTL_S` đúng bằng 60, nên lời
+hứa đã được giữ mà không cần ai bấm nút nào. Đường thứ hai — `SELECT id FROM
+users WHERE tier_name = :ten` rồi `DEL` từng khoá — nhanh hơn, nhưng nó dựng
+lại đúng cái `invalidate()` mà `quota/tiers.py` đã cố ý không viết, và chỗ
+quên gọi nó sau này sẽ là chỗ admin đổi hạn mức rồi không hiểu vì sao không
+thấy gì. Đường thứ ba — `SCAN tier:limits:*` rồi xoá sạch — cạm bẫy đã cấm
+đích danh: nó ném cả hạn mức của người thuộc tier khác đi.
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║  `GET /admin/system`: REDIS CHẾT LÀ MỘT CÂU TRẢ LỜI, KHÔNG PHẢI MỘT 500  ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Đây là màn hình người ta mở **khi** có sự cố, nên nó là màn hình cuối cùng
+được phép chết theo sự cố ấy. Mỗi con số vì vậy hỏi một nguồn khác nhau và
+hỏng riêng: `queue_depth` đi Redis, `streams_dang_chay` đi Postgres, `version`
+không đi đâu cả. Nguồn nào không trả lời thì ô ấy là `null`, và **lý do** nằm ở
+`health` — một chỗ duy nhất, chứ không phải một chuỗi lỗi chép lại cạnh từng ô.
+
+Hệ quả cố ý: endpoint này luôn `200`. Nó **không** trả `503` như
+`GET /health/deep` — hai endpoint trả lời hai câu hỏi khác nhau. `/health/deep`
+nói với **máy** ("đừng gửi request vào đây nữa"), còn màn "Hệ thống" nói với
+**người** ("cái gì đang hỏng"), và một `503` ở đây chỉ làm màn hình chẩn đoán
+tắt đúng lúc cần đọc nó nhất.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from ipaddress import IPv4Address, IPv6Address
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
-from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from app.config import catalog
 from app.config.settings import settings
+from app.config.version import APP_VERSION
 from app.core.blacklist import dat_moc_user, thu_hoi_moi_phien
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
+from app.core.health_checks import CheckResult, run_checks
+from app.core.queue import queue_depth
 from app.core.ratelimit import dia_chi_ip
 from app.core.redis import get_redis
 from app.db.models import (
     TARGET_CATALOG,
+    TARGET_TIER,
     TARGET_USER,
     AuditAction,
     CostConfidence,
@@ -127,11 +178,18 @@ from app.db.models import (
     UserRole,
     UserStatus,
 )
-from app.db.repositories import AuditLogRepository, UsageBucket, UsageEventRepository
+from app.db.repositories import (
+    AuditLogRepository,
+    MessageRepository,
+    UsageBucket,
+    UsageEventRepository,
+)
 from app.db.repositories.tiers import TierRepository
 from app.db.repositories.users import UserRepository
 from app.db.session import session_scope
 from app.quota.tiers import OVERRIDABLE_FIELDS, EffectiveLimits
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -277,6 +335,152 @@ class ReloadCatalogOut(BaseModel):
     version: int
 
 
+# ────────────────────────── T-2.20 · §10.4 hàng `tiers` ─────────────────────
+
+
+class TierOut(BaseModel):
+    """Một hàng của bảng "hạn mức" — `GET /admin/tiers`.
+
+    Chín cột của §10.4, đủ cả `is_default` dù `PATCH` không cho sửa nó: **đọc
+    được mà không sửa được** là đúng hình dạng của một cột mà B-152 còn để ngỏ
+    — người vận hành cần nhìn thấy nó đang bật ở đâu để hiểu B-152 nói về cái
+    gì, nhưng chưa ai chốt bật nó có nghĩa gì.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str
+    limit_5h_usd: Decimal
+    limit_7d_usd: Decimal
+    can_execute_skills: bool
+    can_use_web: bool
+    web_searches_per_day: int
+    max_upload_mb: int
+    max_attachments: int
+    allowed_model_tags: list[str]
+    is_default: bool
+
+
+class AdminTierListOut(BaseModel):
+    tiers: list[TierOut]
+
+
+class UpdateTierRequest(BaseModel):
+    """Body của `PATCH /admin/tiers/{name}` — §10.4, §16.3.
+
+    **Tám trường, và chúng KHÔNG được chép tay ra đây một cách tuỳ hứng:** đó
+    đúng là `OVERRIDABLE_FIELDS` của `app/quota/tiers.py`, tức tập trường mà
+    `users.limit_override_json` đè được lên một tier. Hai tập ấy bằng nhau
+    không phải tình cờ — cả hai đều là "những gì tạo nên hạn mức của một
+    người", chỉ khác phạm vi (một tier với một người). `tests/api/test_admin.py`
+    khẳng định đẳng thức đó, nên ngày `EffectiveLimits` mọc thêm một trường mà
+    ở đây quên là một test đỏ, không phải một ô nhập biến mất trong im lặng.
+
+    **`name` không có mặt**: nó nằm trong đường dẫn, và nó là khoá chính mà
+    `users.tier_name` tham chiếu tới — đổi tên một tier là một cuộc di trú dữ
+    liệu, không phải một `PATCH`.
+
+    **`is_default` cũng không có mặt**, và đó là B-152 chứ không phải một lần
+    quên: hôm nay **không code nào ĐỌC** cột ấy — tier của một người mới đến từ
+    `users.tier_name DEFAULT 'free'` trong DDL. Cho admin bật nó nghĩa là cho
+    họ một công tắc không nối với gì, thứ tệ hơn cả việc không có công tắc.
+
+    `extra="forbid"`: gõ `limit_5h` thay vì `limit_5h_usd` phải là một `422`
+    đọc được, không phải một `PATCH` thành công mà không đổi gì.
+
+    `ge=0` trên sáu trường số: một hạn mức âm không có nghĩa nào trong §10.4, và
+    một `limit_5h_usd = -1` sẽ khoá sạch tier ấy khỏi app mà không ai đọc ra lý
+    do từ màn hình quota.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    limit_5h_usd: Decimal | None = Field(default=None, ge=0)
+    limit_7d_usd: Decimal | None = Field(default=None, ge=0)
+    can_execute_skills: bool | None = None
+    can_use_web: bool | None = None
+    web_searches_per_day: int | None = Field(default=None, ge=0)
+    max_upload_mb: int | None = Field(default=None, ge=0)
+    max_attachments: int | None = Field(default=None, ge=0)
+    allowed_model_tags: list[str] | None = None
+
+
+# ───────────────────────── T-2.20 · §16.3 màn "Hệ thống" ────────────────────
+
+
+class AdminSystemOut(BaseModel):
+    """Bốn ô của màn "Hệ thống" (§16.3) — ba chỉ số §21.2 cộng số phiên bản.
+
+    **Ba `null` có thể xảy ra, và mỗi cái nói một chuyện khác nhau.** Xem
+    docstring module cho lý do endpoint này không bao giờ trả `503`; ở đây chỉ
+    nhắc phần đọc kết quả: một ô `null` nghĩa là *không hỏi được nguồn ấy*, và
+    `health` nói nguồn nào đang hỏng.
+    """
+
+    #: Đọc từ `pyproject.toml`, chỗ duy nhất con số ấy sống (A3) — xem
+    #: `app/config/version.py` cho lý do không phải `importlib.metadata`.
+    version: str
+    #: `ZCARD arq:queue` — §21.2 *"độ dài hàng đợi arq"*. `None` = Redis không
+    #: trả lời.
+    queue_depth: int | None
+    #: Số message `status='streaming'` ngay lúc này. `None` = Postgres không
+    #: trả lời.
+    #:
+    #: Tên trường là tiếng Việt không dấu **chỉ ở đây**, và có lý do: DoD của
+    #: T-2.20 gọi đích danh bốn khoá JSON mà endpoint này phải trả, nên đổi nó
+    #: thành `active_streams` là làm chính dòng DoD ấy không chạy được nguyên
+    #: văn. Mọi định danh Python mới của task này đều tiếng Anh (B-142 vẫn mở
+    #: cho code cũ).
+    streams_dang_chay: int | None
+    #: Năm mục của `GET /health/deep` (§18.6) — cùng một `run_checks()`, nên
+    #: hai màn hình không bao giờ nói hai chuyện khác nhau về cùng hạ tầng.
+    health: dict[str, CheckResult]
+
+
+# ────────────────────── T-2.20 · §16.3 màn "Audit log" ──────────────────────
+
+
+class AuditLogOut(BaseModel):
+    """Một dòng sổ — bốn câu của §16.3: *"ai, lúc nào, làm gì, với ai"*.
+
+    `actor_email` là phần **"ai"** đọc được, và nó đến từ một câu JOIN trong
+    repository chứ không từ một vòng lặp tra từng `actor_id` ở tầng này —
+    NQ-66 đã chốt đúng hình dạng ấy cho bảng Người dùng, và một trang 50 dòng
+    không được biến thành 51 lượt đi Postgres.
+
+    Phần **"với ai"** ở lại dạng `(target_type, target_id)` thô, **không**
+    JOIN: `target_id` là `TEXT` trỏ được sang nhiều bảng (`users.id` là UUID,
+    `tiers.name` là chuỗi), nên một câu JOIN cho nó phải rẽ nhánh theo
+    `target_type` — tức một câu SQL mọc thêm một nhánh mỗi lần schema mọc thêm
+    một bảng. `target_type` đã nói rõ phải `SELECT` ở đâu; FE tra tên khi cần.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    actor_id: uuid.UUID | None
+    #: `None` khi hành động không có người (cron) **hoặc** khi tài khoản ấy đã
+    #: bị xoá — `ON DELETE SET NULL` giữ dòng sổ, bỏ con trỏ về người.
+    actor_email: str | None
+    action: AuditAction
+    target_type: str | None
+    target_id: str | None
+    details: dict[str, Any] | None
+    ip: IPv4Address | IPv6Address | None
+
+
+class AuditLogListOut(BaseModel):
+    """`GET /admin/audit-logs` — một trang, kèm con trỏ sang trang kế."""
+
+    items: list[AuditLogOut]
+    #: `id` của dòng cuối trang này; gửi lại vào `?before_id=` để lấy trang kế.
+    #: `null` = hết. Cùng hợp đồng với `next_cursor` của `GET /conversations`,
+    #: khác kiểu vì khác cột — xem `AuditLogRepository.list_page` cho lý do con
+    #: trỏ ở đây là `id` chứ không phải `created_at`.
+    next_cursor: int | None
+
+
 # ═══════════════════════════════ phần dùng chung ════════════════════════════
 
 _KHONG = UsageAmount(cost_usd=Decimal(0), prompt_tokens=0, completion_tokens=0, events=0)
@@ -360,6 +564,20 @@ def _kiem_ghi_de(ghi_de: dict[str, Any]) -> None:
                 "limit_override co gia tri sai kieu",
                 details={"field": ten},
             ) from loi
+
+
+def _json_safe(value: Any) -> Any:
+    """Giá trị đi vào cột `details` (JSONB) của một dòng audit.
+
+    `Decimal` **phải** đổi sang chuỗi: bộ mã hoá JSON không biết kiểu ấy, nên
+    một dòng sổ mang `limit_5h_usd` sẽ ném `TypeError` — và vì audit ghi trong
+    cùng transaction với thay đổi nó mô tả (xem docstring module), lỗi ấy kéo
+    theo cả cú `PATCH`. Chuỗi chứ không `float`: đây là tiền, và một sổ ghi
+    `0.5000000000000001` là một sổ vô dụng đúng lúc cần đối chiếu. Cùng luật
+    `cost_usd` đi từ Postgres tới FE — chuỗi suốt đường, đổi kiểu đúng một lần
+    ở chỗ hiển thị.
+    """
+    return str(value) if isinstance(value, Decimal) else value
 
 
 # ═══════════════════════════════ endpoint ═══════════════════════════════════
@@ -707,3 +925,232 @@ async def reload_catalog(
         )
         await session.commit()
     return ReloadCatalogOut(models=len(cat.models), version=cat.version)
+
+
+# ═════════════════════ T-2.20 — bốn endpoint còn lại của §18.5 ══════════════
+
+
+@router.get("/tiers", status_code=status.HTTP_200_OK, response_model=AdminTierListOut)
+async def list_tiers() -> AdminTierListOut:
+    """Bảng hạn mức — §10.4, §18.5.
+
+    Không phân trang và không có bộ lọc nào: xem `TierRepository.list_all` cho
+    lý do bảng này không dài được. Đây cũng là nguồn của ô chọn tier trên màn
+    "Người dùng" — `PATCH /admin/users/{id}` từ chối một `tier_name` không có
+    trong bảng `tiers`, nên FE phải có chỗ hỏi bảng ấy gồm những gì thay vì gõ
+    sẵn hai chuỗi `free`/`trusted` vào một `<select>` (A3).
+    """
+    async with session_scope() as session:
+        rows = await TierRepository(session).list_all()
+        return AdminTierListOut(tiers=[TierOut.model_validate(t) for t in rows])
+
+
+@router.patch(
+    "/tiers/{name}",
+    status_code=status.HTTP_200_OK,
+    response_model=TierOut,
+    responses={
+        400: {"model": ErrorEnvelope, "description": "mot truong duoc gui la null (BAD_REQUEST)"},
+        404: {"model": ErrorEnvelope, "description": "khong co tier ten nay (TIER_NOT_FOUND)"},
+    },
+)
+async def update_tier(
+    request: Request,
+    body: UpdateTierRequest,
+    actor_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    name: Annotated[str, Path()],
+) -> TierOut:
+    """Đổi hạn mức của **cả một tier** — §10.4, §16.3: nửa còn thiếu của lời hứa.
+
+    §10.4 viết *"đổi hạn mức trong admin panel có hiệu lực ≤ 60 s"*. T-2.16 chỉ
+    mở được nửa "cho một người" (`limit_override_json`); nửa này là "cho cả
+    tier", tức thứ mà câu trên thật sự nói về.
+
+    **Vắng mặt khác `null`**, đọc bằng `model_fields_set` — cùng luật
+    `PATCH /admin/users/{id}` và `PATCH /conversations/{id}`. Không gửi một
+    trường là "đừng đụng tới nó"; gửi `null` cho nó thì **không** có nghĩa nào
+    (cả tám cột đều `NOT NULL` trong Phụ lục A) nên đó là `400`, không phải một
+    lần bỏ qua im lặng. Muốn "xoá hạn mức riêng" thì đó là `limit_override` của
+    một **user**, không phải một cột của tier.
+
+    **Gửi lại đúng giá trị đang có thì không ghi sổ**, cùng luật với nhánh
+    "đích đã đạt" của `change_user_status`: màn hình admin lưu cả form sẽ gửi
+    cả những ô không ai chạm tới.
+
+    **Không gỡ cache** — xem docstring module, phần "TTL 60 s là luật duy nhất".
+
+    Raises:
+        ApiError 400 `BAD_REQUEST`: một trường được gửi mang giá trị `null`.
+        ApiError 404 `TIER_NOT_FOUND`: không có hàng `tiers` nào tên ấy.
+    """
+    provided = body.model_fields_set
+    nulls = sorted(field for field in provided if getattr(body, field) is None)
+    if nulls:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ApiErrorCode.BAD_REQUEST,
+            "cot cua tier khong nhan null",
+            details={"fields": nulls},
+        )
+    changes: dict[str, Any] = {field: getattr(body, field) for field in provided}
+
+    async with session_scope() as session:
+        repo = TierRepository(session)
+        current = await repo.get(name)
+        if current is None:
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND,
+                ApiErrorCode.TIER_NOT_FOUND,
+                "khong co tier ten nay",
+                details={"name": name},
+            )
+
+        before = {field: getattr(current, field) for field in changes}
+        # Chỉ giữ những trường THỰC SỰ đổi — cùng luật "không đổi gì thì không
+        # ghi sổ" của `update_user` ngay trên.
+        changes = {f: v for f, v in changes.items() if before[f] != v}
+        updated = await repo.update(name, changes=changes)
+        if updated is None:  # pragma: no cover - `get` vừa đọc xong ở trên
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND,
+                ApiErrorCode.TIER_NOT_FOUND,
+                "khong co tier ten nay",
+                details={"name": name},
+            )
+
+        if changes:
+            await AuditLogRepository(session).record(
+                actor_id=actor_id,
+                action=AuditAction.TIER_UPDATE,
+                target_type=TARGET_TIER,
+                target_id=name,
+                details={
+                    "changed": {
+                        field: {"from": _json_safe(before[field]), "to": _json_safe(value)}
+                        for field, value in changes.items()
+                    }
+                },
+                ip=dia_chi_ip(request),
+            )
+            await session.commit()
+        return TierOut.model_validate(updated)
+
+
+@router.get("/system", status_code=status.HTTP_200_OK, response_model=AdminSystemOut)
+async def admin_system() -> AdminSystemOut:
+    """Màn "Hệ thống" của §16.3 — ba chỉ số §21.2 cộng số phiên bản.
+
+    Mỗi ô hỏi một nguồn và hỏng riêng; endpoint luôn `200`. Lý do đầy đủ nằm
+    trong docstring module, phần "REDIS CHẾT LÀ MỘT CÂU TRẢ LỜI".
+
+    `run_checks()` chạy năm mục kiểm **song song**, mỗi mục timeout riêng, nên
+    thời gian trả lời bị chặn trên bởi một timeout chứ không phải tổng năm cái
+    (`app/core/health_checks.py`). Dùng lại đúng hàm ấy chứ không viết một bộ
+    kiểm thứ hai: hai màn hình nói hai chuyện khác nhau về cùng một hạ tầng là
+    cách chắc nhất để không ai còn tin màn nào.
+    """
+    health = await run_checks()
+
+    try:
+        depth: int | None = await queue_depth()
+    except Exception:
+        logger.warning("khong doc duoc do dai hang doi arq — tra null, xem `health.redis`")
+        depth = None
+
+    try:
+        async with session_scope() as session:
+            streams: int | None = await MessageRepository(session).count_streaming()
+    except Exception:
+        logger.warning("khong dem duoc stream dang chay — tra null, xem `health.postgres`")
+        streams = None
+
+    return AdminSystemOut(
+        version=APP_VERSION,
+        queue_depth=depth,
+        streams_dang_chay=streams,
+        health=health,
+    )
+
+
+@router.get(
+    "/audit-logs",
+    status_code=status.HTTP_200_OK,
+    response_model=AuditLogListOut,
+    responses={
+        400: {"model": ErrorEnvelope, "description": "since >= until (BAD_REQUEST)"},
+        422: {"model": ErrorEnvelope, "description": "limit ngoai khoang, hoac action la"},
+    },
+)
+async def list_audit_logs(
+    limit: Annotated[
+        int,
+        Query(ge=1, le=settings.AUDIT_LOG_PAGE_SIZE, description="so dong toi da"),
+    ] = settings.AUDIT_LOG_PAGE_SIZE,
+    before_id: Annotated[int | None, Query(description="next_cursor cua trang truoc")] = None,
+    actor_id: Annotated[uuid.UUID | None, Query()] = None,
+    action: Annotated[AuditAction | None, Query()] = None,
+    since: Annotated[datetime | None, Query()] = None,
+    until: Annotated[datetime | None, Query()] = None,
+) -> AuditLogListOut:
+    """Màn "Audit log" của §16.3 — *"ai, lúc nào, làm gì, với ai"*.
+
+    T-2.16 đã **ghi** đủ dữ liệu từ lâu; tới đây mới có đường đọc nó mà không
+    phải mở `psql`. Một sổ không ai đọc được thì không khác gì một sổ không ai
+    ghi — chỉ là nó tốn thêm chỗ trên đĩa.
+
+    **Cả bốn bộ lọc nằm trong câu SQL** (§20, CLAUDE.md), và điều đó đo được
+    chứ không phải một lời hứa: lọc sau `LIMIT` ở tầng Python sẽ trả về **ít
+    hơn** `limit` dòng khi những dòng mới nhất thuộc về một `action` khác —
+    `tests/api/test_admin.py` nhắm đúng vào chiều đó.
+
+    **Mới nhất trước**, con trỏ là `id` — xem `AuditLogRepository.list_page`
+    cho lý do nó không phải `created_at`.
+
+    `[since, until)` nửa mở, cùng quy ước `GET /admin/usage`: hai trang chia
+    theo ngày không đếm hai lần dòng nằm đúng ở mốc giao.
+
+    **Không ghi sổ.** Đọc không phải một hành động (§20 nói "mọi hành động
+    admin"), và một sổ mà mỗi lần mở lại dài thêm một dòng "có người vừa mở sổ"
+    là một sổ tự lấp chính nó.
+
+    Raises:
+        ApiError 400 `BAD_REQUEST`: `since >= until`.
+    """
+    if since is not None and until is not None and since >= until:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ApiErrorCode.BAD_REQUEST,
+            "since phai truoc until",
+            details={"since": since.isoformat(), "until": until.isoformat()},
+        )
+
+    async with session_scope() as session:
+        rows = await AuditLogRepository(session).list_page(
+            limit=limit,
+            before_id=before_id,
+            actor_id=actor_id,
+            action=action,
+            since=since,
+            until=until,
+        )
+        items = [
+            AuditLogOut(
+                id=row.log.id,
+                created_at=row.log.created_at,
+                actor_id=row.log.actor_id,
+                actor_email=row.email,
+                action=row.log.action,
+                target_type=row.log.target_type,
+                target_id=row.log.target_id,
+                details=row.log.details,
+                ip=row.log.ip,
+            )
+            for row in rows
+        ]
+
+    # Trang chưa đầy ⇒ chắc chắn hết dữ liệu — cùng lối `GET /conversations`.
+    has_more = len(items) == limit
+    return AuditLogListOut(
+        items=items,
+        next_cursor=items[-1].id if (items and has_more) else None,
+    )

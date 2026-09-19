@@ -18,9 +18,10 @@ khoản vừa xoá không được cấp hạn mức nào cả — kể cả h�
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Tier, User
@@ -72,3 +73,52 @@ class TierRepository:
         nói câu tử tế, không ở chỗ chỉ biết gào lên.
         """
         return await self._session.get(Tier, name)
+
+    async def list_all(self) -> Sequence[Tier]:
+        """Cả bảng `tiers`, sắp theo tên — `GET /admin/tiers` (§18.5).
+
+        Không phân trang, và khác `GET /admin/users` ở chỗ đó là một tính chất
+        chứ không phải một món nợ (B-175): số hàng ở đây là số **hạn mức** người
+        vận hành tự định nghĩa, hôm nay là hai (`free`, `trusted`). Một bảng mà
+        chính admin phải gõ tay từng hàng mới dài ra thì không có cách nào dài
+        tới mức cần con trỏ.
+
+        `ORDER BY name` chứ không theo thứ tự Postgres trả về: màn hình §16.3
+        đọc bảng này cạnh một ô chọn tier, và một danh sách đổi thứ tự sau mỗi
+        lần `UPDATE` là một danh sách không bấm trúng được.
+        """
+        stmt = select(Tier).order_by(Tier.name)
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def update(self, name: str, *, changes: Mapping[str, Any]) -> Tier | None:
+        """Đổi hạn mức của **cả một tier** — `PATCH /admin/tiers/{name}` (§10.4).
+
+        Đây là nửa còn thiếu của §10.4. T-2.16 chỉ mở được đường sửa
+        `users.limit_override_json`, tức hạn mức của **một** người; câu "đổi
+        hạn mức trong admin panel" của §10.4 nói về hàng `tiers`, thứ áp cho
+        mọi người thuộc tier đó cùng lúc.
+
+        **Không có bước gỡ cache**, cùng một câu đã viết ở
+        `UserRepository.update_by_admin` và vì cùng lý do — chỉ ở đây nó đáng
+        nói to hơn: cache của T-2.10 nhớ `tier:limits:{user_id}`, tức **kết quả
+        đã gộp của từng người**, không nhớ hàng `tiers`. Xoá một khoá đặt theo
+        tên tier là xoá một khoá không tồn tại, và làm xong sẽ yên tâm rằng
+        mình đã gỡ cache. TTL 60 s là luật duy nhất (NQ-51, §10.4 "có hiệu lực
+        ≤ 60 s").
+
+        `changes` rỗng thì **không** chạy câu UPDATE nào nhưng vẫn trả hàng
+        hiện tại, để `PATCH` body rỗng cư xử như `GET` — cùng lối
+        `update_by_admin`/`update_conversation`.
+
+        Trả `None` khi không có tier tên ấy.
+        """
+        if not changes:
+            return await self.get(name)
+        stmt = (
+            update(Tier)
+            .where(Tier.name == name)
+            .values(**changes)
+            .returning(Tier)
+            .execution_options(synchronize_session="fetch")
+        )
+        return (await self._session.execute(stmt)).scalars().one_or_none()

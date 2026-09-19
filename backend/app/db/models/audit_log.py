@@ -57,6 +57,7 @@ class AuditAction(StrEnum):
     USER_REJECT = "user.reject"
     USER_SUSPEND = "user.suspend"
     USER_UPDATE = "user.update"
+    TIER_UPDATE = "tier.update"
     CATALOG_RELOAD = "catalog.reload"
 
 
@@ -66,6 +67,12 @@ class AuditAction(StrEnum):
 #: nên chuỗi này là thứ duy nhất nói cho người điều tra biết phải `SELECT` ở
 #: đâu với cái id ấy.
 TARGET_USER = "users"
+
+#: `target_type` cho một hành động tác động lên một hàng `tiers` (T-2.20).
+#: `target_id` khi đó là **tên tier**, không phải một UUID — đúng lý do cột ấy
+#: khai `TEXT` ngay từ đầu, và lý do đó nay có người dùng thật chứ không còn
+#: là một dự phòng viết sẵn.
+TARGET_TIER = "tiers"
 
 #: `target_type` cho hành động không nhắm vào hàng nào — `catalog.reload` tác
 #: động lên tiến trình, không lên dữ liệu. `target_id` khi đó để `NULL`.

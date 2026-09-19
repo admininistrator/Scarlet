@@ -1,4 +1,12 @@
-"""Admin API — hành vi của bảy endpoint §18.5 (§16.3, §11.1, §11.3, C16) — T-2.16.
+"""Admin API — hành vi của **mười một** endpoint §18.5 — T-2.16 và T-2.20.
+
+Bảy endpoint đầu là T-2.16 (§16.3, §11.1, §11.3, C16); bốn endpoint cuối
+(`GET/PATCH /admin/tiers`, `GET /admin/system`, `GET /admin/audit-logs`) là
+T-2.20 và nằm ở nửa dưới file, sau một khung tiêu đề. Chúng đo thêm ba thứ mà
+bảy cái đầu không có chỗ để đo: §10.4 nhìn từ phía *cả một tier* (và quyết định
+**không gỡ cache** của NQ-51, đo từ hai phía cùng lúc), một màn hình chẩn đoán
+phải sống sót qua chính sự cố mà người ta mở nó ra để xem, và đường **đọc** sổ
+audit — thứ T-2.16 ghi đủ dữ liệu mà không có cách nào xem ngoài `psql`.
 
 Phần **quyền** không nằm ở đây: nó có file riêng (`test_admin_authz.py`), vì
 nó đọc bảng định tuyến chứ không đọc dữ liệu, và vì DoD gọi đích danh tên file
@@ -32,30 +40,45 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api.v1.admin import UpdateTierRequest
+from app.config.version import APP_VERSION
 from app.core.access_token import encode_access_token
 from app.core.blacklist import user_key
 from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiErrorCode
+from app.core.health_checks import CheckResult
 from app.db.models import (
+    TARGET_TIER,
+    TARGET_USER,
     AuditAction,
     AuditLog,
+    Conversation,
     CostConfidence,
     KeySource,
+    Message,
+    MessageRole,
+    MessageStatus,
     RefreshToken,
     User,
     UserRole,
     UserStatus,
 )
-from app.db.repositories import UsageEventRepository
+from app.db.repositories import AuditLogRepository, UsageEventRepository
 from app.db.repositories.refresh_tokens import RefreshTokenRepository
+from app.db.repositories.tiers import TierRepository
 from app.db.repositories.users import UserRepository
 from app.main import app
+from app.quota.tiers import OVERRIDABLE_FIELDS
 
 DUONG_DAN_USERS = "/api/v1/admin/users"
 DUONG_DAN_USER = "/api/v1/admin/users/{}"
 DUONG_DAN_HANH_DONG = "/api/v1/admin/users/{}/{}"
 DUONG_DAN_USAGE = "/api/v1/admin/usage"
 DUONG_DAN_RELOAD = "/api/v1/admin/catalog/reload"
+DUONG_DAN_TIERS = "/api/v1/admin/tiers"
+DUONG_DAN_TIER = "/api/v1/admin/tiers/{}"
+DUONG_DAN_SYSTEM = "/api/v1/admin/system"
+DUONG_DAN_AUDIT = "/api/v1/admin/audit-logs"
 
 
 # ═══════════════════════════ hạ tầng của bộ test ════════════════════════════
@@ -72,6 +95,7 @@ class _RedisGia:
 
     def __init__(self) -> None:
         self.da_set: dict[str, str] = {}
+        self.da_xoa: list[str] = []
 
     async def mget(self, keys: list[str]) -> list[str | None]:
         return [None for _ in keys]
@@ -79,6 +103,18 @@ class _RedisGia:
     async def set(self, name: str, value: str, *, ex: int | None = None, **_: Any) -> bool:
         self.da_set[name] = value
         return True
+
+    async def delete(self, *names: str) -> int:
+        """Có mặt để ĐẾM, không phải để dùng (T-2.20, NQ-51).
+
+        `PATCH /admin/tiers` cố ý **không** gỡ cache hạn mức — TTL 60 s là luật
+        duy nhất. Một danh sách rỗng ở đây là cách duy nhất khẳng định điều đó
+        từ phía Redis; không có phương thức này thì một lời gọi `delete` lén
+        đưa vào sau sẽ nổ thành `AttributeError`, tức một `500` khó đọc thay vì
+        một test đỏ nói đúng chuyện.
+        """
+        self.da_xoa.extend(names)
+        return len(names)
 
 
 @pytest.fixture(autouse=True)
@@ -1035,3 +1071,586 @@ async def test_patch_gui_lai_dung_gia_tri_dang_co_thi_khong_ghi_so(
     assert resp.status_code == 200
     assert resp.json()["tier_name"] == "trusted"
     assert len(await _audit(session_factory)) == 1
+
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  T-2.20 — bốn endpoint còn lại của §18.5                                 ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+
+async def _audit_row(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    actor_id: uuid.UUID | None,
+    action: AuditAction,
+    target_id: str | None = None,
+) -> int:
+    """Một dòng sổ đặt sẵn, trả về `id` của nó.
+
+    Đi thẳng vào repository chứ không qua một endpoint: những ca dưới đây cần
+    **thứ tự** và **số lượng** dòng chính xác, còn đi vòng qua `POST
+    /admin/users/{id}/approve` thì mỗi dòng sổ phải kéo theo một tài khoản thật
+    và một phép chuyển trạng thái hợp lệ — tức ba thứ phải đúng để đo một thứ.
+    """
+    async with session_factory() as session:
+        row = await AuditLogRepository(session).record(
+            actor_id=actor_id, action=action, target_type=TARGET_USER, target_id=target_id
+        )
+        await session.commit()
+        return row.id
+
+
+# ═══════════════════════ GET /admin/tiers — §10.4, §18.5 ═══════════════════
+
+
+async def test_danh_sach_tier_du_chin_cot_va_sap_theo_ten(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Hai tier của migration 0001, sắp theo tên, đủ chín cột của §10.4."""
+    await _admin(client, session_factory)
+
+    resp = await client.get(DUONG_DAN_TIERS)
+
+    assert resp.status_code == 200, resp.text
+    tiers = resp.json()["tiers"]
+    assert [t["name"] for t in tiers] == ["free", "trusted"]
+    assert set(tiers[0]) == {
+        "name",
+        "limit_5h_usd",
+        "limit_7d_usd",
+        "can_execute_skills",
+        "can_use_web",
+        "web_searches_per_day",
+        "max_upload_mb",
+        "max_attachments",
+        "allowed_model_tags",
+        "is_default",
+    }
+
+
+async def test_danh_sach_tier_khong_ghi_so(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Đọc không phải một hành động — §20, "Việc cần làm" dòng 4 của task."""
+    await _admin(client, session_factory)
+
+    await client.get(DUONG_DAN_TIERS)
+
+    assert await _audit(session_factory) == []
+
+
+# ═════════════════ PATCH /admin/tiers/{name} — §10.4, §16.3 ════════════════
+
+
+async def test_doi_han_muc_ca_tier_va_ghi_mot_dong_audit(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Nửa "đổi" của §10.4 — một dòng sổ, `target_id` là **tên tier**."""
+    admin_id = await _admin(client, session_factory)
+
+    resp = await client.patch(DUONG_DAN_TIER.format("free"), json={"limit_5h_usd": "1.2500"})
+
+    assert resp.status_code == 200, resp.text
+    assert Decimal(resp.json()["limit_5h_usd"]) == Decimal("1.2500")
+
+    dong = await _audit(session_factory)
+    assert len(dong) == 1
+    assert dong[0].actor_id == admin_id
+    assert dong[0].action == AuditAction.TIER_UPDATE
+    assert dong[0].target_type == TARGET_TIER
+    assert dong[0].target_id == "free"
+    assert dong[0].details == {"changed": {"limit_5h_usd": {"from": "0.5000", "to": "1.2500"}}}
+
+
+async def test_tien_trong_dong_so_la_CHUOI_khong_phai_float(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`Decimal` đi vào JSONB phải qua `_json_safe` — nếu không, cả `PATCH` đỏ.
+
+    Ca này là phép kiểm ngược của chính nó: bỏ `_json_safe` đi thì bộ mã hoá
+    JSON của cột `details` ném `TypeError` **trong cùng transaction** với câu
+    `UPDATE`, nên hạn mức cũng không đổi. Một `float` thì lặng lẽ hơn và tệ hơn
+    — sổ ghi `0.5000000000000001` đúng lúc người ta mở sổ ra để đối chiếu tiền.
+    """
+    await _admin(client, session_factory)
+
+    await client.patch(DUONG_DAN_TIER.format("free"), json={"limit_7d_usd": "9.5000"})
+
+    doi = (await _audit(session_factory))[0].details
+    assert doi is not None
+    assert doi["changed"]["limit_7d_usd"] == {"from": "3.0000", "to": "9.5000"}
+    assert isinstance(doi["changed"]["limit_7d_usd"]["to"], str)
+
+
+async def test_doi_nhieu_cot_mot_luot_ghi_dung_mot_dong(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Một lần bấm Lưu là một dòng sổ, dù nó đổi bốn cột."""
+    await _admin(client, session_factory)
+
+    resp = await client.patch(
+        DUONG_DAN_TIER.format("trusted"),
+        json={
+            "can_execute_skills": False,
+            "can_use_web": False,
+            "max_attachments": 12,
+            "allowed_model_tags": ["fast", "vision"],
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["can_execute_skills"] is False
+    assert body["can_use_web"] is False
+    assert body["max_attachments"] == 12
+    assert body["allowed_model_tags"] == ["fast", "vision"]
+
+    dong = await _audit(session_factory)
+    assert len(dong) == 1
+    assert dong[0].details is not None
+    assert set(dong[0].details["changed"]) == {
+        "can_execute_skills",
+        "can_use_web",
+        "max_attachments",
+        "allowed_model_tags",
+    }
+
+
+async def test_gui_lai_dung_gia_tri_dang_co_thi_khong_ghi_so(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Lưu cả form mà không sửa gì ⇒ `200`, không dòng sổ nào — cùng `update_user`."""
+    await _admin(client, session_factory)
+
+    resp = await client.patch(DUONG_DAN_TIER.format("free"), json={"limit_5h_usd": "0.5000"})
+
+    assert resp.status_code == 200, resp.text
+    assert await _audit(session_factory) == []
+
+
+async def test_body_rong_cu_xu_nhu_GET(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`PATCH {}` không chạy câu UPDATE nào nhưng vẫn trả hàng hiện tại."""
+    await _admin(client, session_factory)
+
+    resp = await client.patch(DUONG_DAN_TIER.format("free"), json={})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "free"
+    assert await _audit(session_factory) == []
+
+
+async def test_tier_khong_co_that_thi_404(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Mã riêng, không phải `NOT_FOUND` chung — xem `ApiErrorCode.TIER_NOT_FOUND`."""
+    await _admin(client, session_factory)
+
+    resp = await client.patch(DUONG_DAN_TIER.format("khong-co-that"), json={"max_upload_mb": 1})
+
+    assert resp.status_code == 404, resp.text
+    loi = resp.json()["error"]
+    assert loi["code"] == ApiErrorCode.TIER_NOT_FOUND
+    assert loi["details"]["name"] == "khong-co-that"
+    assert await _audit(session_factory) == []
+
+
+async def test_gui_null_cho_mot_cot_NOT_NULL_thi_400(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`null` không có nghĩa nào cho một cột `NOT NULL` — 400, không bỏ qua im lặng."""
+    await _admin(client, session_factory)
+
+    resp = await client.patch(DUONG_DAN_TIER.format("free"), json={"can_use_web": None})
+
+    assert resp.status_code == 400, resp.text
+    loi = resp.json()["error"]
+    assert loi["code"] == ApiErrorCode.BAD_REQUEST
+    assert loi["details"]["fields"] == ["can_use_web"]
+
+
+@pytest.mark.parametrize("khoa", ["is_default", "name", "limit_5h"])
+async def test_khoa_khong_sua_duoc_thi_422(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], khoa: str
+) -> None:
+    """`extra="forbid"`: `is_default` (B-152), `name` (khoá chính), và một lần gõ nhầm.
+
+    Cả ba đi cùng một đường ra vì với người gọi chúng là cùng một câu chuyện —
+    "trường này không sửa được ở đây". Ngả kia (`200` rồi bỏ qua) là đúng thứ
+    "lệch trong im lặng" mà `update_user` đã từ chối.
+    """
+    await _admin(client, session_factory)
+
+    resp = await client.patch(DUONG_DAN_TIER.format("free"), json={khoa: "x"})
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == ApiErrorCode.VALIDATION_ERROR
+
+
+async def test_han_muc_am_bi_tu_choi(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`ge=0`: một `limit_5h_usd` âm khoá sạch tier mà không ai đọc ra lý do."""
+    await _admin(client, session_factory)
+
+    resp = await client.patch(DUONG_DAN_TIER.format("free"), json={"limit_5h_usd": "-1"})
+
+    assert resp.status_code == 422, resp.text
+
+
+def test_tam_truong_cua_PATCH_dung_bang_OVERRIDABLE_FIELDS() -> None:
+    """Hai tập ấy bằng nhau **không phải tình cờ** — xem docstring `UpdateTierRequest`.
+
+    Ngày `EffectiveLimits` mọc thêm một trường mà body của `PATCH /admin/tiers`
+    quên, đây là chỗ nó tự khai — thay vì một ô nhập biến mất khỏi màn hình
+    admin mà không ai để ý.
+    """
+    assert set(UpdateTierRequest.model_fields) == OVERRIDABLE_FIELDS
+
+
+async def test_doi_tier_KHONG_go_cache_va_Postgres_thay_ngay(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], redis_gia: _RedisGia
+) -> None:
+    """Cạm bẫy của task, đo từ **hai** phía cùng lúc (NQ-51, §10.4).
+
+    Phía Redis: không một lệnh xoá nào được phát. Cache nhớ
+    `tier:limits:{user_id}` — kết quả đã gộp của **từng người** — nên một lệnh
+    xoá đặt theo *tên tier* sẽ xoá một khoá chưa từng tồn tại, chạy xong mà
+    không báo gì, và để lại cảm giác đã gỡ cache. TTL 60 s là luật duy nhất.
+
+    Phía Postgres: hạn mức mới có mặt **ngay**, nên ≤ 60 s của §10.4 là độ trễ
+    của đúng một lớp cache chứ không phải của một câu UPDATE chưa chạy. Đây là
+    nửa đo được trong bộ test của DoD dòng 2; nửa còn lại (đồng hồ thật, không
+    restart) chạy trên stack thật.
+    """
+    await _admin(client, session_factory)
+    user_id = await _tao_user(session_factory, UserStatus.ACTIVE)
+
+    await client.patch(DUONG_DAN_TIER.format("free"), json={"limit_5h_usd": "7.0000"})
+
+    assert redis_gia.da_xoa == []
+    async with session_factory() as session:
+        thay = await TierRepository(session).get_for_user(user_id)
+    assert thay is not None
+    assert thay.tier.name == "free"
+    assert thay.tier.limit_5h_usd == Decimal("7.0000")
+
+
+# ══════════════════ GET /admin/system — §16.3, §21.2, DoD dòng 4 ═══════════
+
+
+def _health_gia(redis_ok: bool = True) -> dict[str, CheckResult]:
+    """Kết quả `run_checks()` giả — năm mục như `app/core/health_checks.py`."""
+    return {
+        ten: CheckResult(ok=True, latency_ms=1)
+        for ten in ("postgres", "minio", "litellm", "ninerouter")
+    } | {
+        "redis": CheckResult(
+            ok=redis_ok,
+            latency_ms=2000,
+            error=None if redis_ok else "Error 111 connecting to redis:6379.",
+        )
+    }
+
+
+@pytest.fixture
+def he_thong_gia(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hạ tầng giả cho màn "Hệ thống": `run_checks` và `queue_depth` đều là mock.
+
+    Cả hai mở kết nối **ra ngoài** (năm service, và một pool arq riêng), thứ mà
+    một bộ test đơn vị không có và không nên có. `count_streaming` thì **không**
+    bị giả: nó đi đúng Postgres thật của bộ test, vì con số ấy là thứ duy nhất
+    ở đây có thể sai một cách thú vị.
+    """
+    monkeypatch.setattr("app.api.v1.admin.run_checks", lambda: _tra_ve(_health_gia()))
+    monkeypatch.setattr("app.api.v1.admin.queue_depth", lambda: _tra_ve(3))
+
+
+async def _tra_ve(gia_tri: Any) -> Any:
+    return gia_tri
+
+
+async def test_man_he_thong_tra_du_bon_o(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    he_thong_gia: None,
+) -> None:
+    """DoD dòng 4: `queue_depth`, `streams_dang_chay`, `version`, `health`."""
+    await _admin(client, session_factory)
+
+    resp = await client.get(DUONG_DAN_SYSTEM)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert set(body) == {"queue_depth", "streams_dang_chay", "version", "health"}
+    assert body["queue_depth"] == 3
+    assert body["version"] == APP_VERSION
+    assert set(body["health"]) == {"postgres", "redis", "minio", "litellm", "ninerouter"}
+
+
+async def test_dem_dung_so_stream_dang_chay(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    he_thong_gia: None,
+) -> None:
+    """Đếm `streaming`, **không** đếm `queued` — §16.3 tách hai chỉ số cạnh nhau.
+
+    Gộp `queued` vào đây là đếm cùng một job hai lần trên cùng một màn hình:
+    nó đã nằm trong `queue_depth` rồi.
+    """
+    await _admin(client, session_factory)
+    user_id = await _tao_user(session_factory, UserStatus.ACTIVE)
+    async with session_factory() as session:
+        conv = Conversation(user_id=user_id)
+        session.add(conv)
+        await session.flush()
+        for trang_thai in (
+            MessageStatus.STREAMING,
+            MessageStatus.STREAMING,
+            MessageStatus.QUEUED,
+            MessageStatus.COMPLETED,
+        ):
+            session.add(
+                Message(conversation_id=conv.id, role=MessageRole.ASSISTANT, status=trang_thai)
+            )
+        await session.commit()
+
+    resp = await client.get(DUONG_DAN_SYSTEM)
+
+    assert resp.json()["streams_dang_chay"] == 2
+
+
+async def test_redis_chet_van_tra_loi_khong_500(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DoD dòng 4 nửa sau: *"tắt `redis` → endpoint vẫn trả lời (báo hỏng), không 500"*.
+
+    Đây là màn hình người ta mở **khi** có sự cố, nên nó là màn hình cuối cùng
+    được phép chết theo sự cố ấy. Ba tính chất cùng lúc: `200` chứ không `500`
+    và cũng không `503`; ô không hỏi được là `null` chứ không phải `0` (một `0`
+    đọc ra là "hàng đợi rỗng", tức đúng ngược với sự thật); và lý do nằm ở
+    `health`, một chỗ duy nhất.
+
+    `streams_dang_chay` vẫn là một con số vì nó đi Postgres — mỗi ô một nguồn
+    và hỏng riêng, không có ô nào kéo theo ô nào.
+    """
+    await _admin(client, session_factory)
+
+    def _no(*_: Any, **__: Any) -> Any:
+        raise ConnectionError("Error 111 connecting to redis:6379.")
+
+    monkeypatch.setattr("app.api.v1.admin.run_checks", lambda: _tra_ve(_health_gia(redis_ok=False)))
+    monkeypatch.setattr("app.api.v1.admin.queue_depth", _no)
+
+    resp = await client.get(DUONG_DAN_SYSTEM)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["queue_depth"] is None
+    assert body["streams_dang_chay"] == 0
+    assert body["health"]["redis"]["ok"] is False
+    assert "111" in body["health"]["redis"]["error"]
+
+
+async def test_man_he_thong_khong_ghi_so(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    he_thong_gia: None,
+) -> None:
+    await _admin(client, session_factory)
+
+    await client.get(DUONG_DAN_SYSTEM)
+
+    assert await _audit(session_factory) == []
+
+
+# ═══════════ GET /admin/audit-logs — §16.3, DoD dòng 3 ═════════════════════
+
+
+async def test_doc_dung_dong_ma_PATCH_vua_ghi(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD dòng 3: *"trả đúng dòng mà `PATCH` vừa ghi"*.
+
+    Đo cả **bốn câu** của §16.3 trong một ca, vì chúng chỉ có ích cùng nhau:
+    ai (`actor_email`, không phải một UUID), lúc nào (`created_at`), làm gì
+    (`action`), với ai (`target_type` + `target_id`).
+    """
+    admin_id = await _admin(client, session_factory)
+    async with session_factory() as session:
+        email = (await session.execute(select(User.email).where(User.id == admin_id))).scalar_one()
+    await client.patch(DUONG_DAN_TIER.format("free"), json={"limit_5h_usd": "2.0000"})
+
+    resp = await client.get(DUONG_DAN_AUDIT)
+
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    assert len(items) == 1
+    dong = items[0]
+    assert dong["actor_id"] == str(admin_id)
+    assert dong["actor_email"] == email
+    assert dong["action"] == AuditAction.TIER_UPDATE.value
+    assert dong["target_type"] == TARGET_TIER
+    assert dong["target_id"] == "free"
+    assert dong["details"]["changed"]["limit_5h_usd"]["to"] == "2.0000"
+    assert dong["created_at"] is not None
+
+
+async def test_loc_action_nam_TRONG_cau_SQL(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD dòng 3 nửa sau: *"`?action=` lọc **trong câu SQL**"* — và đây là phép đo.
+
+    Bố cục cố ý: ba dòng `user.approve` **cũ**, rồi hai dòng `catalog.reload`
+    **mới nhất**. Hỏi `?action=user.approve&limit=2`:
+
+    * lọc trong SQL ⇒ `WHERE` chạy trước `LIMIT` ⇒ đúng **2** dòng, cả hai
+      `user.approve`;
+    * lọc ở Python sau khi đã `SELECT ... LIMIT 2` ⇒ hai dòng lấy về là hai
+      dòng `catalog.reload` mới nhất, sàng xong còn **0**.
+
+    Một ca "lọc đúng" thông thường (đếm tổng số dòng trả về) **không** phân
+    biệt được hai ngả ấy; con số `limit` nhỏ hơn số dòng là thứ làm chúng tách
+    ra.
+    """
+    admin_id = await _admin(client, session_factory)
+    for _ in range(3):
+        await _audit_row(session_factory, actor_id=admin_id, action=AuditAction.USER_APPROVE)
+    for _ in range(2):
+        await _audit_row(session_factory, actor_id=admin_id, action=AuditAction.CATALOG_RELOAD)
+
+    resp = await client.get(DUONG_DAN_AUDIT, params={"action": "user.approve", "limit": 2})
+
+    items = resp.json()["items"]
+    assert len(items) == 2
+    assert {d["action"] for d in items} == {AuditAction.USER_APPROVE.value}
+
+
+async def test_loc_actor_id_nam_trong_cau_SQL(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Cùng hình dạng với `?action=`, trục khác: `?actor_id=` cũng lọc trước `LIMIT`."""
+    admin_id = await _admin(client, session_factory)
+    nguoi_khac = await _tao_user(session_factory, UserStatus.ACTIVE, role=UserRole.ADMIN)
+    for _ in range(3):
+        await _audit_row(session_factory, actor_id=admin_id, action=AuditAction.USER_APPROVE)
+    for _ in range(2):
+        await _audit_row(session_factory, actor_id=nguoi_khac, action=AuditAction.USER_APPROVE)
+
+    resp = await client.get(DUONG_DAN_AUDIT, params={"actor_id": str(admin_id), "limit": 2})
+
+    items = resp.json()["items"]
+    assert len(items) == 2
+    assert {d["actor_id"] for d in items} == {str(admin_id)}
+
+
+async def test_cua_so_thoi_gian_nua_mo(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`[since, until)` — dòng nằm đúng ở mốc `until` **không** thuộc trang này.
+
+    Nửa mở là thứ giữ cho hai trang chia theo ngày không đếm hai lần cùng một
+    dòng; nó cũng là quy ước `GET /admin/usage` đã dùng, nên hai màn hình cạnh
+    nhau không đọc cùng một khoảng theo hai kiểu.
+    """
+    admin_id = await _admin(client, session_factory)
+    ma_dong = await _audit_row(session_factory, actor_id=admin_id, action=AuditAction.USER_APPROVE)
+    async with session_factory() as session:
+        moc = (
+            await session.execute(select(AuditLog.created_at).where(AuditLog.id == ma_dong))
+        ).scalar_one()
+
+    trong = await client.get(DUONG_DAN_AUDIT, params={"since": moc.isoformat()})
+    ngoai = await client.get(DUONG_DAN_AUDIT, params={"until": moc.isoformat()})
+
+    assert [d["id"] for d in trong.json()["items"]] == [ma_dong]
+    assert ngoai.json()["items"] == []
+
+
+async def test_since_sau_until_thi_400(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Cùng câu trả lời với `GET /admin/usage` cho cùng một lỗi của người gọi."""
+    await _admin(client, session_factory)
+    bay_gio = datetime.now(UTC)
+
+    resp = await client.get(
+        DUONG_DAN_AUDIT,
+        params={
+            "since": bay_gio.isoformat(),
+            "until": (bay_gio - timedelta(days=1)).isoformat(),
+        },
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"]["code"] == ApiErrorCode.BAD_REQUEST
+
+
+async def test_phan_trang_bang_con_tro_khong_lap_khong_sot(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Con trỏ `id`, mới nhất trước — hai trang phủ đúng năm dòng, không trùng nhau.
+
+    Trang cuối chưa đầy ⇒ `next_cursor` là `null`, không mời client hỏi thêm
+    một vòng chỉ để nhận về danh sách rỗng (cùng lối `GET /conversations`).
+    """
+    admin_id = await _admin(client, session_factory)
+    ma = [
+        await _audit_row(session_factory, actor_id=admin_id, action=AuditAction.USER_APPROVE)
+        for _ in range(5)
+    ]
+
+    trang1 = (await client.get(DUONG_DAN_AUDIT, params={"limit": 3})).json()
+    trang2 = (
+        await client.get(DUONG_DAN_AUDIT, params={"limit": 3, "before_id": trang1["next_cursor"]})
+    ).json()
+
+    assert [d["id"] for d in trang1["items"]] == list(reversed(ma[2:]))
+    assert trang1["next_cursor"] == ma[2]
+    assert [d["id"] for d in trang2["items"]] == list(reversed(ma[:2]))
+    assert trang2["next_cursor"] is None
+
+
+async def test_actor_da_xoa_van_con_dong_so(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`ON DELETE SET NULL`: dòng sổ ở lại, chỉ mất con trỏ về người.
+
+    `actor_email` khi ấy là `None`, giống hệt một hành động do cron sinh ra —
+    và cả hai đều là câu trả lời đúng: *"không còn biết là ai"*.
+    """
+    await _admin(client, session_factory)
+    await _audit_row(session_factory, actor_id=None, action=AuditAction.CATALOG_RELOAD)
+
+    items = (await client.get(DUONG_DAN_AUDIT)).json()["items"]
+
+    assert len(items) == 1
+    assert items[0]["actor_id"] is None
+    assert items[0]["actor_email"] is None
+
+
+async def test_action_la_thi_422(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Một bộ lọc gõ sai mà trả `[]` sẽ đọc y hệt "sổ trống" — cùng lối `?status=`."""
+    await _admin(client, session_factory)
+
+    resp = await client.get(DUONG_DAN_AUDIT, params={"action": "user.xoa-het"})
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == ApiErrorCode.VALIDATION_ERROR
+
+
+async def test_doc_so_khong_ghi_them_dong_nao(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Một sổ mà mỗi lần mở lại dài thêm một dòng là một sổ tự lấp chính nó."""
+    await _admin(client, session_factory)
+
+    await client.get(DUONG_DAN_AUDIT)
+    await client.get(DUONG_DAN_AUDIT)
+
+    assert await _audit(session_factory) == []

@@ -8,6 +8,7 @@ chết. `users` ra đời ở T-2.1 (§11.1, §11.6), `tiers` ở T-2.10 (§10.4
 
 from app.db.models.audit_log import (
     TARGET_CATALOG,
+    TARGET_TIER,
     TARGET_USER,
     AuditAction,
     AuditLog,
@@ -24,6 +25,7 @@ from app.db.models.user_provider_key import UserProviderKey
 
 __all__ = [
     "TARGET_CATALOG",
+    "TARGET_TIER",
     "TARGET_USER",
     "AuditAction",
     "AuditLog",

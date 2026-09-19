@@ -35,6 +35,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && useradd --create-home --uid 1000 scarlet
 
 COPY --from=builder /install /usr/local
+# §16.3 doi man "He thong" hien PHIEN BAN, va con so ay song o dung mot cho:
+# dong `version =` cua pyproject.toml. Khong the doc bang importlib.metadata vi
+# B-70 da co y bo `pip install .` khoi image, nen khong co metadata phan phoi
+# nao — xem app/config/version.py. Mot dong COPY re hon mot nguon su that thu
+# hai (bien moi truong APP_VERSION) se lech vao dung ngay phat hanh.
+COPY --chown=scarlet:scarlet pyproject.toml /app/pyproject.toml
 COPY --chown=scarlet:scarlet app /app/app
 COPY --chown=scarlet:scarlet alembic /app/alembic
 COPY --chown=scarlet:scarlet alembic.ini /app/alembic.ini

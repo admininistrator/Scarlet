@@ -40,6 +40,7 @@ import asyncio
 
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
+from arq.constants import default_queue_name
 
 from app.config.settings import settings
 
@@ -81,3 +82,28 @@ async def dispose_arq_pool() -> None:
     if _pool is not None:
         await _pool.aclose()
     _pool = None
+
+
+async def queue_depth() -> int:
+    """Bao nhiêu job đang nằm trong hàng đợi — §21.2, §16.3 màn "Hệ thống".
+
+    Chỉ số §21.2 gọi tên là *"độ dài hàng đợi arq"*, và nó trả lời đúng một câu:
+    worker có theo kịp không.
+
+    `ZCARD` chứ không `queued_jobs()`: hàm kia đọc **và giải mã** payload của
+    từng job chỉ để rồi đếm chúng — tức unpickle cả hàng đợi mỗi lần admin mở
+    một màn hình. Tên hàng đợi lấy từ chính `arq.constants`, không gõ lại chuỗi
+    `"arq:queue"` ở đây (A3): bên đẩy job (`enqueue_job` trong
+    `api/v1/messages.py`) cũng dùng mặc định ấy, nên hai bên chỉ đúng khi cùng
+    đọc một hằng.
+
+    Đếm cả job **hoãn** (`_defer_by`) vì chúng cùng nằm trong ZSET ấy — hôm nay
+    không có chỗ nào hoãn job, và ngày có thì một job đã hứa vẫn là việc chưa
+    làm xong.
+
+    Người gọi phải tự lo ca Redis chết: hàm này để nguyên lỗi cho nổi lên, vì
+    chỗ duy nhất biết "không đọc được thì hiển thị gì" là màn hình
+    (`GET /admin/system` trả `null` và để `health` nói vì sao).
+    """
+    pool = await get_arq_pool()
+    return await pool.zcard(default_queue_name)
