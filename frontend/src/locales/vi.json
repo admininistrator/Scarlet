@@ -76,5 +76,20 @@
   "admin.theoModel": "Theo model",
   "admin.theoNguon": "Theo nguồn tiền (luôn đủ cả hai nguồn)",
 
+  "trang.caiDat": "Cài đặt",
+  "trang.dangKy": "Đăng ký",
+  "trang.quenMatKhau": "Quên mật khẩu",
+  "trang.datLaiMatKhau": "Đặt lại mật khẩu",
+  "trang.verifyEmail": "Xác thực email",
+  "trang.choDuyet": "Chờ duyệt",
+  "trangTam.moTa": "Màn hình này chưa được dựng.",
+
+  "loi.404.tieuDe": "Không tìm thấy trang",
+  "loi.404.moTa": "Đường dẫn bạn vừa mở không tồn tại.",
+  "loi.404.veTrangChu": "Về trang chủ",
+  "loi.500.tieuDe": "Giao diện gặp lỗi",
+  "loi.500.moTa": "Một lỗi không xử lý được đã xảy ra khi vẽ màn hình.",
+  "loi.500.taiLai": "Tải lại trang",
+
   "loi.dong": "Đóng"
 }
