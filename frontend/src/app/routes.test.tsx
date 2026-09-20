@@ -113,18 +113,29 @@ describe("bang route", () => {
     expect(screen.queryByText("404")).toBeNull();
   });
 
+  // T-3.1b thay nam trong sau cho trong nay bang man hinh that. `/cai-dat`
+  // con lai mot minh — chu no la T-3.12.
   it.each([
     [PATHS.settings, "Cài đặt"],
     [PATHS.register, "Đăng ký"],
     [PATHS.forgotPassword, "Quên mật khẩu"],
     [PATHS.resetPassword, "Đặt lại mật khẩu"],
-    [PATHS.verifyEmail, "Xác thực email"],
-    [PATHS.pendingApproval, "Chờ duyệt"],
-  ])("%s ra trang tam co ten %s, khong phai 404", async (duong, ten) => {
+    [PATHS.verifyEmail, "Email chưa được xác thực"],
+    [PATHS.pendingApproval, "Đang chờ quản trị duyệt"],
+  ])("%s ra dung man hinh cua no, khong phai 404", async (duong, ten) => {
     moTai(duong);
 
     expect(await screen.findByRole("heading", { name: ten })).toBeInTheDocument();
     expect(screen.queryByText("404")).toBeNull();
+  });
+
+  it("chi con /cai-dat la trang tam — nam duong auth da co man hinh that", async () => {
+    // Phep do cua *"T-3.1b chi phai dien"*: neu mot `element` bi bo quen thi
+    // `PlaceholderPage` van ve mot man hinh co ten va moi khang dinh ben tren
+    // van xanh. Cau "Man hinh nay chua duoc dung" la thu phan biet duoc.
+    moTai(PATHS.register);
+    expect(await screen.findByRole("heading", { name: "Đăng ký" })).toBeInTheDocument();
+    expect(screen.queryByText("Màn hình này chưa được dựng.")).toBeNull();
   });
 
   it("nguoi khong phai admin bi day khoi /admin ve man chat", async () => {

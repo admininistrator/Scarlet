@@ -1,6 +1,12 @@
 import type { RouteObject } from "react-router";
 
 import { AdminScreen } from "../components/admin/AdminScreen";
+import { ForgotPasswordForm } from "../components/auth/ForgotPasswordForm";
+import { PendingApprovalScreen } from "../components/auth/PendingApprovalScreen";
+import { RegisterForm } from "../components/auth/RegisterForm";
+import { ResetPasswordForm } from "../components/auth/ResetPasswordForm";
+import { StatusGate } from "../components/auth/StatusGate";
+import { VerifyEmailScreen } from "../components/auth/VerifyEmailScreen";
 import { ChatScreen } from "../components/chat/ChatScreen";
 import { t } from "../lib/i18n";
 import { AdminOnly } from "./AdminOnly";
@@ -43,20 +49,35 @@ import { PATHS } from "./paths";
  * `errorElement` la duong thu 11 (trang 500). Dat o route GOC de mot ngoai
  * le tu bat ky man hinh nao cung roi vao no — xem `pages/ServerErrorPage`.
  *
- * ── Sau cho trong cua T-3.1b, mot cho trong cua T-3.12 ─────────────────────
+ * ── Sau man auth da vao cho (T-3.1b), mot cho trong con lai la T-3.12 ─────
  *
- * `/dang-ky`, `/verify-email`, `/quen-mat-khau`, `/dat-lai-mat-khau`,
- * `/cho-duyet` la trang tam CO TEN; `/dang-nhap` da co that tu T-2.19. Sau
- * duong ay la sau man hinh auth cua T-3.1b, va task ay chi phai thay
- * `element` — khong phai dung lai cau hinh router. `/cai-dat` cung hinh dang
- * nhung chu no la T-3.12.
+ * T-3.1a khai san sau cho trong CO TEN cho `/dang-ky`, `/verify-email`,
+ * `/quen-mat-khau`, `/dat-lai-mat-khau`, `/cho-duyet` de T-3.1b *"chi phai
+ * dien, khong phai dung lai cau hinh router"* — va do dung la thu da xay ra:
+ * task ay thay nam `element`, khong doi mot dong cau hinh nao. `/cai-dat` van
+ * la trang tam; chu no la T-3.12.
+ *
+ * ── `StatusGate` boc man chat, `AdminOnly` boc man quan tri ────────────────
+ *
+ * Hai cua vao, hai cau hoi khac nhau: `AdminOnly` hoi *"anh co phai admin
+ * khong"* (§16.3), `StatusGate` hoi *"tai khoan cua anh dung duoc chua"*
+ * (§11.1). Chung KHONG long vao nhau o `/admin`, va do la chu y — mot admin
+ * thi theo dinh nghia da `active`, nen boc them mot lop nua chi them mot
+ * duong de sai ma khong chan them ai.
  */
 export const routes: RouteObject[] = [
   {
     element: <Layout />,
     errorElement: <RouteErrorPage />,
     children: [
-      { path: PATHS.home, element: <ChatScreen /> },
+      {
+        path: PATHS.home,
+        element: (
+          <StatusGate>
+            <ChatScreen />
+          </StatusGate>
+        ),
+      },
       {
         path: PATHS.admin,
         element: (
@@ -67,20 +88,11 @@ export const routes: RouteObject[] = [
       },
       { path: PATHS.settings, element: <PlaceholderPage title={t("trang.caiDat")} /> },
       { path: PATHS.login, element: <LoginRoute /> },
-      { path: PATHS.register, element: <PlaceholderPage title={t("trang.dangKy")} /> },
-      {
-        path: PATHS.forgotPassword,
-        element: <PlaceholderPage title={t("trang.quenMatKhau")} />,
-      },
-      {
-        path: PATHS.resetPassword,
-        element: <PlaceholderPage title={t("trang.datLaiMatKhau")} />,
-      },
-      { path: PATHS.verifyEmail, element: <PlaceholderPage title={t("trang.verifyEmail")} /> },
-      {
-        path: PATHS.pendingApproval,
-        element: <PlaceholderPage title={t("trang.choDuyet")} />,
-      },
+      { path: PATHS.register, element: <RegisterForm /> },
+      { path: PATHS.forgotPassword, element: <ForgotPasswordForm /> },
+      { path: PATHS.resetPassword, element: <ResetPasswordForm /> },
+      { path: PATHS.verifyEmail, element: <VerifyEmailScreen /> },
+      { path: PATHS.pendingApproval, element: <PendingApprovalScreen /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

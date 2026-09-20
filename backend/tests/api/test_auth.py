@@ -28,9 +28,11 @@ của `test_messages_cancel.py` (nơi nó chỉ ghi lại lời gọi). Hai lý 
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -365,7 +367,13 @@ async def test_verify_email_dung_token_doi_status_pending_approval(
 async def test_verify_email_bam_lai_lan_hai_khong_loi(
     client: AsyncClient, mailer_gia: _MailerGia
 ) -> None:
-    """DoD T-2.2: bấm lại cùng link → không lỗi, idempotent (UC-01)."""
+    """DoD T-2.2: bấm lại cùng link → không lỗi, idempotent (UC-01).
+
+    T-3.1b tách `already_verified` khỏi `verified` — xem docstring
+    `VerifyEmailResponse.status`. Thứ UC-01 dòng 5 đòi vẫn nguyên: cùng `200`,
+    không lỗi, không tác dụng phụ. Thứ đổi là FE nay **biết** đây là lần thứ
+    hai, nên nó đưa người dùng tới `/dang-nhap` thay vì `/cho-duyet`.
+    """
     email = f"{uuid.uuid4().hex}@scarlet.example"
     await client.post(DUONG_DAN, json={"email": email, "password": "mot-mat-khau-du-manh-123"})
     token = _token_tu_url(mailer_gia.calls[0]["ctx"]["verify_url"])
@@ -374,7 +382,39 @@ async def test_verify_email_bam_lai_lan_hai_khong_loi(
     resp2 = await client.post(DUONG_DAN_VERIFY, json={"token": token})
 
     assert resp1.status_code == resp2.status_code == 200
-    assert resp1.json() == resp2.json() == {"status": "verified"}
+    assert resp1.json() == {"status": "verified"}
+    assert resp2.json() == {"status": "already_verified"}
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_verify_email_lan_hai_KHONG_doi_them_gi_trong_db(
+    client: AsyncClient,
+    mailer_gia: _MailerGia,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """`already_verified` là một cái tên khác, không một hành vi khác.
+
+    Ca này canh đúng chỗ dễ hỏng khi tách nhánh: `email_verified_at` của lần
+    đầu không được ghi đè bởi lần thứ hai, và `status` không được nhảy thêm
+    một bước nào.
+    """
+    email = f"{uuid.uuid4().hex}@scarlet.example"
+    await client.post(DUONG_DAN, json={"email": email, "password": "mot-mat-khau-du-manh-123"})
+    token = _token_tu_url(mailer_gia.calls[0]["ctx"]["verify_url"])
+
+    await client.post(DUONG_DAN_VERIFY, json={"token": token})
+    async with session_factory() as session:
+        user = await UserRepository(session).get_by_email(email)
+        assert user is not None
+        moc_lan_dau = user.email_verified_at
+
+    await client.post(DUONG_DAN_VERIFY, json={"token": token})
+
+    async with session_factory() as session:
+        user = await UserRepository(session).get_by_email(email)
+        assert user is not None
+        assert user.email_verified_at == moc_lan_dau
+        assert user.status.value == "pending_approval"
 
 
 @pytest.mark.usefixtures("_db_cua_test")
@@ -1219,6 +1259,47 @@ async def test_quen_mat_khau_gui_thu_reset_cho_email_co_that(
     assert mailer_gia.calls[0]["template"] == "reset_password"
     assert mailer_gia.calls[0]["to"] == email
     assert "reset_url" in mailer_gia.calls[0]["ctx"]
+
+
+def _duong_dan_cua_fe(ten_khoa: str) -> str:
+    """Giá trị của một hàng `PATHS` trong `frontend/src/app/paths.ts`.
+
+    Đọc file nguồn của FE từ một test backend là cố ý, và nó canh đúng thứ
+    vừa hỏng: `reset_url` trỏ vào `/reset-password` suốt từ T-2.5, trong khi
+    bảng route của T-3.1a gọi đường ấy là `/dat-lai-mat-khau`. Không một phép
+    kiểm nào ở hai bên bắt được — backend chỉ thấy một chuỗi, FE chỉ thấy một
+    route không ai gọi tới — nên mọi link đặt lại mật khẩu rơi vào trang 404
+    mà cả hai bộ test vẫn xanh. Cặp chuỗi này là một hợp đồng giữa hai tầng;
+    hợp đồng thì phải có người đọc cả hai vế.
+    """
+    nguon = (
+        Path(__file__).resolve().parents[3] / "frontend" / "src" / "app" / "paths.ts"
+    ).read_text(encoding="utf-8")
+    khop = re.search(rf'^\s*{ten_khoa}:\s*"([^"]+)"', nguon, re.MULTILINE)
+    assert khop is not None, f"khong thay hang {ten_khoa} trong paths.ts"
+    return khop.group(1)
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_hai_link_trong_thu_tro_dung_hai_route_cua_FE(
+    client: AsyncClient, mailer_gia: _MailerGia, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`verify_url` và `reset_url` phải khớp `PATHS` — xem `_duong_dan_cua_fe`."""
+    _, email = await _tao_user_that(session_factory)
+    await client.post(
+        DUONG_DAN,
+        json={"email": f"{uuid.uuid4().hex}@scarlet.example", "password": _MAT_KHAU_TEST},
+    )
+    await client.post(DUONG_DAN_QUEN_MAT_KHAU, json={"email": email})
+
+    theo_template = {goi["template"]: goi["ctx"] for goi in mailer_gia.calls}
+
+    assert urlsplit(theo_template["verify_email"]["verify_url"]).path == _duong_dan_cua_fe(
+        "verifyEmail"
+    )
+    assert urlsplit(theo_template["reset_password"]["reset_url"]).path == _duong_dan_cua_fe(
+        "resetPassword"
+    )
 
 
 @pytest.mark.usefixtures("_db_cua_test")

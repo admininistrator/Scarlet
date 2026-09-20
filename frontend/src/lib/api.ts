@@ -87,6 +87,16 @@ export const MA_LOI = {
   SAI_MAT_KHAU: "INVALID_CREDENTIALS",
   TAI_KHOAN_BI_KHOA: "ACCOUNT_DISABLED",
   DOI_QUAN_TRI: "ADMIN_REQUIRED",
+
+  // T-3.1b — sau ma loi cua sau man auth. Tat ca deu la ma ma NGUOI DUNG phai
+  // doc duoc mot cau khac nhau, khong phai ma de log: `message` cua backend
+  // viet bang tieng Viet khong dau (`mat khau qua pho bien, hay chon mat khau
+  // khac`) nen no khong dat len man hinh duoc.
+  TURNSTILE_HONG: "TURNSTILE_FAILED",
+  MAT_KHAU_QUA_NGAN: "PASSWORD_TOO_SHORT",
+  MAT_KHAU_QUA_YEU: "PASSWORD_TOO_WEAK",
+  TOKEN_HONG: "TOKEN_INVALID",
+  QUA_NHIEU_LAN: "RATE_LIMITED",
 } as const;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -242,6 +252,35 @@ export interface NguoiDungRa {
   tier_name: string;
 }
 
+/**
+ * Response CO DINH cua ba duong chong do (§11.5): `register`,
+ * `resend-verification`, `forgot-password`.
+ *
+ * FE **khong** duoc doc `message` de re nhanh, va cung khong nen hien no:
+ * backend tra mot cau tieng Viet khong dau, va ca diem cua §11.5 la ca hai
+ * nhanh (email co that / khong) tra ve **cung mot chuoi**. Man hinh tu viet
+ * cau cua no tu `vi.json`.
+ */
+export interface ThongBaoRa {
+  message: string;
+}
+
+/**
+ * `POST /auth/verify-email` — ba ket cuc, ba man hinh khac nhau.
+ *
+ * `verified` la lan bam DAU (tai khoan vua sang `pending_approval`);
+ * `already_verified` la lan bam thu hai — UC-01 dong 5 doi no di thang toi
+ * `/dang-nhap` chu khong phai mot loi. Hai chuoi tach nhau tu T-3.1b, xem
+ * docstring `VerifyEmailResponse.status` cua backend.
+ */
+export interface XacThucEmailRa {
+  status: "verified" | "already_verified" | "expired";
+}
+
+export interface DatLaiMatKhauRa {
+  status: "reset";
+}
+
 /** Ba nut cua man "Duyet user" (§16.3) — khop `hanh_dong` cua backend. */
 export type HanhDongUser = "approve" | "reject" | "suspend";
 
@@ -378,6 +417,45 @@ export const api = {
   // token deu nam trong cookie `HttpOnly` do server dat (NQ-36), tuc JS cua
   // trang KHONG doc duoc chung — va do la ca diem cua NQ-36. FE chi biet "da
   // dang nhap hay chua" qua `toiLaAi()`, khong qua mot bien trong bo nho.
+
+  /**
+   * §11.6 — `turnstile_token` la `null` khi widget tat (`VITE_TURNSTILE_SITE_KEY`
+   * rong). Gui `null` chu khong bo han truong: backend doc no bang mot truong
+   * tuy chon o tang schema nhung BAT BUOC o tang luat khi `TURNSTILE_SECRET` co
+   * gia tri, va hai hinh dang body khac nhau cho cung mot form la mot cho de
+   * lech them.
+   */
+  dangKy: (email: string, password: string, turnstileToken: string | null) =>
+    request<ThongBaoRa>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, password, turnstile_token: turnstileToken }),
+    }),
+
+  xacThucEmail: (token: string) =>
+    request<XacThucEmailRa>("/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+
+  /** Han muc 3/gio (§18.1) — nut goi no phai noi ra dieu do khi bi tu choi. */
+  guiLaiXacThuc: (email: string) =>
+    request<ThongBaoRa>("/auth/resend-verification", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  quenMatKhau: (email: string, turnstileToken: string | null) =>
+    request<ThongBaoRa>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email, turnstile_token: turnstileToken }),
+    }),
+
+  /** KHONG dang nhap ai ca (NQ-44) — no con xoa hai cookie phien dang co. */
+  datLaiMatKhau: (token: string, password: string) =>
+    request<DatLaiMatKhauRa>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
 
   dangNhap: (email: string, password: string) =>
     request<NguoiDungRa>("/auth/login", {

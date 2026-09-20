@@ -293,9 +293,21 @@ class VerifyEmailRequest(BaseModel):
 
 
 class VerifyEmailResponse(BaseModel):
-    #: `verified`: token hợp lệ (lần đầu hoặc đã dùng trước đó — idempotent).
+    #: `verified`: token hợp lệ, **lần đầu** — tài khoản vừa chuyển sang
+    #: `pending_approval`, FE đưa người dùng tới màn "chờ duyệt".
+    #: `already_verified`: token đúng nhưng đã dùng rồi (idempotent, UC-01
+    #: dòng 5) — FE đưa thẳng tới màn đăng nhập.
     #: `expired`: hết hạn, FE hiện trang "gửi lại" — vẫn HTTP 200 (DoD T-2.2).
-    status: Literal["verified", "expired"]
+    #:
+    #: **Vì sao tách `already_verified` khỏi `verified` (T-3.1b).** Tới T-2.2
+    #: hai ca ấy trả cùng một chuỗi vì không ai cần phân biệt; T-3.1b thì cần,
+    #: và cần **cả hai chiều cùng lúc**: DoD dòng 1 đòi lần bấm đầu tự sang
+    #: `/cho-duyet`, DoD dòng 4 đòi lần bấm thứ hai về `/dang-nhap`. Một
+    #: response giống hệt nhau cho hai kết cục khác nhau thì FE chỉ đoán được.
+    #: Phân biệt này **không** rò gì: phải cầm đúng token mới tới được đây, nên
+    #: nó không phải một đường dò kiểu §11.5. Cả hai vẫn `200`, vẫn không có
+    #: tác dụng phụ ở lần thứ hai — tính idempotent của UC-01 giữ nguyên.
+    status: Literal["verified", "already_verified", "expired"]
 
 
 async def _gui_email_xac_thuc(email: str, raw_token: str) -> None:
@@ -457,16 +469,20 @@ async def verify_email(body: VerifyEmailRequest) -> VerifyEmailResponse:
         if outcome.result is ConsumeResult.EXPIRED:
             return VerifyEmailResponse(status="expired")
 
-        if outcome.result is ConsumeResult.OK:
-            uid: UUID | None = outcome.user_id
-            if uid is None:  # bất biến của EmailTokenRepository.consume — không nên xảy ra
-                raise ApiError(
-                    status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    ApiErrorCode.INTERNAL_ERROR,
-                    "loi noi bo, xem log cua server",
-                )
-            await UserRepository(session).mark_email_verified(uid)
-        # ConsumeResult.ALREADY_USED: không có gì để đổi thêm — idempotent.
+        if outcome.result is ConsumeResult.ALREADY_USED:
+            # Không có gì để đổi thêm — idempotent. Nói ra rằng đây là lần
+            # thứ hai chứ không im lặng trộn vào `verified`: xem docstring
+            # `VerifyEmailResponse.status`.
+            return VerifyEmailResponse(status="already_verified")
+
+        uid: UUID | None = outcome.user_id
+        if uid is None:  # bất biến của EmailTokenRepository.consume — không nên xảy ra
+            raise ApiError(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                ApiErrorCode.INTERNAL_ERROR,
+                "loi noi bo, xem log cua server",
+            )
+        await UserRepository(session).mark_email_verified(uid)
 
         await session.commit()
 
@@ -834,7 +850,14 @@ async def _gui_email_dat_lai(email: str, raw_token: str) -> None:
     """Best-effort, cùng lối `_gui_email_xac_thuc`: SMTP hỏng không được làm
     `forgot-password` trả 500 — làm vậy là nói cho người gọi biết email đó có
     thật (§11.5), và token thì đã commit rồi."""
-    reset_url = f"{settings.PUBLIC_BASE_URL}/reset-password?token={raw_token}"
+    # Đường dẫn của FE, không của API — nó đi vào một lá thư cho người thật
+    # bấm. `/dat-lai-mat-khau` là `PATHS.resetPassword` của
+    # `frontend/src/app/paths.ts`; tới T-3.1a nó còn là một trang tạm, nên
+    # chuỗi ở đây trỏ vào `/reset-password` — một đường KHÔNG có trong bảng
+    # route, tức mọi link đặt lại mật khẩu đều rơi vào trang 404. Sửa ở
+    # T-3.1b, cùng lúc màn hình thật ra đời. Cặp với `verify_url` bên trên,
+    # vốn đã trùng `PATHS.verifyEmail` từ đầu.
+    reset_url = f"{settings.PUBLIC_BASE_URL}/dat-lai-mat-khau?token={raw_token}"
     try:
         await mailer.send(
             template="reset_password",
