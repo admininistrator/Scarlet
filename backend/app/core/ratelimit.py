@@ -87,7 +87,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Final
 
 from fastapi import Depends, Request, Response, status
 
@@ -122,6 +122,30 @@ IP_KHONG_RO = "unknown"
 CUA_SO_GIO_S = 3600
 CUA_SO_PHUT_S = 60
 
+#: Tên nhóm của lớp theo IP — **là tên route**, xem `ip_key`. Thành hằng ở
+#: B-188 chứ không còn là năm chuỗi gõ tay trong `api/v1/auth.py`, vì từ nay có
+#: **hai** người đọc chúng: `Depends(...)` lúc chạy, và `python -m app.cli
+#: reset-rate-limit` lúc vận hành. Một chuỗi gõ lệch giữa hai bên cho ra một
+#: lệnh xoá đúng cú pháp, chạy xong, in "0 khoá" — và người vận hành đọc nó
+#: thành "hạn mức đã hết hạn rồi" chứ không thành "tôi gõ sai tên route". Đó
+#: đúng là triệu chứng B-188 ghi lại, chỉ lùi thêm một bước.
+ROUTE_REGISTER = "register"
+ROUTE_RESEND_VERIFICATION = "resend-verification"
+ROUTE_FORGOT_PASSWORD = "forgot-password"
+ROUTE_RESET_PASSWORD = "reset-password"
+ROUTE_LOGOUT = "logout"
+
+#: Mọi nhóm hợp lệ của trục IP. `app/cli.py` dùng nó để từ chối một tên gõ sai
+#: **trước** khi chạm tới Redis; `tests/core/test_ratelimit.py` dùng nó để canh
+#: rằng `api/v1/auth.py` không thêm một route thứ sáu bằng chuỗi gõ tay.
+NHOM_THEO_IP: Final[tuple[str, ...]] = (
+    ROUTE_REGISTER,
+    ROUTE_RESEND_VERIFICATION,
+    ROUTE_FORGOT_PASSWORD,
+    ROUTE_RESET_PASSWORD,
+    ROUTE_LOGOUT,
+)
+
 
 def ip_key(nhom: str, ip: str) -> str:
     """Khoá đếm của một (nhóm route, IP).
@@ -132,6 +156,21 @@ def ip_key(nhom: str, ip: str) -> str:
     thư xác thực không xin được link đặt lại mật khẩu.
     """
     return f"{RL_IP_PREFIX}{nhom}:{ip}"
+
+
+def mau_khoa_ip(nhom: str) -> str:
+    """Mẫu `SCAN` phủ **mọi** IP của một nhóm — `rl:ip:register:*` (B-188).
+
+    Tồn tại vì đường vận hành thật thiếu đúng một mẩu dữ liệu: người chạy DoD
+    biết mình vừa bị `429` ở route nào, nhưng **không** biết IP mà Nginx gắn
+    cho mình (`X-Real-IP` là địa chỉ của host trong network `internal`, không
+    phải thứ đọc được từ trình duyệt). Bắt họ tra IP ra trước khi xoá được một
+    bộ đếm là để nguyên phân nửa của B-188.
+
+    Là một hàm chứ không một chuỗi nối tại chỗ, cùng luật với `ip_key`: chỗ
+    duy nhất biết hình dạng khoá vẫn là file này.
+    """
+    return f"{RL_IP_PREFIX}{nhom}:*"
 
 
 def dia_chi_ip(request: Request) -> str:
@@ -358,6 +397,14 @@ return {allowed, math.floor(tokens), retry_after_ms, reset_ms}
 def user_key(group: str, user_id: uuid.UUID) -> str:
     """Khoá xô của một (nhóm route, user) — `rl:user:chat:{uuid}`."""
     return f"{RL_USER_PREFIX}{group}:{user_id}"
+
+
+def mau_khoa_user(group: str) -> str:
+    """Mẫu `SCAN` phủ mọi user của một nhóm — `rl:user:chat:*` (B-188).
+
+    Cặp với `mau_khoa_ip`; xem docstring bên ấy cho lý do tồn tại.
+    """
+    return f"{RL_USER_PREFIX}{group}:*"
 
 
 @dataclass(frozen=True, slots=True)

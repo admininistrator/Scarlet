@@ -54,6 +54,29 @@ docker compose --profile core --profile tools restart nginx   # xem mục trên
 cục bộ (`/app/.pnpm-store`) và từ chối chạy với `ERR_PNPM_UNEXPECTED_STORE`.
 `--renew-anon-volumes` là thứ làm image vừa build thật sự được dùng.
 
+### Gỡ một hạn mức rate limit đang chặn (§10.6)
+
+`register` / `resend-verification` / `forgot-password` là **3 lượt/giờ/IP**, nên
+đăng ký hai tài khoản test trong một phiên là chạm trần. Gỡ bằng:
+
+```bash
+# khi không biết IP mà Nginx gắn cho mình — ngả dùng khi chạy DoD
+docker compose --profile core --profile tools exec -T api   python -m app.cli reset-rate-limit ip register --all
+
+# khi đã biết mình cần gỡ cho ai
+docker compose --profile core --profile tools exec -T api   python -m app.cli reset-rate-limit ip register 172.18.0.1
+docker compose --profile core --profile tools exec -T api   python -m app.cli reset-rate-limit user chat <user_id>
+```
+
+Trục `ip` nhận tên **route** (`register`, `resend-verification`,
+`forgot-password`, `reset-password`, `logout`); trục `user` nhận tên **nhóm**
+(`chat`) và một `user_id` dạng UUID. Một tên gõ sai dừng ở `argparse` với mã
+thoát 2 chứ không chạy xong rồi in "0 khoa" — đây là **B-188**, và ngả cũ
+(`redis-cli DEL rl:ip:register:<ip>`) không còn cần thiết.
+
+Trần đồng thời (`rl:streams:{uuid}`, §10.6 hàng 3) **không** có ở đây: nó tự
+nhả qua `nha_ghe_sinh` + đối chiếu Postgres.
+
 ## Tài liệu
 
 - `docs/KE-HOACH.md` — kế hoạch kỹ thuật đầy đủ

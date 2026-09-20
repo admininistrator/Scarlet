@@ -207,7 +207,16 @@ from app.core.deps import (
 )
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.mailer import mailer
-from app.core.ratelimit import dia_chi_ip, gioi_han_auth, gioi_han_gui_email
+from app.core.ratelimit import (
+    ROUTE_FORGOT_PASSWORD,
+    ROUTE_LOGOUT,
+    ROUTE_REGISTER,
+    ROUTE_RESEND_VERIFICATION,
+    ROUTE_RESET_PASSWORD,
+    dia_chi_ip,
+    gioi_han_auth,
+    gioi_han_gui_email,
+)
 from app.core.redis import get_redis
 from app.core.security import hash_password, mat_khau_qua_pho_bien, verify_password
 from app.core.turnstile import kiem_turnstile
@@ -324,7 +333,7 @@ async def _gui_email_xac_thuc(email: str, raw_token: str) -> None:
     # KHÔNG thay được Turnstile và không bị Turnstile thay: `TURNSTILE_SECRET`
     # rỗng ở dev thì captcha bị bỏ qua hoàn toàn (§11.6), còn captcha bật thì
     # nó chặn trình duyệt chứ không chặn một script gọi thẳng API.
-    dependencies=[Depends(gioi_han_gui_email("register"))],
+    dependencies=[Depends(gioi_han_gui_email(ROUTE_REGISTER))],
     responses={
         400: {
             "model": ErrorEnvelope,
@@ -398,7 +407,7 @@ async def register(body: DangKyRequest, request: Request) -> DangKyResponse:
     response_model=ResendVerificationResponse,
     # §18.1 ghi "Rate limit 3/giờ" cho đúng route này ngay từ đầu; T-2.2 làm
     # theo "Việc cần làm" của task nên chưa có, B-127 ghi lại thiếu sót đó.
-    dependencies=[Depends(gioi_han_gui_email("resend-verification"))],
+    dependencies=[Depends(gioi_han_gui_email(ROUTE_RESEND_VERIFICATION))],
     responses={
         429: {"model": ErrorEnvelope, "description": "qua 3 lan/gio tu mot IP (RATE_LIMITED)"}
     },
@@ -721,7 +730,7 @@ def _xoa_hai_cookie(response: Response) -> None:
     # Không có `user_id` để đếm theo ⇒ đếm theo IP, hạn mức của nhóm `auth`
     # (§10.6). Hạn mức này KHÔNG phá NQ-42: nó không đòi thêm gì ở client, chỉ
     # chặn gọi dồn dập — một người đăng xuất thật vẫn chỉ gọi một lần.
-    dependencies=[Depends(gioi_han_auth("logout"))],
+    dependencies=[Depends(gioi_han_auth(ROUTE_LOGOUT))],
     responses={
         429: {"model": ErrorEnvelope, "description": "qua 5 lan/phut tu mot IP (RATE_LIMITED)"},
         503: {
@@ -840,7 +849,7 @@ async def _gui_email_dat_lai(email: str, raw_token: str) -> None:
     "/forgot-password",
     status_code=status.HTTP_200_OK,
     response_model=QuenMatKhauResponse,
-    dependencies=[Depends(gioi_han_gui_email("forgot-password"))],
+    dependencies=[Depends(gioi_han_gui_email(ROUTE_FORGOT_PASSWORD))],
     responses={
         400: {
             "model": ErrorEnvelope,
@@ -891,7 +900,7 @@ async def forgot_password(body: QuenMatKhauRequest, request: Request) -> QuenMat
     "/reset-password",
     status_code=status.HTTP_200_OK,
     response_model=DatLaiMatKhauResponse,
-    dependencies=[Depends(gioi_han_auth("reset-password"))],
+    dependencies=[Depends(gioi_han_auth(ROUTE_RESET_PASSWORD))],
     responses={
         400: {
             "model": ErrorEnvelope,
