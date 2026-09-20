@@ -57,6 +57,41 @@ fail() {
 
 psql_() { $COMPOSE exec -T postgres psql -U scarlet -d scarlet -tAq -c "$1"; }
 redis_() { $COMPOSE exec -T redis redis-cli "$@" | tr -d '\r'; }
+# Mot cookie phien that (§11.2) cho user $1, tier $2 — T-3.1c.
+#
+# Nhanh danh tinh tam cua Phase 1 chet cung task ay, nen moi lenh `curl` duoi
+# day phai mang cookie nay thay cho header danh tinh cu. Token duoc ky TRONG
+# container `api`: chi o do moi co `JWT_SECRET` va `app/` — WSL host khong co
+# ca hai.
+#
+# Doan Python di qua STDIN (heredoc nhay don) chu khong qua `python -c "..."`:
+# no mang dau nhay va dau ngoac nhon, va mot lan bash noi suy nham vao giua se
+# bao loi o mot dong khac han — dung cai bay ma chu thich cua `amid()` trong
+# `test_idempotency.sh` da ghi lai mot lan.
+phien_() { # $1=user_id  $2=tier_name
+  $COMPOSE exec -T api python - "$1" "$2" <<'PY' | tr -d '\r'
+import sys
+import uuid
+
+from app.config.settings import settings
+from app.core.access_token import encode_access_token
+from app.core.deps import SESSION_COOKIE_NAME
+from app.db.models import UserRole, UserStatus
+
+print(
+    SESSION_COOKIE_NAME
+    + "="
+    + encode_access_token(
+        user_id=uuid.UUID(sys.argv[1]),
+        role=UserRole.USER,
+        tier=sys.argv[2],
+        status=UserStatus.ACTIVE,
+        ttl_minutes=settings.ACCESS_TOKEN_TTL_MIN,
+    )
+)
+PY
+}
+
 
 # Mot POST toi `.../messages`. In "<ma http>|<ma loi hoac ->|<retry-after>".
 post() { # $1=conversation_id  $2=noi dung
@@ -70,7 +105,7 @@ post() { # $1=conversation_id  $2=noi dung
   local ma
   ma="$(curl -sk -o "$tmp" -D "$head" -w '%{http_code}' \
     -X POST "$BASE_URL/api/v1/conversations/$1/messages" \
-    -H "X-User-Id: $USER_ID" -H 'Content-Type: application/json' \
+    -H "Cookie: $COOKIE" -H 'Content-Type: application/json' \
     -H "Idempotency-Key: $(cat /proc/sys/kernel/random/uuid)" -d "$body")"
   local code retry
   code="$(sed -n 's/.*"code":"\([^"]*\)".*/\1/p' "$tmp")"
@@ -84,6 +119,8 @@ xoa_ghe() { redis_ DEL "rl:streams:$USER_ID" >/dev/null; }
 
 echo "== chuan bi =="
 USER_ID="$(psql_ "INSERT INTO users (email, password_hash, status) VALUES ('$EMAIL','khong-phai-hash-that','active') RETURNING id;" | tr -d ' ')"
+TIER="$(psql_ "SELECT tier_name FROM users WHERE id='$USER_ID';" | tr -d ' ')"
+COOKIE="$(phien_ "$USER_ID" "$TIER")"
 CONV="$(psql_ "INSERT INTO conversations (user_id) VALUES ('$USER_ID') RETURNING id;" | tr -d ' ')"
 echo "  user=$USER_ID  conv=$CONV  model=${MODEL_ID:-<mac dinh catalog>}"
 echo "  RATE_LIMIT_CHAT_PER_MIN=$TRAN_CHAT  MAX_CONCURRENT_STREAMS=$TRAN_GHE"
@@ -209,7 +246,7 @@ echo
 echo "== don dep =="
 for mid in $(psql_ "SELECT id FROM messages WHERE conversation_id='$CONV' AND status IN ('queued','streaming');"); do
   curl -sk -o /dev/null -X POST "$BASE_URL/api/v1/messages/$(echo "$mid" | tr -d ' ')/cancel" \
-    -H "X-User-Id: $USER_ID" || true
+    -H "Cookie: $COOKIE" || true
 done
 sleep 3
 for mau in "rl:user:chat:$USER_ID" "rl:streams:$USER_ID"; do

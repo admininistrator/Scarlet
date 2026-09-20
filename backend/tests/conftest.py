@@ -556,6 +556,34 @@ def ratelimit_redis_fake() -> FakeRateLimitRedis:
     return FakeRateLimitRedis()
 
 
+class FakeBlacklistRedis:
+    """Blacklist §11.3 **rỗng** — đúng một lệnh mà `core/deps.py` dùng.
+
+    Sinh ra ở T-3.1c, và lý do nó nằm ở đây chứ không trong từng file test là
+    lý do đã viết cho ba lớp trên: mười file test của `tests/api/` vừa chuyển
+    từ danh tính tạm của Phase 1 sang **cookie phiên thật**, mà mỗi cookie
+    phiên là một lần `get_access_claims` hỏi Redis xem token đã bị thu hồi
+    chưa. Mười bản sao của sáu dòng dưới đây là đúng hình dạng B-102 đã cấm —
+    và bốn bản sao như thế đã tồn tại từ trước (`test_auth.py`,
+    `test_admin.py`, `test_account_states.py`, `test_admin_authz.py`), mỗi bản
+    vì một lý do riêng của file đó.
+
+    "Rỗng" nghĩa là **không token nào bị coi là đã thu hồi**, nên mọi ca dừng
+    lại đúng ở lớp nó muốn đo chứ không ở một `401 TOKEN_REVOKED`. File nào
+    muốn đo chính §11.3 thì tự vá một Redis của riêng nó đè lên — đó là việc
+    `test_auth.py` và `test_admin.py` vẫn đang làm.
+    """
+
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        return [None for _ in keys]
+
+
+@pytest.fixture
+def blacklist_redis_fake() -> FakeBlacklistRedis:
+    """Một `FakeBlacklistRedis`. Vá nó vào module nào là việc của chỗ xin."""
+    return FakeBlacklistRedis()
+
+
 async def _attach_idempotency_key(request: httpx.Request) -> None:
     """Mỗi POST một key mới — client của test cư xử như FE của C22."""
     if request.method == "POST" and HEADER_IDEMPOTENCY not in request.headers:

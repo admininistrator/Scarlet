@@ -29,11 +29,12 @@ Ba cột của ma trận là ba loại người gọi, và cột thứ ba là c�
 
 1. **user thường** (cookie phiên hợp lệ, `role=user`) → `403 ADMIN_REQUIRED`
 2. **không có gì** (không cookie, không header) → `401 UNAUTHENTICATED`
-3. **danh tính tạm của Phase 1** (`X-User-Id`, NQ-24) → `401`, **không** phải
-   một lối vào. Đây là khác biệt cố ý so với `require_status` (thứ cho nhánh ấy
-   đi thẳng qua): `X-User-Id` là một chuỗi người gọi tự gõ, nên cho nó qua
-   nghĩa là bất kỳ ai gọi được `api` lúc `DEBUG=true` đều duyệt được tài khoản.
-   Xem docstring `app/core/deps.py::require_admin`.
+3. **một cookie lạ, kèm `DEBUG=true`** → `401`, **không** phải một lối vào.
+   Cột này ra đời ở T-2.16 để canh nhánh danh tính tạm của Phase 1 (NQ-24):
+   một chuỗi người gọi tự gõ mà duyệt được tài khoản chính là lỗ hổng B-34.
+   T-3.1c xoá nhánh ấy, nên cột ba nay canh chuyện rộng hơn và bền hơn —
+   **không** cookie nào ngoài cookie phiên nói được gì về danh tính, và
+   `DEBUG` không đổi câu trả lời. Xem `app/core/deps.py::require_admin`.
 
 Không có test nào ở đây chạm Postgres: cả ba cột dừng lại ở dependency, trước
 khi handler kịp mở một `session_scope()`. Đó cũng là một tính chất đáng giữ —
@@ -53,6 +54,7 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from app.api.v1 import admin
+from app.config.settings import settings
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiErrorCode
@@ -234,14 +236,16 @@ async def test_khong_token_thi_401_o_moi_endpoint(
 
 
 @pytest.mark.parametrize(("method", "duong_dan"), DUONG_DAN_ADMIN)
-async def test_danh_tinh_tam_phase_1_khong_mo_duoc_cua_admin(
-    client: AsyncClient, method: str, duong_dan: str
+async def test_cookie_la_va_debug_bat_khong_mo_duoc_cua_admin(
+    client: AsyncClient, method: str, duong_dan: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`X-User-Id` (NQ-24) **không** là một lối vào `/admin/*` — xem docstring module."""
+    """Cột ba của ma trận — xem docstring module."""
+    monkeypatch.setattr(settings, "DEBUG", True)
+
     resp = await client.request(
         method,
         duong_dan,
-        headers={"X-User-Id": str(uuid.uuid4())},
+        headers={"Cookie": f"scarlet_cookie_la={uuid.uuid4()}"},
         **({"json": {}} if method in {"POST", "PATCH", "PUT"} else {}),
     )
 

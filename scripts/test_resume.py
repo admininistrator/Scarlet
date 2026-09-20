@@ -153,6 +153,9 @@ import httpx  # noqa: E402
 
 from app.config.catalog import get_catalog  # noqa: E402
 from app.config.settings import settings  # noqa: E402
+from app.core.access_token import encode_access_token  # noqa: E402
+from app.core.deps import SESSION_COOKIE_NAME  # noqa: E402
+from app.db.models import UserRole, UserStatus  # noqa: E402
 
 
 def dev_database_url() -> str:
@@ -467,19 +470,48 @@ class PhepDo:
 # ═══════════════════════════ dựng và dọn dữ liệu ═══════════════════════════
 
 
-async def tao_user(pool: asyncpg.Pool, dau_vet: str) -> uuid.UUID:
+def cookie_phien(user_id: uuid.UUID, tier: str) -> dict[str, str]:
+    """Header `Cookie` mang một access JWT thật cho `user_id` (§11.2).
+
+    T-3.1c xoá nhánh danh tính tạm của Phase 1, thứ script này mang danh tính
+    bằng từ T-1.11. Script chạy từ WSL host nhưng đã `sys.path.insert` vào
+    `backend/`, nên nó ký được token bằng **chính** `JWT_SECRET` mà `api` đọc
+    — rẻ hơn hẳn đường `POST /auth/login` (cần một mật khẩu Argon2id thật, một
+    lần Turnstile, và một suất trong hạn mức §10.6 cho mỗi lần chạy DoD).
+
+    `status=ACTIVE` khớp đúng hàng mà `tao_user` chèn vào Postgres, và `tier`
+    đọc từ chính hàng ấy chứ không gõ tay (A3): một claim nói khác DB sẽ chạy
+    được hôm nay — §11.1 đọc trạng thái từ claim — rồi hỏng vào đúng ngày ai
+    đó đổi nó sang đọc DB.
+    """
+    token = encode_access_token(
+        user_id=user_id,
+        role=UserRole.USER,
+        tier=tier,
+        status=UserStatus.ACTIVE,
+        ttl_minutes=settings.ACCESS_TOKEN_TTL_MIN,
+    )
+    return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
+
+
+async def tao_user(pool: asyncpg.Pool, dau_vet: str) -> tuple[uuid.UUID, str]:
     """`users` chưa có model ORM (Phase 2, T-2.1) nên chèn bằng SQL thô.
 
-    `tier_name` để trống ⇒ DEFAULT `'free'`, tier do migration 0001 seed.
+    `tier_name` để trống ⇒ DEFAULT `'free'`, tier do migration 0001 seed —
+    và trả nó ra để `cookie_phien` khỏi phải gõ lại tên tier (A3).
     """
     async with pool.acquire() as conn:
-        user_id = await conn.fetchval(
-            "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id",
+        hang = await conn.fetchrow(
+            # `status='active'` từ T-3.1c: cookie phiên mang claim `active`
+            # (xem `cookie_phien`), và hàng trong DB phải nói cùng một câu.
+            "INSERT INTO users (email, password_hash, status) "
+            "VALUES ($1, $2, 'active') RETURNING id, tier_name",
             f"{dau_vet}@scarlet.test",
             "khong-phai-hash-that",
         )
-    assert isinstance(user_id, uuid.UUID)
-    return user_id
+    assert hang is not None
+    assert isinstance(hang["id"], uuid.UUID)
+    return hang["id"], str(hang["tier_name"])
 
 
 async def don_dep(pool: asyncpg.Pool, user_id: uuid.UUID) -> tuple[int, int]:
@@ -529,13 +561,13 @@ async def chay(args: argparse.Namespace) -> int:
 
     pool = await asyncpg.create_pool(dev_database_url(), min_size=1, max_size=2)
     assert pool is not None
-    user_id = await tao_user(pool, dau_vet)
+    user_id, tier = await tao_user(pool, dau_vet)
     ket_qua: list[KetQua] = []
 
     try:
         async with httpx.AsyncClient(
             base_url=settings.PUBLIC_BASE_URL,
-            headers={"X-User-Id": str(user_id)},
+            headers=cookie_phien(user_id, tier),
             verify=args.cacert or False,
             timeout=httpx.Timeout(TRAN_MOT_LUOT_S, read=TRAN_MOT_LUOT_S),
         ) as http:
@@ -548,6 +580,11 @@ async def chay(args: argparse.Namespace) -> int:
 
             do = PhepDo(http, pool, conversation_id, user_id, on_am=args.im_lang)
             for i in range(SO_LUOT):
+                # Access token sống `ACCESS_TOKEN_TTL_MIN` (15 phút, §11.2) còn
+                # cả lượt đo này dài hơn thế. Làm mới ở đầu mỗi lượt là việc mà
+                # một client thật làm bằng `POST /auth/refresh`; ở đây ký thẳng
+                # rẻ hơn và không tiêu một refresh token nào.
+                http.headers.update(cookie_phien(user_id, tier))
                 diem = diem_ngat_cua_luot(i, rng)
                 ten = f"luot {i + 1}/{SO_LUOT} (ngat {len(diem)} lan tai {diem})"
                 print(f"\n▶ {ten}", flush=True)

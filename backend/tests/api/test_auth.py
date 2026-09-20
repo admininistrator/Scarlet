@@ -4,7 +4,7 @@ T-2.3. `/logout` + blacklist (§11.3, C21) — T-2.4.
 
 Cùng mô hình với `test_conversations.py`: `httpx.ASGITransport`, và
 `session_scope()` trong handler bị trỏ về đúng kết nối của test qua
-`_db_cua_test`. Không cần `_debug_bat`: ba endpoint của T-2.1/T-2.2 không đi
+`_db_cua_test`. Ba endpoint của T-2.1/T-2.2 không đi
 qua `Depends(get_current_user_id)` — đều công khai — còn `/me` đi vào bằng
 cookie phiên thật (T-2.3), không phải nhánh tạm DEBUG của Phase 1.
 
@@ -707,11 +707,15 @@ async def test_login_va_refresh_khong_tra_quota(
 
 
 async def test_me_khong_dang_nhap_tra_401(client: AsyncClient) -> None:
-    """Không cookie, không header, `DEBUG=false` (mặc định test) → nhánh Phase 1
-    đóng, và giờ nhánh mới cũng không có cookie phiên nào để thử."""
+    """Không cookie phiên ⇒ `401`, và `401` là kết cục DUY NHẤT (T-3.1c).
+
+    Tới T-3.1b ca này phải nhận cả `503`: nhánh danh tính tạm Phase 1 trả mã
+    ấy khi `DEBUG=false`. Nhánh đã chết, nên một `in (401, 503)` còn lại chỉ
+    là một lưới rộng hơn thứ nó đang canh."""
     resp = await client.get(DUONG_DAN_ME)
 
-    assert resp.status_code in (401, 503)  # xem app/core/deps.py — 503 la nhanh Phase 1
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "UNAUTHENTICATED"
 
 
 @pytest.mark.usefixtures("_db_cua_test")

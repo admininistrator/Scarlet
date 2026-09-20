@@ -17,11 +17,6 @@
   "chat.dangCho": "Đang chờ…",
   "chat.reasoning": "Suy luận",
 
-  "chat.danhTinhNhan": "Danh tính tạm (Phase 1)",
-  "chat.danhTinhTrong": "chưa đặt",
-  "chat.danhTinhONhap": "user_id (UUID)",
-  "chat.danhTinhDat": "Dùng danh tính này",
-  "chat.danhTinhGiaiThich": "Chỗ tạm của Phase 1 — lưu vào cookie scarlet_dev_user, T-2.3 sẽ thay bằng đăng nhập thật.",
 
   "chat.model": "Model",
   "chat.modelMacDinh": "(mặc định của catalog)",

@@ -35,14 +35,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ApiError,
-  api,
-  datDanhTinhDev,
-  docDanhTinhDev,
-  type MessageRa,
-  type ModelRa,
-} from "../../lib/api";
+import { ApiError, api, type MessageRa, type ModelRa } from "../../lib/api";
 import { moStream, type TayCamStream, type TrangThaiKetNoi, type UsageRa } from "../../lib/sse";
 import {
   batDauSinh,
@@ -87,7 +80,6 @@ export interface ChatDangDung {
   cay: TrangThaiCay;
   models: ModelRa[];
   modelChon: string | null;
-  danhTinh: string | null;
   /** `null` = khong co stream nao dang mo trong tab nay. */
   ketNoi: TrangThaiKetNoi | null;
   /** Id message assistant dang chay, hoac `null`. */
@@ -98,7 +90,6 @@ export interface ChatDangDung {
   ghiChu: Record<string, string[]>;
   loi: string | null;
 
-  datDanhTinh: (userId: string) => void;
   chonModel: (modelId: string | null) => void;
   hoiThoaiMoi: () => Promise<void>;
   gui: (noiDung: string) => Promise<void>;
@@ -113,7 +104,6 @@ export function useChat(): ChatDangDung {
   const [cay, setCay] = useState<TrangThaiCay>(cayRong);
   const [models, setModels] = useState<ModelRa[]>([]);
   const [modelChon, setModelChon] = useState<string | null>(null);
-  const [danhTinh, setDanhTinh] = useState<string | null>(null);
   const [ketNoi, setKetNoi] = useState<TrangThaiKetNoi | null>(null);
   const [dangChay, setDangChay] = useState<string | null>(null);
   const [dangBan, setDangBan] = useState(false);
@@ -266,7 +256,6 @@ export function useChat(): ChatDangDung {
 
   // ── nap lan dau, va nap LAI neu lan dau roi dung luc mat mang ──
   useEffect(() => {
-    setDanhTinh(docDanhTinhDev());
     napBanDau();
 
     /**
@@ -290,12 +279,6 @@ export function useChat(): ChatDangDung {
       streamRef.current?.dong();
     };
   }, [napBanDau]);
-
-  const datDanhTinh = useCallback((userId: string) => {
-    datDanhTinhDev(userId.trim());
-    setDanhTinh(docDanhTinhDev());
-    setLoi(null);
-  }, []);
 
   const hoiThoaiMoi = useCallback(async () => {
     setDangBan(true);
@@ -446,14 +429,12 @@ export function useChat(): ChatDangDung {
     cay,
     models,
     modelChon,
-    danhTinh,
     ketNoi,
     dangChay,
     dangBan,
     usage,
     ghiChu,
     loi,
-    datDanhTinh,
     chonModel: setModelChon,
     hoiThoaiMoi,
     gui,

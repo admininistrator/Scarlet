@@ -29,8 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import catalog
 from app.config.settings import settings
+from app.core.access_token import encode_access_token
 from app.core.crypto import mask_secret, seal
-from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.core.deps import SESSION_COOKIE_NAME
+from app.db.models import Conversation, Message, MessageRole, MessageStatus, UserRole, UserStatus
 from app.db.repositories import ConversationRepository, MessageRepository, ProviderKeyRepository
 from app.main import app
 from app.quota.windows import LimitType, Window, encode_member
@@ -49,11 +51,6 @@ class ArqGia:
     async def enqueue_job(self, ten: str, *args: Any, **kwargs: Any) -> object:
         self.da_day.append((ten, args))
         return object()
-
-
-@pytest.fixture
-def _debug_bat(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "DEBUG", True)
 
 
 @pytest.fixture
@@ -80,6 +77,34 @@ async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
         transport=ASGITransport(app=app), base_url="https://localhost", event_hooks=event_hooks
     ) as http:
         yield http
+
+
+def _phien(user_id: uuid.UUID) -> dict[str, str]:
+    """Header `Cookie` mang phiên thật (§11.2) của `user_id` — T-3.1c.
+
+    Trả một `dict` để truyền vào `headers=` của **từng request**, đúng chỗ mà
+    header danh tính tạm của Phase 1 đứng trước đây: danh tính theo request
+    chứ không đặt lên `client`, nên hai danh tính trong cùng một ca (phép kiểm
+    quyền sở hữu, §20) vẫn viết được cạnh nhau mà không ai phải nhớ dọn.
+
+    **Một header `Cookie`, không phải tham số `cookies=` của httpx.** httpx đã
+    deprecate `cookies=` theo request (*"expected behaviour on cookie
+    persistence is ambiguous"*) — và ở đây không có gì để persist: mỗi request
+    tự mang phiên của nó. Một `dict` header còn ghép được bằng `|` với
+    `Idempotency-Key` hay `Last-Event-ID` mà không phải trộn hai cơ chế.
+
+    `status=ACTIVE` chứ không đọc từ bảng `users`: §11.1 kiểm trạng thái từ
+    **claim** của access token (xem `core/deps.py`), và bộ test này đo chuyện
+    khác — ma trận 5×4 của bảng ấy là việc của `test_account_states.py`.
+    """
+    token = encode_access_token(
+        user_id=user_id,
+        role=UserRole.USER,
+        tier="free",
+        status=UserStatus.ACTIVE,
+        ttl_minutes=15,
+    )
+    return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
 async def _het_quota(
@@ -147,7 +172,6 @@ async def test_post_messages_bi_chan_khi_het_quota(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -157,7 +181,7 @@ async def test_post_messages_bi_chan_khi_het_quota(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -176,7 +200,6 @@ async def test_retry_bi_chan_khi_het_quota(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -185,9 +208,7 @@ async def test_retry_bi_chan_khi_het_quota(
     truoc = await _dem_message(session_factory, conversation_id)
     await _het_quota(session_factory, quota_redis, user_a)
 
-    resp = await client.post(
-        DUONG_DAN_RETRY.format(tra_loi_id), headers={"X-User-Id": str(user_a)}, json={}
-    )
+    resp = await client.post(DUONG_DAN_RETRY.format(tra_loi_id), headers=_phien(user_a), json={})
 
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == "QUOTA_EXCEEDED"
@@ -200,7 +221,6 @@ async def test_patch_message_bi_chan_khi_het_quota(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -210,7 +230,7 @@ async def test_patch_message_bi_chan_khi_het_quota(
 
     resp = await client.patch(
         DUONG_DAN_SUA.format(cau_hoi_id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "cau hoi da sua"},
     )
 
@@ -228,7 +248,6 @@ async def test_con_it_quota_thi_202_kem_canh_bao_trong_body(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -241,7 +260,7 @@ async def test_con_it_quota_thi_202_kem_canh_bao_trong_body(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         # Model không có giá ⇒ dự toán 0 ⇒ 0.425 + 0 < 0.50, đi qua. Test này
         # đo CẢNH BÁO, không đo cửa chặn.
         json={"content": "xin chao", "model_id": "nr-gemini-flash"},
@@ -261,14 +280,13 @@ async def test_con_nhieu_quota_thi_khong_co_canh_bao(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
     conversation = await _hoi_thoai(session_factory, user_a)
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
     assert resp.status_code == 202
@@ -280,7 +298,6 @@ async def test_han_muc_rieng_cua_user_duoc_ton_trong(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -298,7 +315,7 @@ async def test_han_muc_rieng_cua_user_duoc_ton_trong(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -316,7 +333,6 @@ async def test_bi_chan_thi_KHONG_nhan_ghe_sinh(
     user_a: uuid.UUID,
     quota_redis: Any,
     ratelimit_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -332,7 +348,7 @@ async def test_bi_chan_thi_KHONG_nhan_ghe_sinh(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -374,7 +390,6 @@ async def test_byok_van_chat_duoc_khi_het_quota_he_thong(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -391,7 +406,7 @@ async def test_byok_van_chat_duoc_khi_het_quota_he_thong(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -404,7 +419,6 @@ async def test_byok_khong_kem_canh_bao_quota_trong_body(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -422,7 +436,7 @@ async def test_byok_khong_kem_canh_bao_quota_trong_body(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -435,7 +449,6 @@ async def test_byok_khong_doc_ZSET_quota(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -451,7 +464,7 @@ async def test_byok_khong_doc_ZSET_quota(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 

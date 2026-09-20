@@ -258,7 +258,8 @@ async def test_model_bien_khoi_catalog_sau_do_van_doc_ra_binh_thuong(
 async def test_khong_dang_nhap_tra_401(client: AsyncClient) -> None:
     resp = await client.put(DUONG_DAN, json={"default_model": mot_model_bat()})
 
-    assert resp.status_code in (401, 503)  # xem app/core/deps.py — 503 la nhanh Phase 1
+    # `401` va chi `401`: nhanh danh tinh tam Phase 1 (`503`) chet o T-3.1c.
+    assert resp.status_code == 401
 
 
 async def test_ghi_cua_nguoi_nay_khong_cham_nguoi_kia(

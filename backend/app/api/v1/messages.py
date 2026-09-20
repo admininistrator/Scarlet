@@ -235,7 +235,7 @@ async def create_message(
     conversation_id: uuid.UUID,
     body: TaoMessageRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-    user_status: Annotated[UserStatus | None, Depends(get_current_user_status)],
+    user_status: Annotated[UserStatus, Depends(get_current_user_status)],
 ) -> TaoMessageResponse:
     """Ghi hai message, dời con trỏ nhánh, đẩy job, trả `202`. Không gọi model.
 
@@ -319,7 +319,7 @@ async def _mo_luot_sinh(
     conversations: ConversationRepository,
     conversation_id: uuid.UUID,
     user_id: uuid.UUID,
-    user_status: UserStatus | None,
+    user_status: UserStatus,
     parent_id: uuid.UUID | None,
     model: catalog.ModelEntry,
 ) -> LuotSinhMoi:
@@ -367,9 +367,10 @@ async def _mo_luot_sinh(
 
     # B-140 — phép kiểm §11.1 CHÍNH XÁC, xem docstring. Bảng vẫn sống ở
     # `core/deps.py`: ở đây chỉ hỏi nó, bằng đúng hàm mà `POST /auth/login`
-    # dùng. Nhánh tạm Phase 1 (`user_status is None`) đi thẳng qua, y như
-    # `require_status` cho nó đi qua — xem `get_current_user_status`.
-    if user_status is not None and key_source is KeySource.SYSTEM:
+    # dùng. Tới T-3.1c `user_status` không còn `None` được nữa — nhánh danh
+    # tính tạm của Phase 1 đã chết, và `get_current_user_status` nay `401`
+    # thay vì trả `None`.
+    if key_source is KeySource.SYSTEM:
         ensure_status_allowed(user_status, STATUSES_CAN_CHAT_SYSTEM_KEY)
 
     try:
@@ -752,7 +753,7 @@ async def retry_message(
     request: Request,
     message_id: uuid.UUID,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-    user_status: Annotated[UserStatus | None, Depends(get_current_user_status)],
+    user_status: Annotated[UserStatus, Depends(get_current_user_status)],
     body: RetryRequest | None = None,
 ) -> RetryResponse:
     """Sinh lại một câu trả lời thành ANH EM của nó — §8.2, UC-04.
@@ -841,7 +842,7 @@ async def edit_message(
     message_id: uuid.UUID,
     body: SuaMessageRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-    user_status: Annotated[UserStatus | None, Depends(get_current_user_status)],
+    user_status: Annotated[UserStatus, Depends(get_current_user_status)],
 ) -> SuaMessageResponse:
     """Sửa một câu hỏi = thêm một câu hỏi ANH EM rồi sinh lại — §8.2, UC-04.
 

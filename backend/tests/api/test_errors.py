@@ -7,7 +7,7 @@ toàn cục thay vì sửa từng chỗ `raise`:
 
     1. route không tồn tại        → Starlette, trước mọi router
     2. method sai                 → Starlette, sau khi khớp đường dẫn
-    3. body/header sai kiểu       → `RequestValidationError` của FastAPI
+    3. path/body sai kiểu         → `RequestValidationError` của FastAPI
     4. ngoại lệ không ai bắt      → `ServerErrorMiddleware` của Starlette
     5. `ApiError` của mình        → có mã riêng, không suy từ status
 
@@ -17,6 +17,7 @@ thêm một route ném lỗi vào app thật là để lại một cái bẫy ch
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -26,7 +27,10 @@ from fastapi import FastAPI, status
 from httpx import ASGITransport, AsyncClient
 
 from app.core import errors
+from app.core.access_token import encode_access_token
+from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import LOI_500, ApiError, ApiErrorCode
+from app.db.models import UserRole, UserStatus
 from app.main import app
 
 
@@ -44,6 +48,28 @@ def _kiem_khung(body: dict[str, Any], code: str) -> None:
 async def client() -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://localhost") as http:
         yield http
+
+
+def _phien() -> dict[str, str]:
+    """Một phiên hợp lệ — điều kiện để chạm được tới lớp validate của FastAPI.
+
+    Hai ca `422` dưới đây trước T-3.1c gửi một header danh tính sai kiểu: nhánh
+    tạm của Phase 1 khai tham số ấy là `uuid.UUID`, nên FastAPI validate nó rồi
+    trả `422` mà không cần ai đăng nhập. Nhánh ấy chết, và `401` nay chặn từ
+    dependency — tức không có `422` nào để đo nếu không có phiên. Nguồn lỗi
+    đổi từ **header** sang **path param**; hình dạng lỗi đang đo thì không đổi,
+    và đó mới là thứ B-86 nói tới.
+
+    Không chạm Postgres: `RequestValidationError` ném trước khi handler chạy.
+    """
+    token = encode_access_token(
+        user_id=uuid.uuid4(),
+        role=UserRole.USER,
+        tier="free",
+        status=UserStatus.ACTIVE,
+        ttl_minutes=15,
+    )
+    return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
 # ═══════════ ba nguồn lỗi KHÔNG đi qua code của mình (§18, B-86) ═══════════
@@ -65,12 +91,9 @@ async def test_method_sai_van_ra_khung_18(client: AsyncClient) -> None:
     _kiem_khung(resp.json(), ApiErrorCode.METHOD_NOT_ALLOWED)
 
 
-async def test_header_sai_kieu_ra_422_co_danh_sach_field(client: AsyncClient) -> None:
+async def test_path_param_sai_kieu_ra_422_co_danh_sach_field(client: AsyncClient) -> None:
     """`RequestValidationError` → 422 `VALIDATION_ERROR`, `details.fields` có `loc`."""
-    resp = await client.get(
-        "/api/v1/messages/00000000-0000-0000-0000-000000000000/stream",
-        headers={"X-User-Id": "khong-phai-uuid"},
-    )
+    resp = await client.get("/api/v1/messages/khong-phai-uuid/stream", headers=_phien())
 
     assert resp.status_code == 422
     _kiem_khung(resp.json(), ApiErrorCode.VALIDATION_ERROR)
@@ -81,16 +104,13 @@ async def test_header_sai_kieu_ra_422_co_danh_sach_field(client: AsyncClient) ->
 async def test_422_khong_vong_lai_gia_tri_nguoi_dung_gui(client: AsyncClient) -> None:
     """§20: `input` của pydantic là chữ người dùng vừa gõ — không được vọng lại.
 
-    Ở endpoint này `input` chỉ là một `X-User-Id` bịa ra, nhưng cùng handler
+    Ở endpoint này `input` chỉ là một mẩu đường dẫn bịa ra, nhưng cùng handler
     ấy phục vụ `POST /conversations/{id}/messages`, nơi `input` là nội dung
     câu hỏi. Kiểm ở đây vì đây là chỗ kiểm được mà không cần dựng cả một cây.
     """
     bi_mat = "khong-duoc-vong-lai-chuoi-nay"
 
-    resp = await client.get(
-        "/api/v1/messages/00000000-0000-0000-0000-000000000000/stream",
-        headers={"X-User-Id": bi_mat},
-    )
+    resp = await client.get(f"/api/v1/messages/{bi_mat}/stream", headers=_phien())
 
     assert resp.status_code == 422
     assert bi_mat not in resp.text

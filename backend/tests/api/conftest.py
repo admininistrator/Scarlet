@@ -6,9 +6,11 @@ mà task muốn (không endpoint nào quên được), và cái giá của nó l
 đã xác thực trong ba router đó đều đi qua Redis**, kể cả những POST của các
 test viết từ Phase 1 chẳng liên quan gì tới idempotency.
 
-Ba mảnh trả giá đó một lần cho cả thư mục, thay vì bắt chín file test tự lo
+Bốn mảnh trả giá đó một lần cho cả thư mục, thay vì bắt chín file test tự lo
 (mảnh thứ ba, `ratelimit_redis`, đến từ T-2.9 vì cùng một lý do: ba route sinh
-chữ nay đi qua token bucket và trần đồng thời của §10.6):
+chữ nay đi qua token bucket và trần đồng thời của §10.6; mảnh thứ tư,
+`blacklist_redis`, đến từ T-3.1c vì **mọi** request mang cookie phiên đều hỏi
+blacklist §11.3):
 
 1. `idempotency_redis` — **autouse**. Redis thật nằm ở `redis:6379`, một host
    chỉ phân giải được bên trong network `internal` của compose, còn `make test`
@@ -16,7 +18,12 @@ chữ nay đi qua token bucket và trần đồng thời của §10.6):
    Autouse chứ không phải xin-thì-có: một file test quên xin sẽ không đỏ ngay
    mà **treo** ở lần kết nối Redis đầu tiên, và đó là kiểu hỏng khó truy nhất.
 2. `ratelimit_redis` — **autouse**, cùng lý do.
-3. `event_hooks` — client của test tự gắn một `Idempotency-Key` mới cho mỗi
+3. `blacklist_redis` — **autouse**, cùng lý do. Từ T-3.1c, `core/deps.py`
+   không còn nhánh danh tính tạm nào, nên mọi file test của thư mục này dựng
+   danh tính bằng một cookie phiên thật — và `get_access_claims` hỏi Redis ở
+   MỌI request có cookie. Lớp `FakeBlacklistRedis` nằm ở conftest gốc, xem
+   docstring của nó.
+4. `event_hooks` — client của test tự gắn một `Idempotency-Key` mới cho mỗi
    POST.
 
 **Từ T-2.18, cả ba mảnh SỐNG Ở `tests/conftest.py`, không ở đây nữa.** Lớp
@@ -59,6 +66,18 @@ def ratelimit_redis(monkeypatch: pytest.MonkeyPatch, ratelimit_redis_fake: Any) 
     """
     monkeypatch.setattr("app.core.ratelimit.get_redis", lambda: ratelimit_redis_fake)
     return ratelimit_redis_fake
+
+
+@pytest.fixture(autouse=True)
+def blacklist_redis(monkeypatch: pytest.MonkeyPatch, blacklist_redis_fake: Any) -> Any:
+    """Redis giả cho blacklist của `core/deps.py` (§11.3). Xem docstring module.
+
+    File test nào cần quan sát chính blacklist (`test_auth.py`, `test_admin.py`)
+    vá một Redis của riêng nó lên cùng mục tiêu; fixture của file chạy SAU
+    fixture autouse của conftest, nên bản của file thắng.
+    """
+    monkeypatch.setattr("app.core.deps.get_redis", lambda: blacklist_redis_fake)
+    return blacklist_redis_fake
 
 
 @pytest.fixture(autouse=True)

@@ -79,11 +79,6 @@ class ApiErrorCode(StrEnum):
     SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
 
     # ── danh tính (§18.1) ──
-    #: Chỗ tạm của Phase 1: `DEBUG=false` và không có session cookie thật nào
-    #: đi kèm (NQ-24). T-2.3 thêm đường auth thật (cookie phiên) chạy TRƯỚC
-    #: nhánh này — mã này chỉ còn nghĩa cho đường tạm phía sau nó, xem
-    #: `app/core/deps.py`.
-    AUTH_NOT_IMPLEMENTED = "AUTH_NOT_IMPLEMENTED"
     #: `POST /auth/login` sai email hoặc sai mật khẩu (T-2.3). Một mã cho cả
     #: hai lý do — cùng tinh thần chống dò của §11.5: nói rõ "email không tồn
     #: tại" là mời kẻ tấn công dò danh sách người dùng.

@@ -31,17 +31,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import catalog
 from app.config.settings import settings
-from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.core.access_token import encode_access_token
+from app.core.deps import SESSION_COOKIE_NAME
+from app.db.models import Conversation, Message, MessageRole, MessageStatus, UserRole, UserStatus
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.main import app
 
 DUONG_DAN = "/api/v1/conversations"
-
-
-@pytest.fixture
-def _debug_bat(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Phase 1 chỉ chạy với `DEBUG=true` — xem `app/core/deps.py`."""
-    monkeypatch.setattr(settings, "DEBUG", True)
 
 
 @pytest.fixture
@@ -58,8 +54,32 @@ async def client() -> AsyncIterator[AsyncClient]:
         yield http
 
 
-def _headers(user_id: uuid.UUID) -> dict[str, str]:
-    return {"X-User-Id": str(user_id)}
+def _phien(user_id: uuid.UUID) -> dict[str, str]:
+    """Header `Cookie` mang phiên thật (§11.2) của `user_id` — T-3.1c.
+
+    Trả một `dict` để truyền vào `headers=` của **từng request**, đúng chỗ mà
+    header danh tính tạm của Phase 1 đứng trước đây: danh tính theo request
+    chứ không đặt lên `client`, nên hai danh tính trong cùng một ca (phép kiểm
+    quyền sở hữu, §20) vẫn viết được cạnh nhau mà không ai phải nhớ dọn.
+
+    **Một header `Cookie`, không phải tham số `cookies=` của httpx.** httpx đã
+    deprecate `cookies=` theo request (*"expected behaviour on cookie
+    persistence is ambiguous"*) — và ở đây không có gì để persist: mỗi request
+    tự mang phiên của nó. Một `dict` header còn ghép được bằng `|` với
+    `Idempotency-Key` hay `Last-Event-ID` mà không phải trộn hai cơ chế.
+
+    `status=ACTIVE` chứ không đọc từ bảng `users`: §11.1 kiểm trạng thái từ
+    **claim** của access token (xem `core/deps.py`), và bộ test này đo chuyện
+    khác — ma trận 5×4 của bảng ấy là việc của `test_account_states.py`.
+    """
+    token = encode_access_token(
+        user_id=user_id,
+        role=UserRole.USER,
+        tier="free",
+        status=UserStatus.ACTIVE,
+        ttl_minutes=15,
+    )
+    return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
 async def _tao_hoi_thoai(
@@ -133,12 +153,12 @@ async def _dem_hoi_thoai(
 # ═══════════════════════════ POST /conversations ═══════════════════════════
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_tao_hoi_thoai_rong_tra_201_va_active_leaf_null(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """§18.2 "Tạo rỗng": có hàng trong DB, chưa message nào, chưa con trỏ nhánh."""
-    res = await client.post(DUONG_DAN, json={"title": "buoi sang"}, headers=_headers(user_a))
+    res = await client.post(DUONG_DAN, json={"title": "buoi sang"}, headers=_phien(user_a))
 
     assert res.status_code == 201
     body = res.json()
@@ -151,24 +171,22 @@ async def test_tao_hoi_thoai_rong_tra_201_va_active_leaf_null(
         assert row is not None and row.user_id == user_a
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_tao_hoi_thoai_khong_can_body_nao_ca(client: AsyncClient, user_a: uuid.UUID) -> None:
-    res = await client.post(DUONG_DAN, json={}, headers=_headers(user_a))
+    res = await client.post(DUONG_DAN, json={}, headers=_phien(user_a))
 
     assert res.status_code == 201
     assert res.json()["title"] is None
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_default_model_co_trong_catalog_thi_duoc_ghi(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     mac_dinh = catalog.get_default_model()
     assert mac_dinh is not None
 
-    res = await client.post(
-        DUONG_DAN, json={"default_model": mac_dinh.id}, headers=_headers(user_a)
-    )
+    res = await client.post(DUONG_DAN, json={"default_model": mac_dinh.id}, headers=_phien(user_a))
 
     assert res.status_code == 201
     async with session_factory() as session:
@@ -176,13 +194,13 @@ async def test_default_model_co_trong_catalog_thi_duoc_ghi(
         assert row is not None and row.default_model == mac_dinh.id
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_default_model_la_thi_400_va_KHONG_tao_hang_nao(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Kiểm ngay lúc tạo: một hội thoại mang model không tồn tại là mìn hẹn giờ."""
     res = await client.post(
-        DUONG_DAN, json={"default_model": "khong-co-model-nay"}, headers=_headers(user_a)
+        DUONG_DAN, json={"default_model": "khong-co-model-nay"}, headers=_phien(user_a)
     )
 
     assert res.status_code == 400
@@ -191,20 +209,31 @@ async def test_default_model_la_thi_400_va_KHONG_tao_hang_nao(
 
 
 @pytest.mark.usefixtures("_db_cua_test")
-async def test_debug_false_thi_503_chu_khong_tao_gi(
-    client: AsyncClient, user_a: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+async def test_debug_bat_cung_khong_tao_duoc_gi_neu_khong_co_phien(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`app/core/deps.py`: chỗ tạm của Phase 1 phải đóng khi `DEBUG=false`."""
-    monkeypatch.setattr(settings, "DEBUG", False)
+    """`DEBUG=true` không còn mua được gì — T-3.1c.
 
-    res = await client.post(DUONG_DAN, json={}, headers=_headers(user_a))
+    Tới T-3.1b, bật `DEBUG` là mở nhánh danh tính tạm của Phase 1: một header
+    người gọi tự gõ đủ để đi hết đường này. Ca này canh đúng chiều ngược lại —
+    nhánh ấy chết rồi, nên `DEBUG` không đổi được kết cục của một request
+    không mang cookie phiên. Nó là bản đảo của ca cũ (`DEBUG=false` ⇒ `503`),
+    và nó chính là thứ sẽ đỏ nếu ai đó dựng lại một cửa sau thứ hai.
+    """
+    monkeypatch.setattr(settings, "DEBUG", True)
 
-    assert res.status_code == 503
-    assert res.json()["error"]["code"] == "AUTH_NOT_IMPLEMENTED"
+    res = await client.post(DUONG_DAN, json={})
+
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "UNAUTHENTICATED"
+    assert await _dem_hoi_thoai(session_factory, user_a) == 0
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
-async def test_thieu_header_danh_tinh_thi_401(client: AsyncClient) -> None:
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_thieu_cookie_phien_thi_401(client: AsyncClient) -> None:
     res = await client.post(DUONG_DAN, json={})
 
     assert res.status_code == 401
@@ -214,7 +243,7 @@ async def test_thieu_header_danh_tinh_thi_401(client: AsyncClient) -> None:
 # ═══════════════════════════ GET /conversations ════════════════════════════
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_danh_sach_moi_nhat_truoc(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -225,13 +254,13 @@ async def test_danh_sach_moi_nhat_truoc(
         await _dat_moc(session_factory, hoi_thoai.id, goc + timedelta(minutes=i))
         ids.append(str(hoi_thoai.id))
 
-    res = await client.get(DUONG_DAN, headers=_headers(user_a))
+    res = await client.get(DUONG_DAN, headers=_phien(user_a))
 
     assert res.status_code == 200
     assert [x["id"] for x in res.json()["items"]] == list(reversed(ids))
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_danh_sach_chi_thay_hoi_thoai_cua_chinh_minh(
     client: AsyncClient,
     user_a: uuid.UUID,
@@ -242,24 +271,24 @@ async def test_danh_sach_chi_thay_hoi_thoai_cua_chinh_minh(
     await _tao_hoi_thoai(session_factory, user_b, title="cua nguoi khac")
     cua_toi = await _tao_hoi_thoai(session_factory, user_a, title="cua toi")
 
-    res = await client.get(DUONG_DAN, headers=_headers(user_a))
+    res = await client.get(DUONG_DAN, headers=_phien(user_a))
 
     assert [x["id"] for x in res.json()["items"]] == [str(cua_toi.id)]
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_hoi_thoai_da_xoa_khong_con_trong_danh_sach(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     hoi_thoai = await _tao_hoi_thoai(session_factory, user_a)
-    await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))
+    await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))
 
-    res = await client.get(DUONG_DAN, headers=_headers(user_a))
+    res = await client.get(DUONG_DAN, headers=_phien(user_a))
 
     assert res.json()["items"] == []
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_phan_trang_bang_con_tro_updated_at(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -272,7 +301,7 @@ async def test_phan_trang_bang_con_tro_updated_at(
         ids.append(str(hoi_thoai.id))
     moi_nhat_truoc = list(reversed(ids))
 
-    trang1 = (await client.get(DUONG_DAN, params={"limit": 2}, headers=_headers(user_a))).json()
+    trang1 = (await client.get(DUONG_DAN, params={"limit": 2}, headers=_phien(user_a))).json()
     assert [x["id"] for x in trang1["items"]] == moi_nhat_truoc[:2]
     assert trang1["next_cursor"] is not None
 
@@ -280,7 +309,7 @@ async def test_phan_trang_bang_con_tro_updated_at(
         await client.get(
             DUONG_DAN,
             params={"limit": 2, "updated_before": trang1["next_cursor"]},
-            headers=_headers(user_a),
+            headers=_phien(user_a),
         )
     ).json()
     assert [x["id"] for x in trang2["items"]] == moi_nhat_truoc[2:4]
@@ -289,29 +318,29 @@ async def test_phan_trang_bang_con_tro_updated_at(
         await client.get(
             DUONG_DAN,
             params={"limit": 2, "updated_before": trang2["next_cursor"]},
-            headers=_headers(user_a),
+            headers=_phien(user_a),
         )
     ).json()
     assert [x["id"] for x in trang3["items"]] == moi_nhat_truoc[4:]
     assert trang3["next_cursor"] is None, "trang chua day thi khong moi client hoi them"
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_danh_sach_rong_thi_next_cursor_la_null(
     client: AsyncClient, user_a: uuid.UUID
 ) -> None:
-    res = await client.get(DUONG_DAN, headers=_headers(user_a))
+    res = await client.get(DUONG_DAN, headers=_phien(user_a))
 
     assert res.json() == {"items": [], "next_cursor": None}
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_limit_vuot_tran_cau_hinh_thi_422(client: AsyncClient, user_a: uuid.UUID) -> None:
     """A3: trần là `settings.CONVERSATION_PAGE_SIZE`, không phải một số trong `.py`."""
     res = await client.get(
         DUONG_DAN,
         params={"limit": settings.CONVERSATION_PAGE_SIZE + 1},
-        headers=_headers(user_a),
+        headers=_phien(user_a),
     )
 
     assert res.status_code == 422
@@ -321,20 +350,20 @@ async def test_limit_vuot_tran_cau_hinh_thi_422(client: AsyncClient, user_a: uui
 # ═════════════════════════ GET /conversations/{id} ═════════════════════════
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_chi_tiet_hoi_thoai_rong_thi_path_rong(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     hoi_thoai = await _tao_hoi_thoai(session_factory, user_a)
 
-    res = await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))
+    res = await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))
 
     assert res.status_code == 200
     assert res.json()["path"] == []
     assert res.json()["active_leaf_id"] is None
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_chi_tiet_tra_DUONG_DI_chu_khong_phai_moi_message(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -370,16 +399,14 @@ async def test_chi_tiet_tra_DUONG_DI_chu_khong_phai_moi_message(
     )
     await _tro_la(session_factory, hoi_thoai.id, user_a, tra_loi_2.id)
 
-    path = (await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))).json()[
-        "path"
-    ]
+    path = (await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))).json()["path"]
 
     assert [x["id"] for x in path] == [str(hoi.id), str(tra_loi_2.id)]
     assert str(tra_loi_1.id) not in [x["id"] for x in path]
     assert [x["content"] for x in path] == ["cau hoi", "nhanh hai"]
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_chi_tiet_mang_sibling_index_va_count(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -411,15 +438,13 @@ async def test_chi_tiet_mang_sibling_index_va_count(
     )
     await _tro_la(session_factory, hoi_thoai.id, user_a, a2.id)
 
-    path = (await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))).json()[
-        "path"
-    ]
+    path = (await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))).json()["path"]
 
     assert path[0]["sibling_index"] == 0 and path[0]["sibling_count"] == 1
     assert path[1]["sibling_index"] == 1 and path[1]["sibling_count"] == 2
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_chi_tiet_khong_lo_cot_van_hanh(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -435,15 +460,13 @@ async def test_chi_tiet_khong_lo_cot_van_hanh(
     )
     await _tro_la(session_factory, hoi_thoai.id, user_a, hoi.id)
 
-    path = (await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))).json()[
-        "path"
-    ]
+    path = (await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))).json()["path"]
 
     cam = {"raw_response", "tool_calls", "heartbeat_at", "prompt_tokens", "completion_tokens"}
     assert cam.isdisjoint(path[0].keys())
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_chi_tiet_message_dang_streaming_van_nam_trong_path(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -468,15 +491,13 @@ async def test_chi_tiet_message_dang_streaming_van_nam_trong_path(
     )
     await _tro_la(session_factory, hoi_thoai.id, user_a, dang_chay.id)
 
-    path = (await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))).json()[
-        "path"
-    ]
+    path = (await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))).json()["path"]
 
     assert path[-1]["status"] == "streaming"
     assert path[-1]["content"] == "phan da ghi"
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_chi_tiet_cua_nguoi_khac_thi_404(
     client: AsyncClient,
     user_a: uuid.UUID,
@@ -486,17 +507,17 @@ async def test_chi_tiet_cua_nguoi_khac_thi_404(
     """§20 — 404 chứ không 403: 403 xác nhận hội thoại đó có thật."""
     cua_b = await _tao_hoi_thoai(session_factory, user_b)
 
-    res = await client.get(f"{DUONG_DAN}/{cua_b.id}", headers=_headers(user_a))
+    res = await client.get(f"{DUONG_DAN}/{cua_b.id}", headers=_phien(user_a))
 
     assert res.status_code == 404
     assert res.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_chi_tiet_hoi_thoai_khong_ton_tai_thi_404(
     client: AsyncClient, user_a: uuid.UUID
 ) -> None:
-    res = await client.get(f"{DUONG_DAN}/{uuid.uuid4()}", headers=_headers(user_a))
+    res = await client.get(f"{DUONG_DAN}/{uuid.uuid4()}", headers=_phien(user_a))
 
     assert res.status_code == 404
 
@@ -504,7 +525,7 @@ async def test_chi_tiet_hoi_thoai_khong_ton_tai_thi_404(
 # ═══════════════════════ DELETE /conversations/{id} ════════════════════════
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_xoa_mem_tra_204_va_message_van_con_trong_db(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -519,7 +540,7 @@ async def test_xoa_mem_tra_204_va_message_van_con_trong_db(
         content="q",
     )
 
-    res = await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))
+    res = await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))
 
     assert res.status_code == 204
     assert res.content == b""
@@ -530,32 +551,32 @@ async def test_xoa_mem_tra_204_va_message_van_con_trong_db(
         assert message is not None and message.deleted_at is None
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_xoa_lan_thu_hai_thi_404(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     hoi_thoai = await _tao_hoi_thoai(session_factory, user_a)
-    await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))
+    await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))
 
-    lan_hai = await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))
+    lan_hai = await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))
 
     assert lan_hai.status_code == 404
     assert lan_hai.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_xoa_roi_thi_GET_cung_404(
     client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     hoi_thoai = await _tao_hoi_thoai(session_factory, user_a)
-    await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))
+    await client.delete(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))
 
-    res = await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_headers(user_a))
+    res = await client.get(f"{DUONG_DAN}/{hoi_thoai.id}", headers=_phien(user_a))
 
     assert res.status_code == 404
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_khong_xoa_duoc_hoi_thoai_cua_nguoi_khac(
     client: AsyncClient,
     user_a: uuid.UUID,
@@ -564,7 +585,7 @@ async def test_khong_xoa_duoc_hoi_thoai_cua_nguoi_khac(
 ) -> None:
     cua_b = await _tao_hoi_thoai(session_factory, user_b)
 
-    res = await client.delete(f"{DUONG_DAN}/{cua_b.id}", headers=_headers(user_a))
+    res = await client.delete(f"{DUONG_DAN}/{cua_b.id}", headers=_phien(user_a))
 
     assert res.status_code == 404
     async with session_factory() as session:

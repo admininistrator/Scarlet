@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router";
 
+import { PATHS } from "../../app/paths";
 import { useSession } from "../../app/Layout";
 import { t } from "../../lib/i18n";
 import { AccountDisabledScreen } from "./AccountDisabledScreen";
@@ -25,12 +26,24 @@ import { pathForStatus } from "./statusRoute";
  * `dangTai` la nhanh RIENG, cung ly le `AdminOnly` da ghi: roi thang xuong
  * nhanh duoi se nhap nhay mot lan chuyen huong trong moi lan mo trang.
  *
- * ── VI SAO `nguoiDung === null` KHONG BI CHAN ─────────────────────────────
+ * ── `nguoiDung === null` ⇒ `/dang-nhap` (T-3.1c) ──────────────────────────
  *
- * Nhanh danh tinh tam cua Phase 1 (`scarlet_dev_user`, NQ-24/NQ-33) van song
- * cho toi T-3.1c, va man chat van chay bang no. Chan nguoi chua dang nhap o
- * day la lam viec cua T-3.1c som mot commit — va lam no bang mot component
- * khac, tuc ngay T-3.1c toi se co hai cho phai go thay vi mot.
+ * T-3.1b co y KHONG chan nguoi chua dang nhap o day: nhanh danh tinh tam cua
+ * Phase 1 (NQ-24/NQ-33) van song luc do va man chat van chay bang no, nen
+ * chan o day la lam viec cua T-3.1c som mot commit bang mot component khac —
+ * tuc ngay T-3.1c toi se co hai cho phai go thay vi mot.
+ *
+ * T-3.1c go nhanh ay. Ke tu day `nguoiDung === null` chi con mot nghia:
+ * khong co phien nao, va man chat khong con duong nao goi API duoc. Man hinh
+ * se dung yen cho mot nguoi khong the lam gi tren no, roi cho ho mot bang loi
+ * `401` o lan bam dau tien; mot lan `<Navigate>` toi `/dang-nhap` la cau tra
+ * loi trung thuc hon. Day cung la ly do ca test *"401 van ra man chat"* cua
+ * T-3.1b doi chieu o ngay commit nay: no la phep do cua nhanh tam, khong phai
+ * mot test hong.
+ *
+ * `replace` chu khong mot lan `push`, cung ly le `AdminOnly` da ghi: mot lan
+ * chuyen huong tu dong de lai dau chan trong lich su la mot cai bay khong
+ * thoat duoc bang Back.
  *
  * ── `biKhoa` khong phai mot `status` ──────────────────────────────────────
  *
@@ -50,11 +63,12 @@ export function StatusGate({ children }: { children: ReactNode }) {
   if (session.biKhoa) {
     return <AccountDisabledScreen />;
   }
-  if (session.nguoiDung !== null) {
-    const dich = pathForStatus(session.nguoiDung.status);
-    if (dich !== null) {
-      return <Navigate to={dich} replace />;
-    }
+  if (session.nguoiDung === null) {
+    return <Navigate to={PATHS.login} replace />;
+  }
+  const dich = pathForStatus(session.nguoiDung.status);
+  if (dich !== null) {
+    return <Navigate to={dich} replace />;
   }
   return <>{children}</>;
 }

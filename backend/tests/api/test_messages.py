@@ -31,7 +31,9 @@ from app.api.v1 import ROUTE_BAT_BUOC_IDEMPOTENCY
 from app.api.v1.messages import TEN_ROUTE_TAO_MESSAGE
 from app.config import catalog
 from app.config.settings import settings
-from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.core.access_token import encode_access_token
+from app.core.deps import SESSION_COOKIE_NAME
+from app.db.models import Conversation, Message, MessageRole, MessageStatus, UserRole, UserStatus
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.main import app
 
@@ -65,12 +67,6 @@ class ArqGia:
 
 
 @pytest.fixture
-def _debug_bat(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Phase 1 chỉ chạy với `DEBUG=true` — xem `app/core/deps.py`."""
-    monkeypatch.setattr(settings, "DEBUG", True)
-
-
-@pytest.fixture
 def _db_cua_test(
     monkeypatch: pytest.MonkeyPatch, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -98,6 +94,34 @@ async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
         transport=ASGITransport(app=app), base_url="https://localhost", event_hooks=event_hooks
     ) as http:
         yield http
+
+
+def _phien(user_id: uuid.UUID) -> dict[str, str]:
+    """Header `Cookie` mang phiên thật (§11.2) của `user_id` — T-3.1c.
+
+    Trả một `dict` để truyền vào `headers=` của **từng request**, đúng chỗ mà
+    header danh tính tạm của Phase 1 đứng trước đây: danh tính theo request
+    chứ không đặt lên `client`, nên hai danh tính trong cùng một ca (phép kiểm
+    quyền sở hữu, §20) vẫn viết được cạnh nhau mà không ai phải nhớ dọn.
+
+    **Một header `Cookie`, không phải tham số `cookies=` của httpx.** httpx đã
+    deprecate `cookies=` theo request (*"expected behaviour on cookie
+    persistence is ambiguous"*) — và ở đây không có gì để persist: mỗi request
+    tự mang phiên của nó. Một `dict` header còn ghép được bằng `|` với
+    `Idempotency-Key` hay `Last-Event-ID` mà không phải trộn hai cơ chế.
+
+    `status=ACTIVE` chứ không đọc từ bảng `users`: §11.1 kiểm trạng thái từ
+    **claim** của access token (xem `core/deps.py`), và bộ test này đo chuyện
+    khác — ma trận 5×4 của bảng ấy là việc của `test_account_states.py`.
+    """
+    token = encode_access_token(
+        user_id=user_id,
+        role=UserRole.USER,
+        tier="free",
+        status=UserStatus.ACTIVE,
+        ttl_minutes=15,
+    )
+    return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
 async def _tao_hoi_thoai(
@@ -158,7 +182,6 @@ async def test_tao_hai_message_va_day_job(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -167,7 +190,7 @@ async def test_tao_hai_message_va_day_job(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -194,7 +217,6 @@ async def test_assistant_o_trang_thai_queued(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -208,7 +230,7 @@ async def test_assistant_o_trang_thai_queued(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "hoi mot cau"},
     )
 
@@ -220,7 +242,6 @@ async def test_stream_url_tro_dung_route_cua_t17(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -229,7 +250,7 @@ async def test_stream_url_tro_dung_route_cua_t17(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
     amid = resp.json()["assistant_message_id"]
@@ -238,7 +259,7 @@ async def test_stream_url_tro_dung_route_cua_t17(
     assert stream_url == f"/api/v1/messages/{amid}/stream"
     # Gọi thẳng vào nó: 404 (message của user khác) sẽ lộ ra nếu đường dẫn sai
     # tiền tố, 200/500 nếu đúng. Chỉ cần nó KHÔNG phải 404-không-có-route.
-    lan_hai = await client.get(stream_url, headers={"X-User-Id": str(uuid.uuid4())})
+    lan_hai = await client.get(stream_url, headers=_phien(uuid.uuid4()))
     assert lan_hai.json()["error"]["code"] == "MESSAGE_NOT_FOUND"
 
 
@@ -249,7 +270,6 @@ async def test_khong_cho_model_sinh_chu(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -262,7 +282,7 @@ async def test_khong_cho_model_sinh_chu(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "viet cho toi 800 tu"},
     )
 
@@ -280,23 +300,20 @@ async def test_parent_id_cu_tra_branched_va_cay_co_them_nhanh(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
     """DoD: gửi với `parent_id` cũ → `branched: true`, và cây có thêm nhánh."""
     conversation = await _tao_hoi_thoai(session_factory, user_a)
-    headers = {"X-User-Id": str(user_a)}
+    phien = _phien(user_a)
 
-    mot = await client.post(
-        DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"}
-    )
+    mot = await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "a"})
     assert mot.json()["branched"] is False
     goc_user = uuid.UUID(mot.json()["user_message_id"])
 
     hai = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers=headers,
+        headers=phien,
         json={"content": "b", "parent_id": str(goc_user)},
     )
 
@@ -320,7 +337,6 @@ async def test_parent_id_bang_leaf_hien_tai_khong_phai_nhanh(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -330,16 +346,14 @@ async def test_parent_id_bang_leaf_hien_tai_khong_phai_nhanh(
     `branched` thì cờ đó vô nghĩa và FE sẽ tắt nó đi.
     """
     conversation = await _tao_hoi_thoai(session_factory, user_a)
-    headers = {"X-User-Id": str(user_a)}
+    phien = _phien(user_a)
 
-    mot = await client.post(
-        DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"}
-    )
+    mot = await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "a"})
     leaf = mot.json()["assistant_message_id"]
 
     hai = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers=headers,
+        headers=phien,
         json={"content": "b", "parent_id": leaf},
     )
 
@@ -350,7 +364,6 @@ async def test_parent_id_vang_thi_noi_vao_leaf_dang_xem(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -362,16 +375,12 @@ async def test_parent_id_vang_thi_noi_vao_leaf_dang_xem(
     mới — hội thoại rơi thành N cây rời, model không thấy câu hỏi trước đó.
     """
     conversation = await _tao_hoi_thoai(session_factory, user_a)
-    headers = {"X-User-Id": str(user_a)}
+    phien = _phien(user_a)
 
-    mot = await client.post(
-        DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"}
-    )
+    mot = await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "a"})
     leaf = uuid.UUID(mot.json()["assistant_message_id"])
 
-    hai = await client.post(
-        DUONG_DAN.format(conversation.id), headers=headers, json={"content": "b"}
-    )
+    hai = await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "b"})
 
     user_hai = await _doc_message(session_factory, uuid.UUID(hai.json()["user_message_id"]))
     assert user_hai.parent_id == leaf
@@ -382,18 +391,17 @@ async def test_parent_id_null_tuong_minh_tao_goc_moi(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
     """`parent_id: null` gửi tường minh ⇒ gốc thứ hai của hội thoại (§8.2)."""
     conversation = await _tao_hoi_thoai(session_factory, user_a)
-    headers = {"X-User-Id": str(user_a)}
+    phien = _phien(user_a)
 
-    await client.post(DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"})
+    await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "a"})
     hai = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers=headers,
+        headers=phien,
         json={"content": "b", "parent_id": None},
     )
 
@@ -410,21 +418,20 @@ async def test_parent_id_cua_hoi_thoai_khac_tra_404(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
     """Nối hai cây của hai hội thoại làm một là đúng thứ `create_message` chặn."""
     mot = await _tao_hoi_thoai(session_factory, user_a)
     hai = await _tao_hoi_thoai(session_factory, user_a)
-    headers = {"X-User-Id": str(user_a)}
+    phien = _phien(user_a)
 
-    trong_mot = await client.post(DUONG_DAN.format(mot.id), headers=headers, json={"content": "a"})
+    trong_mot = await client.post(DUONG_DAN.format(mot.id), headers=phien, json={"content": "a"})
     la_cua_mot = trong_mot.json()["assistant_message_id"]
 
     resp = await client.post(
         DUONG_DAN.format(hai.id),
-        headers=headers,
+        headers=phien,
         json={"content": "b", "parent_id": la_cua_mot},
     )
 
@@ -441,7 +448,6 @@ async def test_hoi_thoai_cua_user_khac_tra_404_va_khong_ghi_gi(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     user_b: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -450,7 +456,7 @@ async def test_hoi_thoai_cua_user_khac_tra_404_va_khong_ghi_gi(
 
     resp = await client.post(
         DUONG_DAN.format(cua_a.id),
-        headers={"X-User-Id": str(user_b)},
+        headers=_phien(user_b),
         json={"content": "toi khong so huu hoi thoai nay"},
     )
 
@@ -463,13 +469,12 @@ async def test_hoi_thoai_cua_user_khac_tra_404_va_khong_ghi_gi(
 async def test_hoi_thoai_khong_ton_tai_tra_404(
     client: AsyncClient,
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
     resp = await client.post(
         DUONG_DAN.format(uuid.uuid4()),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a"},
     )
 
@@ -477,11 +482,10 @@ async def test_hoi_thoai_khong_ton_tai_tra_404(
     assert resp.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
 
 
-async def test_thieu_x_user_id_tra_401(
+async def test_thieu_cookie_phien_tra_401(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -493,25 +497,30 @@ async def test_thieu_x_user_id_tra_401(
     assert await _dem_message(session_factory, conversation.id) == 0
 
 
-async def test_debug_tat_thi_503(
+async def test_debug_bat_cung_khong_mo_cua_nao(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
-    """Không bật `_debug_bat` — cấu hình của một máy mới (`.env.example`)."""
-    assert settings.DEBUG is False
+    """`DEBUG=true` không còn mua được gì — T-3.1c.
+
+    Tới T-3.1b, bật `DEBUG` là mở nhánh danh tính tạm của Phase 1: một header
+    người gọi tự gõ đủ để đi hết đường này. Ca này canh đúng chiều ngược lại —
+    nhánh ấy chết rồi, nên `DEBUG` không đổi được kết cục của một request
+    không mang cookie phiên. Nó là bản đảo của ca cũ (`DEBUG=false` ⇒ `503`),
+    và nó chính là thứ sẽ đỏ nếu ai đó dựng lại một cửa sau thứ hai.
+    """
+    monkeypatch.setattr(settings, "DEBUG", True)
     conversation = await _tao_hoi_thoai(session_factory, user_a)
 
-    resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
-        json={"content": "a"},
-    )
+    resp = await client.post(DUONG_DAN.format(conversation.id), json={"content": "a"})
 
-    assert resp.status_code == 503
-    assert resp.json()["error"]["code"] == "AUTH_NOT_IMPLEMENTED"
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "UNAUTHENTICATED"
+    assert await _dem_message(session_factory, conversation.id) == 0
 
 
 # ════════════════════════ chọn model (§9.2, A3) ═══════════════════════════
@@ -521,7 +530,6 @@ async def test_khong_noi_model_thi_dung_default_cua_catalog(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -531,7 +539,7 @@ async def test_khong_noi_model_thi_dung_default_cua_catalog(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a"},
     )
 
@@ -543,7 +551,6 @@ async def test_default_model_cua_hoi_thoai_thang_default_cua_catalog(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -552,7 +559,7 @@ async def test_default_model_cua_hoi_thoai_thang_default_cua_catalog(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a"},
     )
 
@@ -564,7 +571,6 @@ async def test_model_id_cua_request_thang_tat_ca(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -575,7 +581,7 @@ async def test_model_id_cua_request_thang_tat_ca(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a", "model_id": khac},
     )
 
@@ -587,7 +593,6 @@ async def test_model_khong_co_trong_catalog_tra_400_va_khong_ghi_gi(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -595,7 +600,7 @@ async def test_model_khong_co_trong_catalog_tra_400_va_khong_ghi_gi(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a", "model_id": "khong-ton-tai"},
     )
 
@@ -610,7 +615,6 @@ async def test_model_da_tat_cung_tra_400(
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -621,7 +625,7 @@ async def test_model_da_tat_cung_tra_400(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a", "model_id": khac},
     )
 
@@ -634,7 +638,6 @@ async def test_khong_con_model_nao_bat_tra_503(
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -644,7 +647,7 @@ async def test_khong_con_model_nao_bat_tra_503(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a"},
     )
 
@@ -660,7 +663,6 @@ async def test_enqueue_no_thi_khong_con_message_mo_coi(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -675,7 +677,7 @@ async def test_enqueue_no_thi_khong_con_message_mo_coi(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a"},
     )
 
@@ -689,7 +691,6 @@ async def test_arq_tu_choi_job_thi_cung_khong_con_message_mo_coi(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -699,7 +700,7 @@ async def test_arq_tu_choi_job_thi_cung_khong_con_message_mo_coi(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a"},
     )
 
@@ -713,7 +714,6 @@ async def test_job_id_bang_assistant_message_id(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -728,7 +728,7 @@ async def test_job_id_bang_assistant_message_id(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a"},
     )
 
@@ -747,7 +747,6 @@ async def test_content_dai_hon_tran_mot_ky_tu_tra_422_va_khong_ghi_gi(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -762,7 +761,7 @@ async def test_content_dai_hon_tran_mot_ky_tu_tra_422_va_khong_ghi_gi(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a" * (settings.MESSAGE_MAX_CHARS + 1)},
     )
 
@@ -775,7 +774,6 @@ async def test_content_dung_bang_tran_van_di_qua(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -787,7 +785,7 @@ async def test_content_dung_bang_tran_van_di_qua(
 
     resp = await client.post(
         DUONG_DAN.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "a" * settings.MESSAGE_MAX_CHARS},
     )
 
@@ -801,15 +799,12 @@ async def test_body_sai_tra_422(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     body: dict[str, Any],
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
     conversation = await _tao_hoi_thoai(session_factory, user_a)
 
-    resp = await client.post(
-        DUONG_DAN.format(conversation.id), headers={"X-User-Id": str(user_a)}, json=body
-    )
+    resp = await client.post(DUONG_DAN.format(conversation.id), headers=_phien(user_a), json=body)
 
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
@@ -820,7 +815,6 @@ async def test_hai_lan_gui_cung_key_chi_tao_mot_luot(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -835,13 +829,14 @@ async def test_hai_lan_gui_cung_key_chi_tao_mot_luot(
     ở lại `test_messages.py` vì nó nói về hợp đồng của chính endpoint này.
     """
     conversation = await _tao_hoi_thoai(session_factory, user_a)
-    headers = {"X-User-Id": str(user_a), "Idempotency-Key": "khoa-cua-mot-lan-soan-thao"}
+    phien = _phien(user_a)
+    headers = {"Idempotency-Key": "khoa-cua-mot-lan-soan-thao"}
 
     mot = await client.post(
-        DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"}
+        DUONG_DAN.format(conversation.id), headers=phien | headers, json={"content": "a"}
     )
     hai = await client.post(
-        DUONG_DAN.format(conversation.id), headers=headers, json={"content": "a"}
+        DUONG_DAN.format(conversation.id), headers=phien | headers, json={"content": "a"}
     )
 
     assert mot.status_code == hai.status_code == 202
@@ -854,7 +849,6 @@ async def test_hai_lan_gui_cung_key_chi_tao_mot_luot(
 async def test_thieu_idempotency_key_tra_400(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _debug_bat: None,
     _db_cua_test: None,
     arq_gia: ArqGia,
 ) -> None:
@@ -871,7 +865,7 @@ async def test_thieu_idempotency_key_tra_400(
     ) as khong_hook:
         resp = await khong_hook.post(
             DUONG_DAN.format(conversation.id),
-            headers={"X-User-Id": str(user_a)},
+            headers=_phien(user_a),
             json={"content": "a"},
         )
 

@@ -1,56 +1,35 @@
 /**
  * Lop goi HTTP cua FE — §18 (khung loi), §18.2 (chat), §18.3 (models).
  *
- * KH tham chieu: §18, §18.2, §18.3, §11.4 · CLAUDE.md A3, A8 · NQ-33.
+ * KH tham chieu: §18, §18.2, §18.3, §11.4, §11.2 · CLAUDE.md A3, A8 ·
+ * NQ-33, NQ-36 · tasks.md T-3.1c, B-128.
  *
  * File nay la cho DUY NHAT trong FE biet duong dan `/api/v1/...` trong nhu the
  * nao. Component khong duoc noi chuoi URL: mot duong dan viet sai trong JSX
  * chay thanh 404 luc nguoi dung bam nut, khong phai luc build.
  *
- * ── Danh tinh cua Phase 1 ───────────────────────────────────────────────────
+ * ── Danh tinh: KHONG co mot dong nao trong file nay ─────────────────────────
  *
- * `get_current_user_id` (backend, `app/core/deps.py`) doc header `X-User-Id`
- * roi cookie `scarlet_dev_user`. FE dung COOKIE, va day la ly do ky thuat chu
- * khong phai so thich: `EventSource` KHONG dat duoc header tuy chon, ma §7.4 +
- * Phu luc F doi dung `EventSource` native de trinh duyet tu gui
- * `Last-Event-ID`. Cookie di duoc ca hai duong — `fetch` same-origin lan
- * `EventSource` — nen o day khong co mot dong nao gan header danh tinh.
+ * Cookie phien `scarlet_session` mang access JWT (§11.2, NQ-36) co co
+ * `HttpOnly`, tuc JS KHONG dat duoc va KHONG doc duoc no — trinh duyet tu gui
+ * kem moi request same-origin. Vi vay lop goi HTTP nay khong biet gi ve danh
+ * tinh: no chi phai nho `credentials: "same-origin"` o duoi.
  *
- * Xem NQ-33. Ca hai dau deu la CHO TAM, T-2.3 thay ca hai.
+ * Toi T-3.1b, ben canh cookie phien con mot cho tam cua Phase 1 ma chinh file
+ * nay dat va doc bang `document.cookie` (NQ-24/NQ-33). T-3.1c xoa no cung ca
+ * o nhap `user_id` cua man chat — B-128, B-186. Mot trinh duyet nay chi con
+ * MOT danh tinh, va
+ * cau hoi "toi la ai" chi con mot cau tra loi: `GET /auth/me`.
+ *
+ * Loi ich ky thuat cua duong cookie van nguyen ven cho `EventSource`: no
+ * KHONG dat duoc header tuy chon, ma §7.4 + Phu luc F doi dung `EventSource`
+ * native de trinh duyet tu gui `Last-Event-ID`. Cookie di duoc ca hai duong —
+ * `fetch` same-origin lan `EventSource`.
  */
 
 // A3: base URL tu bien moi truong Vite, khong literal. Mac dinh "/api/v1" —
 // cung origin voi nginx (Phu luc D).
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
-
-/**
- * Ban sao duy nhat cua `app/core/deps.py::DEV_USER_COOKIE`.
- *
- * Hai dau cua mot soi day, cung loai voi `stream:{id}` giua producer va
- * consumer. Doi mot ben ma quen ben kia thi FE im lang truot ve `401`, nen ca
- * hai cho deu tro ve nhau bang chu thich.
- */
-export const TEN_COOKIE_DEV = "scarlet_dev_user";
-
-/** Doc `user_id` tam dang dung, hoac `null`. */
-export function docDanhTinhDev(): string | null {
-  const mau = new RegExp(`(?:^|; )${TEN_COOKIE_DEV}=([^;]*)`);
-  const khop = mau.exec(document.cookie);
-  return khop ? decodeURIComponent(khop[1]) : null;
-}
-
-/**
- * Dat cookie danh tinh tam.
- *
- * `Secure` chi them khi trang dang o https: ca stack di qua Nginx TLS (R2),
- * nhung neu ai do mo thang `http://localhost:5173` cua Vite thi mot cookie
- * `Secure` se bi trinh duyet vut di **khong bao loi** — va trieu chung se doc
- * thanh "API luon 401".
- */
-export function datDanhTinhDev(userId: string): void {
-  const secure = window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${TEN_COOKIE_DEV}=${encodeURIComponent(userId)}; path=/; SameSite=Lax${secure}`;
-}
 
 /** Khung loi duy nhat cua §18: `{ "error": { code, message, details } }`. */
 interface KhungLoi {
@@ -82,7 +61,6 @@ export class ApiError extends Error {
 /** Ma loi FE co phan nhanh theo. Chuoi khop `ApiErrorCode` cua backend. */
 export const MA_LOI = {
   CHUA_XAC_THUC: "UNAUTHENTICATED",
-  AUTH_CHUA_CO: "AUTH_NOT_IMPLEMENTED",
   DANG_SINH: "GENERATION_IN_PROGRESS",
   SAI_MAT_KHAU: "INVALID_CREDENTIALS",
   TAI_KHOAN_BI_KHOA: "ACCOUNT_DISABLED",

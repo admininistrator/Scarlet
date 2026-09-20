@@ -19,6 +19,7 @@
  *  7. DoD dong 2 — `/cho-duyet` hien khi `pending_approval`, bien mat sau khi
  *     duoc duyet
  *  8. §11.1 — `suspended` ra man giai thich, KHONG roi ve man chat
+ *  9. T-3.1c — chua dang nhap thi KHONG vao duoc man chat nua
  *
  * ── Vi sao `./Turnstile` bi thay bang mot ban gia ─────────────────────────
  *
@@ -434,11 +435,14 @@ describe("dieu huong theo status cua §11.1", () => {
     expect(screen.queryByRole("button", { name: "Hội thoại mới" })).toBeNull();
   });
 
-  it("401 (chua dang nhap) VAN ra man chat — nhanh danh tinh tam cua Phase 1", async () => {
-    // Chan nguoi chua dang nhap o day la lam viec cua T-3.1c som mot commit,
-    // va lam no bang mot component khac. Xem docstring `StatusGate`.
+  it("401 (chua dang nhap) sang /dang-nhap, KHONG ra man chat (T-3.1c)", async () => {
+    // Ca nay TUNG khang dinh dieu nguoc lai, va no dung vao ngay T-3.1b:
+    // nhanh danh tinh tam cua Phase 1 con song, man chat con chay bang no.
+    // T-3.1c go nhanh ay, nen cau khang dinh phai lat cung mot commit — do la
+    // dau hieu nhanh tam da chet, khong phai mot test hong. Xem `StatusGate`.
     moTai(PATHS.home);
 
-    expect(await screen.findByRole("button", { name: "Hội thoại mới" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("Mật khẩu")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hội thoại mới" })).toBeNull();
   });
 });

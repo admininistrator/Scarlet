@@ -10,10 +10,10 @@ import { t } from "../../lib/i18n";
  * ╚════════════════════════════════════════════════════════════════════════╝
  *
  * `require_admin` (app/core/deps.py) co y KHONG cho nhanh danh tinh tam cua
- * Phase 1 (`X-User-Id` / cookie `scarlet_dev_user`) di qua: mot chuoi nguoi
- * goi tu go ma duyet duoc tai khoan chinh la lo hong B-34. Nghia la man
- * `/admin` khong the chay bang danh tinh tam, va khong co duong nao lay duoc
- * cookie phien that neu FE khong co cho de go email + mat khau.
+ * Phase 1 di qua: mot chuoi nguoi goi tu go ma duyet duoc tai khoan chinh la
+ * lo hong B-34. Nghia la man `/admin` khong the chay bang danh tinh tam, va
+ * khong co duong nao lay duoc cookie phien that neu FE khong co cho de go
+ * email + mat khau. (T-3.1c da xoa han nhanh tam ay — B-128.)
  *
  * Nen o day khong phai "them tinh nang", ma la dieu kien de hai dong DoD dau
  * cua T-2.19 ton tai. Man dang nhap THAT — quen mat khau, dang ky, Turnstile,

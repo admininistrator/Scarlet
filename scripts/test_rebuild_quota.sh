@@ -59,11 +59,46 @@ fail() {
 
 psql_() { $COMPOSE exec -T postgres psql -U scarlet -d scarlet -tAq -c "$1" | tr -d '\r'; }
 redis_() { $COMPOSE exec -T redis redis-cli "$@" | tr -d '\r'; }
+# Mot cookie phien that (§11.2) cho user $1, tier $2 — T-3.1c.
+#
+# Nhanh danh tinh tam cua Phase 1 chet cung task ay, nen moi lenh `curl` duoi
+# day phai mang cookie nay thay cho header danh tinh cu. Token duoc ky TRONG
+# container `api`: chi o do moi co `JWT_SECRET` va `app/` — WSL host khong co
+# ca hai.
+#
+# Doan Python di qua STDIN (heredoc nhay don) chu khong qua `python -c "..."`:
+# no mang dau nhay va dau ngoac nhon, va mot lan bash noi suy nham vao giua se
+# bao loi o mot dong khac han — dung cai bay ma chu thich cua `amid()` trong
+# `test_idempotency.sh` da ghi lai mot lan.
+phien_() { # $1=user_id  $2=tier_name
+  $COMPOSE exec -T api python - "$1" "$2" <<'PY' | tr -d '\r'
+import sys
+import uuid
+
+from app.config.settings import settings
+from app.core.access_token import encode_access_token
+from app.core.deps import SESSION_COOKIE_NAME
+from app.db.models import UserRole, UserStatus
+
+print(
+    SESSION_COOKIE_NAME
+    + "="
+    + encode_access_token(
+        user_id=uuid.UUID(sys.argv[1]),
+        role=UserRole.USER,
+        tier=sys.argv[2],
+        status=UserStatus.ACTIVE,
+        ttl_minutes=settings.ACCESS_TOKEN_TTL_MIN,
+    )
+)
+PY
+}
+
 
 chat() { # $1=conversation  $2=noi dung — in assistant_message_id
   local amid
   amid="$(curl -sk -X POST "$BASE_URL/api/v1/conversations/$1/messages" \
-    -H "X-User-Id: $USER_ID" -H 'Content-Type: application/json' \
+    -H "Cookie: $COOKIE" -H 'Content-Type: application/json' \
     -H "Idempotency-Key: $(cat /proc/sys/kernel/random/uuid)" \
     -d "{\"content\":\"$2\",\"model_id\":\"$MODEL\"}" |
     sed -n 's/.*"assistant_message_id":"\([^"]*\)".*/\1/p')"
@@ -135,6 +170,8 @@ trap don_dep_tmp EXIT
 
 echo "== chuan bi =="
 USER_ID="$(psql_ "INSERT INTO users (email, password_hash, status) VALUES ('$EMAIL','khong-phai-hash-that','active') RETURNING id;" | tr -d ' ')"
+TIER="$(psql_ "SELECT tier_name FROM users WHERE id='$USER_ID';" | tr -d ' ')"
+COOKIE="$(phien_ "$USER_ID" "$TIER")"
 CONV="$(psql_ "INSERT INTO conversations (user_id) VALUES ('$USER_ID') RETURNING id;" | tr -d ' ')"
 echo "  user=$USER_ID  conv=$CONV"
 
@@ -165,7 +202,7 @@ SAU_FLUSH="$(redis_ --scan --pattern 'quota:*' | grep -c . || true)"
 # ZSET da duoc nap lai ngay khi POST tra ve — truoc khi worker kip ghi dong so
 # cua chinh luot nay.
 AMID2="$(curl -sk -X POST "$BASE_URL/api/v1/conversations/$CONV/messages" \
-  -H "X-User-Id: $USER_ID" -H 'Content-Type: application/json' \
+  -H "Cookie: $COOKIE" -H 'Content-Type: application/json' \
   -H "Idempotency-Key: $(cat /proc/sys/kernel/random/uuid)" \
   -d "{\"content\":\"2+2 bang may? Tra loi that ngan.\",\"model_id\":\"$MODEL\"}" |
   sed -n 's/.*"assistant_message_id":"\([^"]*\)".*/\1/p')"

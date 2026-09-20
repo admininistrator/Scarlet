@@ -1,11 +1,12 @@
 """Dependency dùng chung của tầng HTTP (§23 `core/deps.py`).
 
 KH tham chiếu: §18.1, §20, §11.1, §11.2, §11.3, §10.5, §16.3, UC-01, Phụ lục F ·
-CLAUDE.md A10 · tasks.md T-2.3, T-2.4, T-2.7, T-2.16 · B-34, B-83, B-114, NQ-36.
+CLAUDE.md A10 · tasks.md T-2.3, T-2.4, T-2.7, T-2.16, T-3.1c · B-34, B-83,
+B-114, B-128, NQ-36.
 
 **T-2.16 thêm `require_admin` ở CUỐI file** — cùng hình dạng và cùng chỗ gắn
-với `require_app_access` (lời gọi `include_router`), nhưng ngược nó ở đúng một
-điểm: nhánh tạm Phase 1 **không** đi qua được. Lý do đầy đủ nằm trong docstring
+với `require_app_access` (lời gọi `include_router`), khác nó ở đúng một điểm:
+câu hỏi của nó là `role`, không phải `status`. Lý do đầy đủ nằm trong docstring
 của chính hàm đó.
 
 ╔══════════════════════════════════════════════════════════════════════════╗
@@ -39,13 +40,15 @@ nên không có lý do gì chặn họ". Không claim nào trả lời được 
 giữa hai lần phát hành token), nên có đúng một `SELECT EXISTS` — và nó chỉ
 chạy cho đúng trạng thái đó, không phải cho mọi request.
 
-**Nhánh tạm Phase 1 (không có claim) đi thẳng qua, KHÔNG bị chặn.** Cùng lý lẽ
-với blacklist ở dưới: nó không có trạng thái nào để kiểm (`get_current_user_id`
-cố ý không tra bảng `users`), nó chỉ sống khi `DEBUG=true`, và với
-`DEBUG=false` thì `get_current_user_id` đã trả `503` trước khi có ai chat được.
-Bắt nó tra DB nghĩa là mọi `X-User-Id` bịa ra thành `403` — tức khoá luôn màn
-chat thô T-1.14 và sáu file test của Phase 1, đúng thứ NQ-41 đã chốt là không
-làm. Xem B-128 cho ngày nhánh này biến mất.
+**Không có claim = chưa đăng nhập ⇒ `401`, ở CẢ BA cửa.** Từ T-3.1c,
+`get_access_claims` trả `None` chỉ còn đúng một nghĩa: không có cookie phiên
+nào. Trước đó nó còn nghĩa thứ hai — "có thể là nhánh danh tính tạm của Phase
+1" — và vì nghĩa thứ hai ấy mà `require_status` cùng `get_current_user_status`
+cho `None` **đi thẳng qua**. Nhánh tạm chết thì lối đi thẳng ấy không còn gì
+để chở, và giữ nó lại là để sẵn một cửa mở cho ngày ai đó thêm một route quên
+`get_current_user_id`. Vì vậy cả ba đều dừng ở `401 UNAUTHENTICATED` — `401`
+chứ không `403`: chưa chứng minh được mình là ai thì chưa tới lượt hỏi quyền
+(cùng câu mà `require_admin` ở cuối file đã viết từ T-2.16).
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  T-2.4: BLACKLIST — "middleware" của §11.3 nằm ở ĐÂY                     ║
@@ -72,81 +75,37 @@ một khác biệt có nghĩa: FE hiểu 503 là "thử lại", còn 401 sẽ đ
 màn hình đăng nhập vì một sự cố hạ tầng hoàn toàn không liên quan tới họ.
 
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  T-2.3: THÊM ĐƯỜNG AUTH THẬT — KHÔNG XOÁ CHỖ TẠM CỦA PHASE 1              ║
+║  T-3.1c: CHỖ TẠM CỦA PHASE 1 ĐÃ BỊ XOÁ                                   ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 
-NQ-36 chốt: một cookie phiên `HttpOnly; Secure; SameSite=Lax; Path=/api/v1`
-mang access JWT (§11.2, BỎ Bearer), và `get_current_user_id` là nơi verify nó.
-Đường mới này chạy TRƯỚC mọi thứ, KHÔNG phụ thuộc `DEBUG`: một request có
-cookie `scarlet_session` hợp lệ được nhận danh tính bất kể môi trường, vì đây
-mới là đường thật của production.
+NQ-36 chốt đường thật: một cookie phiên `HttpOnly; Secure; SameSite=Lax;
+Path=/api/v1` mang access JWT (§11.2, BỎ Bearer), và `get_current_user_id` là
+nơi verify nó. Từ T-2.3 tới T-3.1b, đường ấy xếp LỚP lên trên một chỗ tạm của
+Phase 1: một header danh tính người gọi tự gõ, rồi một cookie dev riêng, cả
+hai chỉ sống khi `DEBUG=true` (NQ-24/NQ-33 — tên chính xác của chúng nằm ở
+đó và ở B-128). Cookie phiên thử trước, vắng mặt thì rơi xuống chỗ tạm. NQ-41
+giữ chỗ tạm lại **có điều kiện**, và điều kiện ấy viết ra được thành đúng hai
+câu: FE chưa có trang đăng nhập thật, và 16 file test/script dựng danh tính
+bằng nó.
 
-**Vì sao chỗ tạm của Phase 1 (header `X-User-Id` → cookie `scarlet_dev_user`)
-vẫn ở nguyên dưới đây, không bị xoá dù docstring cũ của T-1.7 nói "T-2.3 thay
-thân hàm này".** Hai lý do, cả hai đều đo được, không phải phỏng đoán:
+T-3.1b dựng sáu màn auth ⇒ điều kiện thứ nhất hết. T-3.1c chuyển 10 file test
+và 6 script sang cookie phiên thật ⇒ điều kiện thứ hai hết. Nên nhánh ấy —
+cùng hằng tên cookie dev, cùng mã lỗi "auth chưa hiện thực" của
+`core/errors.py`, cùng fixture `_debug_bat` của bộ test — biến mất ở đây
+(B-128, B-186). Một dòng DoD của T-3.1c là `grep` cả bốn cái tên ấy trên
+`backend/app`, `frontend/src`, `backend/tests` và đòi **0** dòng, nên
+chúng không được phép sống sót kể cả trong một docstring.
 
-1. `frontend/src/lib/api.ts` (T-1.14) vẫn tự đặt cookie `scarlet_dev_user` cho
-   màn chat thô — NQ-36 tự ghi rõ T-2.3 "không sửa một dòng FE nào", và FE
-   chưa có trang đăng nhập thật (đó là việc của Phase 3, xem báo cáo T-2.2).
-   Xoá đường cũ mà không thay FE là khoá luôn màn chat thô đang chạy.
-2. Sáu file test (`test_conversations.py`, `test_messages.py`,
-   `test_messages_cancel.py`, `test_branching.py`, `test_stream.py`, và chính
-   `test_auth.py` gián tiếp) dựng danh tính qua fixture `_debug_bat` +
-   `X-User-Id`/cookie dev — không thuộc "Việc cần làm" của T-2.3, và xoá đường
-   cũ bắt sửa lại toàn bộ, đúng loại việc CLAUDE.md §0.4 dặn "không làm thêm".
+**Cái còn lại là hình dạng đơn giản nhất mà file này từng có:** đúng MỘT đường
+mang danh tính vào app, và nó không phụ thuộc `DEBUG`. Từ nay `DEBUG` chỉ còn
+quyết định đúng một thứ, ở `api/v1/__init__.py`: router `/_debug/*` có được
+đăng ký hay không (§18.6).
 
-Vì vậy thân hàm dưới đây có hai nhánh xếp lớp: cookie phiên thật (mới, luôn
-bật) thử trước; vắng mặt thì rơi xuống đúng logic cũ (nguyên văn, vẫn giữ ba
-lớp chặn bên dưới) — không đổi một dòng hành vi nào của nhánh cũ. Khi FE có
-trang đăng nhập thật (Phase 3), nhánh cũ này mới hết lý do tồn tại; ghi lại
-thành Backlog cho lúc đó.
-
-── Phần dưới đây (nhánh Phase 1) giữ nguyên docstring gốc của NQ-24/NQ-33 ──
-
-T-1.7 đã phải kiểm quyền sở hữu ngay từ bây giờ ("message của user khác →
-404"), và cả Phase 1 — `scripts/test_resume.py`, `bench_ttft.py`, màn chat thô
-của T-1.14 — cần một danh tính để gọi API. Người dùng chốt phương án này trong
-phiên T-1.7 (xem Nhật ký quyết định NQ-24).
-
-**Ba thứ giữ cho chỗ tạm này không sống sót sang production:**
-
-1. `DEBUG=false` thì dependency **từ chối mọi request** bằng `503` — không có
-   đường nào để một triển khai thật lỡ chạy với nó. `.env.example` để
-   `DEBUG=false`, nên mặc định của một máy mới là "đóng".
-2. Router **không** biết nó đang đọc header nào. Chúng chỉ viết
-   `Depends(get_current_user_id)` và nhận một `UUID`. T-2.3 sửa đúng thân hàm
-   dưới đây, không sửa một dòng nào trong `api/v1/*.py`.
-3. Hàm **không** kiểm tra user có tồn tại trong bảng `users` hay không, và đó
-   là chủ ý: nó không phải xác thực, nó là một chỗ giữ chân. Mọi truy vấn sau
-   đó vẫn lọc `user_id` **trong câu SQL** (§20), nên một `X-User-Id` bịa ra chỉ
-   thấy được đúng số hội thoại nó sở hữu — tức là không cái nào.
-
-┌──────────────────────────────────────────────────────────────────────────┐
-│  VÌ SAO CÓ ĐƯỜNG THỨ HAI: COOKIE  (T-1.14, NQ-33)                        │
-└──────────────────────────────────────────────────────────────────────────┘
-
-`EventSource` của trình duyệt **không đặt được header tuỳ chọn** — đó là chỗ
-API dừng lại, không phải một thiếu sót của thư viện nào. Cả T-1.7 tới T-1.13
-không chạm phải giới hạn đó vì mọi client của chúng là `curl` hoặc `httpx`;
-T-1.14 là client đầu tiên **là một trình duyệt**, và §7.4 + Phụ lục F đòi đúng
-`EventSource` native để `Last-Event-ID` do trình duyệt tự gửi khi reconnect.
-
-Phụ lục F vốn đã viết sẵn `new EventSource(url, { withCredentials: true })` —
-`withCredentials` nói về **cookie**, tức bản thân kế hoạch đã giả định đường
-stream xác thực bằng cookie chứ không bằng header. Cookie ở đây là chỗ tạm đi
-đúng hình dạng mà auth thật rồi cũng phải đi.
-
-**Header vẫn thắng cookie, và thứ tự đó không phải tuỳ tiện.** Ba script của
-Phase 1 (`test_resume.py`, `bench_ttft.py`, mọi `curl` trong DoD) gửi header;
-nếu cookie thắng thì một cookie cũ còn sót trong `curl -b` hoặc trong jar của
-ai đó sẽ **lặng lẽ** đổi danh tính của phép đo. Ngược lại thì không: header chỉ
-có khi người gọi cố ý đặt nó.
-
-**Cookie chỉ được đọc khi header VẮNG MẶT**, và đó là lý do nó khai kiểu `str`
-chứ không `uuid.UUID`. Khai `uuid.UUID` thì FastAPI validate **cả hai** tham số
-trước khi thân hàm chạy, nên một cookie hỏng (người dùng sửa tay, bản cũ của
-một phiên trước) sẽ trả `422` cho cả những request mang header hoàn toàn hợp
-lệ — tức làm hỏng `curl` vì một thứ `curl` không gửi.
+**Vì sao `get_access_claims` vẫn trả `None` thay vì tự `401`:** `POST
+/auth/logout` cố ý chạy được cả khi không có access token còn hạn (NQ-42,
+C21), nên "không có cookie phiên" phải là một giá trị người gọi đọc được, chứ
+không phải một ngoại lệ. Chỗ biến `None` thành `401` là ba cửa gọi nó, không
+phải chính nó.
 """
 
 from __future__ import annotations
@@ -156,9 +115,8 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Cookie, Depends, Header, status
+from fastapi import Cookie, Depends, status
 
-from app.config.settings import settings
 from app.core.access_token import (
     AccessTokenClaims,
     TokenExpiredError,
@@ -179,22 +137,15 @@ logger = logging.getLogger(__name__)
 #: dưới `/api/v1` cần đọc được nó, còn refresh chỉ có nghĩa ở `/auth/refresh`.
 SESSION_COOKIE_NAME = "scarlet_session"
 
-#: Tên cookie mang danh tính tạm của Phase 1. **Bản sao duy nhất của hằng này
-#: nằm ở `frontend/src/lib/api.ts`** (`TEN_COOKIE_DEV`) — hai đầu của một sợi
-#: dây, cùng loại với `stream:{id}` giữa producer và consumer. Đổi ở đây mà
-#: quên bên kia thì FE im lặng trượt về `401`, nên cả hai chỗ đều trỏ về nhau
-#: bằng chú thích.
-DEV_USER_COOKIE = "scarlet_dev_user"
-
 
 async def get_access_claims(
     session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
 ) -> AccessTokenClaims | None:
     """Claim của cookie phiên, đã verify chữ ký + `exp` + blacklist (§11.3).
 
-    Trả `None` khi **không có** cookie phiên — đó không phải lỗi ở đây, vì
-    `get_current_user_id` còn nhánh tạm Phase 1 phía sau. Mọi ca khác (cookie
-    có mặt nhưng không dùng được) đều raise.
+    Trả `None` khi **không có** cookie phiên; ba cửa gọi hàm này biến `None`
+    ấy thành `401` (xem docstring module). Mọi ca khác — cookie có mặt nhưng
+    không dùng được — đều raise ngay tại đây.
 
     Raise:
         ApiError 401 `TOKEN_EXPIRED`: đúng chữ ký nhưng đã qua `exp` — khác
@@ -245,56 +196,27 @@ async def get_access_claims(
 
 async def get_current_user_id(
     claims: Annotated[AccessTokenClaims | None, Depends(get_access_claims)] = None,
-    x_user_id: Annotated[uuid.UUID | None, Header(alias="X-User-Id")] = None,
-    dev_user_cookie: Annotated[str | None, Cookie(alias=DEV_USER_COOKIE)] = None,
 ) -> uuid.UUID:
-    """`user_id` của người gọi.
+    """`user_id` của người gọi — đúng MỘT đường: cookie phiên `scarlet_session`.
 
-    Thứ tự: cookie phiên thật `scarlet_session` (§11.2, T-2.3, luôn bật, nay đi
-    qua `get_access_claims` ở trên) → chỗ tạm của Phase 1 (header `X-User-Id` →
-    cookie `scarlet_dev_user`, DEBUG-only — xem docstring module cho lý do nó
-    còn ở đây).
+    §11.2, T-2.3, NQ-36. Chỗ tạm của Phase 1 từng nằm ngay dưới đây đã bị
+    T-3.1c xoá; xem docstring module.
 
     Raise:
         Mọi lỗi của `get_access_claims` (401 `TOKEN_EXPIRED` /
             `UNAUTHENTICATED` / `TOKEN_REVOKED`, 503 `SERVICE_UNAVAILABLE`).
-        ApiError 401 `UNAUTHENTICATED`: (nhánh Phase 1) không có đường nào
-            mang danh tính tới.
-        ApiError 503 `AUTH_NOT_IMPLEMENTED`: không có cookie phiên VÀ
-            `DEBUG=false` — nhánh Phase 1 đóng (xem docstring module).
-        ApiError 422 `VALIDATION_ERROR`: (nhánh Phase 1) có cookie dev nhưng
-            nó không phải UUID.
+        ApiError 401 `UNAUTHENTICATED`: không có cookie phiên.
 
     `UNAUTHENTICATED` là mã FE đọc để đẩy người dùng ra màn hình đăng nhập
-    (§18, B-86) — cả hai nhánh dưới đây đều giữ đúng mã này cho ca đó.
+    (§18, B-86, `StatusGate` của T-3.1c).
     """
-    if claims is not None:
-        return claims.user_id
-
-    # ── nhánh Phase 1 (NQ-24, NQ-33) — NGUYÊN VĂN, xem docstring module ──
-    if not settings.DEBUG:
-        raise ApiError(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            ApiErrorCode.AUTH_NOT_IMPLEMENTED,
-            "auth chua duoc hien thuc (tasks.md T-2.3); Phase 1 chi chay voi DEBUG=true",
-        )
-    if x_user_id is not None:
-        return x_user_id
-    if dev_user_cookie is None:
+    if claims is None:
         raise ApiError(
             status.HTTP_401_UNAUTHORIZED,
             ApiErrorCode.UNAUTHENTICATED,
-            f"thieu header X-User-Id va cookie {DEV_USER_COOKIE} "
-            f"(cho tam cua Phase 1, xem app/core/deps.py)",
+            "can dang nhap de dung chuc nang nay",
         )
-    try:
-        return uuid.UUID(dev_user_cookie)
-    except ValueError as loi:
-        raise ApiError(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            ApiErrorCode.VALIDATION_ERROR,
-            f"cookie {DEV_USER_COOKIE} khong phai UUID",
-        ) from loi
+    return claims.user_id
 
 
 # ════════════════ §11.1 — bảng phân quyền theo trạng thái (T-2.7) ═══════════
@@ -391,8 +313,8 @@ async def _has_byok(user_id: uuid.UUID) -> bool:
 
 async def get_current_user_status(
     claims: Annotated[AccessTokenClaims | None, Depends(get_access_claims)] = None,
-) -> UserStatus | None:
-    """Trạng thái tài khoản của người gọi, hoặc `None` khi không có claim (T-2.15).
+) -> UserStatus:
+    """Trạng thái tài khoản của người gọi (T-2.15).
 
     Dùng cho phép kiểm §11.1 **chính xác** mà `require_chat_access` không làm
     nổi: nó chạy trước khi handler đọc body nên nó không biết `model_id`, tức
@@ -404,11 +326,17 @@ async def get_current_user_status(
     này chỉ chở một giá trị, nó không phán xét gì; phép so sánh vẫn là
     `ensure_status_allowed(...)` như ở `POST /auth/login`.
 
-    `None` = nhánh tạm Phase 1 (header `X-User-Id` / cookie dev, `DEBUG=true`)
-    — không có trạng thái để kiểm, y hệt cách `require_status` cho nhánh ấy đi
-    thẳng qua. Xem docstring module và B-128.
+    Raise:
+        ApiError 401 `UNAUTHENTICATED`: không có cookie phiên. Trước T-3.1c ca
+            này trả `None` để nhánh tạm Phase 1 đi qua — xem docstring module.
     """
-    return None if claims is None else claims.status
+    if claims is None:
+        raise ApiError(
+            status.HTTP_401_UNAUTHORIZED,
+            ApiErrorCode.UNAUTHENTICATED,
+            "can dang nhap de dung chuc nang nay",
+        )
+    return claims.status
 
 
 def require_status(
@@ -428,15 +356,24 @@ def require_status(
     Dùng qua `dependencies=[Depends(...)]` chứ không phải tham số của handler:
     nó không trả về gì (`None`), và một tham số luôn `None` trong chữ ký
     handler là thứ người đọc sau sẽ tưởng là thừa rồi xoá đi.
+
+    Raise:
+        ApiError 401 `UNAUTHENTICATED`: không có cookie phiên. Trước T-3.1c ca
+            này đi thẳng qua để nhánh tạm Phase 1 sống được.
+        ApiError 403 `EMAIL_NOT_VERIFIED` / `PENDING_APPROVAL` /
+            `ACCOUNT_DISABLED` — xem `_DENIAL_BY_STATUS`.
     """
     byok_only = frozenset(allowed_with_byok) - frozenset(allowed)
 
     async def _check(
         claims: Annotated[AccessTokenClaims | None, Depends(get_access_claims)] = None,
     ) -> None:
-        # Nhánh tạm Phase 1 — không có trạng thái để kiểm (xem docstring module).
         if claims is None:
-            return
+            raise ApiError(
+                status.HTTP_401_UNAUTHORIZED,
+                ApiErrorCode.UNAUTHENTICATED,
+                "can dang nhap de dung chuc nang nay",
+            )
         if claims.status in allowed:
             return
         if claims.status in byok_only and await _has_byok(claims.user_id):
@@ -485,29 +422,22 @@ async def require_admin(
     trong app sinh ra một claim `role` cũ.
 
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║  NHÁNH TẠM PHASE 1 **KHÔNG** ĐI QUA ĐƯỢC — ngược `require_status`    ║
+    ║  `claims is None` ⇒ `401`, KHÔNG phải `403`                          ║
     ╚══════════════════════════════════════════════════════════════════════╝
 
-    `require_status` cho `claims is None` (header `X-User-Id` / cookie dev của
-    NQ-24) đi thẳng qua, vì chặn nó làm 110 test đỏ mà không đóng lỗ nào. Ở đây
-    thì ngược lại, và cả hai vế đều đo được:
+    Chưa có danh tính nào được chứng minh thì chưa tới lượt hỏi quyền. Đó cũng
+    là đúng chữ DoD dòng 1 của T-2.16 (*"`curl` không token → `401`"*).
 
-    * **Chặn là bắt buộc.** `X-User-Id` là một chuỗi người gọi tự gõ. Cho nhánh
-      ấy qua nghĩa là bất kỳ ai gọi được `api` lúc `DEBUG=true` đều duyệt được
-      tài khoản, đổi được tier, và đọc được bảng chi phí của cả hệ thống — tức
-      chính lỗ hổng mà B-34 đã ghi lại từ T-0.7 và giao cho task này đóng.
-    * **Chặn gần như không tốn gì.** Đúng **một** test có sẵn gọi `/admin/*`
-      bằng danh tính dev (`tests/api/test_models.py`), và nó sửa bằng một cookie
-      phiên thật.
-
-    Vì vậy `claims is None` ⇒ `401`, không phải `403`: chưa có danh tính nào
-    được chứng minh thì chưa tới lượt hỏi quyền. Đó cũng là đúng chữ DoD dòng
-    1 của T-2.16 (*"`curl` không token → `401`"*) — và với `DEBUG=false` thì
-    `get_current_user_id` đã `503` trước đó, nên không có đường nào lọt.
+    Hàm này là cửa **đầu tiên** viết ra luật ấy: từ T-2.16 tới T-3.1b nó đứng
+    một mình, vì `require_status` phải cho `claims is None` đi qua để nhánh
+    danh tính tạm của Phase 1 sống được — mà cho nhánh ấy vào `/admin/*` thì
+    bất kỳ ai gọi được `api` lúc `DEBUG=true` đều duyệt được tài khoản, đổi
+    được tier và đọc được bảng chi phí của cả hệ thống (chính lỗ hổng B-34 ghi
+    từ T-0.7 và giao cho T-2.16 đóng). T-3.1c xoá nhánh tạm, nên nay cả ba cửa
+    của file này nói cùng một câu — xem docstring module.
 
     Raise:
-        ApiError 401 `UNAUTHENTICATED`: không có cookie phiên (kể cả khi nhánh
-            tạm Phase 1 có mang một danh tính tới).
+        ApiError 401 `UNAUTHENTICATED`: không có cookie phiên.
         ApiError 403 `ADMIN_REQUIRED`: có danh tính, nhưng `role != admin`.
     """
     if claims is None:

@@ -39,9 +39,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import catalog
 from app.config.settings import settings
 from app.core import ratelimit
+from app.core.access_token import encode_access_token
 from app.core.crypto import mask_secret, seal
+from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiErrorCode
-from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.db.models import Conversation, Message, MessageRole, MessageStatus, UserRole, UserStatus
 from app.db.repositories import ConversationRepository, MessageRepository, ProviderKeyRepository
 from app.main import app
 
@@ -83,11 +85,6 @@ class _ArqGia:
 
 
 @pytest.fixture
-def _debug_bat(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "DEBUG", True)
-
-
-@pytest.fixture
 def _db_cua_test(
     monkeypatch: pytest.MonkeyPatch, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -111,6 +108,34 @@ async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
         transport=ASGITransport(app=app), base_url="https://localhost", event_hooks=event_hooks
     ) as http:
         yield http
+
+
+def _phien(user_id: uuid.UUID) -> dict[str, str]:
+    """Header `Cookie` mang phiên thật (§11.2) của `user_id` — T-3.1c.
+
+    Trả một `dict` để truyền vào `headers=` của **từng request**, đúng chỗ mà
+    header danh tính tạm của Phase 1 đứng trước đây: danh tính theo request
+    chứ không đặt lên `client`, nên hai danh tính trong cùng một ca (phép kiểm
+    quyền sở hữu, §20) vẫn viết được cạnh nhau mà không ai phải nhớ dọn.
+
+    **Một header `Cookie`, không phải tham số `cookies=` của httpx.** httpx đã
+    deprecate `cookies=` theo request (*"expected behaviour on cookie
+    persistence is ambiguous"*) — và ở đây không có gì để persist: mỗi request
+    tự mang phiên của nó. Một `dict` header còn ghép được bằng `|` với
+    `Idempotency-Key` hay `Last-Event-ID` mà không phải trộn hai cơ chế.
+
+    `status=ACTIVE` chứ không đọc từ bảng `users`: §11.1 kiểm trạng thái từ
+    **claim** của access token (xem `core/deps.py`), và bộ test này đo chuyện
+    khác — ma trận 5×4 của bảng ấy là việc của `test_account_states.py`.
+    """
+    token = encode_access_token(
+        user_id=user_id,
+        role=UserRole.USER,
+        tier="free",
+        status=UserStatus.ACTIVE,
+        ttl_minutes=15,
+    )
+    return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
 async def _hoi_thoai_co_luot_sinh(
@@ -158,7 +183,7 @@ def _cac_script(redis: FakeRateLimitRedis) -> list[str]:
 # ═════════════ ba route sinh chữ đi qua token bucket, ba route kia thì không ═
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test", "arq_gia")
+@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
 async def test_tao_message_bi_chan_boi_token_bucket(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -173,7 +198,7 @@ async def test_tao_message_bi_chan_boi_token_bucket(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -184,7 +209,7 @@ async def test_tao_message_bi_chan_boi_token_bucket(
     assert arq_gia.da_day == []
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test", "arq_gia")
+@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
 async def test_retry_bi_chan_boi_token_bucket(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -194,13 +219,13 @@ async def test_retry_bi_chan_boi_token_bucket(
     _, _, tra_loi = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
     ratelimit_redis.bucket = XO_CAN
 
-    resp = await client.post(DUONG_DAN_RETRY.format(tra_loi.id), headers={"X-User-Id": str(user_a)})
+    resp = await client.post(DUONG_DAN_RETRY.format(tra_loi.id), headers=_phien(user_a))
 
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test", "arq_gia")
+@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
 async def test_sua_cau_hoi_bi_chan_boi_token_bucket(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -212,7 +237,7 @@ async def test_sua_cau_hoi_bi_chan_boi_token_bucket(
 
     resp = await client.patch(
         DUONG_DAN_SUA.format(cau_hoi.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "hoi lai"},
     )
 
@@ -220,7 +245,7 @@ async def test_sua_cau_hoi_bi_chan_boi_token_bucket(
     assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_cancel_khong_di_qua_han_muc_nao(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -238,13 +263,13 @@ async def test_cancel_khong_di_qua_han_muc_nao(
     # — giữ hai đường riêng để phép đếm script bên dưới không lẫn.
     monkeypatch.setattr("app.api.v1.messages.get_redis", lambda: _RedisCoHuy())
 
-    resp = await client.post(DUONG_DAN_HUY.format(tra_loi.id), headers={"X-User-Id": str(user_a)})
+    resp = await client.post(DUONG_DAN_HUY.format(tra_loi.id), headers=_phien(user_a))
 
     assert resp.status_code == 200
     assert _cac_script(ratelimit_redis) == []
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_siblings_khong_di_qua_han_muc_nao(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -254,13 +279,13 @@ async def test_siblings_khong_di_qua_han_muc_nao(
     _, _, tra_loi = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
     ratelimit_redis.bucket = XO_CAN
 
-    resp = await client.get(DUONG_DAN_ANH_EM.format(tra_loi.id), headers={"X-User-Id": str(user_a)})
+    resp = await client.get(DUONG_DAN_ANH_EM.format(tra_loi.id), headers=_phien(user_a))
 
     assert resp.status_code == 200
     assert _cac_script(ratelimit_redis) == []
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_stream_khong_dem_ghe_va_khong_ton_token(
     client: AsyncClient,
     user_a: uuid.UUID,
@@ -276,9 +301,7 @@ async def test_stream_khong_dem_ghe_va_khong_ton_token(
     stream, nên test không phải dựng Redis Stream — mà `404` vẫn chứng minh
     điều cần chứng minh, vì hạn mức là *dependency*, chạy trước handler.
     """
-    resp = await client.get(
-        DUONG_DAN_STREAM.format(uuid.uuid4()), headers={"X-User-Id": str(user_a)}
-    )
+    resp = await client.get(DUONG_DAN_STREAM.format(uuid.uuid4()), headers=_phien(user_a))
 
     assert resp.status_code == 404
     assert _cac_script(ratelimit_redis) == [], "không xô, không ghế"
@@ -287,7 +310,7 @@ async def test_stream_khong_dem_ghe_va_khong_ton_token(
 # ═══════════════════ trần đồng thời (§10.6 hàng 4, B-85, NQ-49) ═════════════
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_het_ghe_tra_429_TOO_MANY_STREAMS_va_khong_ghi_hang_nao(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -303,7 +326,7 @@ async def test_het_ghe_tra_429_TOO_MANY_STREAMS_va_khong_ghi_hang_nao(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "cau hoi thu tu"},
     )
 
@@ -319,7 +342,7 @@ async def test_het_ghe_tra_429_TOO_MANY_STREAMS_va_khong_ghi_hang_nao(
     assert arq_gia.da_day == []
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_ghe_giu_TRUOC_khi_day_job(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -334,7 +357,7 @@ async def test_ghe_giu_TRUOC_khi_day_job(
 
     await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -342,7 +365,7 @@ async def test_ghe_giu_TRUOC_khi_day_job(
     assert arq_gia.da_day == []
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test")
+@pytest.mark.usefixtures("_db_cua_test")
 async def test_day_job_that_bai_thi_NHA_ghe_ngay(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -361,7 +384,7 @@ async def test_day_job_that_bai_thi_NHA_ghe_ngay(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -372,7 +395,7 @@ async def test_day_job_that_bai_thi_NHA_ghe_ngay(
     assert khoa == ratelimit.stream_slot_key(user_a)
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test", "arq_gia")
+@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
 async def test_duong_chay_dung_co_du_ba_header_ratelimit(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -386,7 +409,7 @@ async def test_duong_chay_dung_co_du_ba_header_ratelimit(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -397,7 +420,7 @@ async def test_duong_chay_dung_co_du_ba_header_ratelimit(
     assert ratelimit.HEADER_RETRY_AFTER not in resp.headers
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test", "arq_gia")
+@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
 async def test_ghe_cap_cho_dung_message_assistant_vua_tao(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -411,7 +434,7 @@ async def test_ghe_cap_cho_dung_message_assistant_vua_tao(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 
@@ -425,7 +448,7 @@ async def test_ghe_cap_cho_dung_message_assistant_vua_tao(
 # ═══════ BYOK không mua được quyền miễn rate limit (§10.5, T-2.15) ═══════
 
 
-@pytest.mark.usefixtures("_debug_bat", "_db_cua_test", "arq_gia")
+@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
 async def test_byok_van_bi_token_bucket_chan(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -463,7 +486,7 @@ async def test_byok_van_bi_token_bucket_chan(
 
     resp = await client.post(
         DUONG_DAN_TAO.format(conversation.id),
-        headers={"X-User-Id": str(user_a)},
+        headers=_phien(user_a),
         json={"content": "xin chao"},
     )
 

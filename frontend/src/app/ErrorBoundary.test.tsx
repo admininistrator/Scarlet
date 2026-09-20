@@ -35,7 +35,7 @@ vi.mock("../components/chat/ChatScreen", () => ({
   },
 }));
 
-import { api } from "../lib/api";
+import { api, type NguoiDungRa } from "../lib/api";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PATHS } from "./paths";
 import { routes } from "./routes";
@@ -44,12 +44,30 @@ function Bum(): never {
   throw new Error("component nay luon nem");
 }
 
+/**
+ * Mot phien THAT, `active` — dieu kien de `/` render toi `ChatScreen`.
+ *
+ * Toi T-3.1b, `toiLaAi` o day tra `null` va ca 2 van chay: `StatusGate` cho
+ * nguoi chua dang nhap vao thang man chat (nhanh danh tinh tam cua Phase 1).
+ * T-3.1c chan duong do, nen mot `null` se dung lai o `/dang-nhap` va man
+ * hinh "no tung" khong bao gio duoc render — tuc ca 2 se xanh vi mot ly do
+ * khac han ly do no ra doi.
+ */
+const NGUOI_DUNG: NguoiDungRa = {
+  id: "22222222-2222-4222-8222-222222222222",
+  email: "nguoi-dung@scarlet.test",
+  display_name: null,
+  status: "active",
+  role: "user",
+  tier_name: "free",
+};
+
 beforeEach(() => {
   // React ghi nguyen ca stack ra console moi lan mot boundary bat duoc loi.
   // Day la hanh vi dung cua React, nhung o day no lam ban output cua ca bo
   // test bang mot stack cua mot loi DUOC MONG DOI.
   vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.mocked(api.toiLaAi).mockResolvedValue(null as never);
+  vi.mocked(api.toiLaAi).mockResolvedValue(NGUOI_DUNG);
   vi.mocked(api.danhSachModel).mockResolvedValue([]);
 });
 
