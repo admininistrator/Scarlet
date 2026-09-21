@@ -91,7 +91,7 @@ export function ForgotPasswordForm() {
         <Turnstile onToken={turnstile.onToken} ref={turnstile.ref} className="my-1" />
 
         {loi !== null && (
-          <p role="alert" className="text-sm text-danger-emphasis">
+          <p role="alert" className="text-sm text-danger-text">
             {loi}
           </p>
         )}

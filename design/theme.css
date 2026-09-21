@@ -1,310 +1,274 @@
+@import url("https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap");
 @import "tailwindcss";
 
-/* =============================================================================
- * SCARLET — DESIGN SYSTEM (theme.css)
- * -----------------------------------------------------------------------------
- * Tailwind v4. Đúng HAI khối top-level: @theme (sáng) và [data-theme="dark"].
- * @keyframes nằm LỒNG trong @theme (v4 cho phép) nên không phát sinh khối thứ ba.
+/*
+ * Scarlet — Design System tokens (T-HD1)
+ * ---------------------------------------------------------------------------
+ * Quy tắc:
+ *   • Màu CHỈ tồn tại ở file này. Component không có #rrggbb / rgb() / hsl() / oklch().
+ *   • Sáng/tối = @theme (sáng) + [data-theme="dark"] (ghi đè). Không dùng biến thể `dark:`.
+ *   • Thời lượng + easing cũng là token. Component chỉ gắn tên class .motion-*.
+ *   • Định danh tiếng Anh; chuỗi hiển thị nằm trong vi.json.
  *
- * Vì @theme xuất biến vào @layer theme (CSS có layer luôn yếu hơn CSS không
- * layer), khối [data-theme="dark"] không cần tăng specificity vẫn thắng.
+ * Bảng tương phản đã tính: xem contrast.md. Mọi cặp chữ/nền ≥ 4.5:1,
+ * mọi thành phần đồ hoạ ≥ 3:1, ở CẢ HAI theme.
  *
- * Quy ước đọc tên:
- *   -hover / -active   biến thể tương tác của cùng một nền
- *   -foreground        chữ/icon ĐẶT TRÊN nền cùng tên
- *   -subtle            nền nhạt cho banner/badge (chữ dùng -emphasis hoặc foreground)
- *   -emphasis          chính màu đó nhưng đủ tương phản để LÀM CHỮ trên background/raised
- *
- * Tương phản (đã tính, trường hợp xấu nhất của mỗi vai trò, cả hai theme):
- *   foreground            12.34 – 17.49   muted        6.09 – 8.95
- *   disabled-foreground    4.51 –  6.15   *-foreground 4.72 – 9.52 trên nền đặc
- *   *-emphasis             5.56 – 10.30   border-strong 3.12 – 3.96
- *   ring                   4.67 –  8.71   quota fill/track 3.30 – 6.31
- *   chart metered/unmetered 3.33 – 12.81 vs nền, 3.39 – 3.78 với nhau
- * ========================================================================== */
+ * 7 biến kế thừa (GIỮ NGUYÊN TÊN, chỉ đổi giá trị):
+ *   --color-background --color-foreground --color-muted --color-border
+ *   --color-accent --color-accent-foreground --color-danger
+ */
 
 @theme {
-  /* ---------------------------------------------------------------------------
-   * 1. BỀ MẶT — 6 tầng. Trung tính ấm (nghiêng nâu đất) để sắc đỏ son không
-   *    xung đột; xám xanh lạnh làm màu đỏ trông tím.
-   * ------------------------------------------------------------------------ */
-  --color-background: #faf8f6;         /* nền app */
-  --color-sidebar: #f1ece7;            /* sidebar — 1.11:1 so với nền app */
-  --color-raised: #ffffff;             /* dropdown / tooltip / dialog (+shadow) */
-  --color-bubble-assistant: #ffffff;   /* bong bóng assistant */
-  --color-bubble-user: #fbe9e6;        /* bong bóng user — 1.17:1 so với assistant */
-  --color-codeblock: #f2ece7;          /* khối code — 1.17:1 so với assistant */
-  --color-field: #ffffff;              /* nền ô nhập */
-  --color-hover: #ece6e0;              /* nền hover của hàng / item menu */
+  /* ---------- Typography ---------------------------------------------- */
+  /* Cả hai font đều có subset "vietnamese" đầy đủ dấu. */
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
-  /* 2. CHỮ */
-  --color-foreground: #1c1917;
-  --color-muted: #5f5651;                    /* chữ phụ */
-  --color-disabled-foreground: #736a63;      /* model không dùng được */
-  --color-accent-foreground: #ffffff;        /* chữ trên nền nhấn */
-  --color-danger-foreground: #ffffff;        /* chữ trên nền nguy hiểm */
-  --color-warning-foreground: #2b1c05;
-  --color-success-foreground: #ffffff;
-
-  /* 3. ĐƯỜNG VIỀN */
-  --color-border: #e4ddd6;             /* viền thường, phân tách (trang trí) */
-  --color-border-strong: #8d8279;      /* viền ô nhập, viền thanh quota — ≥3:1 */
-  --color-ring: #c3341c;               /* vòng focus */
-
-  /* 4. TRẠNG THÁI — accent là đỏ son (vermilion). danger lệch sang đỏ thắm
-   *    (hue ~344° so với ~13°) để "nút chính" và "nút xoá" không cùng một đỏ. */
-  --color-accent: #c3341c;
-  --color-accent-hover: #a6281d;
-  --color-accent-active: #851f16;
-  --color-accent-subtle: #ffe3dd;      /* nền hội thoại đang chọn, banner */
-  --color-accent-emphasis: #a6281d;    /* link / icon màu nhấn */
-
-  --color-danger: #b81a45;
-  --color-danger-hover: #9c1339;
-  --color-danger-subtle: #ffe2e9;
-  --color-danger-emphasis: #a3123b;
-
-  --color-warning: #e8a33d;            /* hạn mức còn ≤ 20% */
-  --color-warning-subtle: #fdefd0;
-  --color-warning-emphasis: #8a5300;
-
-  --color-success: #15803d;            /* email đã xác thực, provider khoẻ */
-  --color-success-subtle: #dcf5e4;
-  --color-success-emphasis: #0f6a35;
-
-  /* 5. THANH QUOTA — ba mức; fill ≥3:1 so với ray. Ray chỉ 1.27:1 so với nền
-   *    nên thanh PHẢI có viền 1px border-strong (xem ghi chú ở cuối). */
-  --color-quota-track: #e4ddd6;
-  --color-quota-normal: #5f5651;
-  --color-quota-warning: #a86a08;      /* đậm hơn --color-warning để đạt 3:1 với ray */
-  --color-quota-depleted: #b3251b;
-
-  /* 6. BIỂU ĐỒ — đúng 2 chuỗi. metered luôn là màu TỐI, unmetered luôn SÁNG
-   *    ở cả hai theme, nên vẫn phân biệt được khi in trắng đen. */
-  --color-chart-metered: #5c1610;
-  --color-chart-unmetered: #728c9e;
-
-  /* 7. MÀU BÓNG — giá trị shadow được Tailwind nội suy lúc build, nên theme tối
-   *    chỉ đổi được MÀU bóng (biến này), không đổi được --shadow-*. */
-  --color-shadow-soft: rgb(61 41 31 / 0.07);
-  --color-shadow-hard: rgb(61 41 31 / 0.13);
-
-  /* 8. TƯƠNG THÍCH shadcn/ui — để dán primitive vào mà không phải sửa class.
-   *    KHÔNG dùng bg-muted (muted ở đây là màu CHỮ) và thay bg-accent trong
-   *    primitive bằng bg-hover (xem ghi chú ở cuối). */
-  --color-muted-foreground: var(--color-muted);
-  --color-popover: var(--color-raised);
-  --color-popover-foreground: var(--color-foreground);
-  --color-card: var(--color-raised);
-  --color-card-foreground: var(--color-foreground);
-  --color-primary: var(--color-accent);
-  --color-primary-foreground: var(--color-accent-foreground);
-  --color-destructive: var(--color-danger);
-  --color-destructive-foreground: var(--color-danger-foreground);
-  --color-input: var(--color-border-strong);   /* shadcn dùng border-input */
-
-  /* ---------------------------------------------------------------------------
-   * CHỮ — cả hai họ đều có subset "vietnamese" trên Google Fonts / Fontsource:
-   *   npm i @fontsource/be-vietnam-pro @fontsource/jetbrains-mono
-   *   (self-host, không gọi CDN — app chạy nội bộ)
-   * Be Vietnam Pro dựng riêng cho dấu tiếng Việt; JetBrains Mono có U+1EA0-1EF9
-   * và ₫ (U+20AB). Line-height để rộng hơn thường lệ vì dấu chồng (ắ, ộ, ễ).
-   * ------------------------------------------------------------------------ */
-  --font-sans: "Be Vietnam Pro", "Inter", ui-sans-serif, system-ui, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo,
-    Consolas, monospace;
-  --default-font-family: var(--font-sans);
-  --default-mono-font-family: var(--font-mono);
-
-  --text-xs: 0.75rem;              /* 12px — nhãn, chú thích */
+  --text-2xs: 0.6875rem;   /* 11px — nhãn biểu đồ, chỉ dùng chữ hoa */
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;      /* 12px — metadata, timestamp */
   --text-xs--line-height: 1.125rem;
-  --text-sm: 0.875rem;             /* 14px — UI, nhãn nút */
-  --text-sm--line-height: 1.375rem;
-  --text-base: 0.9375rem;          /* 15px — thân tin nhắn */
-  --text-base--line-height: 1.5625rem;
-  --text-lg: 1.0625rem;            /* 17px */
-  --text-lg--line-height: 1.75rem;
-  --text-xl: 1.25rem;              /* 20px — tiêu đề panel */
+  --text-sm: 0.8125rem;    /* 13px — nhãn ô nhập, bảng admin */
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;   /* 14px — chữ giao diện mặc định */
+  --text-base--line-height: 1.375rem;
+  --text-body: 0.9375rem;  /* 15px — nội dung tin nhắn */
+  --text-body--line-height: 1.625rem;
+  --text-lg: 1.0625rem;    /* 17px */
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.3125rem;    /* 21px — tiêu đề panel */
   --text-xl--line-height: 1.75rem;
-  --text-2xl: 1.5rem;              /* 24px — tiêu đề trang admin */
-  --text-2xl--line-height: 2rem;
-  --text-code: 0.8125rem;          /* 13px — khối code, font-mono */
-  --text-code--line-height: 1.375rem;
+  --text-2xl: 1.625rem;    /* 26px — tiêu đề trang */
+  --text-2xl--line-height: 2.125rem;
 
-  --tracking-tight: -0.011em;      /* chỉ cho cỡ ≥ --text-xl */
-
-  /* ---------------------------------------------------------------------------
-   * SPACING / KÍCH THƯỚC — giữ nguyên --spacing gốc (0.25rem).
-   * ------------------------------------------------------------------------ */
+  /* ---------- Spacing / kích thước ------------------------------------- */
   --spacing: 0.25rem;
-  --spacing-touch: 2.75rem;        /* 44px — vùng chạm tối thiểu: size-touch */
-  --spacing-touch-lg: 3rem;        /* 48px — hành động chính trên mobile */
-  --container-app-min: 23.4375rem;  /* 375px — min-w-app-min trên shell gốc */
-  --spacing-sidebar: 17.5rem;      /* 280px */
-  --spacing-icon: 1.25rem;         /* 20px — khung icon trong nút 44px */
-  --container-thread: 46rem;       /* dòng đọc < 80 ký tự: max-w-thread */
-  --breakpoint-shell: 48rem;       /* dưới mức này sidebar là drawer */
+  --spacing-touch: 2.75rem;   /* 44px — vùng chạm tối thiểu (min-h-touch) */
+  --spacing-sidebar: 16rem;
+  --spacing-measure: 46rem;   /* bề rộng đọc tối đa của luồng chat */
+  --spacing-min: 23.4375rem;  /* 375px — bề rộng nhỏ nhất phải chạy đúng */
 
-  /* RADIUS — giữ nguyên ba giá trị đang dùng, chỉ thêm mới. */
+  /* ---------- Radius ---------------------------------------------------- */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
-  --radius-lg: 1rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
   --radius-bubble: 1.125rem;
-  --radius-pill: 9999px;
+  --radius-full: 9999px;
 
-  /* SHADOW — chỉ panel nổi mới có bóng. Bề mặt phẳng dùng viền. */
-  --shadow-xs: 0 1px 1px 0 var(--color-shadow-soft);
-  --shadow-sm: 0 1px 2px 0 var(--color-shadow-soft),
-    0 1px 3px -1px var(--color-shadow-soft);
-  --shadow-md: 0 2px 4px -1px var(--color-shadow-soft),
-    0 6px 14px -4px var(--color-shadow-hard);
-  --shadow-lg: 0 4px 8px -2px var(--color-shadow-soft),
-    0 16px 32px -12px var(--color-shadow-hard);
+  /* ---------- Shadow ---------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgb(24 18 16 / 0.06);
+  --shadow-panel: 0 4px 12px -2px rgb(24 18 16 / 0.10), 0 2px 4px -2px rgb(24 18 16 / 0.06);
+  --shadow-popover: 0 12px 28px -6px rgb(24 18 16 / 0.18), 0 4px 8px -4px rgb(24 18 16 / 0.10);
 
-  /* ---------------------------------------------------------------------------
-   * CHUYỂN ĐỘNG — thời lượng và easing là token. Nhờ --default-transition-*,
-   * component chỉ cần viết `transition-colors`, không cần duration/easing.
-   * Cần nhiều hơn thì dùng animate-* sinh từ --animate-* dưới đây.
-   * Nếu bắt buộc phải đổi thời lượng tại chỗ: duration-(--duration-slow).
-   * ------------------------------------------------------------------------ */
+  /* ---------- Motion ----------------------------------------------------- */
   --duration-instant: 90ms;
   --duration-fast: 140ms;
-  --duration-panel: 180ms;
-  --duration-slow: 280ms;
-  --ease-standard: cubic-bezier(0.32, 0.08, 0.24, 1);
-  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
-  --default-transition-duration: var(--duration-fast);
-  --default-transition-timing-function: var(--ease-standard);
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
 
-  --animate-panel-in: panel-in var(--duration-panel) var(--ease-standard) both;
-  --animate-overlay-in: overlay-in var(--duration-fast) var(--ease-standard) both;
-  --animate-message-in: message-in var(--duration-panel) var(--ease-standard) both;
-  --animate-stream-dot: stream-dot 1.2s var(--ease-standard) infinite;
+  /* ---------- BỀ MẶT ----------------------------------------------------- */
+  --color-background: #f7f6f4;          /* nền app */
+  --color-surface-sidebar: #efede9;     /* sidebar */
+  --color-surface-panel: #ffffff;       /* dialog / dropdown / tooltip (+shadow) */
+  --color-surface-assistant: #ffffff;   /* bong bóng assistant */
+  --color-surface-user: #fbede9;        /* bong bóng user */
+  --color-surface-code: #e8e4df;        /* khối code */
+  --color-surface-hover: #edeae6;       /* hover hàng danh sách */
 
-  @keyframes panel-in {
-    from {
-      opacity: 0;
-      transform: translateY(-0.25rem) scale(0.985);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
-  @keyframes overlay-in {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
-  @keyframes message-in {
-    from {
-      opacity: 0;
-      transform: translateY(0.375rem);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
-  @keyframes stream-dot {
-    0%,
-    100% {
-      opacity: 0.35;
-    }
-    50% {
-      opacity: 1;
-    }
-  }
+  /* ---------- CHỮ --------------------------------------------------------- */
+  --color-foreground: #1b1917;
+  --color-muted: #5c5651;
+  --color-disabled-foreground: #8a837c; /* model không dùng được */
+  --color-accent-foreground: #ffffff;   /* chữ trên nền nhấn */
+  --color-danger-foreground: #ffffff;   /* chữ trên nền nguy hiểm */
+  --color-accent-text: #a81e14;         /* accent dùng làm CHỮ / icon trên bề mặt */
+  --color-danger-text: #961036;
+  --color-warning-text: #8a5200;
+  --color-success-text: #14653d;
+
+  /* ---------- ĐƯỜNG VIỀN --------------------------------------------------- */
+  --color-border: #ded9d3;              /* viền thường */
+  --color-border-strong: #8c857d;       /* viền đậm — ô nhập, ô chọn */
+  --color-ring: #a81e14;                /* vòng focus */
+
+  /* ---------- TRẠNG THÁI ---------------------------------------------------- */
+  --color-accent: #b3261e;
+  --color-accent-hover: #9b1e17;
+  --color-accent-active: #841810;
+  --color-accent-subtle: #fbeae7;       /* nền nhạt: mục sidebar đang chọn */
+  --color-danger: #9f1239;
+  --color-danger-hover: #860f30;
+  --color-danger-subtle: #fce9ee;
+  --color-warning: #b45309;             /* đồ hoạ: thanh, chấm, icon */
+  --color-warning-subtle: #fcf1df;
+  --color-success: #14653d;
+  --color-success-subtle: #e3f3ea;
+
+  /* ---------- THANH QUOTA ---------------------------------------------------- */
+  --color-quota-track: #e2ded8;
+  --color-quota-normal: #46606e;
+  --color-quota-warning: #b45309;       /* ≤ 20% */
+  --color-quota-empty: #9f1239;         /* đã hết */
+
+  /* ---------- BIỂU ĐỒ (đúng 2 chuỗi) -------------------------------------------- */
+  /* Lệch độ sáng 2.4:1 giữa hai màu → vẫn tách bạch khi in trắng đen. */
+  --color-chart-1: #8e1f17;             /* metered */
+  --color-chart-2: #4a8ab8;             /* unmetered */
 }
 
-/* =============================================================================
- * THEME TỐI — chỉ ghi đè giá trị, không thêm tên biến mới.
- * Nền là nâu-đen ấm (không phải xám xanh) để đỏ son giữ được sắc son.
- * Các alias shadcn ở khối trên tự đổi theo vì chúng trỏ bằng var().
- * ========================================================================== */
 [data-theme="dark"] {
-  --color-background: #171413;
-  --color-sidebar: #100e0d;
-  --color-raised: #292525;
-  --color-bubble-assistant: #201d1c;
-  --color-bubble-user: #3f2421;
-  --color-codeblock: #090807;
-  --color-field: #201d1c;
-  --color-hover: #2b2726;
+  /* BỀ MẶT */
+  --color-background: #171514;
+  --color-surface-sidebar: #0e0d0c;
+  --color-surface-panel: #262321;
+  --color-surface-assistant: #201e1c;
+  --color-surface-user: #3a201b;
+  --color-surface-code: #0b0a0a;
+  --color-surface-hover: #221f1d;
 
+  /* CHỮ */
   --color-foreground: #f2efec;
-  --color-muted: #b4aca6;
-  --color-disabled-foreground: #99908a;
+  --color-muted: #a8a099;
+  --color-disabled-foreground: #7c756e;
   --color-accent-foreground: #ffffff;
   --color-danger-foreground: #ffffff;
-  --color-warning-foreground: #2b1c05;
-  --color-success-foreground: #ffffff;
+  --color-accent-text: #ff8b7a;
+  --color-danger-text: #ff8fa3;
+  --color-warning-text: #e8a33d;
+  --color-success-text: #4cc38a;
 
-  --color-border: #302b28;
-  --color-border-strong: #787069;
-  --color-ring: #ff8a75;
+  /* ĐƯỜNG VIỀN */
+  --color-border: #332f2b;
+  --color-border-strong: #7f7871;
+  --color-ring: #ff8b7a;
 
-  --color-accent: #bf3220;
-  --color-accent-hover: #d43b26;
-  --color-accent-active: #a82a1a;
-  --color-accent-subtle: #3a1c16;
-  --color-accent-emphasis: #ff9280;
+  /* TRẠNG THÁI */
+  --color-accent: #d1402f;
+  --color-accent-hover: #c2372a;   /* theme tối: hover ĐẬM xuống, giữ chữ trắng ≥ 4.5:1 */
+  --color-accent-active: #a92c20;
+  --color-accent-subtle: #331914;
+  --color-danger: #c22a4c;
+  --color-danger-hover: #d43a5c;
+  --color-danger-subtle: #331a21;
+  --color-warning: #e8a33d;
+  --color-warning-subtle: #332413;
+  --color-success: #4cc38a;
+  --color-success-subtle: #10281e;
 
-  --color-danger: #b81f45;
-  --color-danger-hover: #cf2a52;
-  --color-danger-subtle: #3a1220;
-  --color-danger-emphasis: #ff8fa8;
+  /* THANH QUOTA */
+  --color-quota-track: #2e2a27;
+  --color-quota-normal: #7fa8bc;
+  --color-quota-warning: #e8a33d;
+  --color-quota-empty: #f2708a;
 
-  --color-warning: #e0a33a;
-  --color-warning-subtle: #33260d;
-  --color-warning-emphasis: #f0b95c;
+  /* BIỂU ĐỒ */
+  --color-chart-1: #e0584a;
+  --color-chart-2: #a8cdea;
 
-  --color-success: #1a7a4a;
-  --color-success-subtle: #0d2a1c;
-  --color-success-emphasis: #5fd39a;
-
-  --color-quota-track: #302b28;
-  --color-quota-normal: #8a8079;
-  --color-quota-warning: #e0a33a;
-  --color-quota-depleted: #e8543c;
-
-  --color-chart-metered: #c9402c;
-  --color-chart-unmetered: #c9d8e2;
-
-  --color-shadow-soft: rgb(0 0 0 / 0.4);
-  --color-shadow-hard: rgb(0 0 0 / 0.55);
+  /* Shadow phải đậm hơn trên nền tối mới nhìn thấy tầng nổi. */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
+  --shadow-panel: 0 4px 12px -2px rgb(0 0 0 / 0.55), 0 2px 4px -2px rgb(0 0 0 / 0.40);
+  --shadow-popover: 0 12px 28px -6px rgb(0 0 0 / 0.70), 0 4px 8px -4px rgb(0 0 0 / 0.50);
 }
 
-/* =============================================================================
- * GHI CHÚ THI CÔNG (không sinh CSS)
- * -----------------------------------------------------------------------------
- * body: đặt class trong index.html, không viết khối CSS thứ ba:
- *   <body class="bg-background text-foreground antialiased min-w-app-min">
- *
- * Theme tối phân tầng bằng viền nhiều hơn bằng nền (chênh lệch chỉ 1.05–1.24:1),
- * nên MỌI ranh giới tầng phải có border-border.
- *
- * Thanh quota: <div class="h-2 rounded-pill bg-quota-track border border-border-strong">
- * — ray/nền chỉ 1.27:1 nên viền là bắt buộc, không phải trang trí.
- *
- * Biểu đồ: hai cột tách riêng + nhãn trực tiếp; thêm hoạ tiết gạch chéo cho
- * unmetered nếu in trắng đen là yêu cầu thật.
- *
- * Số tiền trong bảng admin: class="tabular-nums text-right" (tiện ích sẵn có).
- *
- * Model không dùng được: --color-disabled-foreground đã đạt 4.51:1 (đủ cho axe
- * ở mọi phiên bản) nên PHẢI kèm dấu hiệu phi màu — aria-disabled + nhãn
- * "không dùng được". Item disabled không nhận hover:bg-hover.
- *
- * shadcn/ui: dán primitive rồi đổi `bg-accent` → `bg-hover`,
- * `text-accent-foreground` → `text-foreground`, và không dùng `bg-muted`.
- * Các alias khác (popover, card, primary, destructive, input) đã khớp sẵn.
- *
- * Focus: focus-visible:ring-2 focus-visible:ring-ring
- *        focus-visible:ring-offset-2 focus-visible:ring-offset-background
- * (ring-offset tách vòng focus khỏi nền nút đỏ).
- * ========================================================================== */
+/* ---------------------------------------------------------------------------
+ * Base + utility. Không chứa giá trị màu thô — chỉ tham chiếu token ở trên.
+ * Component gắn tên class, không tự viết transition/animation/ms.
+ * ------------------------------------------------------------------------- */
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  html[data-theme="dark"] {
+    color-scheme: dark;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    min-width: var(--spacing-min);
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+  ::selection {
+    background-color: var(--color-accent-subtle);
+    color: var(--color-foreground);
+  }
+  a {
+    color: var(--color-accent-text);
+    text-underline-offset: 2px;
+  }
+  a:hover {
+    color: var(--color-accent-hover);
+    text-decoration: underline;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 1ms !important;
+    }
+  }
+}
+
+@utility motion-theme {
+  transition: background-color var(--duration-base) var(--ease-standard),
+    color var(--duration-base) var(--ease-standard);
+}
+@utility motion-control {
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+@utility motion-panel {
+  animation: scarlet-panel-in var(--duration-base) var(--ease-enter) both;
+}
+@utility motion-popover {
+  animation: scarlet-popover-in var(--duration-fast) var(--ease-enter) both;
+}
+@utility motion-bubble {
+  animation: scarlet-bubble-in var(--duration-slow) var(--ease-enter) both;
+}
+@utility motion-quota {
+  transition: width var(--duration-slow) var(--ease-standard),
+    background-color var(--duration-base) var(--ease-standard);
+}
+@utility motion-pulse {
+  animation: scarlet-pulse var(--duration-slow) var(--ease-standard) infinite alternate;
+}
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+@keyframes scarlet-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes scarlet-popover-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes scarlet-bubble-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes scarlet-pulse {
+  from { opacity: 0.45; }
+  to   { opacity: 1; }
+}

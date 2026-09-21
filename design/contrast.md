@@ -1,174 +1,139 @@
 # Scarlet — Bảng tương phản
 
-Kiểm chứng accessibility cho `theme.css`. Tính theo công thức tương phản WCAG 2.x
-(relative luminance sRGB). Nguồn giá trị: các token trong `@theme` (theme sáng) và
-`[data-theme="dark"]` (theme tối).
+Mọi số dưới đây tính theo công thức tương phản WCAG 2.1 (relative luminance, sRGB)
+từ chính giá trị hex trong `theme.css`. Sửa một biến màu thì phải tính lại dòng tương ứng.
 
-**Đích:** chữ thường ≥ 4.5:1 · chữ lớn và thành phần đồ hoạ ≥ 3:1 · trong CẢ HAI theme.
+**Ngưỡng áp dụng**
 
-**Kết quả:** không có cặp nào không đạt. 87 cặp đã tính, 0 fail.
+| Loại | Ngưỡng |
+|---|---|
+| Chữ thường (< 18.66px thường / < 24px đậm) | ≥ 4.5:1 |
+| Chữ lớn (≥ 24px, hoặc ≥ 18.66px đậm) | ≥ 3:1 |
+| Thành phần đồ hoạ, viền ô nhập, vòng focus, thanh, cột biểu đồ | ≥ 3:1 |
+| Chữ vô hiệu hoá | miễn trừ (WCAG 1.4.3) — hệ vẫn giữ ≥ 3:1 |
 
----
-
-## 1. Chữ — ngưỡng 4.5:1
-
-| Chữ | Trên nền | Sáng | Tối |
-|---|---|---|---|
-| foreground | background / sidebar / raised | 16.51 / 14.90 / 17.49 | 16.00 / 16.81 / 13.23 |
-| foreground | bubble-assistant / bubble-user / codeblock | 17.49 / 14.91 / 14.93 | 14.62 / 12.34 / 17.47 |
-| foreground | field / hover | 17.49 / 14.13 | 14.62 / 12.90 |
-| foreground | accent-subtle / danger-subtle | 14.39 / 14.41 | 13.50 / 14.24 |
-| foreground | warning-subtle / success-subtle | 15.35 / 15.18 | 12.88 / 13.43 |
-| muted | background / sidebar / raised | 6.75 / 6.09 / 7.15 | 8.20 / 8.61 / 6.78 |
-| muted | bubble-user / codeblock / field / hover | 6.10 / 6.11 / 7.15 / 5.78 | 6.32 / 8.95 / 7.49 / 6.61 |
-| disabled-foreground | background / sidebar / raised / field | 4.99 / **4.51** / 5.29 / 5.29 | 5.86 / 6.15 / **4.84** / 5.35 |
-| accent-foreground | accent / accent-hover / accent-active | 5.49 / 7.14 / 9.52 | 5.69 / **4.72** / 6.97 |
-| danger-foreground | danger / danger-hover | 6.42 / 8.18 | 6.33 / 5.11 |
-| warning-foreground | warning | 7.66 | 7.45 |
-| success-foreground | success | 5.02 | 5.35 |
-| accent-emphasis | background / raised / sidebar / accent-subtle | 6.74 / 7.14 / 6.08 / 5.87 | 8.44 / 6.98 / 8.87 / 7.13 |
-| danger-emphasis | background / raised / danger-subtle | 7.32 / 7.76 / 6.39 | 8.51 / 7.03 / 7.57 |
-| warning-emphasis | background / raised / warning-subtle | 5.97 / 6.33 / **5.56** | 10.30 / 8.52 / 8.29 |
-| success-emphasis | background / raised / success-subtle | 6.33 / 6.70 / 5.82 | 9.84 / 8.13 / 8.26 |
-
-### Ba cặp sát ngưỡng nhất
-
-| Cặp | Theme | Tỷ lệ | Biên |
-|---|---|---|---|
-| disabled-foreground trên sidebar | sáng | 4.51 | +0.01 |
-| accent-foreground trên accent-hover | tối | 4.72 | +0.22 |
-| disabled-foreground trên raised | tối | 4.84 | +0.34 |
-
-Đổi bất kỳ token nào trong ba cặp trên là phải tính lại trước khi commit.
+Cả hai cột Sáng / Tối đều phải đạt thì dòng đó mới ✅.
 
 ---
 
-## 2. Phi văn bản — ngưỡng 3:1
+## 1. Chữ chính và chữ phụ trên từng bề mặt
 
-Áp WCAG 1.4.11 (Non-text Contrast): viền ô nhập, vòng focus, thanh quota và cột
-biểu đồ đều là thành phần đồ hoạ cần thiết để hiểu nội dung.
+| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---|---:|---:|---:|:--:|
+| `--color-foreground` | `--color-background` | 16.23 | 15.89 | 4.5:1 | ✅ |
+| `--color-foreground` | `--color-surface-sidebar` | 14.99 | 16.95 | 4.5:1 | ✅ |
+| `--color-foreground` | `--color-surface-panel` | 17.53 | 13.63 | 4.5:1 | ✅ |
+| `--color-foreground` | `--color-surface-assistant` | 17.53 | 14.51 | 4.5:1 | ✅ |
+| `--color-foreground` | `--color-surface-user` | 15.35 | 13.07 | 4.5:1 | ✅ |
+| `--color-foreground` | `--color-surface-code` | 13.85 | 17.26 | 4.5:1 | ✅ |
+| `--color-muted` | `--color-background` | 6.69 | 7.07 | 4.5:1 | ✅ |
+| `--color-muted` | `--color-surface-sidebar` | 6.18 | 7.54 | 4.5:1 | ✅ |
+| `--color-muted` | `--color-surface-panel` | 7.23 | 6.06 | 4.5:1 | ✅ |
+| `--color-muted` | `--color-surface-assistant` | 7.23 | 6.45 | 4.5:1 | ✅ |
+| `--color-muted` | `--color-surface-user` | 6.33 | 5.81 | 4.5:1 | ✅ |
+| `--color-muted` | `--color-surface-code` | 5.71 | 7.68 | 4.5:1 | ✅ |
 
-| Cặp | Sáng | Tối |
-|---|---|---|
-| border-strong / field | 3.75 | 3.45 |
-| border-strong / background | 3.54 | 3.77 |
-| border-strong / raised | 3.75 | **3.12** |
-| border-strong / sidebar | 3.19 | 3.96 |
-| ring / background | 5.18 | 7.98 |
-| ring / sidebar | 4.67 | 8.38 |
-| ring / raised | 5.49 | 6.60 |
-| ring / bubble-user | 4.68 | 6.16 |
-| ring / codeblock | 4.68 | 8.71 |
-| accent / background | 5.18 | **3.22** |
-| quota-normal / quota-track | 5.32 | 3.63 |
-| quota-warning / quota-track | **3.30** | 6.31 |
-| quota-depleted / quota-track | 4.88 | 3.84 |
-| chart-metered / background | 12.57 | 3.71 |
-| chart-metered / raised | 13.31 | **3.07** |
-| chart-unmetered / background | 3.33 | 12.57 |
-| chart-unmetered / raised | 3.52 | 10.40 |
-| **chart-metered / chart-unmetered** | **3.78** | **3.39** |
+## 2. Chữ trên nền đặc (accent / danger)
 
-### Biểu đồ và in trắng đen
+| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---|---:|---:|---:|:--:|
+| `--color-accent-foreground` | `--color-accent` | 6.54 | 4.68 | 4.5:1 | ✅ |
+| `--color-accent-foreground` | `--color-accent-hover` | 8.10 | 5.42 | 4.5:1 | ✅ |
+| `--color-accent-foreground` | `--color-accent-active` | 9.91 | 6.84 | 4.5:1 | ✅ |
+| `--color-danger-foreground` | `--color-danger` | 8.02 | 5.63 | 4.5:1 | ✅ |
+| `--color-danger-foreground` | `--color-danger-hover` | 9.88 | 4.61 | 4.5:1 | ✅ |
 
-Hai màu chuỗi đạt cả ba điều kiện cùng lúc: ≥3:1 với nền, ≥3:1 với nhau, và
-metered luôn là màu **tối** còn unmetered luôn là màu **sáng** ở cả hai theme
-(12.57 so với 3.33 trong theme sáng) — nên thứ tự độ sáng không đảo, in trắng đen
-vẫn phân biệt được.
+## 3. Màu trạng thái dùng làm CHỮ
 
-Giá phải trả: metered trong theme sáng là đỏ huyết `#5c1610`, không phải đỏ son
-tươi. Một màu đỏ tươi không thể đồng thời ≥3:1 với nền trắng và ≥3:1 với một màu
-thứ hai cũng ≥3:1 với nền trắng.
+Accent và danger mỗi thứ có hai biến: `--color-accent` là nền nút (đồ hoạ, ngưỡng 3:1),
+`--color-accent-text` là bản đủ tương phản để làm chữ hoặc icon trên bề mặt (4.5:1).
+Không dùng lẫn.
 
----
+| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---|---:|---:|---:|:--:|
+| `--color-accent-text` | `--color-background` | 6.80 | 8.00 | 4.5:1 | ✅ |
+| `--color-accent-text` | `--color-surface-panel` | 7.34 | 6.86 | 4.5:1 | ✅ |
+| `--color-accent-text` | `--color-surface-sidebar` | 6.28 | 8.53 | 4.5:1 | ✅ |
+| `--color-accent-text` | `--color-accent-subtle` | 6.30 | 7.15 | 4.5:1 | ✅ |
+| `--color-danger-text` | `--color-background` | 8.02 | 8.42 | 4.5:1 | ✅ |
+| `--color-danger-text` | `--color-danger-subtle` | 7.44 | 7.41 | 4.5:1 | ✅ |
+| `--color-warning-text` | `--color-background` | 5.91 | 8.44 | 4.5:1 | ✅ |
+| `--color-warning-text` | `--color-warning-subtle` | 5.71 | 6.94 | 4.5:1 | ✅ |
+| `--color-success-text` | `--color-background` | 6.57 | 8.22 | 4.5:1 | ✅ |
+| `--color-success-text` | `--color-success-subtle` | 6.18 | 7.05 | 4.5:1 | ✅ |
 
-## 3. Hai chỗ tương phản thấp — có chủ ý
+## 4. Chữ vô hiệu hoá (model không dùng được)
 
-| Cặp | Sáng | Tối | Bù bằng gì |
-|---|---|---|---|
-| quota-track / background | 1.27 | 1.31 | thanh quota **bắt buộc** có `border border-border-strong` (3.19–3.96:1) |
-| các tầng bề mặt kề nhau | 1.06–1.17 | 1.05–1.24 | mọi ranh giới tầng phải có `border-border`; panel nổi thêm shadow |
+| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---|---:|---:|---:|:--:|
+| `--color-disabled-foreground` | `--color-background` | 3.46 | 4.01 | 3:1 | ✅ |
+| `--color-disabled-foreground` | `--color-surface-panel` | 3.74 | 3.44 | 3:1 | ✅ |
+| `--color-disabled-foreground` | `--color-surface-sidebar` | 3.20 | 4.28 | 3:1 | ✅ |
 
-Chi tiết phân tầng bề mặt (không có ngưỡng WCAG, chỉ để kiểm tra "phân biệt được"):
+## 5. Thành phần đồ hoạ
 
-| Cặp tầng | Sáng | Tối |
-|---|---|---|
-| background / sidebar | 1.11 | 1.05 |
-| background / raised | 1.06 | 1.21 |
-| background / bubble-assistant | 1.06 | 1.09 |
-| bubble-assistant / bubble-user | 1.17 | 1.18 |
-| bubble-assistant / codeblock | 1.17 | 1.19 |
-| border / background | 1.27 | 1.31 |
+| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---|---:|---:|---:|:--:|
+| `--color-border-strong` | `--color-background` | 3.37 | 4.18 | 3:1 | ✅ |
+| `--color-border-strong` | `--color-surface-panel` | 3.64 | 3.59 | 3:1 | ✅ |
+| `--color-ring` | `--color-background` | 6.80 | 8.00 | 3:1 | ✅ |
+| `--color-ring` | `--color-surface-panel` | 7.34 | 6.86 | 3:1 | ✅ |
+| `--color-ring` | `--color-surface-sidebar` | 6.28 | 8.53 | 3:1 | ✅ |
+| `--color-ring` | `--color-surface-user` | 6.43 | 6.58 | 3:1 | ✅ |
+| `--color-accent` (nền nút) | `--color-background` | 6.05 | 3.89 | 3:1 | ✅ |
+| `--color-quota-normal` | `--color-quota-track` | 4.96 | 5.57 | 3:1 | ✅ |
+| `--color-quota-warning` | `--color-quota-track` | 3.75 | 6.59 | 3:1 | ✅ |
+| `--color-quota-empty` | `--color-quota-track` | 5.98 | 5.05 | 3:1 | ✅ |
+| `--color-chart-1` | `--color-background` | 8.24 | 4.91 | 3:1 | ✅ |
+| `--color-chart-2` | `--color-background` | 3.46 | 10.91 | 3:1 | ✅ |
+| `--color-chart-1` | `--color-surface-panel` | 8.90 | 4.21 | 3:1 | ✅ |
+| `--color-chart-2` | `--color-surface-panel` | 3.74 | 9.36 | 3:1 | ✅ |
 
-Trong theme sáng, `raised` và `bubble-assistant` cùng là `#ffffff`: panel nổi phân
-biệt bằng shadow chứ không bằng nền. Hai token vẫn tách nhau nên điều chỉnh được
-độc lập.
+## 6. Hai màu chuỗi dữ liệu của biểu đồ
 
----
+Yêu cầu: tách bạch với nhau, tách bạch với nền, và tách bạch **khi in trắng đen**.
+Điều kiện in trắng đen = chênh lệch độ sáng giữa hai màu; hệ đặt ngưỡng ≥ 2:1.
 
-## 4. Giá trị token dùng để tính
+| Cặp | Sáng | Tối | Ngưỡng | Đạt |
+|---|---:|---:|---:|:--:|
+| `--color-chart-1` (metered) ↔ `--color-chart-2` (unmetered) | 2.38 | 2.22 | 2:1 | ✅ |
 
-Để kiểm tra lại độc lập (WebAIM Contrast Checker, axe DevTools, v.v.).
+Hai màu còn khác tông (đỏ ↔ lam) nên phân biệt được với cả deuteranopia và
+protanopia. Vẫn nên gắn nhãn trực tiếp lên cột, không chỉ dựa vào chú giải màu.
 
-| Token | Sáng | Tối |
-|---|---|---|
-| `--color-background` | `#faf8f6` | `#171413` |
-| `--color-sidebar` | `#f1ece7` | `#100e0d` |
-| `--color-raised` | `#ffffff` | `#292525` |
-| `--color-bubble-assistant` | `#ffffff` | `#201d1c` |
-| `--color-bubble-user` | `#fbe9e6` | `#3f2421` |
-| `--color-codeblock` | `#f2ece7` | `#090807` |
-| `--color-field` | `#ffffff` | `#201d1c` |
-| `--color-hover` | `#ece6e0` | `#2b2726` |
-| `--color-foreground` | `#1c1917` | `#f2efec` |
-| `--color-muted` | `#5f5651` | `#b4aca6` |
-| `--color-disabled-foreground` | `#736a63` | `#99908a` |
-| `--color-border` | `#e4ddd6` | `#302b28` |
-| `--color-border-strong` | `#8d8279` | `#787069` |
-| `--color-ring` | `#c3341c` | `#ff8a75` |
-| `--color-accent` | `#c3341c` | `#bf3220` |
-| `--color-accent-hover` | `#a6281d` | `#d43b26` |
-| `--color-accent-active` | `#851f16` | `#a82a1a` |
-| `--color-accent-foreground` | `#ffffff` | `#ffffff` |
-| `--color-accent-subtle` | `#ffe3dd` | `#3a1c16` |
-| `--color-accent-emphasis` | `#a6281d` | `#ff9280` |
-| `--color-danger` | `#b81a45` | `#b81f45` |
-| `--color-danger-hover` | `#9c1339` | `#cf2a52` |
-| `--color-danger-foreground` | `#ffffff` | `#ffffff` |
-| `--color-danger-subtle` | `#ffe2e9` | `#3a1220` |
-| `--color-danger-emphasis` | `#a3123b` | `#ff8fa8` |
-| `--color-warning` | `#e8a33d` | `#e0a33a` |
-| `--color-warning-foreground` | `#2b1c05` | `#2b1c05` |
-| `--color-warning-subtle` | `#fdefd0` | `#33260d` |
-| `--color-warning-emphasis` | `#8a5300` | `#f0b95c` |
-| `--color-success` | `#15803d` | `#1a7a4a` |
-| `--color-success-foreground` | `#ffffff` | `#ffffff` |
-| `--color-success-subtle` | `#dcf5e4` | `#0d2a1c` |
-| `--color-success-emphasis` | `#0f6a35` | `#5fd39a` |
-| `--color-quota-track` | `#e4ddd6` | `#302b28` |
-| `--color-quota-normal` | `#5f5651` | `#8a8079` |
-| `--color-quota-warning` | `#a86a08` | `#e0a33a` |
-| `--color-quota-depleted` | `#b3251b` | `#e8543c` |
-| `--color-chart-metered` | `#5c1610` | `#c9402c` |
-| `--color-chart-unmetered` | `#728c9e` | `#c9d8e2` |
+## 7. Phân tầng bề mặt
 
----
+Không phải ngưỡng WCAG (hai bề mặt kề nhau không cần 3:1). Ngưỡng thực dụng
+là ≥ 1.05 cộng với viền hoặc shadow.
 
-## 5. Những gì bảng này KHÔNG bao phủ
+| Cặp bề mặt | Sáng | Tối | Ngưỡng | Đạt |
+|---|---:|---:|---:|:--:|
+| sidebar ↔ nền app | 1.083 | 1.067 | 1.05 | ✅ |
+| panel nổi ↔ nền app | 1.080 | 1.166 | 1.05 | ✅ |
+| bong bóng assistant ↔ nền app | 1.080 | 1.095 | 1.05 | ✅ |
+| bong bóng user ↔ nền app | 1.057 | 1.215 | 1.05 | ✅ |
+| bong bóng assistant ↔ bong bóng user | 1.142 | 1.110 | 1.05 | ✅ |
+| khối code ↔ bong bóng assistant | 1.266 | 1.190 | 1.05 | ✅ |
+| khối code ↔ bong bóng user | 1.108 | 1.320 | 1.05 | ✅ |
+| hover hàng ↔ nền app | 1.110 | 1.111 | 1.02 | ✅ |
 
-Tương phản chỉ là một phần của đích "Lighthouse Accessibility ≥ 90 và axe-core 0
-lỗi serious/critical". Còn phải kiểm bằng tay:
+Ở theme sáng, `surface-panel` và `surface-assistant` cùng là `#ffffff`: panel phân biệt
+bằng `--shadow-popover`, bong bóng assistant phân biệt bằng `--color-border`. Đây là
+lựa chọn có chủ đích — thêm một sắc trắng thứ hai chỉ tạo bẩn, không tạo thông tin.
 
-- Mọi thành phần tương tác có `focus-visible` nhìn thấy được:
-  `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
-  focus-visible:ring-offset-background` (ring-offset tách vòng focus khỏi nền nút đỏ).
-- Vùng chạm ≥ 44 × 44 px: `size-touch` hoặc `min-h-touch min-w-touch`.
-- Không cuộn ngang ở 375 px.
-- Model không dùng được: `--color-disabled-foreground` đạt 4.51:1 nên không còn
-  "trông mờ" → phải kèm `aria-disabled` và nhãn chữ "không dùng được". Item
-  disabled không nhận `hover:bg-hover`.
-- Trạng thái quota và provider không được chỉ báo bằng màu: kèm nhãn chữ và số.
-- Nút xoá: hue của danger chỉ lệch accent ~30°, không đủ để phân biệt đáng tin →
-  phải khác cả về hình thức (viền thay vì tô đặc, có icon, có bước xác nhận).
-- Biểu đồ: hai cột tách riêng + nhãn trực tiếp; thêm hoạ tiết gạch chéo cho
-  unmetered nếu in trắng đen là yêu cầu thật.
+## 8. Những chỗ đã cân nhắc và loại bỏ
+
+- **Dùng thẳng đỏ son làm chữ.** `--color-accent` ở theme tối chỉ đạt
+  3.89:1 trên nền app — dưới ngưỡng chữ.
+  Vì vậy mới có `--color-accent-text` (8.00:1).
+- **Danger trùng accent.** Cả hai đều đỏ thì người dùng không đọc được ý nghĩa.
+  Danger dịch về đỏ thẫm lạnh (hue ~345°), accent giữ đỏ son ấm (hue ~8°), và danger
+  hầu như chỉ xuất hiện dưới dạng chữ hoặc viền, hiếm khi là nền đặc.
+- **Warning nền đặc + chữ trắng.** `#b45309` với chữ trắng chỉ đạt
+  5.02:1. Warning vì thế là màu đồ hoạ (thanh quota, chấm, icon);
+  phần chữ dùng `--color-warning-text` trên `--color-warning-subtle`.
+- **Hover sáng lên ở theme tối.** `#de4e3b` với chữ trắng chỉ đạt 3.99:1. Ở theme tối
+  trạng thái hover của nút nhấn vì thế đậm xuống chứ không sáng lên.
+- **Sidebar sáng hơn nền app ở theme tối.** Đã thử, nhưng sidebar là tầng lùi về sau;
+  hệ để sidebar tối hơn nền app (1.067)
+  và dùng `--color-border` để cắt cạnh.

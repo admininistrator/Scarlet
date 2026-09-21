@@ -61,7 +61,7 @@ export function AdminScreen() {
       </div>
 
       {qt.loi !== null && (
-        <p role="alert" className="border-b border-border px-6 py-3 text-sm text-danger-emphasis">
+        <p role="alert" className="border-b border-border px-6 py-3 text-sm text-danger-text">
           {qt.loi.code} — {qt.loi.message}
         </p>
       )}

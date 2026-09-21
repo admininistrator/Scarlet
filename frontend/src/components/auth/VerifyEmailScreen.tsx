@@ -134,7 +134,7 @@ export function VerifyEmailScreen() {
         {token === null ? t("verify.chuaXacThuc.tieuDe") : t("verify.hetHan.tieuDe")}
       </h2>
       {loi !== null && (
-        <p role="alert" className="mt-2 text-sm text-danger-emphasis">
+        <p role="alert" className="mt-2 text-sm text-danger-text">
           {loi}
         </p>
       )}
@@ -207,7 +207,7 @@ function ResendBlock() {
       </label>
 
       {loi !== null && (
-        <p role="alert" className="text-sm text-danger-emphasis">
+        <p role="alert" className="text-sm text-danger-text">
           {loi}
         </p>
       )}

@@ -24,16 +24,23 @@
     </script>
   </head>
   <!--
-    T-3.2 — nen/chu cua trang song o DAY, khong o mot khoi `body { ... }` trong
-    `theme.css`. Ghi chu thi cong cua T-HD1 noi ro ly do: file theme chi duoc co
-    dung HAI khoi top-level (`@theme` va `[data-theme="dark"]`), nen mot quy tac
-    `body` viet tay se la khoi thu ba — cho ma lan sua theme ke tiep khong ai
-    nghi toi khi doi mau nen.
+    T-3.2 — <body> KHONG con class tien ich nao. Ban T-HD1 hien tai giao mot khoi
+    `@layer base` tu dat nen, chu, font, `min-width` va `-webkit-font-smoothing`
+    thang tren `body`, nen bon class cu (`min-w-app-min bg-background
+    text-foreground antialiased`) deu thanh thua.
 
-    `min-w-app-min` = --container-app-min = 375px (S8): duoi muc do thi trang
-    cuon ngang chu khong bop nat bo cuc.
+    Day la mot dao chieu so voi ban T-HD1 truoc: ban truoc CAM viet quy tac
+    `body` trong theme.css ("chi duoc co dung hai khoi top-level") va vi the day
+    bon class nay ra day. Ban moi tu viet khoi base, nen cho dat nen quay nguoc
+    ve theme.css.
+
+    Quan trong: `min-w-app-min` con nguy hiem hon la thua — token
+    `--container-app-min` khong con ton tai trong ban moi, nen Tailwind v4 se
+    khong sinh class do va cung KHONG bao loi. San 375px cua S8 se bien mat im
+    lang neu ai do tin vao class nay. San ay bay gio den tu
+    `body { min-width: var(--spacing-min) }` trong theme.css.
   -->
-  <body class="min-w-app-min bg-background text-foreground antialiased">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

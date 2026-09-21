@@ -72,7 +72,7 @@ export function FormDangNhap({
         </label>
 
         {loi !== null && (
-          <p role="alert" className="text-sm text-danger-emphasis">
+          <p role="alert" className="text-sm text-danger-text">
             {loi.code === MA_LOI.SAI_MAT_KHAU
               ? t("auth.saiMatKhau")
               : loi.code === MA_LOI.TAI_KHOAN_BI_KHOA
