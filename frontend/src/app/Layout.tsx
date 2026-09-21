@@ -1,5 +1,7 @@
-import { Link, Outlet, useNavigate, useOutletContext } from "react-router";
+import { Link, Outlet, useLocation, useNavigate, useOutletContext } from "react-router";
 
+import { PanelIcon } from "../components/sidebar/icons";
+import { toggleSidebar, useSidebarOpen } from "../components/sidebar/sidebarOpen";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { usePhien, type Phien } from "../features/auth/usePhien";
 import { t } from "../lib/i18n";
@@ -34,13 +36,34 @@ export function useSession(): Phien {
 export function Layout() {
   const session = usePhien();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const sidebarOpen = useSidebarOpen();
 
   const isAdmin = session.nguoiDung?.role === "admin";
+  /*
+    T-3.3 / T-HD2 — nut bat/tat sidebar song o HEADER, khong trong sidebar
+    ("sidebar dong = 0 px, khong co dai icon"). Nhung header nay boc ca
+    `/admin` va sau man auth, va o do khong co sidebar nao de bat/tat — nen nut
+    chi hien tren duong co sidebar. Khi T-3.10 dung drawer, dung mot dieu kien
+    nay se doi, khong phai hai.
+  */
+  const coSidebar = pathname === PATHS.home;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
         <div className="flex items-center gap-4">
+          {coSidebar && (
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-expanded={sidebarOpen}
+              aria-label={sidebarOpen ? t("header.closeSidebar") : t("header.openSidebar")}
+              className="motion-control grid size-touch place-items-center rounded-md text-foreground hover:bg-surface-hover"
+            >
+              <PanelIcon />
+            </button>
+          )}
           <h1 className="text-lg font-semibold">
             <Link to={PATHS.home}>{t("app.title")}</Link>
           </h1>

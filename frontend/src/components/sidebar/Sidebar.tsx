@@ -2,9 +2,11 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import { ApiError, api, type HoiThoaiRa } from "../../lib/api";
 import { t } from "../../lib/i18n";
+import { MoreIcon, PinIcon, SearchIcon } from "./icons";
+import { useSidebarOpen } from "./sidebarOpen";
 
 /**
- * Sidebar hoi thoai — T-3.3.
+ * Sidebar hoi thoai — T-3.3, dung theo ban T-HD2 giao (`AppShell.tsx`).
  *
  * KH tham chieu: §18.2, §17.4 · tasks.md T-3.3 · CLAUDE.md A3.
  *
@@ -16,23 +18,31 @@ import { t } from "../../lib/i18n";
  * nao (B-09 chua lam), nen o tim o day loc mang trong bo nho — no khong goi
  * mang mot lan nao. Mot nguoi go ten mot hoi thoai cu ma khong thay gi se
  * ket luan "hoi thoai bi mat" chu khong ket luan "no nam o trang sau", nen
- * cau ay phai nam canh o tim (`sidebar.timKiemGhiChu`).
+ * cau ay phai nam canh o tim (`sidebar.searchScopeNote`).
  *
  * **2. Ghim cung chi noi trong PHAN DA TAI.** Backend sap xep
  * `ORDER BY updated_at DESC, id DESC` — doc duoc o
  * `app/db/repositories/conversations.py`, khong mot chu `pinned` nao. Sidebar
- * day ghim len dau o `sortConversations()` duoi day, tuc mot hoi thoai ghim
- * tu thang truoc nam o trang 3 se **vang mat** o dau danh sach cho toi khi
- * nguoi dung bam "Tai them". Xem Cam bay ① cua T-3.3: nga con lai la them
- * `pinned DESC` vao `ORDER BY` cua backend, va no keo theo mot con tro phan
- * trang khac han — do la mot thay doi hop dong backend, khong thuoc task nay.
+ * tach hai nhom "Da ghim" / "Gan day" theo dung ban T-HD2, tuc mot hoi thoai
+ * ghim tu thang truoc nam o trang 3 se **vang mat khoi nhom Da ghim** cho toi
+ * khi nguoi dung bam "Tai them". Xem Cam bay ① cua T-3.3 va B-227: nga con
+ * lai la them `pinned DESC` vao `ORDER BY` cua backend, va no keo theo mot con
+ * tro phan trang khac han — mot thay doi hop dong backend, khong thuoc task nay.
  *
  * **3. "Xoa" la xoa MEM.** `DELETE /conversations/{id}` dat `deleted_at`, cay
  * message ben duoi khong bi dung toi (C12), va ban ghi con nam tren may chu
  * toi luot purge. Chu tren man hinh phai noi dung thu no lam
- * (`sidebar.xoaGhiChu`) — con so ngay cu the (`PURGE_AFTER_DAYS`) khong duoc
- * chep vao day: no la mot han muc sống trong `.env` va khong endpoint nao tra
+ * (`sidebar.deleteNote`) — con so ngay cu the (`PURGE_AFTER_DAYS`) khong duoc
+ * chep vao day: no la mot han muc song trong `.env` va khong endpoint nao tra
  * no ra cho FE (A3).
+ *
+ * ── Dong = 0 px, KHONG co dai icon ───────────────────────────────────────
+ *
+ * Bang so do cua T-HD2 ghi nguyen van: *"An han, khong co dai icon. Dai icon
+ * se nhan doi nut bat/tat cua header ma khong hien duoc tieu de hoi thoai.
+ * Nut bat/tat 44 × 44 o header luon hien, khong doi cho."* Vi vay component
+ * nay tra `null` khi dong, va nut bat/tat song o `app/Layout.tsx` — trang thai
+ * di qua `sidebarOpen.ts`.
  *
  * ── Con tro phan trang den TU RESPONSE, khong suy ra tu danh sach ─────────
  *
@@ -46,20 +56,14 @@ import { t } from "../../lib/i18n";
  *
  * Con tro la `updated_at` trong khi `ORDER BY` la `(updated_at, id)` — Cam
  * bay ② cua T-3.3. Phia server, `< cursor` co the **bo sot** mot hang trung
- * `updated_at`; no khong sinh ra ban sao. Nhung con mot duong khac co that:
- * `updated_at` doi moi lan nguoi dung gui tin nhan, nen mot hoi thoai o trang
- * 1 luc dau co the tut xuong (hoac nhay len) giua hai lan goi, va luc do
- * trang 2 tra ve dung no lan nua. `mergePages()` chong trung theo `id` de DoD
- * *"khong hoi thoai nao xuat hien hai lan sau hai trang"* dung ke ca trong ca
- * ay.
+ * `updated_at`; no khong sinh ra ban sao (B-228). Nhung con mot duong khac co
+ * that: `updated_at` doi moi lan nguoi dung gui tin nhan, nen mot hoi thoai o
+ * trang 1 luc dau co the tut xuong giua hai lan goi, va luc do trang 2 tra ve
+ * dung no lan nua. `mergePages()` chong trung theo `id` de DoD *"khong hoi
+ * thoai nao xuat hien hai lan sau hai trang"* dung ke ca trong ca ay.
  */
 
-/** Khoa `localStorage` nho trang thai an/hien. Cung khuon `ThemeToggle`. */
-const STORAGE_KEY = "scarlet-sidebar";
-const STORED_OPEN = "open";
-const STORED_CLOSED = "closed";
-
-/** Ky tu khong-chu-khong-so dung de cat tu khi so khop khong dau. */
+/** Ky tu dau dung de cat khi so khop khong dau. */
 const DIACRITIC = /\p{Diacritic}/gu;
 
 export interface SidebarProps {
@@ -67,6 +71,8 @@ export interface SidebarProps {
   openConversationId: string | null;
   /** Nguoi dung bam mot hang — man chat mo hoi thoai ay. */
   onSelect: (conversationId: string) => void;
+  /** Nut "Hoi thoai moi" — T-HD2 dat no trong sidebar, khong o thanh cong cu. */
+  onNewChat: () => void;
   /** Hoi thoai **dang mo** vua bi xoa: man chat phai roi khoi no. */
   onOpenConversationDeleted: () => void;
 }
@@ -81,7 +87,8 @@ export interface SidebarProps {
  *
  * Hai khoa sau chep dung `ORDER BY` cua server (`updated_at DESC, id DESC`)
  * de hai trang noi vao nhau khong tao ra mot thu tu thu ba. Khoa dau
- * (`pinned`) la phan **chi FE biet** — xem cau 2 o dau file.
+ * (`pinned`) la phan **chi FE biet** — xem cau 2 o dau file. No van can thiet
+ * du man hinh da tach hai nhom: `ConversationGroup` giu nguyen thu tu mang.
  */
 export function sortConversations(items: readonly HoiThoaiRa[]): HoiThoaiRa[] {
   return [...items].sort((a, b) => {
@@ -113,7 +120,7 @@ export function mergePages(
 /** Tieu de de hien: `null` (chua ai dat ten) co mot cau rieng, khong de trong. */
 export function conversationLabel(item: HoiThoaiRa): string {
   const title = item.title?.trim() ?? "";
-  return title === "" ? t("sidebar.chuaDatTen") : title;
+  return title === "" ? t("sidebar.untitled") : title;
 }
 
 /**
@@ -140,20 +147,6 @@ function foldVietnamese(text: string): string {
     .replace(/Đ/g, "D")
     .toLowerCase()
     .trim();
-}
-
-/**
- * Trang thai an/hien da luu. Thieu hoac doc khong duoc ⇒ **mo**.
- *
- * `try/catch` khong phai thua: che do rieng tu nem `SecurityError` ngay o
- * `getItem` — cung cai bay `ThemeToggle` da ghi tu T-0.10.
- */
-export function storedSidebarOpen(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== STORED_CLOSED;
-  } catch {
-    return true;
-  }
 }
 
 /** `ApiError` mang `code` cua §18; thu khac chi con `message`. */
@@ -183,16 +176,18 @@ function metaOf(detail: HoiThoaiRa): HoiThoaiRa {
 export function Sidebar({
   openConversationId,
   onSelect,
+  onNewChat,
   onOpenConversationDeleted,
 }: SidebarProps) {
   const searchId = useId();
+  const open = useSidebarOpen();
 
-  const [open, setOpen] = useState<boolean>(storedSidebarOpen);
   const [items, setItems] = useState<HoiThoaiRa[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [menuFor, setMenuFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -242,13 +237,26 @@ export function Sidebar({
     void loadFirstPage();
   }, [openConversationId, loadFirstPage]);
 
+  /** Menu "⋯" dong khi bam ra ngoai hoac bam `Esc` — khuon popover thong thuong. */
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, open ? STORED_OPEN : STORED_CLOSED);
-    } catch {
-      // che do rieng tu co the chan localStorage — bo qua, khong lam vo app
+    if (menuFor === null) {
+      return;
     }
-  }, [open]);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuFor(null);
+      }
+    };
+    const onPointerDown = () => setMenuFor(null);
+    document.addEventListener("keydown", onKeyDown);
+    // `click` o pha bong bong: nut mo menu da `stopPropagation` nen lan bam mo
+    // khong tu dong lai chinh no.
+    document.addEventListener("click", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("click", onPointerDown);
+    };
+  }, [menuFor]);
 
   /** `next_cursor === null` nghia la HET; khong goi them mot lan nao. */
   const loadMore = useCallback(async () => {
@@ -270,6 +278,7 @@ export function Sidebar({
 
   const togglePin = useCallback(
     async (item: HoiThoaiRa) => {
+      setMenuFor(null);
       setBusyId(item.id);
       setError(null);
       try {
@@ -332,118 +341,142 @@ export function Sidebar({
     () => items.filter((item) => matchesQuery(item, query)),
     [items, query],
   );
+  const pinned = visible.filter((item) => item.pinned);
+  const recent = visible.filter((item) => !item.pinned);
 
+  // T-HD2: dong = 0 px, KHONG co dai icon. Nut bat/tat o header (`Layout.tsx`).
   if (!open) {
-    return (
-      <nav
-        aria-label={t("sidebar.tieuDe")}
-        className="flex shrink-0 flex-col border-r border-border bg-surface-sidebar p-2"
-      >
-        <button
-          type="button"
-          aria-expanded={false}
-          aria-label={t("sidebar.mo")}
-          onClick={() => setOpen(true)}
-          className="motion-control min-h-touch min-w-touch rounded-md text-base text-foreground hover:bg-surface-hover"
-        >
-          <span aria-hidden="true">›</span>
-        </button>
-      </nav>
-    );
+    return null;
   }
+
+  const rowProps = (item: HoiThoaiRa) => ({
+    item,
+    active: item.id === openConversationId,
+    busy: busyId === item.id,
+    menuOpen: menuFor === item.id,
+    renamingDraft: renaming?.id === item.id ? renaming.draft : null,
+    confirmingDelete: confirming === item.id,
+    onSelect: () => onSelect(item.id),
+    onOpenMenu: () => setMenuFor((current) => (current === item.id ? null : item.id)),
+    onTogglePin: () => void togglePin(item),
+    onStartRename: () => {
+      setMenuFor(null);
+      setRenaming({ id: item.id, draft: item.title ?? "" });
+    },
+    onChangeRenameDraft: (draft: string) => setRenaming({ id: item.id, draft }),
+    onSubmitRename: () => void submitRename(),
+    onCancelRename: () => setRenaming(null),
+    onAskDelete: () => {
+      setMenuFor(null);
+      setConfirming(item.id);
+    },
+    onCancelDelete: () => setConfirming(null),
+    onConfirmDelete: () => void remove(item.id),
+  });
 
   return (
     <nav
-      aria-label={t("sidebar.tieuDe")}
-      className="flex w-sidebar shrink-0 flex-col border-r border-border bg-surface-sidebar"
+      aria-label={t("sidebar.title")}
+      className="flex w-sidebar shrink-0 flex-col border-r border-border bg-surface-sidebar p-3 motion-theme"
     >
-      <div className="flex items-center justify-between gap-2 border-b border-border p-2">
-        <h2 className="px-1 text-lg font-medium">{t("sidebar.tieuDe")}</h2>
-        <button
-          type="button"
-          aria-expanded={true}
-          aria-label={t("sidebar.dong")}
-          onClick={() => setOpen(false)}
-          className="motion-control min-h-touch min-w-touch rounded-md text-base text-foreground hover:bg-surface-hover"
-        >
-          <span aria-hidden="true">‹</span>
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={onNewChat}
+        className="motion-control h-touch w-full shrink-0 rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active"
+      >
+        {t("nav.newChat")}
+      </button>
 
-      <div className="flex flex-col gap-1 border-b border-border p-2">
-        <label htmlFor={searchId} className="text-xs text-muted">
-          {t("sidebar.timKiem")}
-        </label>
-        <input
-          id={searchId}
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="motion-control min-h-touch rounded-md border border-border-strong bg-background px-2 text-base text-foreground"
-        />
-        <p className="text-xs text-muted">{t("sidebar.timKiemGhiChu")}</p>
-      </div>
+      <label htmlFor={searchId} className="mt-3 block shrink-0">
+        <span className="sr-only">{t("sidebar.search")}</span>
+        <span className="relative block">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-3.5 left-3 text-muted"
+          >
+            <SearchIcon />
+          </span>
+          <input
+            id={searchId}
+            type="search"
+            value={query}
+            placeholder={t("sidebar.search")}
+            onChange={(e) => setQuery(e.target.value)}
+            className="motion-control h-touch w-full rounded-md border border-border-strong bg-background pr-3 pl-9 text-base text-foreground placeholder:text-muted"
+          />
+        </span>
+      </label>
+      <p className="mt-1 shrink-0 text-xs text-muted">{t("sidebar.searchScopeNote")}</p>
 
       {error !== null && (
-        <p className="border-b border-border px-2 py-2 text-xs text-danger-text">{error}</p>
+        <p className="mt-2 shrink-0 text-xs text-danger-text">{error}</p>
       )}
 
-      <ul className="flex-1 overflow-y-auto">
-        {visible.map((item) => (
-          <ConversationRow
-            key={item.id}
-            item={item}
-            selected={item.id === openConversationId}
-            busy={busyId === item.id}
-            renamingDraft={renaming?.id === item.id ? renaming.draft : null}
-            confirmingDelete={confirming === item.id}
-            onSelect={() => onSelect(item.id)}
-            onTogglePin={() => void togglePin(item)}
-            onStartRename={() => setRenaming({ id: item.id, draft: item.title ?? "" })}
-            onChangeRenameDraft={(draft) => setRenaming({ id: item.id, draft })}
-            onSubmitRename={() => void submitRename()}
-            onCancelRename={() => setRenaming(null)}
-            onAskDelete={() => setConfirming(item.id)}
-            onCancelDelete={() => setConfirming(null)}
-            onConfirmDelete={() => void remove(item.id)}
-          />
-        ))}
-      </ul>
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+        <ConversationGroup label={t("sidebar.pinnedGroup")} items={pinned} rowProps={rowProps} />
+        <ConversationGroup label={t("sidebar.recentGroup")} items={recent} rowProps={rowProps} />
 
-      <div className="flex flex-col gap-2 border-t border-border p-2">
         {items.length === 0 && !loading && (
-          <p className="text-xs text-muted">{t("sidebar.trong")}</p>
+          <p className="px-2 text-xs text-muted">{t("sidebar.empty")}</p>
         )}
         {items.length > 0 && visible.length === 0 && (
-          <p className="text-xs text-muted">{t("sidebar.khongCoKetQua")}</p>
+          <p className="px-2 text-xs text-muted">{t("sidebar.noMatch")}</p>
         )}
-        <p className="text-xs text-muted">{t("sidebar.ghimGhiChu")}</p>
-        {loading && <p className="text-xs text-muted">{t("sidebar.dangTai")}</p>}
-        {cursor === null ? (
-          items.length > 0 && <p className="text-xs text-muted">{t("sidebar.hetDuLieu")}</p>
-        ) : (
+        {loading && <p className="px-2 text-xs text-muted">{t("sidebar.loading")}</p>}
+
+        {cursor !== null && (
           <button
             type="button"
             disabled={loading}
             onClick={() => void loadMore()}
-            className="motion-control min-h-touch rounded-md border border-border px-3 text-base text-foreground hover:bg-surface-hover disabled:opacity-50"
+            className="motion-control mt-2 h-touch w-full rounded-md text-base font-medium text-accent-text hover:bg-surface-hover disabled:opacity-50"
           >
-            {t("sidebar.taiThem")}
+            {t("sidebar.loadMore")}
           </button>
         )}
       </div>
+
+      <p className="mt-2 shrink-0 text-xs text-muted">{t("sidebar.pinScopeNote")}</p>
     </nav>
+  );
+}
+
+function ConversationGroup({
+  label,
+  items,
+  rowProps,
+}: {
+  label: string;
+  items: HoiThoaiRa[];
+  rowProps: (item: HoiThoaiRa) => ConversationRowProps;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <section className="mb-3">
+      <h2 className="px-2 pb-1 text-2xs font-semibold tracking-wider text-muted uppercase">
+        {label}
+      </h2>
+      <ul className="flex flex-col gap-0.5">
+        {items.map((item) => (
+          <ConversationRow key={item.id} {...rowProps(item)} />
+        ))}
+      </ul>
+    </section>
   );
 }
 
 interface ConversationRowProps {
   item: HoiThoaiRa;
-  selected: boolean;
+  active: boolean;
   busy: boolean;
+  menuOpen: boolean;
   /** `null` = hang nay khong o che do doi ten. */
   renamingDraft: string | null;
   confirmingDelete: boolean;
   onSelect: () => void;
+  onOpenMenu: () => void;
   onTogglePin: () => void;
   onStartRename: () => void;
   onChangeRenameDraft: (draft: string) => void;
@@ -455,19 +488,25 @@ interface ConversationRowProps {
 }
 
 /**
- * Mot hang cua sidebar.
+ * Mot hang cua sidebar — ban T-HD2: tieu de · chim ghim · nut "⋯".
  *
- * Nut chon hoi thoai va ba nut thao tac la ANH EM chu khong long nhau: mot
- * `<button>` trong mot `<button>` la HTML khong hop le, va trinh duyet se tu
- * tach chung ra theo cach khong ai doan duoc.
+ * Nut chon hoi thoai va nut "⋯" la ANH EM chu khong long nhau: mot `<button>`
+ * trong mot `<button>` la HTML khong hop le, va trinh duyet se tu tach chung
+ * ra theo cach khong ai doan duoc.
+ *
+ * Doi ten va xac nhan xoa **khong** co trong ban ve — T-HD2 chi ve menu. Hai
+ * khoi ay dung tai cho trong hang vi do la cho nguoi dung dang nhin; hop xac
+ * nhan xoa la bat buoc cua Cam bay ③.
  */
 function ConversationRow({
   item,
-  selected,
+  active,
   busy,
+  menuOpen,
   renamingDraft,
   confirmingDelete,
   onSelect,
+  onOpenMenu,
   onTogglePin,
   onStartRename,
   onChangeRenameDraft,
@@ -479,32 +518,9 @@ function ConversationRow({
 }: ConversationRowProps) {
   const label = conversationLabel(item);
 
-  return (
-    <li
-      className={`motion-control border-b border-border px-2 py-1 ${
-        selected ? "bg-accent-subtle" : "hover:bg-surface-hover"
-      }`}
-    >
-      {renamingDraft === null ? (
-        <button
-          type="button"
-          onClick={onSelect}
-          aria-current={selected ? "page" : undefined}
-          className="flex min-h-touch w-full flex-col items-start justify-center gap-0.5 rounded-md px-1 text-left"
-        >
-          <span className="flex w-full items-center gap-2">
-            {item.pinned && (
-              <span className="text-2xs font-semibold tracking-wide text-accent-text uppercase">
-                {t("sidebar.daGhim")}
-              </span>
-            )}
-            <span className="min-w-0 flex-1 truncate text-base text-foreground">{label}</span>
-          </span>
-          <span className="text-xs text-muted">
-            {new Date(item.updated_at).toLocaleString()}
-          </span>
-        </button>
-      ) : (
+  if (renamingDraft !== null) {
+    return (
+      <li>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -513,84 +529,144 @@ function ConversationRow({
           className="flex flex-col gap-1 py-1"
         >
           <label className="text-xs text-muted">
-            {t("sidebar.tenMoi")}
+            {t("sidebar.newName")}
             <input
               autoFocus
               value={renamingDraft}
               onChange={(e) => onChangeRenameDraft(e.target.value)}
-              className="motion-control mt-1 min-h-touch w-full rounded-md border border-border-strong bg-background px-2 text-base text-foreground"
+              className="motion-control mt-1 h-touch w-full rounded-md border border-border-strong bg-background px-3 text-base text-foreground"
             />
           </label>
           <div className="flex gap-1">
             <button
               type="submit"
               disabled={busy}
-              className="motion-control min-h-touch rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active disabled:opacity-50"
+              className="motion-control h-touch rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active disabled:opacity-50"
             >
-              {t("sidebar.luu")}
+              {t("sidebar.save")}
             </button>
             <button
               type="button"
               onClick={onCancelRename}
-              className="motion-control min-h-touch rounded-md border border-border px-3 text-base text-foreground hover:bg-surface-hover"
+              className="motion-control h-touch rounded-md border border-border px-3 text-base text-foreground hover:bg-surface-hover"
             >
-              {t("sidebar.thoi")}
+              {t("sidebar.cancel")}
             </button>
           </div>
         </form>
-      )}
+      </li>
+    );
+  }
 
-      {confirmingDelete ? (
+  if (confirmingDelete) {
+    return (
+      <li>
         <div className="motion-panel flex flex-col gap-1 rounded-md bg-danger-subtle p-2">
-          <p className="text-sm font-semibold text-danger-text">{t("sidebar.xacNhanXoa")}</p>
-          <p className="text-xs text-muted">{t("sidebar.xoaGhiChu")}</p>
+          <p className="text-sm font-semibold text-danger-text">{t("sidebar.deleteConfirm")}</p>
+          <p className="text-xs text-muted">{t("sidebar.deleteNote")}</p>
           <div className="flex gap-1">
             <button
               type="button"
               disabled={busy}
               onClick={onConfirmDelete}
-              className="motion-control min-h-touch rounded-md bg-danger px-3 text-base font-semibold text-danger-foreground hover:bg-danger-hover disabled:opacity-50"
+              className="motion-control h-touch rounded-md bg-danger px-3 text-base font-semibold text-danger-foreground hover:bg-danger-hover disabled:opacity-50"
             >
-              {t("sidebar.xoaThat")}
+              {t("sidebar.delete")}
             </button>
             <button
               type="button"
               onClick={onCancelDelete}
-              className="motion-control min-h-touch rounded-md border border-border px-3 text-base text-foreground hover:bg-surface-hover"
+              className="motion-control h-touch rounded-md border border-border px-3 text-base text-foreground hover:bg-surface-hover"
             >
-              {t("sidebar.thoi")}
+              {t("sidebar.cancel")}
             </button>
           </div>
         </div>
-      ) : (
-        <div className="flex gap-1 pb-1">
+      </li>
+    );
+  }
+
+  return (
+    <li className="relative">
+      <div
+        className={
+          active
+            ? "motion-control flex h-touch items-center gap-0.5 rounded-md border border-accent bg-accent-subtle pr-1 pl-3"
+            : "motion-control flex h-touch items-center gap-0.5 rounded-md border border-transparent pr-1 pl-3 hover:bg-surface-hover"
+        }
+      >
+        <button
+          type="button"
+          onClick={onSelect}
+          aria-current={active ? "page" : undefined}
+          className={
+            active
+              ? "min-w-0 flex-1 truncate text-left text-base font-semibold text-foreground"
+              : "min-w-0 flex-1 truncate text-left text-base text-foreground"
+          }
+        >
+          {label}
+        </button>
+
+        {item.pinned && (
+          <span className="grid w-5 shrink-0 place-items-center text-muted">
+            <PinIcon />
+            <span className="sr-only">{t("sidebar.pinned")}</span>
+          </span>
+        )}
+
+        <button
+          type="button"
+          disabled={busy}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={`${t("sidebar.rowMenu")} — ${label}`}
+          onClick={(e) => {
+            // Khong de lan bam nay chay toi `document` — no se dong menu vua mo.
+            e.stopPropagation();
+            onOpenMenu();
+          }}
+          className={
+            active
+              ? "motion-control grid size-touch shrink-0 place-items-center rounded-md text-accent-text hover:bg-surface-hover disabled:opacity-50"
+              : "motion-control grid size-touch shrink-0 place-items-center rounded-md text-muted hover:bg-surface-hover disabled:opacity-50"
+          }
+        >
+          <MoreIcon />
+        </button>
+      </div>
+
+      {menuOpen && (
+        <div
+          role="menu"
+          aria-label={`${t("sidebar.rowMenu")} — ${label}`}
+          onClick={(e) => e.stopPropagation()}
+          className="motion-popover absolute top-12 right-0 z-10 w-46 rounded-lg border border-border bg-surface-panel p-1 shadow-popover"
+        >
           <button
             type="button"
-            disabled={busy}
-            aria-pressed={item.pinned}
-            aria-label={`${item.pinned ? t("sidebar.boGhim") : t("sidebar.ghim")} — ${label}`}
-            onClick={onTogglePin}
-            className="motion-control min-h-touch rounded-md px-2 text-xs text-muted hover:bg-surface-hover disabled:opacity-50"
-          >
-            {item.pinned ? t("sidebar.boGhim") : t("sidebar.ghim")}
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            aria-label={`${t("sidebar.doiTen")} — ${label}`}
+            role="menuitem"
             onClick={onStartRename}
-            className="motion-control min-h-touch rounded-md px-2 text-xs text-muted hover:bg-surface-hover disabled:opacity-50"
+            className="motion-control flex h-touch w-full items-center rounded-md px-3 text-left text-base text-foreground hover:bg-surface-hover"
           >
-            {t("sidebar.doiTen")}
+            {t("sidebar.rename")}
           </button>
           <button
             type="button"
-            disabled={busy}
-            aria-label={`${t("sidebar.xoa")} — ${label}`}
-            onClick={onAskDelete}
-            className="motion-control min-h-touch rounded-md px-2 text-xs text-danger-text hover:bg-surface-hover disabled:opacity-50"
+            role="menuitem"
+            onClick={onTogglePin}
+            className="motion-control flex h-touch w-full items-center rounded-md px-3 text-left text-base text-foreground hover:bg-surface-hover"
           >
-            {t("sidebar.xoa")}
+            {item.pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+          </button>
+          <div className="mx-2 my-1 h-px bg-border" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onAskDelete}
+            className="motion-control flex h-touch w-full items-center rounded-md px-3 text-left text-base text-danger-text hover:bg-surface-hover"
+          >
+            {t("sidebar.delete")}
           </button>
         </div>
       )}

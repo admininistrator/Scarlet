@@ -48,6 +48,16 @@
   --spacing-measure: 46rem;   /* bề rộng đọc tối đa của luồng chat */
   --spacing-min: 23.4375rem;  /* 375px — bề rộng nhỏ nhất phải chạy đúng */
 
+  /* Khung chính (T-HD2) */
+  --spacing-header: 3.5rem;          /* 56px — chiều cao header, cả desktop lẫn mobile */
+  --spacing-drawer: 20rem;           /* 320px — sidebar dạng drawer dưới 1024px */
+  --spacing-panel-right: 23.75rem;   /* 380px — panel phải, bề rộng mặc định */
+  --spacing-panel-min: 20rem;        /* 320px — kéo hẹp nhất */
+  --spacing-panel-max: 35rem;        /* 560px — kéo rộng nhất */
+  --spacing-bubble-user: 35rem;      /* 560px — bong bóng người dùng */
+  --spacing-gutter: 1rem;            /* lề ngang mobile */
+  --spacing-gutter-lg: 1.5rem;       /* lề ngang desktop */
+
   /* ---------- Radius ---------------------------------------------------- */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
@@ -114,6 +124,9 @@
   --color-quota-warning: #b45309;       /* ≤ 20% */
   --color-quota-empty: #9f1239;         /* đã hết */
 
+  /* ---------- LỚP PHỦ ------------------------------------------------------- */
+  --color-scrim: rgb(24 18 16 / 0.44);  /* nền mờ sau drawer */
+
   /* ---------- BIỂU ĐỒ (đúng 2 chuỗi) -------------------------------------------- */
   /* Lệch độ sáng 2.4:1 giữa hai màu → vẫn tách bạch khi in trắng đen. */
   --color-chart-1: #8e1f17;             /* metered */
@@ -164,6 +177,9 @@
   --color-quota-normal: #7fa8bc;
   --color-quota-warning: #e8a33d;
   --color-quota-empty: #f2708a;
+
+  /* LỚP PHỦ */
+  --color-scrim: rgb(0 0 0 / 0.64);
 
   /* BIỂU ĐỒ */
   --color-chart-1: #e0584a;
@@ -244,6 +260,15 @@
 @utility motion-bubble {
   animation: scarlet-bubble-in var(--duration-slow) var(--ease-enter) both;
 }
+@utility motion-sidebar {
+  transition: width var(--duration-base) var(--ease-standard);
+}
+@utility motion-drawer {
+  animation: scarlet-drawer-in var(--duration-base) var(--ease-enter) both;
+}
+@utility motion-scrim {
+  animation: scarlet-scrim-in var(--duration-base) var(--ease-enter) both;
+}
 @utility motion-quota {
   transition: width var(--duration-slow) var(--ease-standard),
     background-color var(--duration-base) var(--ease-standard);
@@ -267,6 +292,14 @@
 @keyframes scarlet-bubble-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: none; }
+}
+@keyframes scarlet-drawer-in {
+  from { transform: translateX(-100%); }
+  to   { transform: none; }
+}
+@keyframes scarlet-scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 @keyframes scarlet-pulse {
   from { opacity: 0.45; }

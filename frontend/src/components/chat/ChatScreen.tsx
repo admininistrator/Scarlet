@@ -56,20 +56,16 @@ export function ChatScreen() {
       <Sidebar
         openConversationId={cay.conversationId}
         onSelect={(id) => void chat.moHoiThoai(id)}
+        onNewChat={() => void chat.hoiThoaiMoi()}
         onOpenConversationDeleted={chat.dongHoiThoai}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {/*
+          "Hoi thoai moi" da chuyen vao sidebar theo ban T-HD2 — hai nut cung
+          goi mot ham la hai cho de lech. Model picker o lai day cho toi T-3.6.
+        */}
         <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-3 text-sm">
-          <button
-            type="button"
-            onClick={() => void chat.hoiThoaiMoi()}
-            disabled={chat.dangBan}
-            className="rounded-md border border-border px-3 py-1.5 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-          >
-            {t("chat.hoiThoaiMoi")}
-          </button>
-
           <label className="flex items-center gap-2">
             <span className="text-muted">{t("chat.model")}</span>
             <select

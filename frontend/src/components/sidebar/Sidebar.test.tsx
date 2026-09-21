@@ -1,5 +1,5 @@
 /**
- * Sidebar hoi thoai — DoD dong 1 cua T-3.3.
+ * Sidebar hoi thoai — DoD dong 1 cua T-3.3, tren ban T-HD2.
  *
  * ╔════════════════════════════════════════════════════════════════════════╗
  * ║  MOI CA O DAY LA MOT DONG DoD HOAC MOT CAM BAY CUA TASK                ║
@@ -16,22 +16,30 @@
  *   5. Xoa hoi thoai DANG MO ⇒ man chat duoc bao (`onOpenConversationDeleted`)
  *   6. Tim kiem loc dung va **khong goi mang** (DoD dong 1)
  *   7. Tim kiem bo dau: go khong dau van tim ra tieu de co dau
- *   8. Ghim ⇒ `PATCH {pinned: true}` va hang do **len dau** (DoD dong 4)
+ *   8. Ghim ⇒ `PATCH {pinned: true}` va hang do nhay sang nhom "Da ghim"
+ *      (DoD dong 4)
  *   9. Doi ten ⇒ `PATCH {title}`; de trong ⇒ `PATCH {title: null}`
  *  10. An/hien nho qua `localStorage`, va `localStorage` nem thi van chay
  *      (Cam bay cua `ThemeToggle`, T-0.10)
- *  11. Chon mot hang DA CO trong danh sach ⇒ khong goi mang lan nua
+ *  11. Doi hoi thoai dang mo: DA CO ⇒ khong goi mang · CHUA CO ⇒ goi lai
  *  12. `sortConversations` giu dung thu tu cua server trong nhom khong ghim
+ *  13. Ban T-HD2: dong = **0 px, khong co dai icon**
  *
  * ── Vi sao mock `../../lib/api` chu khong mock `fetch` ────────────────────
  *
  * Ca 6 phai khang dinh **khong mot loi goi mang nao** xay ra khi go vao o
  * tim. Mot `fetch` gia van de lot ca "component goi `api.danhSachHoiThoai`
  * roi cache ket qua" — thu van la mot loi goi. Dem o tang `api` la dem dung
- * cai DoD noi toi.
+ * cai DoD noi toi. (Chuoi URL that duoc do rieng o `src/lib/api.test.ts`.)
+ *
+ * ── Nut bat/tat nam o HEADER, khong trong sidebar ────────────────────────
+ *
+ * Ban T-HD2 dat no o `app/Layout.tsx`, nen ca 10 goi thang `toggleSidebar()`
+ * cua store thay vi bam mot nut — ca file nay render mot minh `Sidebar`.
+ * Duong bam that duoc phu o `routes.test.tsx`.
  */
 
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -55,6 +63,19 @@ import {
   type HoiThoaiRa,
 } from "../../lib/api";
 import { Sidebar, sortConversations } from "./Sidebar";
+import { resetSidebarOpenForTest, toggleSidebar } from "./sidebarOpen";
+
+/**
+ * `toggleSidebar()` la mot store NGOAI React, nen React khong biet no vua
+ * bao moi nguoi nghe — thieu `act` thi cap nhat roi ra ngoai luot render cua
+ * test va console day canh bao. Nut that o header (`Layout.tsx`) di qua mot
+ * `onClick`, tuc da nam trong `act` san.
+ */
+function batTat(): void {
+  act(() => {
+    toggleSidebar();
+  });
+}
 
 const KHOA_LUU = "scarlet-sidebar";
 
@@ -83,20 +104,35 @@ const goi = () => vi.mocked(api.danhSachHoiThoai);
 
 function dungLen(props: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const onSelect = vi.fn();
+  const onNewChat = vi.fn();
   const onOpenConversationDeleted = vi.fn();
-  render(
+  const ket = render(
     <Sidebar
       openConversationId={null}
       onSelect={onSelect}
+      onNewChat={onNewChat}
       onOpenConversationDeleted={onOpenConversationDeleted}
       {...props}
     />,
   );
-  return { onSelect, onOpenConversationDeleted };
+  return { ...ket, onSelect, onNewChat, onOpenConversationDeleted };
+}
+
+/** Mo menu "⋯" cua mot hang roi bam mot muc trong do. */
+async function quaMenu(tieuDe: string, muc: string) {
+  await userEvent.click(screen.getByRole("button", { name: `Tuỳ chọn hội thoại — ${tieuDe}` }));
+  await userEvent.click(screen.getByRole("menuitem", { name: muc }));
+}
+
+/** Nhom "Đã ghim" / "Gần đây" — tra ve `<section>` chua tieu de nhom ay. */
+function nhom(ten: string): HTMLElement {
+  return screen.getByRole("heading", { name: ten }).closest("section") as HTMLElement;
 }
 
 beforeEach(() => {
   localStorage.clear();
+  // Store song o tam module nen no song sot qua `cleanup()`.
+  resetSidebarOpenForTest();
   goi().mockResolvedValue(trang([]));
 });
 
@@ -155,7 +191,7 @@ describe("Sidebar — xoa", () => {
     dungLen();
     await screen.findByText("Một");
 
-    await userEvent.click(screen.getByRole("button", { name: "Xoá — Một" }));
+    await quaMenu("Một", "Xoá");
     await userEvent.click(screen.getByRole("button", { name: "Xoá" }));
 
     await waitFor(() => {
@@ -173,7 +209,7 @@ describe("Sidebar — xoa", () => {
     const { onOpenConversationDeleted } = dungLen({ openConversationId: "a" });
     await screen.findByText("Một");
 
-    await userEvent.click(screen.getByRole("button", { name: "Xoá — Một" }));
+    await quaMenu("Một", "Xoá");
     await userEvent.click(screen.getByRole("button", { name: "Xoá" }));
 
     await waitFor(() => {
@@ -195,7 +231,7 @@ describe("Sidebar — tim kiem cuc bo", () => {
     await screen.findByText("Hạn mức Redis");
     const truoc = goi().mock.calls.length;
 
-    await userEvent.type(screen.getByLabelText("Tìm trong hội thoại đã tải"), "nginx");
+    await userEvent.type(screen.getByLabelText("Tìm hội thoại"), "nginx");
 
     expect(screen.getByText("Sửa nginx")).toBeInTheDocument();
     expect(screen.queryByText("Hạn mức Redis")).not.toBeInTheDocument();
@@ -208,14 +244,14 @@ describe("Sidebar — tim kiem cuc bo", () => {
     dungLen();
     await screen.findByText("Hạn mức Redis");
 
-    await userEvent.type(screen.getByLabelText("Tìm trong hội thoại đã tải"), "han muc");
+    await userEvent.type(screen.getByLabelText("Tìm hội thoại"), "han muc");
 
     expect(screen.getByText("Hạn mức Redis")).toBeInTheDocument();
   });
 });
 
 describe("Sidebar — ghim va doi ten", () => {
-  it("8. ghim goi `PATCH {pinned:true}` va day hang do len DAU", async () => {
+  it("8. ghim goi `PATCH {pinned:true}` va chuyen hang sang nhom “Đã ghim”", async () => {
     const cu = hoiThoai({ id: "a", title: "Cũ", updated_at: "2026-09-01T00:00:00+00:00" });
     const moi = hoiThoai({ id: "b", title: "Mới", updated_at: "2026-09-09T00:00:00+00:00" });
     goi().mockResolvedValue(trang([cu, moi]));
@@ -223,15 +259,21 @@ describe("Sidebar — ghim va doi ten", () => {
 
     dungLen();
     await screen.findByText("Cũ");
-    // Truoc khi ghim: "Moi" dung dau vi `updated_at` moi hon.
-    expect(within(screen.getAllByRole("listitem")[0]).getByText("Mới")).toBeInTheDocument();
+    // Truoc khi ghim: chua co nhom "Da ghim", va "Moi" dung dau nhom "Gan day".
+    expect(screen.queryByRole("heading", { name: "Đã ghim" })).not.toBeInTheDocument();
+    expect(within(nhom("Gần đây")).getAllByRole("listitem")[0]).toHaveTextContent("Mới");
 
-    await userEvent.click(screen.getByRole("button", { name: "Ghim — Cũ" }));
+    await quaMenu("Cũ", "Ghim");
 
     await waitFor(() => {
-      expect(within(screen.getAllByRole("listitem")[0]).getByText("Cũ")).toBeInTheDocument();
+      expect(within(nhom("Đã ghim")).getByText("Cũ")).toBeInTheDocument();
     });
+    expect(within(nhom("Gần đây")).queryByText("Cũ")).not.toBeInTheDocument();
     expect(api.suaHoiThoai).toHaveBeenCalledWith("a", { pinned: true });
+    // Nhom "Da ghim" dung TRUOC nhom "Gan day" trong DOM.
+    expect(nhom("Đã ghim").compareDocumentPosition(nhom("Gần đây"))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it("9. doi ten goi `PATCH {title}`; de trong goi `PATCH {title: null}`", async () => {
@@ -242,7 +284,7 @@ describe("Sidebar — ghim va doi ten", () => {
     dungLen();
     await screen.findByText("Cũ");
 
-    await userEvent.click(screen.getByRole("button", { name: "Đổi tên — Cũ" }));
+    await quaMenu("Cũ", "Đổi tên");
     await userEvent.clear(screen.getByLabelText("Tên mới"));
     await userEvent.type(screen.getByLabelText("Tên mới"), "Tên mới");
     await userEvent.click(screen.getByRole("button", { name: "Lưu" }));
@@ -252,7 +294,7 @@ describe("Sidebar — ghim va doi ten", () => {
     });
 
     vi.mocked(api.suaHoiThoai).mockResolvedValue(chiTiet({ ...item, title: null }));
-    await userEvent.click(screen.getByRole("button", { name: "Đổi tên — Tên mới" }));
+    await quaMenu("Tên mới", "Đổi tên");
     await userEvent.clear(screen.getByLabelText("Tên mới"));
     await userEvent.click(screen.getByRole("button", { name: "Lưu" }));
 
@@ -263,43 +305,45 @@ describe("Sidebar — ghim va doi ten", () => {
 });
 
 describe("Sidebar — an/hien", () => {
-  it("10a. bam an roi mount lai thi van an, va bam hien thi ghi lai vao localStorage", async () => {
+  it("10a. an roi mount lai thi van an, va mo lai ghi duoc vao localStorage", async () => {
     goi().mockResolvedValue(trang([hoiThoai({ id: "a", title: "Một" })]));
 
-    const { unmount } = render(
-      <Sidebar openConversationId={null} onSelect={vi.fn()} onOpenConversationDeleted={vi.fn()} />,
-    );
+    const { unmount } = dungLen();
     await screen.findByText("Một");
 
-    await userEvent.click(screen.getByRole("button", { name: "Ẩn danh sách hội thoại" }));
-    expect(screen.queryByText("Một")).not.toBeInTheDocument();
+    batTat();
+    await waitFor(() => {
+      expect(screen.queryByText("Một")).not.toBeInTheDocument();
+    });
     expect(localStorage.getItem(KHOA_LUU)).toBe("closed");
 
     unmount();
+    resetSidebarOpenForTest();
     dungLen();
 
     expect(screen.queryByText("Một")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Mở danh sách hội thoại" }));
+    batTat();
     expect(await screen.findByText("Một")).toBeInTheDocument();
     expect(localStorage.getItem(KHOA_LUU)).toBe("open");
   });
 
-  it("10b. `localStorage` nem (che do rieng tu) thi sidebar van mo duoc, khong vo app", async () => {
+  it("10b. `localStorage` nem (che do rieng tu) thi sidebar van chay, khong vo app", async () => {
     goi().mockResolvedValue(trang([hoiThoai({ id: "a", title: "Một" })]));
-    const doc = vi
-      .spyOn(Storage.prototype, "getItem")
-      .mockImplementation(() => {
-        throw new DOMException("bi chan", "SecurityError");
-      });
+    const doc = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("bi chan", "SecurityError");
+    });
     const ghi = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("bi chan", "SecurityError");
     });
 
+    resetSidebarOpenForTest();
     dungLen();
 
     expect(await screen.findByText("Một")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Ẩn danh sách hội thoại" }));
-    expect(screen.queryByText("Một")).not.toBeInTheDocument();
+    batTat();
+    await waitFor(() => {
+      expect(screen.queryByText("Một")).not.toBeInTheDocument();
+    });
 
     doc.mockRestore();
     ghi.mockRestore();
@@ -326,13 +370,7 @@ describe("Sidebar — chon hoi thoai", () => {
       trang([hoiThoai({ id: "a", title: "Một" }), hoiThoai({ id: "b", title: "Hai" })]),
     );
 
-    const { rerender } = render(
-      <Sidebar
-        openConversationId="a"
-        onSelect={vi.fn()}
-        onOpenConversationDeleted={vi.fn()}
-      />,
-    );
+    const { rerender } = dungLen({ openConversationId: "a" });
     await screen.findByText("Hai");
     expect(goi()).toHaveBeenCalledTimes(1);
 
@@ -340,6 +378,7 @@ describe("Sidebar — chon hoi thoai", () => {
       <Sidebar
         openConversationId="b"
         onSelect={vi.fn()}
+        onNewChat={vi.fn()}
         onOpenConversationDeleted={vi.fn()}
       />,
     );
@@ -355,6 +394,7 @@ describe("Sidebar — chon hoi thoai", () => {
       <Sidebar
         openConversationId="moi"
         onSelect={vi.fn()}
+        onNewChat={vi.fn()}
         onOpenConversationDeleted={vi.fn()}
       />,
     );
@@ -373,5 +413,28 @@ describe("sortConversations", () => {
     ]);
 
     expect(xep.map((x) => x.id)).toEqual(["c", "b", "a2", "a1"]);
+  });
+});
+
+describe("Sidebar — ban T-HD2", () => {
+  /**
+   * Bang so do cua T-HD2: *"An han, khong co dai icon. Dai icon se nhan doi
+   * nut bat/tat cua header ma khong hien duoc tieu de hoi thoai."* Mot ban
+   * hien thuc ve dai icon 48 px se lam ca 10a xanh (danh sach van an) nhung
+   * lech ban ve — nen phai co mot ca noi thang ra rang khong con gi ca.
+   */
+  it("13. dong = 0 px: khong `<nav>`, khong nut nao con lai trong sidebar", async () => {
+    goi().mockResolvedValue(trang([hoiThoai({ id: "a", title: "Một" })]));
+
+    const { container } = dungLen();
+    await screen.findByText("Một");
+
+    batTat();
+
+    await waitFor(() => {
+      expect(container.querySelector("nav")).toBeNull();
+    });
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+    expect(container).toBeEmptyDOMElement();
   });
 });
