@@ -1,0 +1,122 @@
+/**
+ * Ba loi goi hoi thoai ma T-3.3 them/sua — do o TANG DAY, khong o tang `api`.
+ *
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║  VI SAO CAN FILE NAY KHI `Sidebar.test.tsx` DA MOCK `api`               ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ *
+ * `Sidebar.test.tsx` thay ca doi tuong `api`, nen no chung minh duoc *sidebar
+ * goi dung ham voi dung tham so* — va khong chung minh duoc gi ve **chuoi URL
+ * that di ra day**. Do dung la thu DoD dong 3 cua T-3.3 nhin vao:
+ *
+ *     DevTools → Network thay dung `?updated_before=<con tro cua trang truoc>`
+ *
+ * `next_cursor` la mot `datetime` co mui gio, tuc no chua dau `+`. Noi thang
+ * vao URL thi server doc `+` thanh mot **dau cach** va tra `422` — mot loi chi
+ * hien ra o trinh duyet that, dung luc nguoi dung bam "Tai them" lan dau.
+ *
+ * `fetch` bi thay chu khong phai mot may chu that: cai dang do la **request
+ * FE dung len**, khong phai cau tra loi cua backend (`tests/api/` cua backend
+ * lo phan ay).
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { api } from "./api";
+
+const fetchGia = vi.fn();
+
+function traVe(status: number, body: unknown = null): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: "",
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
+}
+
+/** URL cua lan goi `fetch` thu `n` (dem tu 0). */
+function urlLanGoi(n: number): string {
+  return String(fetchGia.mock.calls[n][0]);
+}
+
+function initLanGoi(n: number): RequestInit {
+  return fetchGia.mock.calls[n][1] as RequestInit;
+}
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", fetchGia);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("danhSachHoiThoai", () => {
+  it("khong co con tro ⇒ khong co query string nao", async () => {
+    fetchGia.mockResolvedValue(traVe(200, { items: [], next_cursor: null }));
+
+    await api.danhSachHoiThoai();
+
+    expect(urlLanGoi(0)).toBe("/api/v1/conversations");
+  });
+
+  it("co con tro ⇒ `?updated_before=`, va dau `+` cua mui gio duoc ma hoa", async () => {
+    fetchGia.mockResolvedValue(traVe(200, { items: [], next_cursor: null }));
+
+    await api.danhSachHoiThoai("2026-09-02T03:04:05.678901+00:00");
+
+    // `+` ⇒ `%2B`. Khong ma hoa thi server doc ra mot dau cach va tra 422.
+    expect(urlLanGoi(0)).toBe(
+      "/api/v1/conversations?updated_before=2026-09-02T03%3A04%3A05.678901%2B00%3A00",
+    );
+  });
+
+  it("`null` duoc doi xu nhu vang mat (khong gui `updated_before=null`)", async () => {
+    fetchGia.mockResolvedValue(traVe(200, { items: [], next_cursor: null }));
+
+    await api.danhSachHoiThoai(null);
+
+    expect(urlLanGoi(0)).toBe("/api/v1/conversations");
+  });
+});
+
+describe("suaHoiThoai", () => {
+  it("chi gui DUNG nhung truong nguoi goi dat — vang mat khac `null`", async () => {
+    fetchGia.mockResolvedValue(traVe(200, {}));
+
+    await api.suaHoiThoai("abc", { pinned: true });
+    expect(initLanGoi(0).method).toBe("PATCH");
+    expect(JSON.parse(String(initLanGoi(0).body))).toEqual({ pinned: true });
+
+    await api.suaHoiThoai("abc", { title: null });
+    // `title: null` = "xoa tieu de". No PHAI di ra day, khong bi `JSON.stringify`
+    // bo mat — do la khac biet giua "xoa tieu de" va "dung dung toi tieu de".
+    expect(JSON.parse(String(initLanGoi(1).body))).toEqual({ title: null });
+
+    await api.suaHoiThoai("abc", { default_model: "mot-model" });
+    expect(JSON.parse(String(initLanGoi(2).body))).toEqual({ default_model: "mot-model" });
+  });
+});
+
+describe("xoaHoiThoai", () => {
+  it("`DELETE` va nuot duoc `204` (khong body de `json()` doc)", async () => {
+    fetchGia.mockResolvedValue(traVe(204));
+
+    await expect(api.xoaHoiThoai("abc")).resolves.toBeUndefined();
+
+    expect(urlLanGoi(0)).toBe("/api/v1/conversations/abc");
+    expect(initLanGoi(0).method).toBe("DELETE");
+  });
+
+  it("`404` (xoa lan hai) ⇒ `ApiError` mang `code` cua §18", async () => {
+    fetchGia.mockResolvedValue(
+      traVe(404, { error: { code: "CONVERSATION_NOT_FOUND", message: "khong tim thay" } }),
+    );
+
+    await expect(api.xoaHoiThoai("abc")).rejects.toMatchObject({
+      status: 404,
+      code: "CONVERSATION_NOT_FOUND",
+    });
+  });
+});

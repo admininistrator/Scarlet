@@ -69,6 +69,13 @@ function ghiThamSoHoiThoai(id: string): void {
   window.history.replaceState(null, "", url);
 }
 
+/** T-3.3 — hoi thoai vua bi xoa thi `?c=` cua no khong duoc song sot qua F5. */
+function xoaThamSoHoiThoai(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(THAM_SO_HOI_THOAI);
+  window.history.replaceState(null, "", url);
+}
+
 function loiThanhChu(loi: unknown): string {
   if (loi instanceof ApiError) {
     return `${loi.code}: ${loi.message}`;
@@ -92,6 +99,10 @@ export interface ChatDangDung {
 
   chonModel: (modelId: string | null) => void;
   hoiThoaiMoi: () => Promise<void>;
+  /** T-3.3 — sidebar chon mot hoi thoai da co. */
+  moHoiThoai: (conversationId: string) => Promise<void>;
+  /** T-3.3 — hoi thoai dang mo vua bi xoa: roi khoi no, khong mo cai nao. */
+  dongHoiThoai: () => void;
   gui: (noiDung: string) => Promise<void>;
   dung: () => Promise<void>;
   thuLai: (messageId: string) => Promise<void>;
@@ -297,6 +308,39 @@ export function useChat(): ChatDangDung {
     }
   }, [mo, modelChon]);
 
+  /**
+   * T-3.3 — sidebar chon mot hoi thoai da co.
+   *
+   * Dong stream cu TRUOC khi mo hoi thoai khac: luat 3 cua file nay cho moi
+   * tab mot `EventSource`, va mot stream con song cua hoi thoai truoc se noi
+   * chu cua no vao cay vua nap.
+   */
+  const moHoiThoai = useCallback(
+    async (conversationId: string) => {
+      if (conversationId === cayRef.current.conversationId) {
+        return;
+      }
+      streamRef.current?.dong();
+      setDangChay(null);
+      setKetNoi(null);
+      setUsage(null);
+      setLoi(null);
+      await mo(conversationId);
+    },
+    [mo],
+  );
+
+  /** T-3.3 — hoi thoai dang mo vua bi xoa: khong con gi de hien. */
+  const dongHoiThoai = useCallback(() => {
+    streamRef.current?.dong();
+    setDangChay(null);
+    setKetNoi(null);
+    setUsage(null);
+    setLoi(null);
+    datCay(() => cayRong());
+    xoaThamSoHoiThoai();
+  }, [datCay]);
+
   const gui = useCallback(
     async (noiDungMoi: string) => {
       const conversationId = cayRef.current.conversationId;
@@ -437,6 +481,8 @@ export function useChat(): ChatDangDung {
     loi,
     chonModel: setModelChon,
     hoiThoaiMoi,
+    moHoiThoai,
+    dongHoiThoai,
     gui,
     dung,
     thuLai,

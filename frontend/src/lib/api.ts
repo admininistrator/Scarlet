@@ -339,19 +339,69 @@ export interface NapCatalogRa {
 export const api = {
   danhSachModel: () => request<ModelRa[]>("/models"),
 
-  danhSachHoiThoai: () => request<DanhSachHoiThoai>("/conversations"),
+  /**
+   * §18.2 — mot TRANG cua sidebar. `updatedBefore` la `next_cursor` cua trang
+   * truoc; bo trong de lay trang dau.
+   *
+   * Con tro di qua `URLSearchParams` chu khong noi chuoi: `next_cursor` la mot
+   * `datetime` pydantic tuan tu hoa (`2026-09-22T01:02:03.456789+00:00`), va
+   * dau `+` cua mui gio la mot KY TU CO NGHIA trong query string — noi thang
+   * vao URL thi server doc duoc mot dau cach va tra `422`.
+   *
+   * KHONG co tham so `limit`: kich thuoc trang la cau hinh cua server
+   * (`CONVERSATION_PAGE_SIZE`, A3). FE gui mot con so o day la chep mot han
+   * muc sang phia khong so huu no.
+   */
+  danhSachHoiThoai: (updatedBefore?: string | null) =>
+    request<DanhSachHoiThoai>(
+      updatedBefore === undefined || updatedBefore === null
+        ? "/conversations"
+        : `/conversations?${new URLSearchParams({ updated_before: updatedBefore }).toString()}`,
+    ),
 
   taoHoiThoai: (body: { title?: string | null; default_model?: string | null } = {}) =>
     request<HoiThoaiRa>("/conversations", { method: "POST", body: JSON.stringify(body) }),
 
   docHoiThoai: (id: string) => request<HoiThoaiChiTiet>(`/conversations/${id}`),
 
-  /** §8.2 — chuyen nhanh la mot `PATCH` dat `active_leaf_id`, khong xoa gi. */
-  suaHoiThoai: (id: string, thayDoi: { active_leaf_id?: string | null; title?: string | null }) =>
+  /**
+   * §18.2 — BON truong: tieu de, model mac dinh, ghim, va con tro nhanh.
+   *
+   * `SuaHoiThoai` doc `model_fields_set` o phia server, nen **vang mat khac
+   * `null`**: khong gui `title` la "dung dung toi tieu de", gui `title: null`
+   * la "xoa tieu de". Hai nghia khac nhau phai di bang hai body khac nhau —
+   * do la ly do kieu duoi day dung `?:` chu khong dat gia tri mac dinh.
+   *
+   * `pinned` **khong** nhan `null` (cot `NOT NULL` — server tra `400`), nen
+   * kieu o day la `boolean` chu khong `boolean | null`: mot lan `pinned: null`
+   * phai la loi luc `tsc` chay, khong phai mot `400` luc nguoi dung bam nut.
+   *
+   * Tra ve **ca duong di** (`HoiThoaiChiTiet`) chu khong chi metadata, vi
+   * `active_leaf_id` la mot trong bon truong — xem docstring cua handler.
+   */
+  suaHoiThoai: (
+    id: string,
+    thayDoi: {
+      active_leaf_id?: string | null;
+      title?: string | null;
+      pinned?: boolean;
+      default_model?: string | null;
+    },
+  ) =>
     request<HoiThoaiChiTiet>(`/conversations/${id}`, {
       method: "PATCH",
       body: JSON.stringify(thayDoi),
     }),
+
+  /**
+   * §18.2 — xoa **MEM** (C12): hoi thoai bien khoi moi truy van mac dinh, cay
+   * message ben duoi van nguyen trong Postgres toi luot purge.
+   *
+   * Tra `204` (khong body), nen `request` tra `undefined` — dung nhanh 204 da
+   * co san o tren. Xoa lan thu hai la `404` chu khong `204`.
+   */
+  xoaHoiThoai: (id: string) =>
+    request<void>(`/conversations/${id}`, { method: "DELETE" }),
 
   /**
    * §7.2 ① — tra `202` roi thoi. Khong sinh mot chu nao o day (A1).
