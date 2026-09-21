@@ -56,7 +56,7 @@ export function ServerErrorPage({ error }: { error: unknown }) {
       <p className="mt-2 text-sm text-muted">{t("loi.500.moTa")}</p>
 
       {chiTiet !== null && (
-        <pre className="mt-4 overflow-x-auto rounded-sm border border-border px-3 py-2 text-left text-xs text-danger">
+        <pre className="mt-4 overflow-x-auto rounded-sm border border-border px-3 py-2 text-left text-xs text-danger-emphasis">
           {chiTiet}
         </pre>
       )}

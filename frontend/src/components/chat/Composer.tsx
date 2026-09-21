@@ -57,7 +57,7 @@ export function Composer({
           <button
             type="button"
             onClick={onDung}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-danger"
+            className="rounded-md border border-border px-3 py-1.5 text-sm text-danger-emphasis"
           >
             {t("chat.dung")}
           </button>

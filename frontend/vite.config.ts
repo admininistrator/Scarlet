@@ -23,6 +23,17 @@ export default defineConfig({
     host: true,
     port: 5173,
     strictPort: true,
+    // T-3.2 — Vite 6 tra 403 "Blocked request" cho moi `Host:` khong nam trong
+    // danh sach nay (lop chan DNS-rebinding cua no). Nginx da lach bang
+    // `proxy_set_header Host $host` nen duong nguoi dung di khong bao gio cham
+    // toi; nhung container `audit` goi THANG `http://web:5173` tren network
+    // `internal`, tuc `Host: web`, va no an tron 403.
+    //
+    // Trieu chung khi thieu dong nay rat de doc nham: lighthouse bao
+    // "unable to reliably load the page", con axe cham diem chinh TRANG LOI
+    // cua Vite va bao `html-has-lang` / `document-title` — ba loi khong mot
+    // cai nao ton tai trong `index.html`.
+    allowedHosts: ["web", "localhost"],
   },
   test: {
     environment: "jsdom",

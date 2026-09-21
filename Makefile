@@ -1,4 +1,4 @@
-.PHONY: up down test test-resume bench lint fmt migrate check-hardcode eval logs
+.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs
 
 COMPOSE := docker compose --profile core --profile tools
 
@@ -33,6 +33,22 @@ test-resume:
 # tính bằng chục phút. Mã thoát ≠ 0 nếu có model trượt ngưỡng p95 của §2.3.
 bench:
 	backend/.venv/bin/python scripts/bench_ttft.py
+
+# T-3.2 / S8 — Lighthouse Accessibility + @axe-core/cli tren bon duong cua P3.
+# CUNG HO `bench`/`test-resume`, khong phai `test`: can ca stack dang chay
+# (`make up`), vi no do mot trang that bang mot Chrome that. Ma thoat = so
+# duong truot nguong.
+#
+# Vi sao `run --rm` chu khong `exec`: service `audit` o `profile: dev` va
+# KHONG chay thuong truc — DoD cua T-3.2 doi `docker compose --profile core
+# --profile tools ps` khong thay no. `--profile core` co mat de `depends_on:
+# web` keo duoc `web` len; `-T` de dau ra khong bi pseudo-tty lam roi, giong
+# `make test`.
+#
+#   make audit                     bon duong
+#   make audit DUONG=/dang-nhap    mot duong, dung luc sua loi
+audit:
+	docker compose --profile core --profile dev run --rm -T -e DUONG="$(DUONG)" audit
 
 lint:
 	cd backend && .venv/bin/ruff check .

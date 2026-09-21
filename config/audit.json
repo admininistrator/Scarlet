@@ -1,0 +1,30 @@
+{
+  "_huong_dan_1": "Nguong va danh sach duong cua `make audit` (tasks.md T-3.2, NQ-77). Doc boi `scripts/audit.mjs`. A3/L4: khong mot con so nguong hay mot URL nao duoc viet thang trong script.",
+  "_huong_dan_2": "`base_url` la `http://web:5173` chu KHONG `https://localhost`: container `audit` nam tren network `internal` va goi thang Vite dev server, nen no khong cham vao chung chi mkcert (CA nam tren host Windows theo T-H1, khong trong container).",
+  "_huong_dan_3": "`lighthouse.only_categories` co DUNG mot phan tu `accessibility`. Performance KHONG duoc do o day: phep do chay tren Vite dev server (ES module chua minify + client HMR), nen mot diem Performance cham o day khong noi gi ve san pham se deploy. NQ-77 da chuyen `Performance >= 80` cua S8 sang P9 / T-9.4.",
+  "_huong_dan_4": "Lighthouse mac dinh gia lap MOBILE (Moto G Power). S8 va DoD cua T-3.10 doi dung kich thuoc do, nen o day khong truyen `--preset=desktop`. `form_factor` chi de ghi lai y dinh cho nguoi doc va cho dong tieu de cua bao cao.",
+  "_huong_dan_5": "`axe.fail_impacts` la muc do nghiem trong lam do phep kiem. axe-core xep bon muc: minor, moderate, serious, critical. DoD cua T-3.2 chi cam hai muc cuoi.",
+  "_huong_dan_6": "`axe.fail_incomplete_rules` la luat ma ket qua `incomplete` (\"axe khong tu ket luan duoc, can nguoi soat\") CUNG bi tinh la truot. Do duoc 2026-09-21 khi chay ca am cua DoD: dat `--color-muted: var(--color-background)` cho ra fgColor == bgColor, va axe-core tra `incomplete` voi `messageKey: equalRatio` chu KHONG tra `violation` — no khong phan biet duoc chu vo hinh vi loi voi chu bi an co y. Lighthouse cung khong bat duoc ca nay: diem Accessibility van la 100. Neu khong co dong nay thi `make audit` xanh tren mot trang co chu chim hoan toan vao nen, tuc dung cai ma dong DoD ay ton tai de chan.",
+
+  "base_url": "http://web:5173",
+
+  "routes": ["/", "/dang-nhap", "/dang-ky", "/admin"],
+
+  "lighthouse": {
+    "only_categories": ["accessibility"],
+    "min_scores": { "accessibility": 90 },
+    "form_factor": "mobile"
+  },
+
+  "axe": {
+    "fail_impacts": ["serious", "critical"],
+    "fail_incomplete_rules": ["color-contrast"]
+  },
+
+  "cho_san_sang": {
+    "so_lan_thu": 30,
+    "nghi_giua_hai_lan_ms": 2000
+  },
+
+  "timeout_moi_lenh_s": 180
+}

@@ -77,7 +77,7 @@ export function ChatScreen() {
       </div>
 
       {chat.loi !== null && (
-        <div className="flex items-center gap-3 border-b border-border px-6 py-2 text-sm text-danger">
+        <div className="flex items-center gap-3 border-b border-border px-6 py-2 text-sm text-danger-emphasis">
           <span>{chat.loi}</span>
           <button
             type="button"

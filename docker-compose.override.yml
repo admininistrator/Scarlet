@@ -1,6 +1,6 @@
 # File này LUÔN được docker compose tự nạp cùng docker-compose.yml (không cần
-# cờ riêng). Muốn thêm mailpit/adminer thì mới cần: --profile core --profile
-# tools --profile dev.
+# cờ riêng). Muốn thêm mailpit/adminer/audit thì mới cần: --profile core
+# --profile tools --profile dev.
 #
 # Đây là file CHỈ DÀNH CHO DEV. `--reload`/`--watch` và bind-mount source không
 # bao giờ được đi vào `docker-compose.yml`.
@@ -73,6 +73,37 @@ services:
     profiles: [dev]
     environment:
       ADMINER_DEFAULT_SERVER: postgres
+
+  # T-3.2 / NQ-77 — nơi duy nhất trong hệ có một Chrome thật. `make audit` gọi
+  # nó bằng `docker compose run --rm`, tức nó sống đúng bằng một lần đo rồi
+  # biến mất; nó KHÔNG phải một service chạy thường trực và `docker compose
+  # --profile core --profile tools ps` không được thấy nó.
+  #
+  # Ba quyết định, cả ba đều của NQ-77:
+  #
+  #  1. `profiles: [dev]`, cùng khuôn `mailpit`/`adminer` từ T-0.4 — KHÔNG thêm
+  #     `chromium` vào image `web`. `web` chạy suốt ngày ở `profile: core`, và
+  #     mỗi lần đổi `package.json` của nó là một lần kéo lại ~400 MB.
+  #  2. `networks: [internal]` và đo `http://web:5173`: CA của mkcert nằm trên
+  #     host Windows (T-H1), không trong container nào. Đo thẳng trên network
+  #     nội bộ xoá vấn đề chứng chỉ bằng cách không tạo ra nó.
+  #  3. KHÔNG `env_file` — audit không có việc gì phải biết JWT_SECRET hay khoá
+  #     MinIO. Cùng lý lẽ với `web`, `litellm` và `sandbox` (C27).
+  #
+  # `config/` mount vào để `scripts/audit.mjs` đọc ngưỡng từ `config/audit.json`
+  # (A3): đổi ngưỡng là sửa một file, không rebuild image.
+  audit:
+    build: ./audit
+    restart: "no"
+    networks: [internal]
+    profiles: [dev]
+    working_dir: /scarlet
+    volumes:
+      - ./scripts:/scarlet/scripts:ro
+      - ./config:/scarlet/config:ro
+    command: node scripts/audit.mjs
+    depends_on:
+      web: { condition: service_healthy }
 
   # Publish Postgres ra loopback CHỈ cho test tầng repository (T-1.1).
   # `make test` chạy pytest từ WSL host, ngoài network `internal`, nên không có

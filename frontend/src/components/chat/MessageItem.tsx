@@ -50,7 +50,7 @@ export function MessageItem({
         <span>{node.status}</span>
         {node.model_id !== null && <span>{node.model_id}</span>}
         {node.finish_reason !== null && <span>finish={node.finish_reason}</span>}
-        {node.error_code !== null && <span className="text-danger">{node.error_code}</span>}
+        {node.error_code !== null && <span className="text-danger-emphasis">{node.error_code}</span>}
 
         {coAnhEm(node) && (
           <span className="flex items-center gap-1">

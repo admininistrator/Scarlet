@@ -60,7 +60,7 @@ export function BangChoDuyet({
                     type="button"
                     disabled={dangBan}
                     onClick={() => onDoiTrangThai(u.id, "reject")}
-                    className="rounded-sm border border-border px-2 py-1 text-danger hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                    className="rounded-sm border border-border px-2 py-1 text-danger-emphasis hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
                   >
                     {t("admin.tuChoi")}
                   </button>

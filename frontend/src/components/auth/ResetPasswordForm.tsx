@@ -44,7 +44,7 @@ export function ResetPasswordForm() {
     return (
       <main className="mx-auto w-full max-w-sm px-6 py-12">
         <h2 className="text-lg font-semibold">{t("datLai.tieuDe")}</h2>
-        <p role="alert" className="mt-2 text-sm text-danger">
+        <p role="alert" className="mt-2 text-sm text-danger-emphasis">
           {token === null ? t("datLai.thieuToken") : t("datLai.tokenHong")}
         </p>
         <Link
@@ -123,7 +123,7 @@ export function ResetPasswordForm() {
         <span className="-mt-2 text-xs text-muted">{t("auth.matKhauGoiY")}</span>
 
         {loi !== null && (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-sm text-danger-emphasis">
             {loi}
           </p>
         )}

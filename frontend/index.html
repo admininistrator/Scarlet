@@ -23,7 +23,17 @@
       })();
     </script>
   </head>
-  <body>
+  <!--
+    T-3.2 — nen/chu cua trang song o DAY, khong o mot khoi `body { ... }` trong
+    `theme.css`. Ghi chu thi cong cua T-HD1 noi ro ly do: file theme chi duoc co
+    dung HAI khoi top-level (`@theme` va `[data-theme="dark"]`), nen mot quy tac
+    `body` viet tay se la khoi thu ba — cho ma lan sua theme ke tiep khong ai
+    nghi toi khi doi mau nen.
+
+    `min-w-app-min` = --container-app-min = 375px (S8): duoi muc do thi trang
+    cuon ngang chu khong bop nat bo cuc.
+  -->
+  <body class="min-w-app-min bg-background text-foreground antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

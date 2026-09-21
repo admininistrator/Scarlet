@@ -125,7 +125,7 @@ export function RegisterForm() {
         <Turnstile onToken={turnstile.onToken} ref={turnstile.ref} className="my-1" />
 
         {loi !== null && (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-sm text-danger-emphasis">
             {loi}
           </p>
         )}
