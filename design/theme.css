@@ -48,6 +48,29 @@
   --spacing-measure: 46rem;   /* bề rộng đọc tối đa của luồng chat */
   --spacing-min: 23.4375rem;  /* 375px — bề rộng nhỏ nhất phải chạy đúng */
 
+  /* Khung chính (T-HD2) */
+  --spacing-header: 3.5rem;          /* 56px — chiều cao header, cả desktop lẫn mobile */
+  --spacing-drawer: 20rem;           /* 320px — sidebar dạng drawer dưới 1024px */
+  --spacing-panel-right: 23.75rem;   /* 380px — panel phải, bề rộng mặc định */
+  --spacing-panel-min: 20rem;        /* 320px — kéo hẹp nhất */
+  --spacing-panel-max: 35rem;        /* 560px — kéo rộng nhất */
+  --spacing-bubble-user: 35rem;      /* 560px — bong bóng người dùng */
+  --spacing-gutter: 1rem;            /* lề ngang mobile */
+  --spacing-gutter-lg: 1.5rem;       /* lề ngang desktop */
+
+  /* Model picker (T-HD4) */
+  --spacing-picker: 24rem;          /* 384px — dropdown desktop */
+  --spacing-picker-max: 26rem;      /* 416px — trần khi tên model dài */
+  --spacing-tooltip: 18rem;         /* 288px — tooltip lý do, buộc xuống dòng */
+  --spacing-row-model: 4rem;        /* 64px — chiều cao hàng model (> 44px) */
+  --spacing-sheet-max: 80vh;        /* trần sheet ở 375px */
+  --spacing-rail: 0.1875rem;        /* 3px — rail tầng mặc định bên trái hàng */
+  --spacing-grabber: 2.25rem;       /* 36px — tay nắm của sheet (T-3.6) */
+
+  /* Bong bóng tin nhắn (T-HD3) */
+  --spacing-code-gutter: 2.5rem;     /* 40px — cột số dòng, cố định tới 999 dòng */
+  --spacing-caret: 0.5rem;           /* 8px — bề ngang con trỏ stream */
+
   /* ---------- Radius ---------------------------------------------------- */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
@@ -61,14 +84,38 @@
   --shadow-panel: 0 4px 12px -2px rgb(24 18 16 / 0.10), 0 2px 4px -2px rgb(24 18 16 / 0.06);
   --shadow-popover: 0 12px 28px -6px rgb(24 18 16 / 0.18), 0 4px 8px -4px rgb(24 18 16 / 0.10);
 
-  /* ---------- Motion ----------------------------------------------------- */
+  /* ---------- Motion (T-HD5) ---------------------------------------------
+   * Thang thời lượng — tên theo VAI TRÒ:
+   *   instant  tức thì   90ms   phản hồi tay: nhấn nút xuống
+   *   fast     nhanh    140ms   hover, nhả nút, MỌI chuyển động RA
+   *   normal   thường   200ms   panel / sidebar / drawer / sheet đi VÀO
+   *   slow     chậm     320ms   vùng mới xuất hiện: bong bóng, thanh quota
+   *   caret    nhịp    1060ms   chu kỳ nháy con trỏ stream (không phải transition)
+   * Ra luôn ngắn hơn vào: người dùng đã quyết định rời đi, đừng bắt họ chờ.
+   *
+   * Easing — tên theo VAI TRÒ:
+   *   enter    vào màn hình       giảm tốc mạnh, tới nơi êm
+   *   exit     ra khỏi màn hình   tăng tốc, biến mất dứt khoát
+   *   move     di chuyển TRONG màn hình (đổi kích thước, đổi trạng thái)
+   *   constant tốc độ đều — chỉ cho vòng quay / nhịp lặp
+   * ----------------------------------------------------------------------- */
   --duration-instant: 90ms;
   --duration-fast: 140ms;
-  --duration-base: 200ms;
+  --duration-normal: 200ms;
   --duration-slow: 320ms;
-  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-caret: 1060ms;
+  --duration-spin: 960ms;
   --ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
   --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-move: cubic-bezier(0.2, 0, 0, 1);
+  --ease-constant: linear;
+  /* Bí danh giữ tương thích mã cũ — không dùng cho mã mới. */
+  --duration-base: var(--duration-normal);
+  --ease-standard: var(--ease-move);
+  /* Tiện ích `transition-*` mặc định của Tailwind đọc hai biến này — trỏ về
+   * token để không một `transition-colors` nào còn chạy 150ms của thư viện (T-3.9). */
+  --default-transition-duration: var(--duration-fast);
+  --default-transition-timing-function: var(--ease-move);
 
   /* ---------- BỀ MẶT ----------------------------------------------------- */
   --color-background: #f7f6f4;          /* nền app */
@@ -78,6 +125,9 @@
   --color-surface-user: #fbede9;        /* bong bóng user */
   --color-surface-code: #e8e4df;        /* khối code */
   --color-surface-hover: #edeae6;       /* hover hàng danh sách */
+  --color-surface-disabled: #f1eeea;    /* hàng model không dùng được */
+  --color-surface-tooltip: #1b1917;     /* tooltip nền đặc, chữ sáng */
+  --color-tooltip-foreground: #f7f6f4;
 
   /* ---------- CHỮ --------------------------------------------------------- */
   --color-foreground: #1b1917;
@@ -114,10 +164,27 @@
   --color-quota-warning: #b45309;       /* ≤ 20% */
   --color-quota-empty: #9f1239;         /* đã hết */
 
+  /* ---------- LỚP PHỦ ------------------------------------------------------- */
+  --color-scrim: rgb(24 18 16 / 0.44);  /* nền mờ sau drawer */
+
   /* ---------- BIỂU ĐỒ (đúng 2 chuỗi) -------------------------------------------- */
   /* Lệch độ sáng 2.4:1 giữa hai màu → vẫn tách bạch khi in trắng đen. */
   --color-chart-1: #8e1f17;             /* metered */
   --color-chart-2: #4a8ab8;             /* unmetered */
+
+  /* ---------- TÔ MÀU CÚ PHÁP (T-3.5 · Prism) ----------------------------------- */
+  /* Sáu lớp, không hơn. Prism sinh ra hàng chục tên token; `mauCuPhap()` trong
+   * `highlight.ts` gộp chúng về đúng sáu tên dưới đây, nên số màu phải kiểm
+   * tương phản là sáu chứ không phải ba mươi. Nền đối chiếu luôn là
+   * `--color-surface-code` — khối code không nằm trên bề mặt nào khác.
+   * Màu ở đây là TRANG TRÍ: gỡ hết màu đi thì code vẫn đọc được nguyên vẹn
+   * (WCAG 1.4.1), nên bốn hue chỉ cần khác tông, không cần khác độ sáng. */
+  --color-code-keyword: #6d28d9;        /* tím  — từ khoá, boolean, tag */
+  --color-code-string: #14653d;         /* lục  — chuỗi, regex, attr-value */
+  --color-code-number: #8a5200;         /* hổ phách — số, hằng, symbol */
+  --color-code-function: #1c4ed8;       /* lam  — tên hàm, class, thuộc tính */
+  --color-code-comment: #5c5651;        /* chú thích — cùng giá trị với muted */
+  --color-code-punct: #5c5651;          /* dấu câu, toán tử */
 }
 
 [data-theme="dark"] {
@@ -129,6 +196,9 @@
   --color-surface-user: #3a201b;
   --color-surface-code: #0b0a0a;
   --color-surface-hover: #221f1d;
+  --color-surface-disabled: #1b1918;
+  --color-surface-tooltip: #3a3632;
+  --color-tooltip-foreground: #f7f6f4;
 
   /* CHỮ */
   --color-foreground: #f2efec;
@@ -165,9 +235,20 @@
   --color-quota-warning: #e8a33d;
   --color-quota-empty: #f2708a;
 
+  /* LỚP PHỦ */
+  --color-scrim: rgb(0 0 0 / 0.64);
+
   /* BIỂU ĐỒ */
   --color-chart-1: #e0584a;
   --color-chart-2: #a8cdea;
+
+  /* TÔ MÀU CÚ PHÁP */
+  --color-code-keyword: #c4a2ff;
+  --color-code-string: #7ddba4;
+  --color-code-number: #e8a33d;
+  --color-code-function: #8ab4f8;
+  --color-code-comment: #a8a099;
+  --color-code-punct: #a8a099;
 
   /* Shadow phải đậm hơn trên nền tối mới nhìn thấy tầng nổi. */
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
@@ -214,42 +295,210 @@
     color: var(--color-accent-hover);
     text-decoration: underline;
   }
-  @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-      animation-duration: 1ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 1ms !important;
-    }
+}
+
+/* ---------------------------------------------------------------------------
+ * prefers-reduced-motion: reduce ⇒ TẮT HẲN. Không "giảm một nửa", không 1ms.
+ *   • animation/transition = none: phần tử hiện ngay ở trạng thái cuối
+ *     (mọi keyframe "in" kết thúc ở opacity 1 / transform none = trạng thái gốc).
+ *   • Token thời lượng về 0ms: mã JS nào đọc token để hẹn giờ cũng không chờ.
+ *   • Radix đọc animation-name; khi = none nó unmount ngay, không treo chờ animationend.
+ *   • Con trỏ stream đứng yên, vẫn nhìn thấy. Vòng quay "đang làm mới" đứng yên;
+ *     trạng thái vẫn đọc được qua chữ "Đang kiểm lại trạng thái".
+ * Khối này nằm NGOÀI @layer để thắng mọi utility.
+ *
+ * `HoatAnh.test.tsx` đọc chính khối này (chuỗi truy vấn phải khớp đúng
+ * `REDUCED_MOTION_QUERY` của `lib/motion.ts`) — xoá hoặc đổi nó là test đỏ.
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-theme="dark"] {
+    --duration-instant: 0ms;
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
+    --duration-slow: 0ms;
+    --duration-caret: 0ms;
+    --duration-spin: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  .motion-press:active {
+    transform: none !important;
   }
 }
 
-@utility motion-theme {
-  transition: background-color var(--duration-base) var(--ease-standard),
-    color var(--duration-base) var(--ease-standard);
+/* ---------------------------------------------------------------------------
+ * BẢNG "CHỖ NÀO DÙNG TOKEN NÀO"
+ *
+ *  Chỗ                        Class               Thời lượng        Easing
+ *  ─────────────────────────  ──────────────────  ────────────────  ────────
+ *  Nút — nhấn xuống            .motion-press       instant  90ms     move
+ *  Nút — nhả ra                .motion-press       fast    140ms     move
+ *  Icon khi hover              .motion-icon        fast    140ms     move
+ *  Sidebar desktop mở / đóng   .motion-sidebar     normal  200ms     move
+ *  Drawer mobile — vào         .motion-drawer      normal  200ms     enter
+ *  Drawer mobile — ra          .motion-drawer      fast    140ms     exit
+ *  Nền mờ sau drawer           .motion-scrim       (theo drawer)
+ *  Chữ stream — VÙNG           .motion-enter       slow    320ms     enter
+ *  Chữ stream — phần tử chữ    .motion-none        —                 —
+ *  Con trỏ stream              .caret-stream       caret  1060ms     bước
+ *
+ * Chữ stream: 309 mảnh / 3,768 s. Hoạt ảnh chỉ đặt MỘT LẦN trên vùng
+ * (bong bóng vừa mount). Phần tử chứa chữ gắn .motion-none — cấm mọi
+ * transition/animation, kể cả do một class khác vô tình thêm vào.
+ * ------------------------------------------------------------------------- */
+
+/* Nút bấm. Transition đọc từ trạng thái ĐÍCH: vào :active dùng instant,
+ * rời :active dùng lại fast → nhấn nhanh hơn nhả. */
+@utility motion-press {
+  transition: transform var(--duration-fast) var(--ease-move),
+    background-color var(--duration-fast) var(--ease-move),
+    border-color var(--duration-fast) var(--ease-move),
+    color var(--duration-fast) var(--ease-move);
+  &:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: scale(0.97);
+    transition-duration: var(--duration-instant);
+  }
 }
+/* Icon trong nút / hàng. Component tự đổi màu bằng group-hover:text-*. */
+@utility motion-icon {
+  transition: color var(--duration-fast) var(--ease-move),
+    opacity var(--duration-fast) var(--ease-move),
+    transform var(--duration-fast) var(--ease-move);
+}
+/* Vùng mới xuất hiện (bong bóng, card). Chạy MỘT lần khi mount;
+ * re-render con bên trong không kích lại animation. */
+@utility motion-enter {
+  animation: scarlet-rise-in var(--duration-slow) var(--ease-enter) both;
+}
+/* Rào chắn cho phần tử có nội dung đổi liên tục (chữ stream). */
+@utility motion-none {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* ---- Tên cũ, giữ nguyên để component hiện có không phải sửa ---- */
+@utility motion-theme {
+  transition: background-color var(--duration-normal) var(--ease-move),
+    color var(--duration-normal) var(--ease-move);
+}
+/* = motion-press cho ô nhập / hàng danh sách không cần hiệu ứng nhấn. */
 @utility motion-control {
-  transition: background-color var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+  transition: background-color var(--duration-fast) var(--ease-move),
+    border-color var(--duration-fast) var(--ease-move),
+    color var(--duration-fast) var(--ease-move),
+    box-shadow var(--duration-fast) var(--ease-move);
 }
 @utility motion-panel {
-  animation: scarlet-panel-in var(--duration-base) var(--ease-enter) both;
+  animation: scarlet-panel-in var(--duration-normal) var(--ease-enter) both;
 }
 @utility motion-popover {
   animation: scarlet-popover-in var(--duration-fast) var(--ease-enter) both;
+  &[data-state="closed"] {
+    animation: scarlet-fade-out var(--duration-fast) var(--ease-exit) both;
+  }
 }
+/* Bí danh của motion-enter. */
 @utility motion-bubble {
-  animation: scarlet-bubble-in var(--duration-slow) var(--ease-enter) both;
+  animation: scarlet-rise-in var(--duration-slow) var(--ease-enter) both;
+}
+/* Sidebar desktop: di chuyển TRONG màn hình (cột chat giãn ra) → move. */
+@utility motion-sidebar {
+  transition: width var(--duration-normal) var(--ease-move),
+    visibility 0s linear var(--duration-normal);
+  &[data-state="open"] {
+    transition: width var(--duration-normal) var(--ease-move), visibility 0s;
+  }
+}
+@utility motion-drawer {
+  animation: scarlet-drawer-in var(--duration-normal) var(--ease-enter) both;
+  &[data-state="closed"] {
+    animation: scarlet-drawer-out var(--duration-fast) var(--ease-exit) both;
+  }
+}
+@utility motion-scrim {
+  animation: scarlet-fade-in var(--duration-normal) var(--ease-enter) both;
+  &[data-state="closed"] {
+    animation: scarlet-fade-out var(--duration-fast) var(--ease-exit) both;
+  }
+}
+/* Con trỏ stream. Gắn vào MỘT span rỗng riêng — KHÔNG gắn vào phần tử chứa
+ * chữ đang chảy, vì phần tử đó re-render 300+ lần trong 4 giây. */
+@utility caret-stream {
+  display: inline-block;
+  width: var(--spacing-caret);
+  height: 1em;
+  vertical-align: text-bottom;
+  background-color: var(--color-accent);
+  animation: scarlet-caret var(--duration-caret) steps(2, jump-none) infinite;
+}
+/* Con trỏ ở CUỐI một khối markdown đang chảy (T-3.5).
+ * Nó phải nằm TRONG dòng chữ cuối, mà dòng chữ cuối là một <p> do
+ * `react-markdown` dựng — không có chỗ chèn một <span> vào đó. `::after` của
+ * phần tử cuối cho đúng vị trí ấy, và hoạt ảnh chạy trên pseudo-element chứ
+ * không trên phần tử đang đổi nội dung, nên nó không khởi động lại mỗi delta. */
+@utility caret-tail {
+  & > :last-child::after {
+    content: "";
+    display: inline-block;
+    width: var(--spacing-caret);
+    height: 1em;
+    margin-left: 0.1875rem;
+    vertical-align: text-bottom;
+    background-color: var(--color-accent);
+    animation: scarlet-caret var(--duration-caret) steps(2, jump-none) infinite;
+  }
+}
+
+/* Số dòng vẽ bằng CSS counter + ::before — không nằm trong DOM text,
+ * nên textContent của <code> là code sạch, không kèm số dòng. */
+@utility code-lines {
+  counter-reset: code-line;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+@utility code-line {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  &::before {
+    counter-increment: code-line;
+    content: counter(code-line);
+    position: sticky;
+    left: 0;
+    display: inline-block;
+    width: var(--spacing-code-gutter);
+    margin-right: 1rem;
+    text-align: right;
+    color: var(--color-muted);
+    background-color: var(--color-surface-code);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+/* Sheet từ đáy lên — dùng ở bề rộng < 640px thay cho dropdown. */
+@utility motion-sheet {
+  animation: scarlet-sheet-in var(--duration-normal) var(--ease-enter) both;
+  &[data-state="closed"] {
+    animation: scarlet-sheet-out var(--duration-fast) var(--ease-exit) both;
+  }
+}
+/* Chỉ báo "đang làm mới trạng thái provider". Quay liên tục, không đổi layout. */
+@utility motion-spin {
+  animation: scarlet-spin var(--duration-spin) var(--ease-constant) infinite;
 }
 @utility motion-quota {
-  transition: width var(--duration-slow) var(--ease-standard),
-    background-color var(--duration-base) var(--ease-standard);
+  transition: width var(--duration-slow) var(--ease-move),
+    background-color var(--duration-normal) var(--ease-move);
 }
 @utility motion-pulse {
-  animation: scarlet-pulse var(--duration-slow) var(--ease-standard) infinite alternate;
+  animation: scarlet-pulse var(--duration-slow) var(--ease-move) infinite alternate;
 }
 @utility tabular {
   font-variant-numeric: tabular-nums;
@@ -264,11 +513,63 @@
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: none; }
 }
+@keyframes scarlet-rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes scarlet-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scarlet-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes scarlet-drawer-out {
+  from { transform: none; }
+  to   { transform: translateX(-100%); }
+}
+@keyframes scarlet-sheet-out {
+  from { transform: none; }
+  to   { transform: translateY(100%); }
+}
 @keyframes scarlet-bubble-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: none; }
 }
+@keyframes scarlet-caret {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes scarlet-drawer-in {
+  from { transform: translateX(-100%); }
+  to   { transform: none; }
+}
+@keyframes scarlet-scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scarlet-sheet-in {
+  from { transform: translateY(100%); }
+  to   { transform: none; }
+}
+@keyframes scarlet-spin {
+  to { transform: rotate(360deg); }
+}
 @keyframes scarlet-pulse {
   from { opacity: 0.45; }
   to   { opacity: 1; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Sáu lớp tô màu cú pháp (T-3.5). `highlight.ts` chỉ sinh đúng sáu tên này;
+ * token nào Prism gọi tên khác thì rơi về màu chữ thường, không có lớp nào.
+ * ------------------------------------------------------------------------- */
+@layer base {
+  .tk-keyword  { color: var(--color-code-keyword); }
+  .tk-string   { color: var(--color-code-string); }
+  .tk-number   { color: var(--color-code-number); }
+  .tk-function { color: var(--color-code-function); }
+  .tk-comment  { color: var(--color-code-comment); font-style: italic; }
+  .tk-punct    { color: var(--color-code-punct); }
 }

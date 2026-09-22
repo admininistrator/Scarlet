@@ -58,18 +58,18 @@
   --spacing-gutter: 1rem;            /* lề ngang mobile */
   --spacing-gutter-lg: 1.5rem;       /* lề ngang desktop */
 
+  /* Model picker (T-HD4) */
+  --spacing-picker: 24rem;          /* 384px — dropdown desktop */
+  --spacing-picker-max: 26rem;      /* 416px — trần khi tên model dài */
+  --spacing-tooltip: 18rem;         /* 288px — tooltip lý do, buộc xuống dòng */
+  --spacing-row-model: 4rem;        /* 64px — chiều cao hàng model (> 44px) */
+  --spacing-sheet-max: 80vh;        /* trần sheet ở 375px */
+  --spacing-rail: 0.1875rem;        /* 3px — rail tầng mặc định bên trái hàng */
+  --spacing-grabber: 2.25rem;       /* 36px — tay nắm của sheet (T-3.6) */
+
   /* Bong bóng tin nhắn (T-HD3) */
   --spacing-code-gutter: 2.5rem;     /* 40px — cột số dòng, cố định tới 999 dòng */
   --spacing-caret: 0.5rem;           /* 8px — bề ngang con trỏ stream */
-
-  /* Model Picker (T-HD4) */
-  --spacing-picker: 24rem;           /* 384px — bề rộng dropdown ở desktop */
-  --spacing-picker-max: 26rem;       /* 416px — trần khi tên model dài */
-  --spacing-row-model: 4rem;         /* 64px — chiều cao tối thiểu một hàng model */
-  --spacing-rail: 0.1875rem;         /* 3px — thanh dọc báo tầng mặc định */
-  --spacing-tooltip: 18rem;          /* 288px — trần tooltip, câu lý do tự xuống dòng */
-  --spacing-sheet-max: 80vh;         /* sheet từ đáy lên không che hết màn hình */
-  --spacing-grabber: 2.25rem;        /* 36px — tay nắm của sheet */
 
   /* ---------- Radius ---------------------------------------------------- */
   --radius-sm: 0.25rem;
@@ -113,7 +113,7 @@
   --duration-base: var(--duration-normal);
   --ease-standard: var(--ease-move);
   /* Tiện ích `transition-*` mặc định của Tailwind đọc hai biến này — trỏ về
-   * token để không một `transition-colors` nào còn chạy 150ms của thư viện. */
+   * token để không một `transition-colors` nào còn chạy 150ms của thư viện (T-3.9). */
   --default-transition-duration: var(--duration-fast);
   --default-transition-timing-function: var(--ease-move);
 
@@ -125,9 +125,9 @@
   --color-surface-user: #fbede9;        /* bong bóng user */
   --color-surface-code: #e8e4df;        /* khối code */
   --color-surface-hover: #edeae6;       /* hover hàng danh sách */
-  --color-surface-disabled: #f1eeea;    /* nền hàng model không chọn được (T-HD4) */
-  --color-surface-tooltip: #1b1917;     /* tooltip — nền ĐẢO so với panel */
-  --color-tooltip-foreground: #f7f6f4;  /* chữ trên nền tooltip */
+  --color-surface-disabled: #f1eeea;    /* hàng model không dùng được */
+  --color-surface-tooltip: #1b1917;     /* tooltip nền đặc, chữ sáng */
+  --color-tooltip-foreground: #f7f6f4;
 
   /* ---------- CHỮ --------------------------------------------------------- */
   --color-foreground: #1b1917;
@@ -197,10 +197,8 @@
   --color-surface-code: #0b0a0a;
   --color-surface-hover: #221f1d;
   --color-surface-disabled: #1b1918;
-  /* Theme tối: tooltip KHÔNG đảo về nền sáng — nó nổi lên một bậc so với
-   * panel. Đảo màu ở đây cho một mảng chữ dài là ném một ô trắng vào giữa
-   * màn hình tối. `--color-tooltip-foreground` giữ nguyên giá trị sáng. */
   --color-surface-tooltip: #3a3632;
+  --color-tooltip-foreground: #f7f6f4;
 
   /* CHỮ */
   --color-foreground: #f2efec;
@@ -303,8 +301,7 @@
  * prefers-reduced-motion: reduce ⇒ TẮT HẲN. Không "giảm một nửa", không 1ms.
  *   • animation/transition = none: phần tử hiện ngay ở trạng thái cuối
  *     (mọi keyframe "in" kết thúc ở opacity 1 / transform none = trạng thái gốc).
- *   • Token thời lượng về 0ms: mã JS nào đọc token để hẹn giờ cũng không chờ
- *     (`lib/motion.ts::readDurationMs` — sidebar gỡ khỏi DOM ngay khi đóng).
+ *   • Token thời lượng về 0ms: mã JS nào đọc token để hẹn giờ cũng không chờ.
  *   • Radix đọc animation-name; khi = none nó unmount ngay, không treo chờ animationend.
  *   • Con trỏ stream đứng yên, vẫn nhìn thấy. Vòng quay "đang làm mới" đứng yên;
  *     trạng thái vẫn đọc được qua chữ "Đang kiểm lại trạng thái".
@@ -336,7 +333,7 @@
 }
 
 /* ---------------------------------------------------------------------------
- * BẢNG "CHỖ NÀO DÙNG TOKEN NÀO" (T-HD5)
+ * BẢNG "CHỖ NÀO DÙNG TOKEN NÀO"
  *
  *  Chỗ                        Class               Thời lượng        Easing
  *  ─────────────────────────  ──────────────────  ────────────────  ────────
@@ -430,36 +427,17 @@
     animation: scarlet-fade-out var(--duration-fast) var(--ease-exit) both;
   }
 }
-/* Sheet của Model Picker ở bề rộng nhỏ (T-HD4): luôn đi lên từ đáy, vì nút mở
- * nằm sát đáy màn hình và một dropdown ở đó sẽ bị bàn phím ảo đè. */
-@utility motion-sheet {
-  animation: scarlet-sheet-in var(--duration-normal) var(--ease-enter) both;
-  &[data-state="closed"] {
-    animation: scarlet-sheet-out var(--duration-fast) var(--ease-exit) both;
-  }
-}
-/* Icon nút làm mới trong lúc đang kiểm lại. Khối reduced-motion ở trên đặt
- * `animation: none`, nên vòng quay đứng yên cho người đã tắt hiệu ứng — không
- * cần một điều kiện thứ hai trong component. */
-@utility motion-spin {
-  animation: scarlet-spin var(--duration-spin) var(--ease-constant) infinite;
-  transform-origin: 50% 50%;
-}
-
-/* Con trỏ stream (T-HD3). Gắn vào MỘT span RỖNG đứng cạnh chữ — KHÔNG gắn vào
- * phần tử chứa chữ đang chảy, vì phần tử đó dựng lại 300+ lần trong 4 giây và
- * một `animation` trên nó là 300 lần khởi động lại hoạt ảnh. */
+/* Con trỏ stream. Gắn vào MỘT span rỗng riêng — KHÔNG gắn vào phần tử chứa
+ * chữ đang chảy, vì phần tử đó re-render 300+ lần trong 4 giây. */
 @utility caret-stream {
   display: inline-block;
   width: var(--spacing-caret);
   height: 1em;
   vertical-align: text-bottom;
-  border-radius: 2px;
   background-color: var(--color-accent);
   animation: scarlet-caret var(--duration-caret) steps(2, jump-none) infinite;
 }
-
-/* Con trỏ ở CUỐI một khối markdown đang chảy.
+/* Con trỏ ở CUỐI một khối markdown đang chảy (T-3.5).
  * Nó phải nằm TRONG dòng chữ cuối, mà dòng chữ cuối là một <p> do
  * `react-markdown` dựng — không có chỗ chèn một <span> vào đó. `::after` của
  * phần tử cuối cho đúng vị trí ấy, và hoạt ảnh chạy trên pseudo-element chứ
@@ -472,15 +450,13 @@
     height: 1em;
     margin-left: 0.1875rem;
     vertical-align: text-bottom;
-    border-radius: 2px;
     background-color: var(--color-accent);
     animation: scarlet-caret var(--duration-caret) steps(2, jump-none) infinite;
   }
 }
 
-/* Số dòng vẽ bằng CSS counter + ::before — KHÔNG nằm trong DOM text, nên
- * `textContent` của <code> là code sạch và nút Copy không phải cắt gì cả.
- * Đây là ràng buộc của bản T-HD3, không phải một mẹo trình bày. */
+/* Số dòng vẽ bằng CSS counter + ::before — không nằm trong DOM text,
+ * nên textContent của <code> là code sạch, không kèm số dòng. */
 @utility code-lines {
   counter-reset: code-line;
   overflow-x: auto;
@@ -499,11 +475,23 @@
     width: var(--spacing-code-gutter);
     margin-right: 1rem;
     text-align: right;
-    color: var(--color-code-comment);
+    color: var(--color-muted);
     background-color: var(--color-surface-code);
     user-select: none;
     -webkit-user-select: none;
   }
+}
+
+/* Sheet từ đáy lên — dùng ở bề rộng < 640px thay cho dropdown. */
+@utility motion-sheet {
+  animation: scarlet-sheet-in var(--duration-normal) var(--ease-enter) both;
+  &[data-state="closed"] {
+    animation: scarlet-sheet-out var(--duration-fast) var(--ease-exit) both;
+  }
+}
+/* Chỉ báo "đang làm mới trạng thái provider". Quay liên tục, không đổi layout. */
+@utility motion-spin {
+  animation: scarlet-spin var(--duration-spin) var(--ease-constant) infinite;
 }
 @utility motion-quota {
   transition: width var(--duration-slow) var(--ease-move),
@@ -549,6 +537,10 @@
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: none; }
 }
+@keyframes scarlet-caret {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
 @keyframes scarlet-drawer-in {
   from { transform: translateX(-100%); }
   to   { transform: none; }
@@ -564,18 +556,14 @@
 @keyframes scarlet-spin {
   to { transform: rotate(360deg); }
 }
-@keyframes scarlet-caret {
-  from { opacity: 1; }
-  to   { opacity: 0; }
-}
 @keyframes scarlet-pulse {
   from { opacity: 0.45; }
   to   { opacity: 1; }
 }
 
 /* ---------------------------------------------------------------------------
- * Sáu lớp tô màu cú pháp. `highlight.ts` chỉ sinh đúng sáu tên này; token nào
- * Prism gọi tên khác thì rơi về màu chữ thường, không có lớp nào.
+ * Sáu lớp tô màu cú pháp (T-3.5). `highlight.ts` chỉ sinh đúng sáu tên này;
+ * token nào Prism gọi tên khác thì rơi về màu chữ thường, không có lớp nào.
  * ------------------------------------------------------------------------- */
 @layer base {
   .tk-keyword  { color: var(--color-code-keyword); }

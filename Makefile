@@ -1,4 +1,4 @@
-.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs
+.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme
 
 COMPOSE := docker compose --profile core --profile tools
 
@@ -50,10 +50,24 @@ bench:
 audit:
 	docker compose --profile core --profile dev run --rm -T -e DUONG="$(DUONG)" audit
 
-lint:
+lint: check-theme
 	cd backend && .venv/bin/ruff check .
 	cd backend && .venv/bin/mypy app
 	$(COMPOSE) exec -T web pnpm typecheck
+
+# B-249 — `design/theme.css` la NGUON (ban Claude Design giao, cong phan app
+# them vao). `frontend/src/styles/theme.css` la BAN CHEP y nguyen, vi container
+# `web` chi mount `frontend/`. Sua o `design/` roi `make sync-theme`; sua thang
+# ban chep thi `make lint` do. Hai ban lech nhau la hong trong im lang (B-226).
+THEME_SRC := design/theme.css
+THEME_DST := frontend/src/styles/theme.css
+
+sync-theme:
+	cp $(THEME_SRC) $(THEME_DST)
+
+check-theme:
+	@cmp -s $(THEME_SRC) $(THEME_DST) || { echo "check-theme: $(THEME_DST) lech $(THEME_SRC) — sua o design/ roi chay 'make sync-theme'"; exit 1; }
+	@echo "check-theme: OK"
 
 fmt:
 	cd backend && .venv/bin/ruff format .
