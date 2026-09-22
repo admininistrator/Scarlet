@@ -1921,3 +1921,140 @@ async def test_quen_mat_khau_han_muc_dem_ca_luot_bi_captcha_chan(client: AsyncCl
 
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
+
+
+# ═════════ HAI cookie phiên cùng tên — cookie tossing (2026-09-22) ══════════
+#
+# Lỗi đo được trên stack thật: người dùng đăng nhập, `POST /auth/login` trả
+# `200`, và request ngay sau đó nhận `401 TOKEN_EXPIRED`. Log nginx cho thấy
+# trình duyệt gửi **hai** `scarlet_session` (`ss=1 dup=1`), còn
+# `cookie_parser` của Starlette giữ giá trị **cuối cùng** — mà RFC 6265 §5.4
+# xếp cookie `Path` dài hơn lên trước, nên cookie vừa cấp (`Path=/api/v1`) đi
+# trước và một cookie cũ ở path rộng hơn đi sau và thắng.
+#
+# Sáu ca dưới đây gửi header `Cookie` THÔ thay vì dùng `client.cookies`: kho
+# cookie của httpx là một `dict` theo tên nên nó **không thể** dựng lại tình
+# huống này — chính là lý do bộ test cũ xanh suốt trong khi trình duyệt hỏng.
+
+
+def _hai_cookie(*gia_tri: str) -> dict[str, str]:
+    """Header `Cookie` mang nhiều `scarlet_session`, đúng thứ tự truyền vào."""
+    return {"Cookie": "; ".join(f"{SESSION_COOKIE_NAME}={v}" for v in gia_tri)}
+
+
+def _token_cua(user_id: uuid.UUID, ttl_minutes: int) -> str:
+    return encode_access_token(
+        user_id=user_id,
+        role=UserRole.USER,
+        tier="free",
+        status=UserStatus.ACTIVE,
+        ttl_minutes=ttl_minutes,
+    )
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_cookie_cu_het_han_di_SAU_khong_che_duoc_cookie_moi(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Đúng thứ tự trình duyệt gửi trong sự cố thật: mới trước, cũ sau."""
+    user_id, _ = await _tao_user_that(session_factory)
+
+    resp = await client.get(
+        DUONG_DAN_ME,
+        headers=_hai_cookie(_token_cua(user_id, 15), _token_cua(user_id, -1)),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == str(user_id)
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_cookie_cu_het_han_di_TRUOC_cung_khong_che_duoc(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Thứ tự nào cũng phải ra cùng một kết quả — thứ tự do trình duyệt quyết,
+    không do ta."""
+    user_id, _ = await _tao_user_that(session_factory)
+
+    resp = await client.get(
+        DUONG_DAN_ME,
+        headers=_hai_cookie(_token_cua(user_id, -1), _token_cua(user_id, 15)),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == str(user_id)
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_cookie_rac_khong_phai_jwt_di_kem_khong_che_duoc(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Cookie tossing không cần một token hợp lệ — một chuỗi rác là đủ, nếu
+    tầng đọc cookie chỉ nhìn một giá trị."""
+    user_id, _ = await _tao_user_that(session_factory)
+
+    resp = await client.get(
+        DUONG_DAN_ME,
+        headers=_hai_cookie(_token_cua(user_id, 15), "khong-phai-jwt-hop-le"),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == str(user_id)
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_ca_HAI_cookie_deu_het_han_van_tra_token_expired(
+    client: AsyncClient, user_a: uuid.UUID
+) -> None:
+    """Không được nới lỏng chẩn đoán: `TOKEN_EXPIRED` là mã FE đọc để đi
+    `/auth/refresh` thay vì đẩy người dùng ra màn đăng nhập."""
+    resp = await client.get(
+        DUONG_DAN_ME,
+        headers=_hai_cookie(_token_cua(user_a, -1), _token_cua(user_a, -2)),
+    )
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.TOKEN_EXPIRED
+
+
+async def test_mot_cookie_het_han_mot_cookie_rac_uu_tien_token_expired(
+    client: AsyncClient, user_a: uuid.UUID
+) -> None:
+    """Một cookie rác đi kèm KHÔNG được hạ `TOKEN_EXPIRED` xuống
+    `UNAUTHENTICATED` — hạ xuống là đẩy người dùng ra màn đăng nhập trong khi
+    refresh token của họ còn sống 30 ngày."""
+    resp = await client.get(
+        DUONG_DAN_ME, headers=_hai_cookie("rac-hoan-toan", _token_cua(user_a, -1))
+    )
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.TOKEN_EXPIRED
+
+
+async def test_hai_cookie_deu_sai_dinh_dang_tra_unauthenticated(
+    client: AsyncClient,
+) -> None:
+    resp = await client.get(DUONG_DAN_ME, headers=_hai_cookie("rac-mot", "rac-hai"))
+
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
+
+
+@pytest.mark.usefixtures("_db_cua_test")
+async def test_logout_quet_ca_path_rong_hon(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`Set-Cookie` là đường DUY NHẤT xoá một cookie `HttpOnly`, và nó phải
+    trúng đúng `Path`. Không quét `/` và `/api` thì cookie rác sống tới khi
+    người dùng tự đi dọn trong cài đặt trình duyệt."""
+    _, email = await _tao_user_that(session_factory)
+    await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU_TEST})
+
+    resp = await client.post("/api/v1/auth/logout")
+
+    assert resp.status_code == 200
+    xoa_phien = [
+        h for h in resp.headers.get_list("set-cookie") if h.startswith(f"{SESSION_COOKIE_NAME}=")
+    ]
+    paths = {h.split("Path=")[1].split(";")[0] for h in xoa_phien}
+    assert paths == {"/api/v1", "/api", "/"}

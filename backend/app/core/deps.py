@@ -115,7 +115,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Cookie, Depends, status
+from fastapi import Depends, Request, status
 
 from app.core.access_token import (
     AccessTokenClaims,
@@ -138,9 +138,51 @@ logger = logging.getLogger(__name__)
 SESSION_COOKIE_NAME = "scarlet_session"
 
 
-async def get_access_claims(
-    session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
-) -> AccessTokenClaims | None:
+def _moi_cookie_phien(request: Request) -> list[str]:
+    """MỌI giá trị `scarlet_session` trong header `Cookie`, đúng thứ tự gửi.
+
+    **Vì sao không dùng `Cookie(alias=...)` của FastAPI** — đây là một lỗi đã
+    cắn thật, đo được 2026-09-22:
+
+        POST /api/v1/auth/login    → 200   (đăng nhập thành công)
+        GET  /api/v1/auth/me       → 401 TOKEN_EXPIRED
+        GET  /api/v1/auth/me       → 401   ss=1 dup=1   ← HAI cookie cùng tên
+
+    `Cookie(alias=...)` đọc `request.cookies`, mà `cookie_parser` của Starlette
+    gán vào một `dict` trong một vòng lặp, tức **giá trị cuối cùng thắng**::
+
+        cookie_parser('scarlet_session=CU; scarlet_session=MOI')  → 'MOI'
+        cookie_parser('scarlet_session=MOI; scarlet_session=CU')  → 'CU'
+
+    RFC 6265 §5.4 bắt trình duyệt xếp cookie có `Path` DÀI hơn lên trước, nên
+    cookie mới (`Path=/api/v1`, xem `_dat_cookie_phien`) đi **trước** và một
+    cookie cũ cùng tên ở path rộng hơn đi **sau** — đúng cái Starlette giữ lại.
+    Hệ quả: người dùng đăng nhập lại bao nhiêu lần cũng vô ích, vì cookie vừa
+    cấp luôn bị cái cũ che, và màn hình báo "access token đã hết hạn" ngay sau
+    một lần `login` trả `200`.
+
+    Và nó KHÔNG chỉ là chuyện phiền: đây là **cookie tossing**. Ai đặt được một
+    cookie cùng tên ở path rộng hơn — hoặc, khi lên domain thật, từ một
+    subdomain anh em — sẽ khoá vĩnh viễn phiên của người khác mà không cần
+    biết một bí mật nào. Cookie `HttpOnly` không đỡ được: nó chặn JS **đọc**,
+    không chặn việc ghi đè bằng một cookie khác.
+
+    Vì vậy tầng này đọc header thô và trả **tất cả**; `get_access_claims` nhận
+    cái đầu tiên giải mã được. Một cookie rác đi kèm không còn đủ sức chặn một
+    cookie thật.
+    """
+    raw = request.headers.get("cookie")
+    if not raw:
+        return []
+    gia_tri: list[str] = []
+    for phan in raw.split(";"):
+        ten, dau_bang, val = phan.partition("=")
+        if dau_bang and ten.strip() == SESSION_COOKIE_NAME:
+            gia_tri.append(val.strip().strip('"'))
+    return gia_tri
+
+
+async def get_access_claims(request: Request) -> AccessTokenClaims | None:
     """Claim của cookie phiên, đã verify chữ ký + `exp` + blacklist (§11.3).
 
     Trả `None` khi **không có** cookie phiên; ba cửa gọi hàm này biến `None`
@@ -157,23 +199,39 @@ async def get_access_claims(
         ApiError 503 `SERVICE_UNAVAILABLE`: không hỏi được Redis nên KHÔNG
             biết token có bị thu hồi hay không (xem docstring module).
     """
-    if session_cookie is None:
+    cookies = _moi_cookie_phien(request)
+    if not cookies:
         return None
 
-    try:
-        claims = decode_access_token(session_cookie)
-    except TokenExpiredError as loi:
-        raise ApiError(
-            status.HTTP_401_UNAUTHORIZED,
-            ApiErrorCode.TOKEN_EXPIRED,
-            "access token da het han",
-        ) from loi
-    except TokenInvalidError as loi:
+    # Nhận cái ĐẦU TIÊN giải mã được. Khi chỉ có một cookie — đường đi thường —
+    # vòng lặp này chạy đúng một lần và hành vi y hệt bản cũ.
+    claims = None
+    co_het_han = False
+    for raw_token in cookies:
+        try:
+            claims = decode_access_token(raw_token)
+            break
+        except TokenExpiredError:
+            co_het_han = True
+        except TokenInvalidError:
+            pass
+
+    if claims is None:
+        # `TOKEN_EXPIRED` được ưu tiên hơn `UNAUTHENTICATED` khi có ít nhất một
+        # cookie hết hạn: nó là mã FE đọc để đi `/auth/refresh` thay vì đẩy
+        # thẳng người dùng ra màn đăng nhập. Một cookie rác đi kèm không được
+        # phép hạ cấp chẩn đoán ấy.
+        if co_het_han:
+            raise ApiError(
+                status.HTTP_401_UNAUTHORIZED,
+                ApiErrorCode.TOKEN_EXPIRED,
+                "access token da het han",
+            )
         raise ApiError(
             status.HTTP_401_UNAUTHORIZED,
             ApiErrorCode.UNAUTHENTICATED,
             "access token khong hop le",
-        ) from loi
+        )
 
     try:
         da_bi_thu_hoi = await bi_chan(get_redis(), claims)

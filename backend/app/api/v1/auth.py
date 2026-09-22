@@ -719,6 +719,17 @@ class DangXuatResponse(BaseModel):
 _PHAN_HOI_DANG_XUAT = DangXuatResponse(status="logged_out")
 
 
+#: Path rộng hơn `SESSION_COOKIE_PATH` mà logout cũng quét (2026-09-22).
+#:
+#: Scarlet chỉ **đặt** cookie phiên ở `Path=/api/v1`, nhưng một cookie cùng tên
+#: ở path rộng hơn vẫn được trình duyệt gửi kèm, và `_moi_cookie_phien`
+#: (`app/core/deps.py`) chỉ làm nó vô hại chứ không xoá được nó — `Set-Cookie`
+#: là đường duy nhất xoá một cookie `HttpOnly`, và nó phải trúng ĐÚNG `Path`.
+#: Không quét hai path này thì một cookie rác sống tới khi người dùng tự đi
+#: dọn trong cài đặt trình duyệt, và logout không thật sự dọn sạch phiên.
+_SESSION_PATH_QUET_THEM = ("/", "/api")
+
+
 def _xoa_hai_cookie(response: Response) -> None:
     """Xoá cookie phiên + cookie refresh, đúng `Path` đã đặt chúng."""
     response.delete_cookie(
@@ -728,6 +739,14 @@ def _xoa_hai_cookie(response: Response) -> None:
         secure=True,
         samesite="lax",
     )
+    for path in _SESSION_PATH_QUET_THEM:
+        response.delete_cookie(
+            key=SESSION_COOKIE_NAME,
+            path=path,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+        )
     response.delete_cookie(
         key=REFRESH_COOKIE_NAME,
         path=REFRESH_COOKIE_PATH,
