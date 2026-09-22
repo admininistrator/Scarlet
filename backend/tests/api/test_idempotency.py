@@ -42,8 +42,8 @@ from app.core.idempotency import (
     STATE_DONE,
     build_key,
 )
-from app.db.models import Conversation, Message, UserRole, UserStatus
-from app.db.repositories import ConversationRepository
+from app.db.models import Conversation, Message, MessageStatus, UserRole, UserStatus
+from app.db.repositories import ConversationRepository, MessageRepository
 from app.main import app
 
 #: Kiểu thật là `tests.api.conftest.FakeIdempotencyRedis`, nhưng `tests/` không
@@ -53,6 +53,7 @@ RedisGia = Any
 
 DUONG_DAN = "/api/v1/conversations/{}/messages"
 DUONG_DAN_HUY = "/api/v1/messages/{}/cancel"
+DUONG_DAN_RETRY = "/api/v1/messages/{}/retry"
 
 
 class ArqGia:
@@ -482,6 +483,128 @@ async def test_endpoint_khac_van_ap_luat_khi_co_header(
     assert hai.headers[HEADER_REPLAY] == "true"
     assert mot.json() == hai.json()
     assert build_key(user_a, "cancel_message", "huy-mot-lan") in idempotency_redis.store
+
+
+# ════════ NQ-93 / B-231 — `POST /messages/{id}/retry` cũng BẮT BUỘC ═════════
+#
+# Hai ca dưới đây là toàn bộ phần đo được của B-231. Chúng cố ý *soi gương* hai
+# ca của `POST .../messages` ở trên (thiếu header ⇒ 400; cùng key ⇒ một lượt),
+# vì lý lẽ NQ-93 là "hai đường này cùng hạng rủi ro" — nếu một ngày ai đó gỡ
+# `TEN_ROUTE_THU_LAI` khỏi danh sách, hai ca này phải đỏ y như hai ca kia.
+
+
+async def _mot_cau_tra_loi_da_khep(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    conversation_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> uuid.UUID:
+    """Một lượt chat đã khép, trả `assistant_message_id` để retry được.
+
+    Phải khép (`completed`) chứ không để `queued`: `retry` kiểm `status` trước
+    khi kiểm bất cứ thứ gì khác và sẽ trả `409 GENERATION_IN_PROGRESS` — tức
+    hai ca dưới sẽ đo nhầm một phép kiểm khác. Cùng lối `_hoan_tat` của
+    `tests/api/test_branching.py`.
+    """
+    tao = await client.post(
+        DUONG_DAN.format(conversation_id),
+        headers=_phien(user_id) | _khoa(f"de-co-mot-cau-tra-loi-{uuid.uuid4().hex}"),
+        json={"content": "a"},
+    )
+    assert tao.status_code == 202, tao.text
+    amid = uuid.UUID(tao.json()["assistant_message_id"])
+    async with session_factory() as session:
+        await MessageRepository(session).finish_generation(
+            amid, status=MessageStatus.COMPLETED, content="tra loi", finish_reason="stop"
+        )
+        await session.commit()
+    return amid
+
+
+async def test_retry_thieu_header_tra_400(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """B-231: `retry` không có `Idempotency-Key` ⇒ `400`, và KHÔNG thêm hàng nào.
+
+    Con số 2 là cặp user+assistant của lượt chuẩn bị; một `retry` lọt qua sẽ
+    làm nó thành 3 — tức một anh em mới và một hoá đơn mới cho một lần bấm mà
+    §11.4 không đếm được.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    amid = await _mot_cau_tra_loi_da_khep(client, session_factory, conversation.id, user_a)
+    arq_gia.da_day.clear()
+
+    resp = await client.post(DUONG_DAN_RETRY.format(amid), headers=_phien(user_a))
+
+    assert resp.status_code == 400, resp.text
+    body = resp.json()["error"]
+    assert body["code"] == "IDEMPOTENCY_KEY_REQUIRED"
+    assert body["details"]["header"] == HEADER_IDEMPOTENCY
+    assert await _dem_message(session_factory, conversation.id) == 2
+    assert arq_gia.da_day == []
+
+
+async def test_retry_cung_key_hai_lan_chi_mot_anh_em(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """Cạm bẫy ① của T-3.7: bấm nhanh hai lần **không** được thành hai hoá đơn.
+
+    Đây là ca mà lớp `_job_id` của B-92 không đỡ được: mỗi lần bấm sinh một
+    `assistant_message_id` khác, nên hai job đều hợp lệ và đều tính tiền. Phép
+    đo là `count(*)` **3** (không phải 4) cộng đúng một job.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    amid = await _mot_cau_tra_loi_da_khep(client, session_factory, conversation.id, user_a)
+    arq_gia.da_day.clear()
+    headers = _phien(user_a) | _khoa("mot-lan-bam-thu-lai")
+
+    mot = await client.post(DUONG_DAN_RETRY.format(amid), headers=headers)
+    hai = await client.post(DUONG_DAN_RETRY.format(amid), headers=headers)
+
+    assert mot.status_code == hai.status_code == 202, (mot.text, hai.text)
+    assert mot.json() == hai.json()
+    assert hai.headers[HEADER_REPLAY] == "true"
+    assert await _dem_message(session_factory, conversation.id) == 3
+    assert len(arq_gia.da_day) == 1
+
+
+async def test_retry_key_khac_thi_mo_nhanh_moi(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """Chiều ngược lại: khoá mới ⇒ một anh em THẬT, không phải bản phát lại.
+
+    Không có ca này thì "chỉ một anh em" ở trên vẫn xanh khi ai đó khoá cứng
+    retry theo `message_id` — và người dùng mất quyền retry lần thứ hai (§8.2
+    cho phép nhiều anh em) mà không một phép đo nào kêu.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    amid = await _mot_cau_tra_loi_da_khep(client, session_factory, conversation.id, user_a)
+    arq_gia.da_day.clear()
+
+    mot = await client.post(
+        DUONG_DAN_RETRY.format(amid), headers=_phien(user_a) | _khoa("lan-bam-thu-nhat")
+    )
+    hai = await client.post(
+        DUONG_DAN_RETRY.format(amid), headers=_phien(user_a) | _khoa("lan-bam-thu-hai")
+    )
+
+    assert mot.status_code == hai.status_code == 202, (mot.text, hai.text)
+    assert mot.json()["assistant_message_id"] != hai.json()["assistant_message_id"]
+    assert HEADER_REPLAY not in hai.headers
+    assert await _dem_message(session_factory, conversation.id) == 4
+    assert len(arq_gia.da_day) == 2
 
 
 # ═══════════════════════ DoD dòng 4 — TTL ≈ 86400 ═══════════════════════════

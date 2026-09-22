@@ -145,6 +145,19 @@ TEN_ROUTE_STREAM = "stream_message"
 #: lặng**; test `test_ten_route_khop_ham` canh đúng chiều đó.
 TEN_ROUTE_TAO_MESSAGE = "create_message"
 
+#: Tên route của `POST /messages/{id}/retry`. NQ-93 (B-231) đưa nó vào
+#: `ROUTE_BAT_BUOC_IDEMPOTENCY` cạnh hằng trên, và đó là **áp** A8 chứ không
+#: lệch: retry *tạo tài nguyên* — một `assistant_message_id` mới, một anh em
+#: mới, một hoá đơn mới — nên nó nằm đúng trong chữ "mọi POST tạo tài nguyên".
+#: Lớp `_job_id` của B-92 không đỡ được chiều này: mỗi lần bấm sinh một id
+#: khác, nên hai lần bấm là hai job hợp lệ với hai hàng khác nhau.
+#:
+#: `PATCH /messages/{id}` thì **không** vào danh sách — nó không phải POST, và
+#: mở `GUARDED_METHOD` sang `PATCH` là một lệch có chủ ý với §11.4/A8 mà NQ-93
+#: chọn chưa mở (khe còn hở: B-232). Cùng lý do đặt tên route ở đây chứ không
+#: đường dẫn: xem hằng trên và `app/core/idempotency.py::build_key`.
+TEN_ROUTE_THU_LAI = "retry_message"
+
 #: Hai luật của §10.6 áp cho ba route SINH CHỮ, dựng MỘT lần ở đây rồi gắn ba
 #: chỗ — cùng lối `_idempotency` của `api/v1/__init__.py`.
 #:
@@ -746,9 +759,16 @@ class AnhEmResponse(BaseModel):
     # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_ROUTE_SINH_CHU`.
     dependencies=_ROUTE_SINH_CHU,
     responses={
-        400: {"model": ErrorEnvelope, "description": "Khong phai assistant, hoac model_id la"},
+        400: {
+            "model": ErrorEnvelope,
+            "description": "Khong phai assistant, model_id la, hoac thieu Idempotency-Key",
+        },
         404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
-        409: {"model": ErrorEnvelope, "description": "Luot sinh cu con dang chay"},
+        409: {
+            "model": ErrorEnvelope,
+            "description": "Luot sinh cu con dang chay (GENERATION_IN_PROGRESS), hoac mot "
+            "request cung Idempotency-Key dang duoc xu ly (IN_PROGRESS) — §11.4",
+        },
         429: {
             "model": ErrorEnvelope,
             "description": "Qua 20 luot/phut (RATE_LIMITED), da co "
@@ -770,6 +790,12 @@ async def retry_message(
     Câu trả lời cũ **ở lại nguyên vẹn**: cùng `content`, cùng `model_id`, cùng
     `status`. Người dùng bấm `‹ 1/2 ›` là quay về được nó, và đó là lý do duy
     nhất cây message tồn tại (§8.1).
+
+    **`Idempotency-Key` là BẮT BUỘC ở đây (NQ-93, B-231).** Thiếu header ⇒ `400
+    IDEMPOTENCY_KEY_REQUIRED`, đúng như `POST .../messages`: hai đường này cùng
+    hạng rủi ro vì bấm hai lần là hai hàng `messages` và hai hoá đơn. Tên route
+    nằm trong `ROUTE_BAT_BUOC_IDEMPOTENCY` (`api/v1/__init__.py`) chứ không khai
+    ở chữ ký hàm này — xem `TEN_ROUTE_THU_LAI`.
 
     **`parent_id` của bản mới chép từ bản cũ, không phải từ `active_leaf_id`.**
     Retry một câu trả lời ở *giữa* hội thoại (sau khi đã cuộn ngược lên) phải

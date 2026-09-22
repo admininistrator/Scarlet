@@ -28,7 +28,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1 import ROUTE_BAT_BUOC_IDEMPOTENCY
-from app.api.v1.messages import TEN_ROUTE_TAO_MESSAGE
+from app.api.v1.messages import TEN_ROUTE_TAO_MESSAGE, TEN_ROUTE_THU_LAI
 from app.config import catalog
 from app.config.settings import settings
 from app.core.access_token import encode_access_token
@@ -875,21 +875,28 @@ async def test_thieu_idempotency_key_tra_400(
 
 
 def test_ten_route_khop_ham() -> None:
-    """`TEN_ROUTE_TAO_MESSAGE` phải là tên FastAPI thực sự đặt cho route.
+    """Hai hằng tên route phải là tên FastAPI thực sự đặt cho hai route ấy.
 
-    FastAPI lấy tên route từ **tên hàm**, nên đổi tên `create_message` mà quên
-    hằng ấy sẽ gỡ luật "bắt buộc `Idempotency-Key`" trong im lặng: danh sách ở
-    `api/v1/__init__.py` trỏ vào một tên không route nào mang, và endpoint đắt
-    tiền nhất của app lại thành "tuỳ chọn" mà không một dòng log nào kêu.
+    FastAPI lấy tên route từ **tên hàm**, nên đổi tên `create_message` (hoặc
+    `retry_message`) mà quên hằng tương ứng sẽ gỡ luật "bắt buộc
+    `Idempotency-Key`" trong im lặng: danh sách ở `api/v1/__init__.py` trỏ vào
+    một tên không route nào mang, và endpoint đắt tiền nhất của app lại thành
+    "tuỳ chọn" mà không một dòng log nào kêu.
+
+    Đẳng thức kiểm **cả hai chiều** (NQ-93/B-231): thêm một tên vào
+    `ROUTE_BAT_BUOC_IDEMPOTENCY` mà không có route nào mang nó cũng đỏ ở đây,
+    không đợi tới lúc người dùng bấm nút.
     """
-    assert frozenset({TEN_ROUTE_TAO_MESSAGE}) == ROUTE_BAT_BUOC_IDEMPOTENCY
+    assert frozenset({TEN_ROUTE_TAO_MESSAGE, TEN_ROUTE_THU_LAI}) == ROUTE_BAT_BUOC_IDEMPOTENCY
     # `url_path_for` ném `NoMatchFound` nếu không route nào mang tên ấy — đó
     # chính là phép kiểm. Đi đường này chứ không duyệt `app.routes` vì từ
     # FastAPI 0.141 `include_router` giữ router lồng nhau (`_IncludedRouter`)
     # thay vì trải phẳng, nên `app.routes` không còn là danh sách route nữa.
     duong_dan = app.url_path_for(TEN_ROUTE_TAO_MESSAGE, conversation_id=str(uuid.uuid4()))
+    duong_dan_retry = app.url_path_for(TEN_ROUTE_THU_LAI, message_id=str(uuid.uuid4()))
 
     assert str(duong_dan).endswith("/messages")
+    assert str(duong_dan_retry).endswith("/retry")
 
 
 # ═══════════════ A1 dạng kiểm được bằng grep (§5.3, DoD) ══════════════════

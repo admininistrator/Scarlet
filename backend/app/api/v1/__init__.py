@@ -56,7 +56,17 @@ from app.core.idempotency import require_idempotency
 
 #: A8: "Bắt buộc với POST /conversations/{id}/messages". Một tên route, không
 #: phải một đường dẫn — xem `app/core/idempotency.py::build_key`.
-ROUTE_BAT_BUOC_IDEMPOTENCY = frozenset({messages.TEN_ROUTE_TAO_MESSAGE})
+#:
+#: **Hai tên từ NQ-93 (B-231), không một.** `POST /messages/{id}/retry` cũng
+#: *tạo tài nguyên* (một `assistant_message_id` mới ⇒ một hoá đơn mới), nên bắt
+#: buộc nó là **áp** A8 chứ không lệch — A8 gọi đích danh một endpoint vì đó là
+#: endpoint đắt nhất, không vì nó là endpoint duy nhất tạo ra một lượt sinh.
+#: Hai nút Retry cạnh nhau của T-3.7 là chỗ hai lần bấm nhanh gặp nhau, và lớp
+#: `_job_id` của B-92 không đỡ được (mỗi lần bấm một id khác).
+#:
+#: `PATCH /messages/{id}` **vẫn ngoài vùng phủ** (B-232): nó không phải POST, và
+#: `GUARDED_METHOD` giữ nguyên `POST` theo đúng chữ §11.4/A8 — xem NQ-93.
+ROUTE_BAT_BUOC_IDEMPOTENCY = frozenset({messages.TEN_ROUTE_TAO_MESSAGE, messages.TEN_ROUTE_THU_LAI})
 
 _idempotency = require_idempotency(ROUTE_BAT_BUOC_IDEMPOTENCY)
 
