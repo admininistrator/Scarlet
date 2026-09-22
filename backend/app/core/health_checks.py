@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config.catalog import get_catalog
 from app.config.settings import settings
+from app.core.provider_health import probe_provider
 
 #: Timeout riêng cho mỗi mục kiểm (Việc cần làm, T-0.11).
 CHECK_TIMEOUT_S = 2.0
@@ -100,17 +101,13 @@ async def _check_litellm() -> None:
 
 
 async def _check_ninerouter() -> None:
-    # `base_url` + `health_path` lấy từ catalog, KHÔNG từ biến môi trường:
-    # key và endpoint của provider là việc của LiteLLM (`.env.providers`), còn
-    # backend chỉ biết provider qua `model_catalog.json` — NQ-15/B-26, A3.
-    # Không gắn Authorization: `/v1/models` của 9Router trả 200 khi không có
-    # header, và health check không có lý do gì phải cầm key provider.
-    provider = get_catalog().providers[NINEROUTER]
-    if provider.health_path is None:
-        raise ValueError(f"provider '{NINEROUTER}' thiếu health_path trong model_catalog.json")
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{provider.base_url}{provider.health_path}")
-        resp.raise_for_status()
+    # Phép đo nằm ở `core/provider_health.py` kể từ T-3.6, không chép lại ở
+    # đây: `GET /models` hỏi ĐÚNG câu hỏi này để làm xám model (§9.3, UC-05),
+    # và hai bản sao của một lệnh gọi là hai chỗ để `base_url` được ghép khác
+    # nhau (C43). Khác biệt duy nhất giữa hai người gọi là bộ nhớ: mục kiểm
+    # của `/health/deep` luôn đo TƯƠI (người vận hành đang nhìn màn hình để
+    # chẩn đoán), còn picker đọc bản có hạn `TTL_S`.
+    await probe_provider(get_catalog().providers[NINEROUTER])
 
 
 async def _timed(name: str, check: Coroutine[Any, Any, None]) -> tuple[str, CheckResult]:

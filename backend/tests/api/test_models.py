@@ -26,6 +26,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import catalog
+from app.core import provider_health
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
 from app.db.models import UserRole, UserStatus
@@ -51,6 +52,11 @@ class _SessionGia:
 async def _khong_ghi_so() -> AsyncIterator[_SessionGia]:
     """Thay `session_scope()` của `admin.py` — xem `test_reload_endpoint_...`."""
     yield _SessionGia()
+
+
+async def _probe_ok(_provider: object) -> None:
+    """Provider trả lời được — xem `_khong_do_mang_that`."""
+    return None
 
 
 class _RedisGia:
@@ -91,6 +97,22 @@ def _khoi_phuc_catalog_that() -> None:
     """Mỗi test tự dọn cache về catalog thật, tránh rò rỉ giữa các test."""
     yield
     catalog.reload(path=catalog.CATALOG_PATH)
+    provider_health.quen_het()
+
+
+@pytest.fixture(autouse=True)
+def _khong_do_mang_that(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-3.6 — `GET /models` nay hỏi `provider_health`, thứ gọi ra ngoài.
+
+    Thay đúng **một** hàm (`probe_provider`, lời gọi mạng duy nhất) chứ không
+    thay cả `provider_statuses`: phần ánh xạ provider → model vẫn phải chạy
+    thật ở mỗi ca, nếu không thì hai trường mới của §18.3 không ai đo.
+
+    Mặc định là "mọi provider trả lời được", nên các ca cũ của T-0.7 giữ
+    nguyên ý nghĩa. Ca nào cần chiều ngược lại thì tự `monkeypatch` lại.
+    """
+    monkeypatch.setattr(provider_health, "probe_provider", _probe_ok)
+    provider_health.quen_het()
 
 
 def test_get_models_khong_lo_base_url_hay_pricing() -> None:
@@ -140,3 +162,118 @@ def test_reload_endpoint_tra_ve_so_luong_model(monkeypatch: pytest.MonkeyPatch) 
 
     assert resp.status_code == 200
     assert resp.json()["models"] == len(catalog.get_catalog().models)
+
+
+# ═════════════════ T-3.6 — `available` + `unavailable_reason` (§18.3) ════════
+
+
+def test_get_models_co_hai_truong_kha_dung_cua_18_3() -> None:
+    """§18.3: *"có `available: bool` và `unavailable_reason`"*. T-0.7 dựng
+    `GET /models` **tối thiểu** và bỏ hai trường này lại; T-3.6 đặt chúng vào."""
+    body = client.get("/api/v1/models").json()
+
+    assert body
+    for m in body:
+        assert isinstance(m["available"], bool)
+        assert "unavailable_reason" in m
+
+
+def test_provider_song_thi_moi_model_kha_dung_va_khong_co_ly_do() -> None:
+    body = client.get("/api/v1/models").json()
+
+    assert all(m["available"] for m in body)
+    assert all(m["unavailable_reason"] is None for m in body)
+
+
+def test_provider_host_dependent_tat_thi_dung_model_cua_no_bi_xam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RR-5 / UC-05 dòng 2 — 9Router tắt là ca THƯỜNG. Chỉ model của provider
+    ấy mất `available`; DeepSeek và Anthropic không liên quan."""
+
+    async def probe_hong(_provider: object) -> None:
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr(provider_health, "probe_provider", probe_hong)
+    provider_health.quen_het()
+
+    body = client.get("/api/v1/models").json()
+
+    cat = catalog.get_catalog()
+    tat = {
+        m.id
+        for m in cat.models
+        if m.enabled and cat.providers[m.provider].availability == "host-dependent"
+    }
+    assert tat, "catalog thật phải còn ít nhất một model `host-dependent`"
+    for m in body:
+        if m["id"] in tat:
+            assert m["available"] is False
+            assert m["unavailable_reason"]
+        else:
+            assert m["available"] is True
+            assert m["unavailable_reason"] is None
+
+
+def test_model_khong_kha_dung_VAN_nam_trong_danh_sach(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UC-05 dòng 2 đòi *hiện xám*, không đòi biến mất. Lọc nó đi thì
+    `conversations.default_model` của một hội thoại cũ trỏ vào một model
+    không còn trong danh sách nào — Cạm bẫy ① của T-3.6 ở một dạng khác."""
+
+    async def probe_hong(_provider: object) -> None:
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr(provider_health, "probe_provider", probe_hong)
+    provider_health.quen_het()
+
+    so_luong_khi_tat = len(client.get("/api/v1/models").json())
+
+    monkeypatch.setattr(provider_health, "probe_provider", _probe_ok)
+    provider_health.quen_het()
+    so_luong_khi_song = len(client.get("/api/v1/models").json())
+
+    assert so_luong_khi_tat == so_luong_khi_song
+
+
+def test_ly_do_lay_ten_provider_tu_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A3 — câu hiện lên màn hình không được ghim tên một provider cụ thể."""
+
+    async def probe_hong(_provider: object) -> None:
+        raise TimeoutError("het gio cho")
+
+    monkeypatch.setattr(provider_health, "probe_provider", probe_hong)
+    provider_health.quen_het()
+
+    body = client.get("/api/v1/models").json()
+    cat = catalog.get_catalog()
+    nhan = {
+        cat.providers[m.provider].label
+        for m in cat.models
+        if m.enabled and cat.providers[m.provider].availability == "host-dependent"
+    }
+
+    ly_do = [m["unavailable_reason"] for m in body if not m["available"]]
+    assert ly_do
+    assert all(any(n in r for n in nhan) for r in ly_do)
+
+
+def test_get_models_khong_lo_base_url_khi_provider_tat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Câu lý do đi ra ngoài cho MỌI người dùng. `str(exc)` của httpx mang
+    nguyên URL nội bộ (`http://host.docker.internal:20128/v1/models`), nên nó
+    phải ở lại trong log — ADR-12, §9.3 hàng đầu tiên."""
+
+    async def probe_hong(_provider: object) -> None:
+        raise ConnectionError("All connection attempts failed: http://host.docker.internal:20128")
+
+    monkeypatch.setattr(provider_health, "probe_provider", probe_hong)
+    provider_health.quen_het()
+
+    body = client.get("/api/v1/models").json()
+
+    for m in body:
+        assert "host.docker.internal" not in (m["unavailable_reason"] or "")
+        assert "20128" not in (m["unavailable_reason"] or "")
