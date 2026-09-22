@@ -58,6 +58,10 @@
   --spacing-gutter: 1rem;            /* lề ngang mobile */
   --spacing-gutter-lg: 1.5rem;       /* lề ngang desktop */
 
+  /* Bong bóng tin nhắn (T-HD3) */
+  --spacing-code-gutter: 2.5rem;     /* 40px — cột số dòng, cố định tới 999 dòng */
+  --spacing-caret: 0.5rem;           /* 8px — bề ngang con trỏ stream */
+
   /* ---------- Radius ---------------------------------------------------- */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
@@ -76,6 +80,7 @@
   --duration-fast: 140ms;
   --duration-base: 200ms;
   --duration-slow: 320ms;
+  --duration-caret: 1060ms;   /* nhịp nháy con trỏ stream */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
   --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
@@ -131,6 +136,20 @@
   /* Lệch độ sáng 2.4:1 giữa hai màu → vẫn tách bạch khi in trắng đen. */
   --color-chart-1: #8e1f17;             /* metered */
   --color-chart-2: #4a8ab8;             /* unmetered */
+
+  /* ---------- TÔ MÀU CÚ PHÁP (T-3.5 · Prism) ----------------------------------- */
+  /* Sáu lớp, không hơn. Prism sinh ra hàng chục tên token; `mauCuPhap()` trong
+   * `highlight.ts` gộp chúng về đúng sáu tên dưới đây, nên số màu phải kiểm
+   * tương phản là sáu chứ không phải ba mươi. Nền đối chiếu luôn là
+   * `--color-surface-code` — khối code không nằm trên bề mặt nào khác.
+   * Màu ở đây là TRANG TRÍ: gỡ hết màu đi thì code vẫn đọc được nguyên vẹn
+   * (WCAG 1.4.1), nên bốn hue chỉ cần khác tông, không cần khác độ sáng. */
+  --color-code-keyword: #6d28d9;        /* tím  — từ khoá, boolean, tag */
+  --color-code-string: #14653d;         /* lục  — chuỗi, regex, attr-value */
+  --color-code-number: #8a5200;         /* hổ phách — số, hằng, symbol */
+  --color-code-function: #1c4ed8;       /* lam  — tên hàm, class, thuộc tính */
+  --color-code-comment: #5c5651;        /* chú thích — cùng giá trị với muted */
+  --color-code-punct: #5c5651;          /* dấu câu, toán tử */
 }
 
 [data-theme="dark"] {
@@ -184,6 +203,14 @@
   /* BIỂU ĐỒ */
   --color-chart-1: #e0584a;
   --color-chart-2: #a8cdea;
+
+  /* TÔ MÀU CÚ PHÁP */
+  --color-code-keyword: #c4a2ff;
+  --color-code-string: #7ddba4;
+  --color-code-number: #e8a33d;
+  --color-code-function: #8ab4f8;
+  --color-code-comment: #a8a099;
+  --color-code-punct: #a8a099;
 
   /* Shadow phải đậm hơn trên nền tối mới nhìn thấy tầng nổi. */
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
@@ -269,6 +296,66 @@
 @utility motion-scrim {
   animation: scarlet-scrim-in var(--duration-base) var(--ease-enter) both;
 }
+
+/* Con trỏ stream (T-HD3). Gắn vào MỘT span RỖNG đứng cạnh chữ — KHÔNG gắn vào
+ * phần tử chứa chữ đang chảy, vì phần tử đó dựng lại 300+ lần trong 4 giây và
+ * một `animation` trên nó là 300 lần khởi động lại hoạt ảnh. */
+@utility caret-stream {
+  display: inline-block;
+  width: var(--spacing-caret);
+  height: 1em;
+  vertical-align: text-bottom;
+  border-radius: 2px;
+  background-color: var(--color-accent);
+  animation: scarlet-caret var(--duration-caret) steps(2, jump-none) infinite;
+}
+
+/* Con trỏ ở CUỐI một khối markdown đang chảy.
+ * Nó phải nằm TRONG dòng chữ cuối, mà dòng chữ cuối là một <p> do
+ * `react-markdown` dựng — không có chỗ chèn một <span> vào đó. `::after` của
+ * phần tử cuối cho đúng vị trí ấy, và hoạt ảnh chạy trên pseudo-element chứ
+ * không trên phần tử đang đổi nội dung, nên nó không khởi động lại mỗi delta. */
+@utility caret-tail {
+  & > :last-child::after {
+    content: "";
+    display: inline-block;
+    width: var(--spacing-caret);
+    height: 1em;
+    margin-left: 0.1875rem;
+    vertical-align: text-bottom;
+    border-radius: 2px;
+    background-color: var(--color-accent);
+    animation: scarlet-caret var(--duration-caret) steps(2, jump-none) infinite;
+  }
+}
+
+/* Số dòng vẽ bằng CSS counter + ::before — KHÔNG nằm trong DOM text, nên
+ * `textContent` của <code> là code sạch và nút Copy không phải cắt gì cả.
+ * Đây là ràng buộc của bản T-HD3, không phải một mẹo trình bày. */
+@utility code-lines {
+  counter-reset: code-line;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+@utility code-line {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  &::before {
+    counter-increment: code-line;
+    content: counter(code-line);
+    position: sticky;
+    left: 0;
+    display: inline-block;
+    width: var(--spacing-code-gutter);
+    margin-right: 1rem;
+    text-align: right;
+    color: var(--color-code-comment);
+    background-color: var(--color-surface-code);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
 @utility motion-quota {
   transition: width var(--duration-slow) var(--ease-standard),
     background-color var(--duration-base) var(--ease-standard);
@@ -301,7 +388,24 @@
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+@keyframes scarlet-caret {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
 @keyframes scarlet-pulse {
   from { opacity: 0.45; }
   to   { opacity: 1; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Sáu lớp tô màu cú pháp. `highlight.ts` chỉ sinh đúng sáu tên này; token nào
+ * Prism gọi tên khác thì rơi về màu chữ thường, không có lớp nào.
+ * ------------------------------------------------------------------------- */
+@layer base {
+  .tk-keyword  { color: var(--color-code-keyword); }
+  .tk-string   { color: var(--color-code-string); }
+  .tk-number   { color: var(--color-code-number); }
+  .tk-function { color: var(--color-code-function); }
+  .tk-comment  { color: var(--color-code-comment); font-style: italic; }
+  .tk-punct    { color: var(--color-code-punct); }
 }

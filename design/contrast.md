@@ -121,7 +121,44 @@ là ≥ 1.05 cộng với viền hoặc shadow.
 bằng `--shadow-popover`, bong bóng assistant phân biệt bằng `--color-border`. Đây là
 lựa chọn có chủ đích — thêm một sắc trắng thứ hai chỉ tạo bẩn, không tạo thông tin.
 
-## 8. Những chỗ đã cân nhắc và loại bỏ
+## 8. Tô màu cú pháp trong khối code (T-3.5)
+
+Sáu lớp, không hơn — `highlight.ts` gộp hàng chục tên token của Prism về đúng sáu tên này.
+Nền đối chiếu **luôn** là `--color-surface-code`: khối code không nằm trên bề mặt nào khác,
+và code nội dòng cũng dùng chính nền ấy.
+
+| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---|---:|---:|---:|:--:|
+| `--color-code-keyword` | `--color-surface-code` | 5.61 | 9.38 | 4.5:1 | ✅ |
+| `--color-code-string` | `--color-surface-code` | 5.61 | 11.81 | 4.5:1 | ✅ |
+| `--color-code-number` | `--color-surface-code` | 5.05 | 9.17 | 4.5:1 | ✅ |
+| `--color-code-function` | `--color-surface-code` | 5.30 | 9.38 | 4.5:1 | ✅ |
+| `--color-code-comment` | `--color-surface-code` | 5.71 | 7.68 | 4.5:1 | ✅ |
+| `--color-code-punct` | `--color-surface-code` | 5.71 | 7.68 | 4.5:1 | ✅ |
+
+**Bốn hue không cách nhau về độ sáng** (chênh lệch giữa chúng chỉ 1.00–1.29:1), và điều đó
+**có chủ đích**. Màu cú pháp là trang trí: gỡ sạch màu đi thì code vẫn đọc được nguyên vẹn,
+không một thông tin nào chỉ được mang bằng màu (WCAG 1.4.1). Thứ phải đạt ngưỡng là từng màu
+so với **nền**, và cả sáu đều đạt ≥ 4.5:1 ở cả hai theme. Tách bạch giữa các lớp với nhau
+dựa vào **tông** — tím ↔ lục ↔ hổ phách ↔ lam — chứ không dựa vào độ sáng.
+
+`--color-code-comment` và `--color-code-punct` trùng giá trị với `--color-muted`, và đó là
+lý do chúng vẫn là hai biến riêng: một ngày nào đó đổi màu chú thích trong code không nên
+kéo theo màu chữ phụ của cả app.
+
+## 9. Con trỏ stream
+
+Con trỏ là một khối đặc màu `--color-accent`, tức một **thành phần đồ hoạ** (ngưỡng 3:1),
+không phải chữ.
+
+| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---|---:|---:|---:|:--:|
+| `--color-accent` (con trỏ) | `--color-surface-assistant` | 6.54 | 3.55 | 3:1 | ✅ |
+| `--color-accent` (con trỏ) | `--color-surface-code` | 5.17 | 4.22 | 3:1 | ✅ |
+
+---
+
+## 10. Những chỗ đã cân nhắc và loại bỏ
 
 - **Dùng thẳng đỏ son làm chữ.** `--color-accent` ở theme tối chỉ đạt
   3.89:1 trên nền app — dưới ngưỡng chữ.

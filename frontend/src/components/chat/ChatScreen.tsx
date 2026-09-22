@@ -116,22 +116,30 @@ export function ChatScreen() {
           </div>
         )}
 
-        <main className="flex-1">
+        {/*
+          T-3.5 — cot doc rong toi da `--spacing-measure` (736 px, ban T-HD3).
+          Cot nay phai o DAY chu khong trong tung bong bong: bong bong nguoi
+          dung neo phai bang `ml-auto`, va "phai" cua no la mep cot chu khong
+          phai mep man hinh.
+        */}
+        <main className="flex-1 overflow-x-hidden">
           {cay.conversationId === null ? (
             <p className="px-6 py-8 text-muted">{t("chat.chuaCoHoiThoai")}</p>
           ) : (
-            cay.path.map((node) => (
-              <MessageItem
-                key={node.id}
-                node={node}
-                cay={cay}
-                ghiChu={chat.ghiChu[node.id] ?? []}
-                dangChay={chat.dangChay === node.id}
-                onThuLai={(id) => void chat.thuLai(id)}
-                onSua={(id, ban) => void chat.suaCauHoi(id, ban)}
-                onChuyenNhanh={(n, huong) => void chat.chuyenNhanh(n, huong)}
-              />
-            ))
+            <div className="mx-auto flex w-full max-w-measure flex-col gap-4 px-gutter py-6 lg:px-gutter-lg">
+              {cay.path.map((node) => (
+                <MessageItem
+                  key={node.id}
+                  node={node}
+                  cay={cay}
+                  ghiChu={chat.ghiChu[node.id] ?? []}
+                  dangChay={chat.dangChay === node.id}
+                  onThuLai={(id) => void chat.thuLai(id)}
+                  onSua={(id, ban) => void chat.suaCauHoi(id, ban)}
+                  onChuyenNhanh={(n, huong) => void chat.chuyenNhanh(n, huong)}
+                />
+              ))}
+            </div>
           )}
         </main>
 

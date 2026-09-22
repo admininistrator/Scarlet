@@ -12,12 +12,19 @@
   "chat.guiKhoaMoi": "Gửi lại bằng khoá mới",
   "chat.gui": "Gửi",
   "chat.dung": "Dừng",
-  "chat.thuLai": "Thử lại",
-  "chat.sua": "Sửa",
-  "chat.luu": "Lưu",
-  "chat.thoi": "Thôi",
-  "chat.dangCho": "Đang chờ…",
+
+  "chat.assistantLabel": "Scarlet trả lời",
+  "chat.userLabel": "Bạn",
+  "chat.waiting": "Đang chờ Scarlet trả lời",
+  "chat.streaming": "Đang trả lời",
+  "chat.errorTitle": "Không nhận được câu trả lời",
+  "chat.errorRetry": "Thử lại",
+  "chat.edit": "Sửa",
+  "chat.save": "Lưu",
+  "chat.cancel": "Thôi",
+  "chat.editing": "Đang sửa tin nhắn",
   "chat.reasoning": "Suy luận",
+  "chat.branchLabel": "Nhánh câu trả lời",
 
 
   "chat.model": "Model",
@@ -28,8 +35,13 @@
   "chat.ketNoi.dangNoiLai": "mất kết nối, đang nối lại…",
   "chat.ketNoi.dong": "kết nối đã đóng",
 
-  "chat.nhanhTruoc": "Nhánh trước",
-  "chat.nhanhSau": "Nhánh sau",
+  "chat.branchPrev": "Nhánh trước",
+  "chat.branchNext": "Nhánh sau",
+
+  "code.copy": "Sao chép code",
+  "code.copied": "Đã sao chép",
+  "code.streaming": "Khối code đang mở",
+  "code.plain": "văn bản",
 
   "nav.newChat": "Hội thoại mới",
   "header.openSidebar": "Mở thanh bên",

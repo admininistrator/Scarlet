@@ -7,7 +7,7 @@
  * do di qua day. Nho vay bon luat duoi day co dung MOT cho de dung.
  *
  * ╔════════════════════════════════════════════════════════════════════════╗
- * ║  BON LUAT                                                              ║
+ * ║  NAM LUAT                                                              ║
  * ╚════════════════════════════════════════════════════════════════════════╝
  *
  * **1. Sau MOI thao tac lam doi cay, doc lai duong di tu server.** Gui, thu
@@ -25,6 +25,10 @@
  * truoc khi mo cai moi — khong phai de tiet kiem ket noi ma vi hai stream cua
  * cung mot message se cung noi chu vao mot cho. (Hai TAB thi khac: moi tab mot
  * cursor rieng, va §7.4/C7 doi ca hai cung chay.)
+ *
+ * **5. Delta duoc GOM theo khung hinh, khong day thang vao state** (B-234,
+ * quy tac 4 cua ban T-HD3). Xem khoi "GOM DELTA THEO KHUNG HINH" duoi than
+ * hook — day la cho duy nhat `noiDelta`/`noiReasoning` duoc goi.
  *
  * **4. Cay giu them o mot `ref`, khong chi trong `useState`.** Ham cap nhat
  * cua React chay luc RENDER chu khong luc goi, nen `setCay(cu => ...)` khong
@@ -157,6 +161,92 @@ export function useChat(): ChatDangDung {
     setGhiChu((cu) => ({ ...cu, [messageId]: [...(cu[messageId] ?? []), chu] }));
   }, []);
 
+  // ╔══════════════════════════════════════════════════════════════════════╗
+  // ║  GOM DELTA THEO KHUNG HINH — B-234, quy tac 4 cua ban T-HD3          ║
+  // ╚══════════════════════════════════════════════════════════════════════╝
+  //
+  // T-1.14 do duoc **309 delta trong 3,768 giay**, khoang cach lon nhat giua
+  // hai manh la 22 ms. Day thang moi manh vao `setCay` nghia la 309 lan React
+  // dung lai ca bong bong trong 4 giay — nhanh hon han toc do man hinh ve
+  // duoc (60 Hz = mot khung moi 16,7 ms), tuc phan lon cong ay khong bao gio
+  // xuat hien truoc mat ai.
+  //
+  // Bo dem duoi day gom cac manh lai va chi day vao state MOT LAN moi khung
+  // hinh: ~60 lan/giay thay vi 309 lan trong 4 giay, ma mat khong thay khac.
+  //
+  // Ba dieu phai dung, va ca ba deu la cho de hong:
+  //
+  //   1. **`start` XOA phan dang cho cua chinh message do.** `start` nghia la
+  //      "bat dau tu dau" ke ca khi no den tu duong dung lai bang Postgres
+  //      (T-1.14 ④). Mot manh con nam trong bo dem tu truoc `start` ma duoc
+  //      xa sau do se noi chu cu vao sau chu moi — dung trieu chung C3 nhung
+  //      do loi cua client.
+  //   2. **`done`/`error`/dong stream XA NGAY, khong doi khung hinh ke.**
+  //      Sau `done` la `lamTuoi()`, va mot manh xa muon hon no se noi them
+  //      chu vao mot message da khep.
+  //   3. **Tab bi an thi `requestAnimationFrame` khong chay** — dung nhu mong
+  //      muon: chu don lai trong bo dem, khong ai ve gi ca, va mot lan xa duy
+  //      nhat bat kip luc nguoi dung quay lai. Duong `done` o diem 2 la thu
+  //      bao dam ca truong hop tab an suot ca luot sinh.
+  const pendingRef = useRef(new Map<string, { content: string; reasoning: string }>());
+  const frameRef = useRef<number | null>(null);
+
+  /** Xa bo dem NGAY lap tuc va huy khung hinh dang cho. */
+  const flushDeltas = useCallback(() => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    const pending = pendingRef.current;
+    if (pending.size === 0) {
+      return;
+    }
+    // Thay bang Map moi TRUOC khi dung: `datCay` goi `setCay`, va mot manh
+    // den giua chung phai roi vao lo hang sau chu khong vao lo dang xa.
+    pendingRef.current = new Map();
+    datCay((c) => {
+      let moi = c;
+      for (const [messageId, manh] of pending) {
+        if (manh.content !== "") {
+          moi = noiDelta(moi, messageId, manh.content);
+        }
+        if (manh.reasoning !== "") {
+          moi = noiReasoning(moi, messageId, manh.reasoning);
+        }
+      }
+      return moi;
+    });
+  }, [datCay]);
+
+  const queueDelta = useCallback(
+    (messageId: string, field: "content" | "reasoning", manh: string) => {
+      const cu = pendingRef.current.get(messageId) ?? { content: "", reasoning: "" };
+      pendingRef.current.set(messageId, { ...cu, [field]: cu[field] + manh });
+      if (frameRef.current === null) {
+        frameRef.current = window.requestAnimationFrame(() => {
+          frameRef.current = null;
+          flushDeltas();
+        });
+      }
+    },
+    [flushDeltas],
+  );
+
+  /**
+   * Dong stream cua tab nay — XA truoc, dong sau.
+   *
+   * Xa chu khong bo: moi noi goi ham nay deu la mot lan roi khoi stream (doi
+   * hoi thoai, doi nhanh, unmount), va phan chu da nhan duoc thi da nhan
+   * duoc. Bo no di la lam mat 16 ms cuoi cua cau tra loi vi mot ly do ky
+   * thuat khong ai nhin thay. Ca DUY NHAT phai bo la `start`, va no bo tay o
+   * `onSuKien` chu khong o day.
+   */
+  const dongStream = useCallback(() => {
+    flushDeltas();
+    streamRef.current?.dong();
+    streamRef.current = null;
+  }, [flushDeltas]);
+
   /** Doc lai duong di tu server — luat 1. Tra ve cay moi de goi tiep. */
   const lamTuoi = useCallback(
     async (conversationId: string): Promise<TrangThaiCay | null> => {
@@ -174,7 +264,7 @@ export function useChat(): ChatDangDung {
   const moStreamCho = useCallback(
     (url: string, messageId: string, conversationId: string) => {
       // Luat 3: mot tab, mot stream.
-      streamRef.current?.dong();
+      dongStream();
       setDangChay(messageId);
       setUsage(null);
 
@@ -190,20 +280,29 @@ export function useChat(): ChatDangDung {
             setLoi(null);
           }
         },
-        onChet: setLoi,
+        onChet: (chu) => {
+          // Stream chet giua chung: phan da nhan duoc phai len man hinh, neu
+          // khong thi 16 ms cuoi bien mat cung voi ket noi (luat 5, diem 2).
+          flushDeltas();
+          setLoi(chu);
+        },
         onCanhBao: setLoi,
         onSuKien: (suKien) => {
           switch (suKien.event) {
             case "start":
               // Xoa phan cu: `start` nghia la "bat dau tu dau" ke ca khi no
               // den tu duong dung lai bang Postgres (§7.4, diem 4 cua sse.ts).
+              // Bo dem phai bi bo TRUOC `batDauSinh`, khong phai xa: mot manh
+              // cua lan sinh truoc ma xa sau `start` se noi chu cu vao sau
+              // chu moi (luat 5, diem 1).
+              pendingRef.current.delete(suKien.data.message_id);
               datCay((c) => batDauSinh(c, suKien.data.message_id));
               break;
             case "delta":
-              datCay((c) => noiDelta(c, messageId, suKien.data.t));
+              queueDelta(messageId, "content", suKien.data.t);
               break;
             case "reasoning":
-              datCay((c) => noiReasoning(c, messageId, suKien.data.t));
+              queueDelta(messageId, "reasoning", suKien.data.t);
               break;
             case "tool_call":
               themGhiChu(messageId, `tool_call ${suKien.data.name}`);
@@ -221,6 +320,9 @@ export function useChat(): ChatDangDung {
               setUsage(suKien.data);
               break;
             case "done":
+              // Xa TRUOC `lamTuoi()`: mot manh xa muon hon no se noi them chu
+              // vao mot message da khep (luat 5, diem 2).
+              flushDeltas();
               if (suKien.data.usage !== null) {
                 setUsage(suKien.data.usage);
               }
@@ -228,6 +330,7 @@ export function useChat(): ChatDangDung {
               void lamTuoi(conversationId);
               break;
             case "error":
+              flushDeltas();
               setLoi(`${suKien.data.code}: ${suKien.data.message}`);
               setDangChay(null);
               void lamTuoi(conversationId);
@@ -236,7 +339,7 @@ export function useChat(): ChatDangDung {
         },
       });
     },
-    [datCay, lamTuoi, themGhiChu],
+    [datCay, dongStream, flushDeltas, lamTuoi, queueDelta, themGhiChu],
   );
 
   /**
@@ -304,14 +407,14 @@ export function useChat(): ChatDangDung {
     window.addEventListener("online", khiCoMang);
     return () => {
       window.removeEventListener("online", khiCoMang);
-      streamRef.current?.dong();
+      dongStream();
     };
-  }, [napBanDau]);
+  }, [dongStream, napBanDau]);
 
   const hoiThoaiMoi = useCallback(async () => {
     setDangBan(true);
     try {
-      streamRef.current?.dong();
+      dongStream();
       setDangChay(null);
       setKetNoi(null);
       const hoiThoai = await api.taoHoiThoai(
@@ -323,7 +426,7 @@ export function useChat(): ChatDangDung {
     } finally {
       setDangBan(false);
     }
-  }, [mo, modelChon]);
+  }, [dongStream, mo, modelChon]);
 
   /**
    * T-3.3 — sidebar chon mot hoi thoai da co.
@@ -337,26 +440,26 @@ export function useChat(): ChatDangDung {
       if (conversationId === cayRef.current.conversationId) {
         return;
       }
-      streamRef.current?.dong();
+      dongStream();
       setDangChay(null);
       setKetNoi(null);
       setUsage(null);
       setLoi(null);
       await mo(conversationId);
     },
-    [mo],
+    [dongStream, mo],
   );
 
   /** T-3.3 — hoi thoai dang mo vua bi xoa: khong con gi de hien. */
   const dongHoiThoai = useCallback(() => {
-    streamRef.current?.dong();
+    dongStream();
     setDangChay(null);
     setKetNoi(null);
     setUsage(null);
     setLoi(null);
     datCay(() => cayRong());
     xoaThamSoHoiThoai();
-  }, [datCay]);
+  }, [datCay, dongStream]);
 
   /**
    * §7.2 ① — tao message roi mo stream. KHONG sinh mot chu nao o day (A1).
@@ -483,7 +586,7 @@ export function useChat(): ChatDangDung {
         // NQ-35: gui dung id anh em. Khi nga (a) cua B-109 co mat, server tu di
         // tiep xuong la sau nhat cua nhanh nay va dong nay khong phai sua.
         const chiTiet = await api.suaHoiThoai(conversationId, { active_leaf_id: dich });
-        streamRef.current?.dong();
+        dongStream();
         setDangChay(null);
         setKetNoi(null);
         baoDamStream(datCay((cu) => napHoiThoai(cu, chiTiet)));
@@ -493,7 +596,7 @@ export function useChat(): ChatDangDung {
         setDangBan(false);
       }
     },
-    [baoDamStream, datCay],
+    [baoDamStream, datCay, dongStream],
   );
 
   return {
