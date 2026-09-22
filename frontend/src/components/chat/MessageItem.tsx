@@ -2,16 +2,8 @@ import { useState } from "react";
 
 import type { DanhGia, MessageRa } from "../../lib/api";
 import { t } from "../../lib/i18n";
-import {
-  chiSoHienThi,
-  coAnhEm,
-  coTheLui,
-  coTheToi,
-  noiDung,
-  phanReasoning,
-  type TrangThaiCay,
-} from "../../lib/tree";
-import { IconButton } from "./IconButton";
+import { coAnhEm, noiDung, phanReasoning, type TrangThaiCay } from "../../lib/tree";
+import { BranchNav, VachNgan } from "./BranchNav";
 import { Markdown } from "./Markdown";
 import { NutDuoiCauTraLoi } from "./NutDuoiCauTraLoi";
 
@@ -59,14 +51,17 @@ import { NutDuoiCauTraLoi } from "./NutDuoiCauTraLoi";
  * cai gi" (bon trang thai), con file kia tra loi "bam mot nut thi gui gi len
  * server" — va chi cau thu hai can mot bo test rieng.
  *
- * `‹ n/m ›` van o day va van la ban THO cua T-1.14: mac ao T-HD3 cho no la
- * viec cua T-3.8.
+ * `‹ n/m ›` roi sang `BranchNav.tsx` o T-3.8, va cung luc do no moc them duoi
+ * bong bong NGUOI DUNG: sua mot cau hoi sinh anh em cua message user (§8.2),
+ * nen bo hang duoi nghia la nhanh vua tao khong co duong nao quay lai tu giao
+ * dien. Xem docstring cua chinh file ay.
  */
 export function MessageItem({
   node,
   cay,
   ghiChu,
   dangChay,
+  dangBan,
   modelDangChon,
   onThuLai,
   onDanhGia,
@@ -77,6 +72,13 @@ export function MessageItem({
   cay: TrangThaiCay;
   ghiChu: string[];
   dangChay: boolean;
+  /**
+   * Co mot thao tac doi cay dang bay. Nut "Luu" tat trong luc do — B-232:
+   * `PATCH /messages/{id}` nam NGOAI vung phu idempotency cua §11.4 (NQ-93 co
+   * y dung o chu "POST" cua A8), nen bam Luu hai lan la hai nhanh va hai hoa
+   * don. Day la mot lop chan o FE chu khong phai mot ban va cho khe ay.
+   */
+  dangBan: boolean;
   /** Model dang chon tren picker — nut "Doi model & thu lai" gui no (T-3.6). */
   modelDangChon: string | null;
   /** `modelId` vang mat = giu nguyen model cu. Xem `useChat.thuLai`. */
@@ -89,7 +91,15 @@ export function MessageItem({
   const reasoning = phanReasoning(cay, node);
 
   if (node.role === "user") {
-    return <UserBubble node={node} chu={chu} onSua={onSua} />;
+    return (
+      <UserBubble
+        node={node}
+        chu={chu}
+        dangBan={dangBan}
+        onSua={onSua}
+        onChuyenNhanh={(huong) => onChuyenNhanh(node, huong)}
+      />
+    );
   }
 
   const laLoi = node.status === "failed" || node.error_code !== null;
@@ -185,9 +195,12 @@ export function MessageItem({
           <div className="mt-2 flex flex-wrap items-center gap-1">
             {coAnhEm(node) && (
               <>
-                <BranchNav node={node} onChuyenNhanh={(huong) => onChuyenNhanh(node, huong)} />
-                {/* Vach ngan hai nhom cua ban T-HD3: dieu huong nhanh | hanh dong */}
-                <span aria-hidden="true" className="mx-1 h-6 w-px bg-border" />
+                <BranchNav
+                  node={node}
+                  nhan={t("chat.branchLabel")}
+                  onChuyenNhanh={(huong) => onChuyenNhanh(node, huong)}
+                />
+                <VachNgan />
               </>
             )}
             <NutDuoiCauTraLoi
@@ -206,15 +219,33 @@ export function MessageItem({
   );
 }
 
-/** Bong bong nguoi dung — neo phai, khong vien, khong nhan (T-HD3 hinh 2b). */
+/**
+ * Bong bong nguoi dung — neo phai, khong vien, khong nhan (T-HD3 hinh 2b).
+ *
+ * Hai trang thai cua ban ve: mac dinh (chu + nut "Sua") va dang sua tai cho
+ * (textarea + "Thoi"/"Luu"). T-3.8 them mot thu ban ve khong dat o day nhung
+ * §8.2 doi: `‹ n/m ›` cua chinh message nay. Sua mot cau hoi = them mot cau
+ * hoi ANH EM (`PATCH /messages/{id}`), nen con so nhanh cua mot message user
+ * doi sau moi lan sua — va day la duong DUY NHAT quay lai cau hoi cu tu giao
+ * dien (UC-04 dong 1 va dong 2).
+ *
+ * `ban` khoi tao bang chuoi rong roi duoc do day luc bam "Sua", khong phai
+ * `useState(chu)`: giua luot sinh cua mot lan sua truoc, `chu` co the doi, va
+ * mot `useState` chi doc gia tri khoi tao dung mot lan — ban nhap se ke lai
+ * cau cu ma khong ai giai thich duoc tai sao.
+ */
 function UserBubble({
   node,
   chu,
+  dangBan,
   onSua,
+  onChuyenNhanh,
 }: {
   node: MessageRa;
   chu: string;
+  dangBan: boolean;
   onSua: (messageId: string, noiDungMoi: string) => void;
+  onChuyenNhanh: (huong: -1 | 1) => void;
 }) {
   const [dangSua, setDangSua] = useState(false);
   const [ban, setBan] = useState("");
@@ -252,9 +283,16 @@ function UserBubble({
             >
               {t("chat.cancel")}
             </button>
+            {/*
+              `disabled` khi dang ban — B-232. Duong sua cau hoi di qua `PATCH`,
+              tuc ngoai vung phu idempotency cua §11.4, nen bam hai lan la hai
+              nhanh va hai hoa don. Mot nut bi khoa khong phai lop bao ve that
+              (client nao cung go duoc), nhung no la lop duy nhat hom nay co.
+            */}
             <button
               type="submit"
-              className="h-touch rounded-md bg-accent px-4 text-base font-semibold text-accent-foreground hover:bg-accent-hover motion-control"
+              disabled={dangBan}
+              className="h-touch rounded-md bg-accent px-4 text-base font-semibold text-accent-foreground hover:bg-accent-hover disabled:bg-surface-hover disabled:text-disabled-foreground motion-control"
             >
               {t("chat.save")}
             </button>
@@ -272,47 +310,33 @@ function UserBubble({
       {/* Tin nhan cua nguoi dung la chu tho: no khong di qua mot model nao,
           va render markdown o day nghia la nguoi go ``` bi mat dau ```. */}
       <p className="m-0 text-body whitespace-pre-wrap text-foreground">{chu}</p>
-      <button
-        type="button"
-        onClick={() => {
-          setBan(chu);
-          setDangSua(true);
-        }}
-        className="h-touch self-end rounded-md px-3 text-base font-medium text-muted hover:bg-surface-hover motion-control"
-      >
-        {t("chat.edit")}
-      </button>
+      {/*
+        Cung mot ngu phap voi hang duoi bong bong assistant: dieu huong nhanh,
+        vach ngan, roi hanh dong. Neo phai vi ca bong bong neo phai (T-HD3 2b).
+      */}
+      <div className="flex flex-wrap items-center justify-end gap-1">
+        {coAnhEm(node) && (
+          <>
+            <BranchNav
+              node={node}
+              nhan={t("chat.branchLabelCauHoi")}
+              onChuyenNhanh={onChuyenNhanh}
+            />
+            <VachNgan />
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setBan(chu);
+            setDangSua(true);
+          }}
+          className="h-touch rounded-md px-3 text-base font-medium text-muted hover:bg-surface-hover motion-control"
+        >
+          {t("chat.edit")}
+        </button>
+      </div>
     </article>
-  );
-}
-
-/** `‹ n/m ›` — hai nut 44 x 44 va mot con so. Ban T-HD3 hinh 2c. */
-function BranchNav({
-  node,
-  onChuyenNhanh,
-}: {
-  node: MessageRa;
-  onChuyenNhanh: (huong: -1 | 1) => void;
-}) {
-  return (
-    <div role="group" aria-label={t("chat.branchLabel")} className="flex items-center">
-      <IconButton
-        label={t("chat.branchPrev")}
-        glyph="‹"
-        disabled={!coTheLui(node)}
-        onClick={() => onChuyenNhanh(-1)}
-      />
-      {/* chiSoHienThi() la cho duy nhat doi 0-based sang so nguoi doc (B-60) */}
-      <span className="tabular min-w-10 text-center text-sm text-muted">
-        {chiSoHienThi(node)} / {node.sibling_count}
-      </span>
-      <IconButton
-        label={t("chat.branchNext")}
-        glyph="›"
-        disabled={!coTheToi(node)}
-        onClick={() => onChuyenNhanh(1)}
-      />
-    </div>
   );
 }
 

@@ -180,6 +180,11 @@ export function ChatScreen() {
                   cay={cay}
                   ghiChu={chat.ghiChu[node.id] ?? []}
                   dangChay={chat.dangChay === node.id}
+                  // T-3.8 / B-232 — nut "Luu" cua bong bong nguoi dung tat
+                  // trong luc mot thao tac doi cay con bay. `PATCH
+                  // /messages/{id}` khong di qua §11.4 (NQ-93), nen bam hai
+                  // lan la hai nhanh va hai hoa don.
+                  dangBan={chat.dangBan}
                   // T-3.7 — nut "Doi model & thu lai" gui dung model dang
                   // chon tren picker. Mot nguon, khong hai: neu no bang model
                   // da sinh ra cau tra loi nay thi nut tu tat.

@@ -8,6 +8,7 @@
  */
 
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { MessageRa } from "../../lib/api";
@@ -33,13 +34,14 @@ function node(patch: Partial<MessageRa> = {}): MessageRa {
   };
 }
 
-function ve(n: MessageRa, cay: TrangThaiCay = cayRong(), dangChay = false) {
+function ve(n: MessageRa, cay: TrangThaiCay = cayRong(), dangChay = false, dangBan = false) {
   return render(
     <MessageItem
       node={n}
       cay={cay}
       ghiChu={[]}
       dangChay={dangChay}
+      dangBan={dangBan}
       modelDangChon={null}
       onThuLai={vi.fn()}
       onDanhGia={vi.fn()}
@@ -96,5 +98,34 @@ describe("bon trang thai", () => {
     expect(screen.getByText("1 / 3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Nhánh trước" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Nhánh sau" })).toBeEnabled();
+  });
+});
+
+/**
+ * T-3.8 — sua cau hoi sinh anh em cua message USER (§8.2), nen bong bong nguoi
+ * dung phai mang `‹ n/m ›` cua chinh no. Bo ba ca duoi day la phep do cua UC-04
+ * dong 2: khong co chung thi mot nhanh vua tao ra khong co duong nao quay lai.
+ */
+describe("bong bong nguoi dung co nhanh", () => {
+  it("8 — co anh em ⇒ hien `‹ n/m ›` duoi bong bong NGUOI DUNG", () => {
+    ve(node({ role: "user", content: "cau hoi cu", sibling_index: 0, sibling_count: 2 }));
+    expect(screen.getByRole("group", { name: "Nhánh câu hỏi" })).toBeInTheDocument();
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+  });
+
+  it("9 — khong co anh em ⇒ khong hien, chi con nut Sua", () => {
+    ve(node({ role: "user", content: "cau hoi", sibling_count: 1 }));
+    expect(screen.queryByRole("group", { name: "Nhánh câu hỏi" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Sửa" })).toBeInTheDocument();
+  });
+
+  it("10 — nut Luu TAT khi dang ban (B-232: `PATCH` ngoai vung phu §11.4)", async () => {
+    const nguoi = userEvent.setup();
+    ve(node({ role: "user", content: "cau hoi" }), cayRong(), false, true);
+
+    await nguoi.click(screen.getByRole("button", { name: "Sửa" }));
+
+    expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Thôi" })).toBeEnabled();
   });
 });
