@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import type { KetQuaGui } from "../../features/chat/useChat";
 import { t } from "../../lib/i18n";
@@ -91,6 +91,17 @@ import { khoaMoi } from "../../lib/idempotency";
  *
  * `dangChay` di vao nhu mot prop; file nay khong co mot bo dem thoi gian nao
  * va khong duoc co. Nut Gui ⇄ Dung doi chu theo dung no.
+ *
+ * ┌──────────────────────────────────────────────────────────────────────┐
+ * │  THANH CONG CU DUOI O NHAP (B-242)                                   │
+ * └──────────────────────────────────────────────────────────────────────┘
+ *
+ * Mot khung: o nhap o tren, hang [picker model … Gui/Dung] o duoi — nguoi
+ * dung chon bo cuc nay khi chot B-242 (ban T-HD2 chi ve o nhap + nut gui, ban
+ * T-HD4 chi ghi "trigger o composer"). Picker di vao qua `modelPicker` chu
+ * khong import thang: file nay tra loi "go va gui mot cau", con danh muc model
+ * va ba tang mac dinh la viec cua `ChatScreen`. Vien va vong tieu diem thuoc
+ * ve KHUNG (`focus-within`), vi o nhap khong con vien rieng.
  */
 
 export function Composer({
@@ -99,6 +110,7 @@ export function Composer({
   tranKyTu,
   onGui,
   onDung,
+  modelPicker,
 }: {
   dangChay: boolean;
   moDuoc: boolean;
@@ -106,6 +118,8 @@ export function Composer({
   tranKyTu: number | null;
   onGui: (noiDung: string, khoa: string) => Promise<KetQuaGui>;
   onDung: () => void;
+  /** Nut mo Model Picker, dat o dau thanh cong cu duoi o nhap (B-242). */
+  modelPicker?: ReactNode;
 }) {
   const [ban, setBan] = useState("");
   const [ketKhoa, setKetKhoa] = useState(false);
@@ -168,8 +182,8 @@ export function Composer({
           void gui();
         }}
       >
-        <div className="flex items-end gap-2">
-          <label className="min-w-0 flex-1">
+        <div className="motion-control flex flex-col rounded-lg border border-border-strong bg-surface-panel focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring">
+          <label className="min-w-0">
             <span className="sr-only">{t("chat.oNhap")}</span>
             <textarea
               value={ban}
@@ -186,29 +200,33 @@ export function Composer({
               disabled={!moDuoc}
               aria-invalid={vuotTran}
               placeholder={t("chat.oNhap")}
-              className="motion-control min-h-touch w-full resize-none rounded-lg border border-border-strong bg-surface-panel px-3 py-3 text-body text-foreground placeholder:text-muted disabled:opacity-50"
+              className="block min-h-touch w-full resize-none rounded-t-lg bg-transparent px-3 pt-3 pb-1 text-body text-foreground placeholder:text-muted focus-visible:outline-none disabled:opacity-50"
             />
           </label>
 
-          {dangChay ? (
-            <button
-              type="button"
-              onClick={onDung}
-              className="motion-press grid size-touch shrink-0 place-items-center rounded-lg border border-border-strong text-danger-text hover:bg-surface-hover"
-            >
-              <StopIcon />
-              <span className="sr-only">{t("chat.dung")}</span>
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!guiDuoc}
-              className="motion-press grid size-touch shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
-            >
-              <SendIcon />
-              <span className="sr-only">{t("chat.gui")}</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2 px-2 pb-2">
+            <div className="min-w-0 flex-1">{modelPicker}</div>
+
+            {dangChay ? (
+              <button
+                type="button"
+                onClick={onDung}
+                className="motion-press grid size-touch shrink-0 place-items-center rounded-lg border border-border-strong text-danger-text hover:bg-surface-hover"
+              >
+                <StopIcon />
+                <span className="sr-only">{t("chat.dung")}</span>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!guiDuoc}
+                className="motion-press grid size-touch shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
+              >
+                <SendIcon />
+                <span className="sr-only">{t("chat.gui")}</span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">

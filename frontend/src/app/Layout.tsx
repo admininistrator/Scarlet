@@ -50,8 +50,15 @@ export function Layout() {
   const coSidebar = pathname === PATHS.home;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
+    /*
+      Khung cao DUNG man hinh (`h-dvh`, ban T-HD2 `AppShell.tsx`): header
+      `shrink-0` dung yen o dinh, va thanh cuon nam O TRONG vung noi dung chu
+      khong o `window`. Man chat tu chia tiep (sidebar · tin nhan · o nhap) va
+      chi cot tin nhan cuon; cac man khac (`/admin`, man auth) cuon ca vung
+      duoi header. `dvh` chu khong `vh`: tren iOS `vh` tinh ca thanh dia chi.
+    */
+    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
         <div className="flex items-center gap-4">
           {coSidebar && (
             <button
@@ -109,7 +116,9 @@ export function Layout() {
         </div>
       </header>
 
-      <Outlet context={session} />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <Outlet context={session} />
+      </div>
     </div>
   );
 }

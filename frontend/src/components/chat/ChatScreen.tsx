@@ -104,12 +104,35 @@ export function ChatScreen() {
     }
   };
 
+  /*
+    B-242 — picker song trong thanh cong cu duoi o nhap (ban T-HD4: "trigger
+    o composer"; popover `side="top"` mo LEN tu day, duoi 640 px la sheet).
+  */
+  const modelPicker = (
+    <ModelPicker
+      models={danhMuc.models}
+      macDinh={chat.macDinh}
+      nhanDocLuc={gioPhut(danhMuc.docLuc)}
+      dangLamMoi={danhMuc.dangLamMoi}
+      onLamMoi={() => void danhMuc.lamMoi()}
+      onChon={(id) => void chonModel(id)}
+    />
+  );
+  const coThanhTrangThai =
+    cay.conversationId !== null || chat.ketNoi !== null || chat.usage !== null;
+
+  /*
+    Bo cuc CO DINH (ban T-HD2, `AppShell.tsx`): header cua `Layout`, sidebar va
+    o nhap dung yen; CHI cot tin nhan cuon. Ca man hinh cao dung phan con lai
+    duoi header (`h-full` + `min-h-0` o moi tang flex), nen khong con thanh
+    cuon cua `window` nao keo ca ba thu kia di theo.
+  */
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex h-full min-h-0 bg-background text-foreground">
       {/*
         T-3.3 — sidebar dung canh man chat chu khong trong `Layout`: danh sach
         hoi thoai chi co nghia sau `StatusGate`, va `/admin`, `/dang-nhap`
-        khong co gi de liet ke.
+        khong co gi de liet ke. Danh sach ben trong tu cuon (`overflow-y-auto`).
       */}
       <Sidebar
         openConversationId={cay.conversationId}
@@ -118,39 +141,23 @@ export function ChatScreen() {
         onOpenConversationDeleted={chat.dongHoiThoai}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/*
-          "Hoi thoai moi" da chuyen vao sidebar theo ban T-HD2 — hai nut cung
-          goi mot ham la hai cho de lech. Model picker o lai day cho toi T-3.6.
-        */}
-        <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-3 text-sm">
-          {/*
-            T-3.6 / T-HD4 — picker o day la cho TAM cua T-1.14 con lai; ban
-            T-HD2 dat no trong composer va T-3.10 se dua no ve dung cho khi
-            dung bo cuc responsive. Doi bay gio nghia la doi hai lan.
-          */}
-          <ModelPicker
-            models={danhMuc.models}
-            macDinh={chat.macDinh}
-            nhanDocLuc={gioPhut(danhMuc.docLuc)}
-            dangLamMoi={danhMuc.dangLamMoi}
-            onLamMoi={() => void danhMuc.lamMoi()}
-            onChon={(id) => void chonModel(id)}
-          />
-
-          {cay.conversationId !== null && (
-            <code className="text-xs text-muted">{cay.conversationId}</code>
-          )}
-          <NhanKetNoi ketNoi={chat.ketNoi} />
-          {chat.usage !== null && (
-            <span className="text-xs text-muted">
-              in={chat.usage.in} out={chat.usage.out}
-            </span>
-          )}
-        </div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {coThanhTrangThai && (
+          <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-sm">
+            {cay.conversationId !== null && (
+              <code className="text-xs text-muted">{cay.conversationId}</code>
+            )}
+            <NhanKetNoi ketNoi={chat.ketNoi} />
+            {chat.usage !== null && (
+              <span className="text-xs text-muted">
+                in={chat.usage.in} out={chat.usage.out}
+              </span>
+            )}
+          </div>
+        )}
 
         {chat.loi !== null && (
-          <div className="flex items-center gap-3 border-b border-border px-6 py-2 text-sm text-danger-text">
+          <div className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-2 text-sm text-danger-text">
             <span>{chat.loi}</span>
             <button
               type="button"
@@ -168,7 +175,7 @@ export function ChatScreen() {
           dung neo phai bang `ml-auto`, va "phai" cua no la mep cot chu khong
           phai mep man hinh.
         */}
-        <main className="flex-1 overflow-x-hidden">
+        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           {cay.conversationId === null ? (
             <p className="px-6 py-8 text-muted">{t("chat.chuaCoHoiThoai")}</p>
           ) : (
@@ -207,6 +214,7 @@ export function ChatScreen() {
           // khoa cua §11.4 va no phai biet ket qua moi biet nen giu hay bo.
           onGui={chat.gui}
           onDung={() => void chat.dung()}
+          modelPicker={modelPicker}
         />
       </div>
     </div>

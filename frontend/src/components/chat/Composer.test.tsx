@@ -440,3 +440,34 @@ describe("Composer qua useChat", () => {
     expect(screen.queryByRole("button", { name: "Gửi lại bằng khoá mới" })).toBeNull();
   });
 });
+
+describe("Composer — thanh cong cu (B-242)", () => {
+  /**
+   * Nguoi dung chot "thanh cong cu duoi o nhap": picker nam TRONG form, SAU o
+   * nhap va TRUOC nut Gui. Dem thu tu trong DOM chu khong do toa do — jsdom
+   * khong dung layout.
+   */
+  it("17. picker nam trong khung soan thao, giua o nhap va nut Gui", () => {
+    render(
+      <Composer
+        dangChay={false}
+        moDuoc
+        tranKyTu={null}
+        onGui={vi.fn()}
+        onDung={vi.fn()}
+        modelPicker={<button type="button">picker-stub</button>}
+      />,
+    );
+
+    const oNhap = screen.getByRole("textbox");
+    const picker = screen.getByRole("button", { name: "picker-stub" });
+    const gui = screen.getByRole("button", { name: "Gửi" });
+    const form = oNhap.closest("form");
+
+    expect(form).not.toBeNull();
+    expect(form).toContainElement(picker);
+    const sau = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(oNhap.compareDocumentPosition(picker) & sau).toBeTruthy();
+    expect(picker.compareDocumentPosition(gui) & sau).toBeTruthy();
+  });
+});
