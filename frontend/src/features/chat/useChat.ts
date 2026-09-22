@@ -32,10 +32,20 @@
  * vua doc de goi thang `baoDamStream()`. Doc tu `ref` cung tranh mot ca stale
  * closure that: `gui()` can `activeLeafId` MOI NHAT (luat 2), khong phai gia
  * tri cua lan render tao ra no.
+ *
+ * ── C22 KHONG con o day (T-3.4) ──────────────────────────────────────────
+ *
+ * `khoaGuiRef` da roi file nay. Don vi cua C22 la **mot lan soan thao** —
+ * *"sinh khi o nhap chuyen tu rong sang co chu, chi doi sau khi gui thanh
+ * cong"* — ma `useChat` khong nhin thay o nhap: no chi thay nhung lan `gui()`
+ * duoc goi, va mot `ref` o day song het doi hook nen no cung khong chet khi
+ * nguoi dung xoa trang o nhap roi go mot cau khac han. Khoa gio thuoc ve
+ * `Composer`; `gui()` nhan no nhu mot tham so va tra ve `KetQuaGui` de chu
+ * so huu biet nen giu hay nen bo.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, api, type MessageRa, type ModelRa } from "../../lib/api";
+import { ApiError, MA_LOI, api, type MessageRa, type ModelRa } from "../../lib/api";
 import { moStream, type TayCamStream, type TrangThaiKetNoi, type UsageRa } from "../../lib/sse";
 import {
   batDauSinh,
@@ -50,14 +60,6 @@ import {
 
 /** Tham so URL giu hoi thoai dang mo — de F5 quay lai dung cho (M3). */
 const THAM_SO_HOI_THOAI = "c";
-
-/** `crypto.randomUUID` chi co trong secure context; co duong lui cho http dev. */
-function khoaMoi(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
-}
 
 function docThamSoHoiThoai(): string | null {
   return new URLSearchParams(window.location.search).get(THAM_SO_HOI_THOAI);
@@ -83,6 +85,23 @@ function loiThanhChu(loi: unknown): string {
   return loi instanceof Error ? loi.message : String(loi);
 }
 
+/**
+ * Ba ket cuc cua mot lan bam Gui — T-3.4.
+ *
+ * `gui()` tra ve thay vi chi `setLoi()`, vi tu T-3.4 **khoa `Idempotency-Key`
+ * khong con song o day** (C22: no thuoc ve mot lan soan thao, tuc ve
+ * `Composer`). Nguoi giu khoa phai biet duoc lam gi voi no:
+ *
+ *   `da-gui`   — `202` (ke ca ban phat lai cua §11.4). Bo khoa, xoa o nhap.
+ *   `ket-khoa` — `409 IN_PROGRESS`: mot request khac dang giu dung khoa nay.
+ *                Chinh la ca B-143 — mot tien trinh `api` chet giua chung se
+ *                de khoa o trang thai ay 24 gio. GIU nguyen chu da go va mo
+ *                duong thoat (Cam bay ①).
+ *   `hong`     — moi ket cuc con lai. GIU ca chu lan khoa: C22 doi lan thu
+ *                lai mang **dung mot** khoa, va chu da go khong duoc bien mat.
+ */
+export type KetQuaGui = "da-gui" | "ket-khoa" | "hong";
+
 export interface ChatDangDung {
   cay: TrangThaiCay;
   models: ModelRa[];
@@ -103,7 +122,8 @@ export interface ChatDangDung {
   moHoiThoai: (conversationId: string) => Promise<void>;
   /** T-3.3 — hoi thoai dang mo vua bi xoa: roi khoi no, khong mo cai nao. */
   dongHoiThoai: () => void;
-  gui: (noiDung: string) => Promise<void>;
+  /** `khoa` do NGUOI GOI cam (C22) — xem `KetQuaGui`. */
+  gui: (noiDung: string, khoa: string) => Promise<KetQuaGui>;
   dung: () => Promise<void>;
   thuLai: (messageId: string) => Promise<void>;
   suaCauHoi: (messageId: string, noiDung: string) => Promise<void>;
@@ -125,9 +145,6 @@ export function useChat(): ChatDangDung {
   //: Luat 4 — ban doc duoc ngay cua cung mot cay.
   const cayRef = useRef<TrangThaiCay>(cayRong());
   const streamRef = useRef<TayCamStream | null>(null);
-  //: C22 — mot thao tac gui cua nguoi dung = MOT khoa, ke ca khi phai thu lai
-  //: vi mang rot. Xoa khi da nhan `202`.
-  const khoaGuiRef = useRef<string | null>(null);
 
   const datCay = useCallback((doi: (cu: TrangThaiCay) => TrangThaiCay): TrangThaiCay => {
     const moi = doi(cayRef.current);
@@ -341,14 +358,21 @@ export function useChat(): ChatDangDung {
     xoaThamSoHoiThoai();
   }, [datCay]);
 
+  /**
+   * §7.2 ① — tao message roi mo stream. KHONG sinh mot chu nao o day (A1).
+   *
+   * `khoa` di VAO chu khong duoc sinh o day (C22, T-3.4): mot khoa sinh tai
+   * cho la mot khoa moi cho moi lan thu lai, va khi ay middleware §11.4 vo
+   * dung — dung cai bay ma C22 ta. Chu so huu khoa la `Composer`, vi don vi
+   * cua C22 la "lan soan thao" chu khong "loi goi HTTP".
+   */
   const gui = useCallback(
-    async (noiDungMoi: string) => {
+    async (noiDungMoi: string, khoa: string): Promise<KetQuaGui> => {
       const conversationId = cayRef.current.conversationId;
       if (conversationId === null) {
         setLoi("chua co hoi thoai nao dang mo");
-        return;
+        return "hong";
       }
-      khoaGuiRef.current ??= khoaMoi();
       setDangBan(true);
       try {
         const ra = await api.guiTinNhan(
@@ -359,16 +383,19 @@ export function useChat(): ChatDangDung {
             parent_id: cayRef.current.activeLeafId,
             model_id: modelChon,
           },
-          khoaGuiRef.current,
+          khoa,
         );
-        khoaGuiRef.current = null;
         if (ra.branched) {
           setLoi("da mo mot nhanh moi (parent_id khac la hien tai) — C14");
         }
         moStreamCho(ra.stream_url, ra.assistant_message_id, conversationId);
         await lamTuoi(conversationId);
+        return "da-gui";
       } catch (e) {
         setLoi(loiThanhChu(e));
+        // `IN_PROGRESS` (khoa dang bi giu) chu khong `GENERATION_IN_PROGRESS`
+        // (message dang sinh) — hai ma, xem `MA_LOI`.
+        return e instanceof ApiError && e.code === MA_LOI.KHOA_DANG_GIU ? "ket-khoa" : "hong";
       } finally {
         setDangBan(false);
       }

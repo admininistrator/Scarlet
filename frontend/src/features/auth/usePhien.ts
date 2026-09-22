@@ -19,11 +19,25 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, MA_LOI, api, type NguoiDungRa } from "../../lib/api";
+import { ApiError, MA_LOI, api, type HoSoRa, type NguoiDungRa } from "../../lib/api";
 
 export interface Phien {
   /** `null` = chua dang nhap (hoac phien da het). */
   nguoiDung: NguoiDungRa | null;
+  /**
+   * Cau tra loi DAY DU cua `GET /auth/me` — `quota`, `message_max_chars`,
+   * `default_model` (§18.1, B-213).
+   *
+   * Tach khoi `nguoiDung` chu khong mo rong no, vi `/auth/login` KHONG tra
+   * hai truong dau: chung dat hai luot doc Redis (`HoSoRa` cua backend giai
+   * thich vi sao), va mot cai ten kieu `NguoiDungRa` hua ba truong ma chi hai
+   * duong trong ba tra ve la mot cai bay im lang.
+   *
+   * `null` khi chua hoi xong, khi chua dang nhap, hoac khi lan hoi do hong.
+   * Ben doc phai co duong lui: mot `message_max_chars` khong biet la "khong
+   * dem duoc", khong phai "khong co tran" — tran that o `422` cua server.
+   */
+  hoSo: HoSoRa | null;
   /** Lan hoi `GET /auth/me` dau tien con dang chay hay khong. */
   dangTai: boolean;
   /**
@@ -41,6 +55,7 @@ export interface Phien {
 
 export function usePhien(): Phien {
   const [nguoiDung, setNguoiDung] = useState<NguoiDungRa | null>(null);
+  const [hoSo, setHoSo] = useState<HoSoRa | null>(null);
   const [dangTai, setDangTai] = useState(true);
   const [biKhoa, setBiKhoa] = useState(false);
   const [loi, setLoi] = useState<ApiError | null>(null);
@@ -52,6 +67,7 @@ export function usePhien(): Phien {
         const ra = await api.toiLaAi();
         if (conGan) {
           setNguoiDung(ra);
+          setHoSo(ra);
           setBiKhoa(false);
         }
       } catch (e) {
@@ -67,6 +83,7 @@ export function usePhien(): Phien {
         // nghia cu.
         if (conGan) {
           setNguoiDung(null);
+          setHoSo(null);
           setBiKhoa(e instanceof ApiError && e.code === MA_LOI.TAI_KHOAN_BI_KHOA);
         }
       } finally {
@@ -87,6 +104,23 @@ export function usePhien(): Phien {
         const ra = await api.dangNhap(email, matKhau);
         setNguoiDung(ra);
         setBiKhoa(false);
+        /*
+          Hoi them `GET /auth/me` sau khi dang nhap — B-213.
+
+          `Layout` goi `usePhien()` MOT lan luc mount, va dieu huong sau dang
+          nhap la dieu huong phia client: khong co lan mount thu hai nao de
+          `/auth/me` tu chay lai. Khong co dong nay thi ca mot phien bat dau
+          bang man dang nhap se khong bao gio biet `message_max_chars` —
+          nguoi dung go bao nhieu cung khong thay bo dem, roi nhan `422`.
+
+          Loi o day KHONG lam hong lan dang nhap: phien da that su mo (cookie
+          da duoc dat), chi la phan "biet them" chua ve. `hoSo` o lai `null`
+          va ben doc di duong lui cua no.
+        */
+        void api
+          .toiLaAi()
+          .then(setHoSo)
+          .catch(() => setHoSo(null));
         // Tra `ra` chu khong `true`: caller phai dinh tuyen theo `status`
         // (§11.1) NGAY trong cung mot nhip, va `nguoiDung` cua state thi chua
         // cap nhat o thoi diem promise nay resolve.
@@ -109,9 +143,10 @@ export function usePhien(): Phien {
       // Giu man hinh o trang thai "van dang dang nhap" chi lam nguoi dung
       // tuong minh chua thoat.
       setNguoiDung(null);
+      setHoSo(null);
       setBiKhoa(false);
     }
   }, []);
 
-  return { nguoiDung, dangTai, biKhoa, loi, dangNhap, dangXuat };
+  return { nguoiDung, hoSo, dangTai, biKhoa, loi, dangNhap, dangXuat };
 }

@@ -6,7 +6,10 @@
   "theme.dark": "Tối",
 
   "chat.chuaCoHoiThoai": "Chưa mở hội thoại nào. Bấm “Hội thoại mới” để bắt đầu.",
-  "chat.oNhap": "Nhập câu hỏi rồi bấm Gửi (Ctrl+Enter)",
+  "chat.oNhap": "Nhập câu hỏi…",
+  "chat.phimGui": "Enter để gửi · Shift+Enter để xuống dòng",
+  "chat.khoaKet": "Lần gửi này đang bị một yêu cầu khác giữ chỗ. Nếu nó không bao giờ xong, hãy gửi lại bằng khoá mới — lưu ý là nếu yêu cầu cũ vẫn đang chạy thì bạn sẽ có hai câu trả lời.",
+  "chat.guiKhoaMoi": "Gửi lại bằng khoá mới",
   "chat.gui": "Gửi",
   "chat.dung": "Dừng",
   "chat.thuLai": "Thử lại",

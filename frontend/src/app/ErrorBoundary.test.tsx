@@ -35,7 +35,7 @@ vi.mock("../components/chat/ChatScreen", () => ({
   },
 }));
 
-import { api, type NguoiDungRa } from "../lib/api";
+import { api, type HoSoRa } from "../lib/api";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PATHS } from "./paths";
 import { routes } from "./routes";
@@ -53,13 +53,17 @@ function Bum(): never {
  * hinh "no tung" khong bao gio duoc render — tuc ca 2 se xanh vi mot ly do
  * khac han ly do no ra doi.
  */
-const NGUOI_DUNG: NguoiDungRa = {
+const NGUOI_DUNG: HoSoRa = {
   id: "22222222-2222-4222-8222-222222222222",
   email: "nguoi-dung@scarlet.test",
   display_name: null,
   status: "active",
   role: "user",
   tier_name: "free",
+  // Ba truong cua `HoSoRa` — chi `GET /auth/me` tra chung (B-213, T-3.4).
+  default_model: null,
+  quota: null,
+  message_max_chars: 24000,
 };
 
 beforeEach(() => {

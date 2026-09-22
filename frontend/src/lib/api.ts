@@ -62,6 +62,13 @@ export class ApiError extends Error {
 export const MA_LOI = {
   CHUA_XAC_THUC: "UNAUTHENTICATED",
   DANG_SINH: "GENERATION_IN_PROGRESS",
+  /**
+   * `409` cua §11.4 — mot request KHAC mang cung `Idempotency-Key` con dang
+   * chay. **Khac** `DANG_SINH` o tren: cai kia noi ve mot MESSAGE dang sinh
+   * (409 cua `retry`), cai nay noi ve mot KHOA dang bi giu. Hai ma, hai cau
+   * tra loi cho nguoi dung — xem `backend/app/core/errors.py`.
+   */
+  KHOA_DANG_GIU: "IN_PROGRESS",
   SAI_MAT_KHAU: "INVALID_CREDENTIALS",
   TAI_KHOAN_BI_KHOA: "ACCOUNT_DISABLED",
   DOI_QUAN_TRI: "ADMIN_REQUIRED",
@@ -228,6 +235,53 @@ export interface NguoiDungRa {
   status: TrangThaiUser;
   role: VaiTroUser;
   tier_name: string;
+  /**
+   * Model mac dinh cua nguoi nay (§18.4, B-206) — `null` = chua chon, FE roi
+   * ve `default: true` cua catalog. Nam o lop CHUNG vi no la mot cot cua hang
+   * `users`, tuc ca ba duong deu tra.
+   */
+  default_model: string | null;
+}
+
+/** Hai gia tri cua `limit_type` (§10.3, UC-07) — `5h` va `weekly`. */
+export type LoaiHanMuc = "5h" | "weekly";
+
+/**
+ * Mot cua so truot cua §10.3 — `WindowSnapshot` cua backend.
+ *
+ * Bon con so tien la CHUOI, khong `number`: backend tra `Decimal` va pydantic
+ * tuan tu hoa no thanh chuoi — cung luat da dua `cost_usd` tu Postgres toi FE
+ * o `SoTien`. Doi sang so mot lan de HIEN, khong de cong.
+ */
+export interface CuaSoQuota {
+  limit_type: LoaiHanMuc;
+  limit_usd: string;
+  spent_usd: string;
+  remaining_usd: string;
+  /** Lam tron XUONG — con so hien ra khong bao gio lac quan hon su that. */
+  remaining_pct: number;
+  /** Giay cho toi khi duoi tran lai, hoac `null`. Cung don vi voi `Retry-After`. */
+  retry_after: number | null;
+}
+
+/**
+ * `HoSoRa` — rieng `GET /auth/me`, rong hon `NguoiDungRa` dung hai truong.
+ *
+ * B-213/NQ-81: ba task cua Phase 3 doc BA nhom khac nhau cua CUNG mot
+ * response — T-3.4 lay `message_max_chars`, T-3.6 lay `default_model`, T-3.11
+ * lay `quota`. Hinh dang day du duoc khai MOT lan o day chu khong moi task
+ * them mot manh, vi `request<T>()` **ep kieu** response chu khong kiem no:
+ * mot truong thieu trong interface khong sinh loi nao, no chi im lang bien
+ * mat truoc khi component kip doc.
+ */
+export interface HoSoRa extends NguoiDungRa {
+  /**
+   * `null` = khong do duoc luc nay (Redis khong tra loi), **khong** phai
+   * "khong co han muc". FE an thanh quota di chu dung ve mot thanh rong.
+   */
+  quota: CuaSoQuota[] | null;
+  /** Tran do dai mot message, tinh bang ky tu (B-205, NQ-78) — A3: khong literal o FE. */
+  message_max_chars: number;
 }
 
 /**
@@ -493,7 +547,11 @@ export const api = {
 
   dangXuat: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
 
-  toiLaAi: () => request<NguoiDungRa>("/auth/me"),
+  /**
+   * §18.1 — *"User + tier + quota con lai + trang thai"*. Tra `HoSoRa`, tuc
+   * rong hon `/login` va `/refresh` dung hai truong (B-213).
+   */
+  toiLaAi: () => request<HoSoRa>("/auth/me"),
 
   // ──────────────────────────── §16.3 — quan tri ────────────────────────────
   //

@@ -101,15 +101,19 @@ vi.mock("../../lib/api", async (importOriginal) => {
 
 import { PATHS } from "../../app/paths";
 import { routes } from "../../app/routes";
-import { ApiError, api, type NguoiDungRa, type TrangThaiUser } from "../../lib/api";
+import { ApiError, api, type HoSoRa, type TrangThaiUser } from "../../lib/api";
 
-const NGUOI_DUNG: NguoiDungRa = {
+const NGUOI_DUNG: HoSoRa = {
   id: "33333333-3333-4333-8333-333333333333",
   email: "nguoi-moi@scarlet.test",
   display_name: null,
   status: "active",
   role: "user",
   tier_name: "free",
+  // Ba truong cua `HoSoRa` — chi `GET /auth/me` tra chung (B-213, T-3.4).
+  default_model: null,
+  quota: null,
+  message_max_chars: 24000,
 };
 
 const MAT_KHAU = "mot-mat-khau-du-manh-123";

@@ -35,17 +35,21 @@ vi.mock("../lib/api", async (importOriginal) => {
   };
 });
 
-import { api, type ChiPhiRa, type NguoiDungRa } from "../lib/api";
+import { api, type ChiPhiRa, type HoSoRa } from "../lib/api";
 import { PATHS } from "./paths";
 import { routes } from "./routes";
 
-const ADMIN: NguoiDungRa = {
+const ADMIN: HoSoRa = {
   id: "11111111-1111-4111-8111-111111111111",
   email: "admin@scarlet.test",
   display_name: null,
   status: "active",
   role: "admin",
   tier_name: "trusted",
+  // Ba truong cua `HoSoRa` — chi `GET /auth/me` tra chung (B-213, T-3.4).
+  default_model: null,
+  quota: null,
+  message_max_chars: 24000,
 };
 
 const KHONG_TIEN = { cost_usd: "0", prompt_tokens: 0, completion_tokens: 0, events: 0 };

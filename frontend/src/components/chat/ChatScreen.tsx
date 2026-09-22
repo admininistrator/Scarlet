@@ -1,3 +1,4 @@
+import { useSession } from "../../app/Layout";
 import { t } from "../../lib/i18n";
 import type { TrangThaiKetNoi } from "../../lib/sse";
 import { useChat } from "../../features/chat/useChat";
@@ -45,6 +46,15 @@ function NhanKetNoi({ ketNoi }: { ketNoi: TrangThaiKetNoi | null }) {
 export function ChatScreen() {
   const chat = useChat();
   const { cay } = chat;
+  /*
+    T-3.4 — tran ky tu den tu `GET /auth/me` (`message_max_chars`, NQ-78),
+    khong tu mot hang so o FE (A3/L4). `Layout` da hoi mot lan roi nen o day
+    chi la lay lai, khong them mot luot goi nao.
+
+    `?? null` chu khong mot con so mac dinh: "chua biet tran" va "tran bang
+    N" la hai chuyen khac nhau, va `Composer` xu ly ca dau rieng.
+  */
+  const tranKyTu = useSession().hoSo?.message_max_chars ?? null;
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
@@ -128,7 +138,10 @@ export function ChatScreen() {
         <Composer
           dangChay={chat.dangChay !== null}
           moDuoc={cay.conversationId !== null && !chat.dangBan}
-          onGui={(ban) => void chat.gui(ban)}
+          tranKyTu={tranKyTu}
+          // Tra nguyen `Promise<KetQuaGui>` chu khong `void`: `Composer` giu
+          // khoa cua §11.4 va no phai biet ket qua moi biet nen giu hay bo.
+          onGui={chat.gui}
           onDung={() => void chat.dung()}
         />
       </div>
