@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { MessageRa } from "../../lib/api";
+import type { DanhGia, MessageRa } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import {
   chiSoHienThi,
@@ -11,7 +11,9 @@ import {
   phanReasoning,
   type TrangThaiCay,
 } from "../../lib/tree";
+import { IconButton } from "./IconButton";
 import { Markdown } from "./Markdown";
+import { NutDuoiCauTraLoi } from "./NutDuoiCauTraLoi";
 
 /**
  * Mot bong bong tren duong di hien tai — ban T-HD3, §8.2, §7.4, C13.
@@ -52,14 +54,22 @@ import { Markdown } from "./Markdown";
  * `transition`/`animation`.
  *
  * Nam nut duoi cau tra loi (Copy · Thich · Khong thich · Thu lai · Doi model)
- * la T-3.7 — o day chi co Thu lai va Sua nhu T-1.14 da co, mac ao cua T-HD3.
+ * nam trong `NutDuoiCauTraLoi` (T-3.7). Chung o mot file rieng chu khong noi
+ * tiep vao day vi mot ly do doc duoc: file nay tra loi cau "bong bong nao ve
+ * cai gi" (bon trang thai), con file kia tra loi "bam mot nut thi gui gi len
+ * server" — va chi cau thu hai can mot bo test rieng.
+ *
+ * `‹ n/m ›` van o day va van la ban THO cua T-1.14: mac ao T-HD3 cho no la
+ * viec cua T-3.8.
  */
 export function MessageItem({
   node,
   cay,
   ghiChu,
   dangChay,
+  modelDangChon,
   onThuLai,
+  onDanhGia,
   onSua,
   onChuyenNhanh,
 }: {
@@ -67,7 +77,11 @@ export function MessageItem({
   cay: TrangThaiCay;
   ghiChu: string[];
   dangChay: boolean;
-  onThuLai: (messageId: string) => void;
+  /** Model dang chon tren picker — nut "Doi model & thu lai" gui no (T-3.6). */
+  modelDangChon: string | null;
+  /** `modelId` vang mat = giu nguyen model cu. Xem `useChat.thuLai`. */
+  onThuLai: (messageId: string, modelId?: string) => void;
+  onDanhGia: (messageId: string, gia: DanhGia | null) => void;
   onSua: (messageId: string, noiDungMoi: string) => void;
   onChuyenNhanh: (node: MessageRa, huong: -1 | 1) => void;
 }) {
@@ -170,15 +184,21 @@ export function MessageItem({
 
           <div className="mt-2 flex flex-wrap items-center gap-1">
             {coAnhEm(node) && (
-              <BranchNav node={node} onChuyenNhanh={(huong) => onChuyenNhanh(node, huong)} />
+              <>
+                <BranchNav node={node} onChuyenNhanh={(huong) => onChuyenNhanh(node, huong)} />
+                {/* Vach ngan hai nhom cua ban T-HD3: dieu huong nhanh | hanh dong */}
+                <span aria-hidden="true" className="mx-1 h-6 w-px bg-border" />
+              </>
             )}
-            <button
-              type="button"
-              onClick={() => onThuLai(node.id)}
-              className="h-touch rounded-md px-3 text-base font-medium text-foreground hover:bg-surface-hover motion-control"
-            >
-              {t("chat.errorRetry")}
-            </button>
+            <NutDuoiCauTraLoi
+              chu={chu}
+              feedback={node.feedback}
+              modelDangDung={node.model_id}
+              modelDangChon={modelDangChon}
+              onDanhGia={(gia) => onDanhGia(node.id, gia)}
+              onThuLai={() => onThuLai(node.id)}
+              onThuLaiModel={(modelId) => onThuLai(node.id, modelId)}
+            />
           </div>
         </>
       )}
@@ -293,33 +313,6 @@ function BranchNav({
         onClick={() => onChuyenNhanh(1)}
       />
     </div>
-  );
-}
-
-function IconButton({
-  label,
-  glyph,
-  onClick,
-  disabled,
-}: {
-  label: string;
-  glyph: string;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      title={label}
-      className="grid size-touch place-items-center rounded-md border border-transparent text-muted hover:bg-surface-hover disabled:text-disabled-foreground motion-control"
-    >
-      <span aria-hidden="true" className="text-lg">
-        {glyph}
-      </span>
-    </button>
   );
 }
 

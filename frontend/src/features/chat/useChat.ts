@@ -46,10 +46,37 @@
  * nguoi dung xoa trang o nhap roi go mot cau khac han. Khoa gio thuoc ve
  * `Composer`; `gui()` nhan no nhu mot tham so va tra ve `KetQuaGui` de chu
  * so huu biet nen giu hay nen bo.
+ *
+ * ── ...nhung C22 cua `thuLai` thi O DAY (T-3.7 / B-231) ───────────────────
+ *
+ * NQ-93 dua `POST /messages/{id}/retry` vao danh sach BAT BUOC `Idempotency-Key`,
+ * nen nut Thu lai cung phai cam mot khoa. Khoa ay o lai `useChat` chu khong
+ * di ra component, va ly do la don vi cua no khac han o nhap:
+ *
+ *   • Don vi la mot cap **(message, model)** — "thu lai cau tra loi nay bang
+ *     model nay". `useChat` la cho duy nhat biet ca hai.
+ *   • Hang nut song va chet theo duong di: sau mot lan thu lai thanh cong,
+ *     `active_leaf_id` doi sang anh em MOI nen bong bong cu bien mat khoi
+ *     `path` va component cua no unmount. Mot `ref` trong component se chet
+ *     theo, tuc luat 2 cua C22 (giu nguyen khoa qua moi lan HONG) mat dung
+ *     luc no can nhat.
+ *
+ * Ba dong luat giong het `Composer`, chi khac cho sinh: **sinh** o lan bam dau
+ * cho mot cap, **giu** qua moi lan hong (mang rot, `500`, `503` — van la mot
+ * y dinh), **bo** khi va chi khi `202` ve. Nho vay bam nhanh hai lan la mot
+ * hoa don, con bam lai sau khi da xong la mot anh em that (§8.2 cho phep).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, MA_LOI, api, type MessageRa, type ModelRa } from "../../lib/api";
+import {
+  ApiError,
+  MA_LOI,
+  api,
+  type DanhGia,
+  type MessageRa,
+  type ModelRa,
+} from "../../lib/api";
+import { khoaMoi } from "../../lib/idempotency";
 import { chonMacDinh, type KetQuaMacDinh } from "../models/macDinh";
 import { moStream, type TayCamStream, type TrangThaiKetNoi, type UsageRa } from "../../lib/sse";
 import {
@@ -128,7 +155,14 @@ export interface ChatDangDung {
    * di model khac.
    */
   macDinh: KetQuaMacDinh;
-  /** Loi tat cua `macDinh.modelId` — model cho lan gui/thu lai KE TIEP. */
+  /**
+   * Loi tat cua `macDinh.modelId` — model cho lan GUI ke tiep.
+   *
+   * Tu T-3.7 no **khong** con di kem moi lan `thuLai`: hai nut Thu lai canh
+   * nhau chi khac nhau o cho ay, nen nut tron giu model cu con nut "Doi model
+   * & thu lai" truyen `modelId` tuong minh. Gia tri nay van la thu nut thu hai
+   * gui di — no la model dang chon tren picker.
+   */
   modelHieuLuc: string | null;
   /** `null` = khong co stream nao dang mo trong tab nay. */
   ketNoi: TrangThaiKetNoi | null;
@@ -155,7 +189,24 @@ export interface ChatDangDung {
   /** `khoa` do NGUOI GOI cam (C22) — xem `KetQuaGui`. */
   gui: (noiDung: string, khoa: string) => Promise<KetQuaGui>;
   dung: () => Promise<void>;
-  thuLai: (messageId: string) => Promise<void>;
+  /**
+   * §8.2 — sinh lai cau tra loi `messageId` thanh mot anh em cua no.
+   *
+   * `modelId` vang mat (nut "Thu lai" tron) ⇒ **khong** gui `model_id`, va
+   * backend dung lai dung model cua chinh cau tra loi ay (`_chon_model`).
+   * Truyen mot id (nut "Doi model & thu lai") la cho duy nhat doi model.
+   *
+   * Khoa §11.4 khong o chu ky nay: xem khoi C22 o docstring module.
+   */
+  thuLai: (messageId: string, modelId?: string) => Promise<void>;
+  /**
+   * §18.2 — Like/Dislike. `gia === null` la **go** danh gia (bam lai lan hai).
+   *
+   * Khong nhan `lyDo`: ban T-HD3 chi co hai nut sang/toi, khong co o nhap ly
+   * do — va mot ly do gui len hom nay khong doc lai duoc o dau (B-244).
+   * `api.danhGia` van mo duong cho no.
+   */
+  danhGia: (messageId: string, gia: DanhGia | null) => Promise<void>;
   suaCauHoi: (messageId: string, noiDung: string) => Promise<void>;
   chuyenNhanh: (node: MessageRa, huong: -1 | 1) => Promise<void>;
   /** Dat mot cau loi len bang loi cua man chat (T-3.6 — xem `ChatScreen`). */
@@ -216,6 +267,23 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
   //: Luat 4 — ban doc duoc ngay cua cung mot cay.
   const cayRef = useRef<TrangThaiCay>(cayRong());
   const streamRef = useRef<TayCamStream | null>(null);
+  /*
+    C22 cho nut Thu lai (B-231): `${messageId}:${modelId}` → khoa §11.4.
+
+    `Map` chu khong mot chuoi duy nhat: hai bong bong khac nhau tren cung mot
+    man hinh la hai y dinh khac nhau, va hai nut cua CUNG mot bong bong ("Thu
+    lai" va "Doi model & thu lai") cung vay — dung chung mot khoa se lam nut
+    thu hai nhan lai ban phat lai cua nut thu nhat, tuc doi model khong co tac
+    dung gi.
+
+    `ref` chu khong `state`: hai lan bam trong cung mot luot render phai doc
+    duoc CUNG mot gia tri (cai bay S5, y het `khoaRef` cua `Composer`).
+
+    Muc chi bi xoa khi `202` ve, nen mot lan hong se de lai mot muc song het
+    doi hook. Do la co y (luat 2 cua C22) va no khong phai mot cho ro: so muc
+    bi chan boi so bong bong nguoi dung da bam nham, khong boi thoi gian.
+  */
+  const khoaThuLaiRef = useRef<Map<string, string>>(new Map());
 
   const datCay = useCallback((doi: (cu: TrangThaiCay) => TrangThaiCay): TrangThaiCay => {
     const moi = doi(cayRef.current);
@@ -613,27 +681,76 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
     }
   }, [dangChay]);
 
+  /**
+   * §8.2 — mot anh em moi cho cung mot cau hoi. Xem khoi C22 o docstring module.
+   *
+   * **Khong con nhet `modelHieuLuc` vao moi lan thu lai** (ban T-3.6 lam vay).
+   * T-3.7 dung HAI nut canh nhau, va chung chi khac nhau o dung diem ay: "Thu
+   * lai" giu nguyen model cu, "Doi model & thu lai" moi doi. Gui model dang
+   * chon cho ca hai la lam nut thu nhat lang le doi model — dung thu
+   * `_chon_model` cua backend viet ro la khong duoc ("bam Retry ma khong chon
+   * gi phai sinh lai bang dung model cu").
+   */
   const thuLai = useCallback(
-    async (messageId: string) => {
+    async (messageId: string, modelId?: string) => {
       const conversationId = cayRef.current.conversationId;
       if (conversationId === null) {
         return;
       }
+      // Mot cap (message, model) = mot y dinh = mot khoa. Hai lan bam nhanh
+      // doc cung gia tri nay vi no la `ref` chu khong `state` (cai bay S5).
+      const dinhDanh = `${messageId}:${modelId ?? ""}`;
+      const khoa = khoaThuLaiRef.current.get(dinhDanh) ?? khoaMoi();
+      khoaThuLaiRef.current.set(dinhDanh, khoa);
       setDangBan(true);
       try {
         const ra = await api.thuLai(
           messageId,
-          modelHieuLuc === null ? {} : { model_id: modelHieuLuc },
+          modelId === undefined ? {} : { model_id: modelId },
+          khoa,
         );
+        // Luat 3 cua C22: bo khoa KHI VA CHI KHI `202` ve. Lan bam sau tren
+        // cung cau tra loi la mot y dinh moi, tuc mot anh em that.
+        khoaThuLaiRef.current.delete(dinhDanh);
         moStreamCho(ra.stream_url, ra.assistant_message_id, conversationId);
         await lamTuoi(conversationId);
       } catch (e) {
+        // Luat 2: GIU khoa. Mang rot hay `503` thi lan bam sau van la cung
+        // mot y dinh, va §11.4 chi lam viec duoc khi hai lan ay cung khoa.
         setLoi(loiThanhChu(e));
       } finally {
         setDangBan(false);
       }
     },
-    [lamTuoi, modelHieuLuc, moStreamCho],
+    [lamTuoi, moStreamCho],
+  );
+
+  /**
+   * §18.2 — ghi Like/Dislike roi DOC LAI duong di tu server.
+   *
+   * Doc lai chu khong tu va `feedback` vao node dang co trong state: "Viec"
+   * dong 3 cua T-3.7 doi hai nut ve tu `feedback` cua `MessageRa` chu khong tu
+   * mot ban rieng o FE, va cach re nhat de dieu do dung mai la khong bao gio
+   * co ban thu hai de lech. Cung luat 1 cua hook nay, ap cho mot truong thay
+   * vi cho hinh dang cay.
+   *
+   * `null` = go danh gia (bam Like lan thu hai). Endpoint idempotent theo
+   * message nen bam bao nhieu lan cung ra mot hang.
+   */
+  const danhGia = useCallback(
+    async (messageId: string, gia: DanhGia | null) => {
+      const conversationId = cayRef.current.conversationId;
+      if (conversationId === null) {
+        return;
+      }
+      try {
+        await api.danhGia(messageId, gia);
+        await lamTuoi(conversationId);
+      } catch (e) {
+        setLoi(loiThanhChu(e));
+      }
+    },
+    [lamTuoi],
   );
 
   const suaCauHoi = useCallback(
@@ -710,6 +827,7 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
     gui,
     dung,
     thuLai,
+    danhGia,
     suaCauHoi,
     chuyenNhanh,
     datLoi: setLoi,

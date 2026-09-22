@@ -130,6 +130,15 @@ async function docLoi(res: Response): Promise<ApiError> {
 export type VaiTro = "system" | "user" | "assistant" | "tool";
 export type TrangThaiMessage = "queued" | "streaming" | "completed" | "failed" | "cancelled";
 
+/**
+ * Hai gia tri cua enum `message_feedback` (§18.2, T-3.7a).
+ *
+ * `null` = **chua ai bam gi**, va no khong phai mot nhan thu ba: cot trong
+ * Postgres la `NULL`, va cung `null` ay la cach GO mot danh gia da bam. Mot
+ * nhan `"none"` se cho hai cach viet cung mot su that.
+ */
+export type DanhGia = "like" | "dislike";
+
 /** Mot node tren duong di hien tai — `MessageTrenDuongDi` cua backend. */
 export interface MessageRa {
   id: string;
@@ -145,6 +154,17 @@ export interface MessageRa {
   /** Dem tu 0 (B-60, NQ-33). `‹ n/m ›` hien `sibling_index + 1`. */
   sibling_index: number;
   sibling_count: number;
+  /**
+   * Like/Dislike da luu (§18.2, T-3.7a). Hai nut duoi cau tra loi ve trang
+   * thai cua chung **tu day**, khong tu mot ban sao trong state cua FE — F5
+   * phai ra dung thu vua bam, va duong duy nhat bao dam dieu do la doc lai tu
+   * server.
+   *
+   * KHONG co `feedback_reason` di kem: backend co y khong cho no di theo duong
+   * di (mot truong tu do 2000 ky tu tren bang ma moi lan mo hoi thoai deu keo
+   * ca hang ve). Xem B-244.
+   */
+  feedback: DanhGia | null;
 }
 
 export interface HoiThoaiRa {
@@ -181,6 +201,19 @@ export interface ThuLaiRa {
   assistant_message_id: string;
   stream_url: string;
   model_id: string;
+}
+
+/**
+ * `POST /messages/{id}/feedback` — trang thai SAU khi ghi (§18.2, T-3.7a).
+ *
+ * `feedback_reason` co mat o day va CHI o day: `MessageRa` khong mang no (xem
+ * docstring cua truong `feedback`), nen ai vua go mot ly do thi nhan lai
+ * nguyen van trong chinh response nay — va khong o dau khac (B-244).
+ */
+export interface DanhGiaRa {
+  message_id: string;
+  feedback: DanhGia | null;
+  feedback_reason: string | null;
 }
 
 export interface SuaMessageRa {
@@ -498,10 +531,54 @@ export const api = {
 
   huy: (messageId: string) => request<HuyRa>(`/messages/${messageId}/cancel`, { method: "POST" }),
 
-  thuLai: (messageId: string, body: { model_id?: string | null } = {}) =>
+  /**
+   * §8.2 — sinh lai mot cau tra loi thanh ANH EM cua no. `202` + `stream_url`.
+   *
+   * `idempotencyKey` la tham so **bat buoc** tu NQ-93/B-231: route nay nay
+   * nam trong `ROUTE_BAT_BUOC_IDEMPOTENCY`, thieu header ⇒ `400`. Cung ly le
+   * `guiTinNhan`: moi lan bam sinh mot `assistant_message_id` moi nen bam hai
+   * lan la hai hoa don, va lop `_job_id` cua B-92 khong do duoc chieu nay.
+   *
+   * Khoa do NGUOI GOI cam, khong sinh tai cho (C22) — sinh o day nghia la hai
+   * lan bam nhanh mang hai khoa khac nhau, tuc luat §11.4 vo dung dung luc no
+   * can chay. Chu so huu khoa la `useChat.thuLai`.
+   *
+   * `model_id` vang mat ⇒ backend dung lai `messages.model_id` cua chinh cau
+   * tra loi dang thu lai (xem `_chon_model`), tuc nut "Thu lai" tron. Nut
+   * "Doi model & thu lai" la cho duy nhat truyen mot `model_id` khac.
+   */
+  thuLai: (
+    messageId: string,
+    body: { model_id?: string | null },
+    idempotencyKey: string,
+  ) =>
     request<ThuLaiRa>(`/messages/${messageId}/retry`, {
       method: "POST",
       body: JSON.stringify(body),
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
+  /**
+   * §18.2 — Like/Dislike tren mot cau tra loi (T-3.7a).
+   *
+   * `gia` la `null` de **go** danh gia, va no phai di trong body mot cach
+   * tuong minh: backend khai `value` la truong BAT BUOC ke ca khi gia tri la
+   * `null`, nen mot body rong la `422` chu khong phai mot lan go am tham.
+   *
+   * `lyDo` chi gui khi co chu: `{value: null, reason: "..."}` la `422` (mot ly
+   * do khong kem danh gia la mot hang khong doc duoc), va `reason` vang mat
+   * doc thanh `NULL` chu khong phai "giu nguyen cai cu".
+   *
+   * KHONG co `Idempotency-Key`: day la mot `UPDATE` hai cot tren mot hang da
+   * co, bam hai lan ra dung mot trang thai — cung ly le `api/v1/__init__.py`
+   * dung cho moi POST cua `/admin/*` (A8 noi ve POST **tao tai nguyen**).
+   */
+  danhGia: (messageId: string, gia: DanhGia | null, lyDo?: string) =>
+    request<DanhGiaRa>(`/messages/${messageId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify(
+        lyDo === undefined || lyDo === "" ? { value: gia } : { value: gia, reason: lyDo },
+      ),
     }),
 
   suaCauHoi: (messageId: string, content: string) =>

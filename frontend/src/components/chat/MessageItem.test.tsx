@@ -28,6 +28,7 @@ function node(patch: Partial<MessageRa> = {}): MessageRa {
     created_at: "2026-09-22T00:00:00Z",
     sibling_index: 0,
     sibling_count: 1,
+    feedback: null,
     ...patch,
   };
 }
@@ -39,7 +40,9 @@ function ve(n: MessageRa, cay: TrangThaiCay = cayRong(), dangChay = false) {
       cay={cay}
       ghiChu={[]}
       dangChay={dangChay}
+      modelDangChon={null}
       onThuLai={vi.fn()}
+      onDanhGia={vi.fn()}
       onSua={vi.fn()}
       onChuyenNhanh={vi.fn()}
     />,

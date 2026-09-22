@@ -2,6 +2,10 @@ import { useRef, useState } from "react";
 
 import type { KetQuaGui } from "../../features/chat/useChat";
 import { t } from "../../lib/i18n";
+// `khoaMoi` roi khoi file nay o T-3.7 (B-231): nut Thu lai nay cung phai sinh
+// khoa, va mot ban chep thu hai cua duong lui "khong co secure context" la
+// mot ban chep se chi duoc sua mot nua. Xem `lib/idempotency.ts`.
+import { khoaMoi } from "../../lib/idempotency";
 
 /**
  * O nhap — gui, Dung, dem ky tu, `Idempotency-Key` theo lan soan thao (T-3.4).
@@ -88,21 +92,6 @@ import { t } from "../../lib/i18n";
  * `dangChay` di vao nhu mot prop; file nay khong co mot bo dem thoi gian nao
  * va khong duoc co. Nut Gui ⇄ Dung doi chu theo dung no.
  */
-
-/**
- * `crypto.randomUUID` chi ton tai trong **secure context** (https, hoac
- * `localhost`) — tren mot may dev mo bang `http://<ip-lan>` thi no la
- * `undefined`, va mot `TypeError` o day nghia la khong gui duoc gi ca.
- *
- * Duong lui khong can chong va cham toan cau: khoa chi phai doc nhat trong
- * pham vi `idem:{user_id}:{route}:` cua mot nguoi (§11.4), va no song 24 gio.
- */
-function khoaMoi(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
-}
 
 export function Composer({
   dangChay,

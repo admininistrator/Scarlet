@@ -47,6 +47,7 @@ function message(chen: Partial<MessageRa> & Pick<MessageRa, "id">): MessageRa {
     created_at: "2026-09-20T00:00:00Z",
     sibling_index: 0,
     sibling_count: 1,
+    feedback: null,
     ...chen,
   };
 }

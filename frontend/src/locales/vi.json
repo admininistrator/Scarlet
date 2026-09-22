@@ -38,6 +38,15 @@
   "chat.branchPrev": "Nhánh trước",
   "chat.branchNext": "Nhánh sau",
 
+  "chat.copy": "Sao chép",
+  "chat.copied": "Đã sao chép",
+  "chat.like": "Thích",
+  "chat.liked": "Đã thích",
+  "chat.dislike": "Không thích",
+  "chat.disliked": "Đã không thích",
+  "chat.retryOtherModel": "Đổi model & thử lại",
+  "chat.retryOtherModelSame": "Chọn một model khác ở thanh trên rồi bấm lại — nút này gửi model đang chọn.",
+
   "code.copy": "Sao chép code",
   "code.copied": "Đã sao chép",
   "code.streaming": "Khối code đang mở",

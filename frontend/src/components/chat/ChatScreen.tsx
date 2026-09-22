@@ -180,7 +180,12 @@ export function ChatScreen() {
                   cay={cay}
                   ghiChu={chat.ghiChu[node.id] ?? []}
                   dangChay={chat.dangChay === node.id}
-                  onThuLai={(id) => void chat.thuLai(id)}
+                  // T-3.7 — nut "Doi model & thu lai" gui dung model dang
+                  // chon tren picker. Mot nguon, khong hai: neu no bang model
+                  // da sinh ra cau tra loi nay thi nut tu tat.
+                  modelDangChon={chat.modelHieuLuc}
+                  onThuLai={(id, modelId) => void chat.thuLai(id, modelId)}
+                  onDanhGia={(id, gia) => void chat.danhGia(id, gia)}
                   onSua={(id, ban) => void chat.suaCauHoi(id, ban)}
                   onChuyenNhanh={(n, huong) => void chat.chuyenNhanh(n, huong)}
                 />
