@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.selectable import LateralFromClause
 
-from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.db.models import Conversation, Message, MessageFeedback, MessageRole, MessageStatus
 from app.db.repositories.errors import (
     ConversationNotFoundError,
     MessageNotInConversationError,
@@ -207,6 +207,53 @@ class MessageRepository:
                 Message.conversation_id.in_(owned_conversations),
             )
             .values(deleted_at=func.now())
+            .returning(Message.id)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def set_feedback(
+        self,
+        message_id: uuid.UUID,
+        *,
+        user_id: uuid.UUID,
+        value: MessageFeedback | None,
+        reason: str | None,
+    ) -> bool:
+        """Ghi Like/Dislike lên một message — §18.2, T-3.7a. `False` = không có gì để ghi.
+
+        **Ghi CẢ HAI cột trong mọi lần gọi, kể cả khi `reason=None`.** Đánh giá
+        là một tài nguyên thay-cả-cụm chứ không vá từng trường: đổi Like thành
+        Dislike mà giữ lại câu lý do của lần Like là để một hàng tự mâu thuẫn.
+        Cùng lý lẽ với `PUT /settings` của T-3.0 ("`PUT` thay cả tài nguyên").
+
+        **Idempotent theo message** (chữ của "Việc cần làm"): đây là `UPDATE`
+        trên một hàng đã có, không phải `INSERT`. Like rồi Like lại vẫn đúng
+        một hàng với đúng một giá trị; `value=None` là **gỡ** đánh giá, và
+        `reason` đi theo về `NULL` — CHECK `ck_msg_feedback_reason_needs_value`
+        của migration 0005 canh đúng chuyện đó.
+
+        **`user_id` lọc TRONG câu SQL (§20), không sau khi đã SELECT.** Lồng
+        đúng truy vấn `owned_conversations` mà `soft_delete_message` dùng, chứ
+        không mở một đường tra quyền thứ hai — đó là cả lý do NQ-80 chọn hai
+        cột trên `messages` thay vì một bảng `message_feedback` riêng.
+
+        Không kiểm `role` ở đây: "chỉ đánh giá được câu trả lời" là luật của
+        tầng API (§18.2 gắn hai nút này dưới câu trả lời), và nó cần trả `400
+        MESSAGE_ROLE_MISMATCH` — một mã HTTP thì không phải việc của repository.
+        """
+        owned_conversations = select(Conversation.id).where(
+            Conversation.user_id == user_id,
+            Conversation.deleted_at.is_(None),
+        )
+        stmt = (
+            update(Message)
+            .where(
+                Message.id == message_id,
+                Message.deleted_at.is_(None),
+                Message.conversation_id.in_(owned_conversations),
+            )
+            .values(feedback=value, feedback_reason=reason)
             .returning(Message.id)
             .execution_options(synchronize_session=False)
         )

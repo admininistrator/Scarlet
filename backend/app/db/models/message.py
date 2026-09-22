@@ -16,10 +16,11 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, Integer, Text, func, text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.config.settings import FEEDBACK_REASON_MAX_CHARS
 from app.db.models.base import Base, pg_enum
 
 
@@ -40,6 +41,19 @@ class MessageStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class MessageFeedback(StrEnum):
+    """Khớp kiểu Postgres `message_feedback` (§18.2, migration 0005).
+
+    Chỉ hai giá trị, và **không** có thành viên thứ ba tên `none`/`unset`: "chưa
+    ai bấm gì" là `NULL` trên cột, không phải một nhãn của enum. Một nhãn như
+    thế sẽ cho hai cách viết cùng một sự thật, và mọi truy vấn sau đó phải nhớ
+    kiểm cả hai.
+    """
+
+    LIKE = "like"
+    DISLIKE = "dislike"
 
 
 class Message(Base):
@@ -78,6 +92,17 @@ class Message(Base):
     #: Chỉ có nghĩa khi `status='streaming'`; reaper so với `now()` (§7.6).
     heartbeat_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     raw_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    #: Like/Dislike của §18.2 — `NULL` = chưa ai bấm, hoặc vừa bấm gỡ. Hai cột
+    #: này **không** mang `user_id`: NQ-80 chốt "cột thay vì bảng riêng" và
+    #: nhận luôn cái giá đi kèm — ngày P8 mở share/fork, câu "ai đánh giá"
+    #: không trả lời được từ đây. Xem migration 0005.
+    feedback: Mapped[MessageFeedback | None] = mapped_column(
+        pg_enum(MessageFeedback, "message_feedback")
+    )
+    #: Lý do tuỳ chọn đi kèm. Có trần độ dài ở DDL
+    #: (`settings.FEEDBACK_REASON_MAX_CHARS`): đây là trường **tự do** duy nhất
+    #: trên một bảng mà mọi truy vấn đường đi (§8.3) đều kéo cả hàng về.
+    feedback_reason: Mapped[str | None] = mapped_column(Text)
     #: `clock_timestamp()` chứ KHÔNG phải `now()` — migration 0002, B-53.
     #: `now()` là `transaction_timestamp()`, nên mọi message ghi trong cùng một
     #: transaction sẽ có `created_at` bằng nhau và §8.3 không sắp được chúng.
@@ -99,6 +124,19 @@ class Message(Base):
         # không `heartbeat_at`: message `queued` chưa bao giờ có nhịp tim, vì
         # `mark_streaming` — chỗ đặt `heartbeat_at` — đúng là bước chưa chạy.
         Index("ix_msg_queued", "created_at", postgresql_where=text("status = 'queued'")),
+        # Hai CHECK của migration 0005, khai lại vì cùng lý do với bốn index
+        # trên: metadata không được nói dối (§17.4). Tên phải TRÙNG DDL — một
+        # `alembic revision --autogenerate` sau này so theo tên, và hai tên
+        # lệch nhau sẽ sinh ra một migration đòi tạo lại thứ đã có.
+        CheckConstraint(
+            "feedback_reason IS NULL OR "
+            f"char_length(feedback_reason) <= {FEEDBACK_REASON_MAX_CHARS}",
+            name="ck_msg_feedback_reason_len",
+        ),
+        CheckConstraint(
+            "feedback IS NOT NULL OR feedback_reason IS NULL",
+            name="ck_msg_feedback_reason_needs_value",
+        ),
     )
 
     def __repr__(self) -> str:

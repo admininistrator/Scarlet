@@ -65,7 +65,7 @@ from app.config import catalog
 from app.config.settings import settings
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
-from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.db.models import Conversation, Message, MessageFeedback, MessageRole, MessageStatus
 from app.db.repositories import (
     ConversationRepository,
     MessageNotInConversationError,
@@ -163,6 +163,14 @@ class MessageTrenDuongDi(BaseModel):
     created_at: datetime
     sibling_index: int
     sibling_count: int
+    #: Like/Dislike đã lưu (§18.2, T-3.7a). FE vẽ trạng thái hai nút **từ đây**,
+    #: không từ một bản sao trong state của mình — F5 phải ra đúng thứ vừa bấm.
+    #:
+    #: `feedback_reason` **không** có mặt, cố ý: nó là trường tự do dài tới
+    #: `FEEDBACK_REASON_MAX_CHARS`, và đường đi là thứ được tải lại mỗi lần mở
+    #: một hội thoại. Hai nút sáng/tối chỉ cần một enum; ai vừa gõ lý do thì đã
+    #: nhận lại nguyên văn trong response của chính `POST .../feedback`.
+    feedback: MessageFeedback | None
 
     @classmethod
     def from_path_node(cls, node: PathNode) -> MessageTrenDuongDi:
@@ -202,6 +210,7 @@ class MessageTrenDuongDi(BaseModel):
             created_at=m.created_at,
             sibling_index=sibling_index,
             sibling_count=sibling_count,
+            feedback=m.feedback,
         )
 
 

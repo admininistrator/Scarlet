@@ -1,10 +1,11 @@
-"""Năm endpoint message của §18.2: tạo một lượt chat, dừng nó, và ba thao tác CÂY.
+"""Sáu endpoint message của §18.2: tạo một lượt chat, dừng nó, ba thao tác CÂY.
 
     POST  /api/v1/conversations/{id}/messages   §7.2 ① — T-1.8
     POST  /api/v1/messages/{id}/cancel          §7.5   — T-1.9
     POST  /api/v1/messages/{id}/retry           §8.2   — T-1.13
     PATCH /api/v1/messages/{id}                 §8.2   — T-1.13
     GET   /api/v1/messages/{id}/siblings        §8.3   — T-1.13
+    POST  /api/v1/messages/{id}/feedback        §18.2  — T-3.7a
 
 KH tham chiếu: §7.2 ①, §7.5, §8.2, §8.3, §11.4, §18.2, §20 · CLAUDE.md A1, A2,
 A3, A8.
@@ -90,12 +91,12 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.conversations import MessageTrenDuongDi
 from app.config import catalog
-from app.config.settings import settings
+from app.config.settings import FEEDBACK_REASON_MAX_CHARS, settings
 from app.core.deps import (
     STATUSES_CAN_CHAT_SYSTEM_KEY,
     ensure_status_allowed,
@@ -107,7 +108,15 @@ from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.queue import GENERATE_JOB_NAME, get_arq_pool
 from app.core.ratelimit import gioi_han_chat, nha_ghe_sinh, nhan_ghe_sinh
 from app.core.redis import get_redis
-from app.db.models import Conversation, KeySource, Message, MessageRole, MessageStatus, UserStatus
+from app.db.models import (
+    Conversation,
+    KeySource,
+    Message,
+    MessageFeedback,
+    MessageRole,
+    MessageStatus,
+    UserStatus,
+)
 from app.db.repositories import (
     ConversationRepository,
     MessageNotInConversationError,
@@ -953,6 +962,133 @@ async def list_siblings(
             sibling_count=len(items),
             items=items,
         )
+
+
+# ═════════ §18.2 — Like/Dislike trên một câu trả lời (T-3.7a, NQ-80) ════════
+
+
+class DanhGiaRequest(BaseModel):
+    """Body của `POST /messages/{id}/feedback` — `{value, reason?}` của §18.2.
+
+    **`value` là trường BẮT BUỘC, kể cả khi giá trị của nó là `null`.** Gỡ đánh
+    giá là một ý định có thật (bấm nhầm Dislike mà không rút lại được là một
+    nút chỉ bấm được một lần trong đời), nên nó phải gửi được — nhưng nó phải
+    được gửi **tường minh**. Body rỗng đọc thành "gỡ" là để một request hỏng
+    hoặc một khoá gõ sai âm thầm xoá mất thứ người dùng vừa bấm; ở đây nó là
+    `422`. Đây là chỗ hợp đồng khác `PUT /settings` của T-3.0 ("vắng mặt đọc
+    thành `null`") và khác có chủ ý: `PUT` thay **cả** tài nguyên nên vắng mặt
+    có nghĩa, còn đây là một `POST` nhắm vào một message đã có.
+
+    `extra="forbid"` cùng lý lẽ ấy, và cùng lối `CaiDatIn`: gõ `rating` thay vì
+    `value` phải là một `422` đọc được chứ không phải một lần bấm Like không có
+    tác dụng gì.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: `null` = **gỡ** đánh giá. Không có nhãn enum nào mang nghĩa đó — xem
+    #: `MessageFeedback`: "chưa ai bấm gì" là `NULL` trên cột, một chỗ duy nhất.
+    value: MessageFeedback | None
+    #: Lý do tuỳ chọn (§18.2). Trần độ dài đến từ `config/` chứ không gõ vào
+    #: đây (A3), và cùng con số ấy là một `CHECK` trên DDL — xem
+    #: `settings.FEEDBACK_REASON_MAX_CHARS` cho lý do hai chỗ phải khớp.
+    reason: str | None = Field(default=None, max_length=FEEDBACK_REASON_MAX_CHARS)
+
+    @model_validator(mode="after")
+    def _ly_do_phai_di_kem_mot_danh_gia(self) -> DanhGiaRequest:
+        """`{"value": null, "reason": "..."}` ⇒ `422`, không phải một lần ghi nửa vời.
+
+        Một lý do không có đánh giá là một hàng không đọc được: lần đọc sau
+        không biết câu chữ ấy nói về cái gì. CHECK `ck_msg_feedback_reason_needs_value`
+        của migration 0005 nói cùng một câu ở tầng dưới; phép kiểm ở đây tồn tại
+        để câu trả lời là `422` có chữ chứ không phải `500` từ Postgres.
+        """
+        if self.value is None and self.reason is not None:
+            raise ValueError("reason chi gui kem mot value khac null")
+        return self
+
+
+class DanhGiaResponse(BaseModel):
+    """`200` của `POST /messages/{id}/feedback` — trạng thái SAU khi ghi.
+
+    Trả lại cả hai cột thay vì `204`: FE vừa gửi một giá trị và cần biết chắc
+    server đã nhận đúng thứ ấy, cùng lối `CaiDatRa` của T-3.0. Nó cũng là chỗ
+    duy nhất `feedback_reason` đi ra khỏi server — `MessageTrenDuongDi` cố ý
+    không mang nó (xem docstring lớp đó).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: uuid.UUID
+    feedback: MessageFeedback | None
+    feedback_reason: str | None
+
+
+@router.post(
+    "/messages/{message_id}/feedback",
+    status_code=status.HTTP_200_OK,
+    response_model=DanhGiaResponse,
+    responses={
+        400: {"model": ErrorEnvelope, "description": "Khong phai message assistant"},
+        404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
+    },
+)
+async def set_message_feedback(
+    message_id: uuid.UUID,
+    body: DanhGiaRequest,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> DanhGiaResponse:
+    """Ghi Like/Dislike lên một câu trả lời — §18.2, UC-02, T-3.7a.
+
+    **Idempotent theo message, không theo lần bấm.** Đây là `UPDATE` hai cột
+    trên một hàng đã có, không phải `INSERT`: Like rồi Like lại vẫn đúng một
+    dòng với đúng một giá trị, Like rồi Dislike thì đổi giá trị, và `value:
+    null` gỡ hẳn. Vì thế nó **không** vào `ROUTE_BAT_BUOC_IDEMPOTENCY` (§11.4,
+    A8): A8 nói "mọi POST **tạo tài nguyên**", còn đường này không tạo hàng
+    nào — bấm hai lần ra đúng một trạng thái, đúng lý lẽ `api/v1/__init__.py`
+    đã dùng cho mọi POST của `/admin/*`. Header vẫn được tôn trọng nếu FE gửi
+    (diện "tuỳ chọn" của router).
+
+    **Ghi cả hai cột trong một câu lệnh.** Đổi Like thành Dislike mà giữ lại
+    câu lý do của lần Like là để một hàng tự mâu thuẫn, nên `reason` vắng mặt
+    đọc thành `NULL` chứ không phải "giữ nguyên cái cũ".
+
+    **Chỉ `role='assistant'`** → `400 MESSAGE_ROLE_MISMATCH`. §18.2 và UC-02
+    dòng 5 đặt hai nút này dưới **câu trả lời**; đánh giá chính câu hỏi của
+    mình không có nghĩa nào đọc được, và mở cửa cho nó là để hai cột trên bảng
+    nóng nhất của app mang dữ liệu không ai biết đọc ra sao.
+
+    **404 chứ không 403 (§20)**, cùng lối `cancel`/`retry`: "không tồn tại",
+    "đã xoá mềm" và "của người khác" là cùng một câu trả lời. Phép kiểm quyền
+    chạy **hai** lần trên cùng một bộ điều kiện — `_message_cua_toi` để lấy
+    `role`, rồi `set_feedback` lọc `user_id` ngay trong câu `UPDATE` — và đó
+    không phải thừa: §20 đòi phép lọc nằm trong câu SQL *ghi*, chứ không phải
+    một lần đọc trước đó rồi tin vào nó.
+    """
+    async with session_scope() as session:
+        messages = MessageRepository(session)
+        message = await _message_cua_toi(messages, message_id, user_id=user_id)
+        _doi_role(message, MessageRole.ASSISTANT)
+
+        da_ghi = await messages.set_feedback(
+            message_id, user_id=user_id, value=body.value, reason=body.reason
+        )
+        if not da_ghi:  # pragma: no cover - `_message_cua_toi` đã lọc cùng điều kiện
+            raise ApiError(
+                status.HTTP_404_NOT_FOUND,
+                ApiErrorCode.MESSAGE_NOT_FOUND,
+                "khong tim thay message",
+            )
+        await session.commit()
+
+    # §20 cấm log nội dung người dùng: ghi ĐỘ DÀI của lý do, không ghi chữ.
+    logger.info(
+        "feedback: message %s -> %s (reason_len=%d)",
+        message_id,
+        body.value.value if body.value is not None else "null",
+        len(body.reason or ""),
+    )
+    return DanhGiaResponse(message_id=message_id, feedback=body.value, feedback_reason=body.reason)
 
 
 async def _message_cua_toi(

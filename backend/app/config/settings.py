@@ -39,6 +39,25 @@ logger = logging.getLogger(__name__)
 #: Độ dài tối thiểu của secret sinh bằng ``openssl rand -hex 32`` (§19.3).
 MIN_SECRET_CHARS = 32
 
+#: Trần độ dài của ``messages.feedback_reason`` — lý do kèm Like/Dislike
+#: (§18.2, T-3.7a). A3 cấm một *giới hạn* nằm rải trong ``.py``, nên nó ở đây;
+#: ``api/v1/messages.py`` đọc nó làm ``max_length`` của schema request.
+#:
+#: **Một hằng module chứ không một field của ``Settings``**, khác hẳn
+#: ``MESSAGE_MAX_CHARS`` ngay bên dưới, và khác biệt ấy có lý do đo được: con
+#: số này còn là một ``CHECK`` trên DDL (migration 0005). Một field ``.env``
+#: sửa được lúc chạy thì nới nó lên mà không kèm migration sẽ biến một ``422``
+#: gọn gàng thành một ``IntegrityError`` từ Postgres, tức ``500``.
+#: ``MESSAGE_MAX_CHARS`` không có ràng buộc ấy — nó chỉ sống ở tầng schema — nên
+#: nó được phép là một biến môi trường.
+#:
+#: **Vì sao 2000.** ``messages`` là bảng nóng nhất của app: mọi truy vấn đường
+#: đi (§8.3) kéo cả hàng về, nên một trường tự do không trần là một hàng có thể
+#: phình vô hạn trên đúng đường đi nóng nhất (Cạm bẫy ① của T-3.7a). 2000 ký tự
+#: đủ cho vài đoạn văn giải thích "câu trả lời sai chỗ nào" và chặn đứng ngả
+#: dán cả một file log vào ô lý do.
+FEEDBACK_REASON_MAX_CHARS = 2000
+
 _HTTP_URL = TypeAdapter(AnyHttpUrl)
 
 

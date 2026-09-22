@@ -498,6 +498,16 @@ MA_TRAN: tuple[CaIDOR, ...] = (
         ma_loi=ApiErrorCode.MESSAGE_NOT_FOUND,
     ),
     CaIDOR(
+        ten="POST /messages/{cua-B}/feedback",
+        tai_nguyen="message",
+        route=f"{API}/messages/{{message_id}}/feedback",
+        method="POST",
+        muc_tieu="message_assistant",
+        duong_dan=lambda muc_tieu, _cua_a: f"{API}/messages/{muc_tieu}/feedback",
+        body=lambda _muc_tieu: {"value": "like"},
+        ma_loi=ApiErrorCode.MESSAGE_NOT_FOUND,
+    ),
+    CaIDOR(
         ten="GET /messages/{cua-B}/siblings",
         tai_nguyen="message",
         route=f"{API}/messages/{{message_id}}/siblings",

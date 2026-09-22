@@ -16,7 +16,7 @@ from app.db.models.audit_log import (
 from app.db.models.base import Base
 from app.db.models.conversation import Conversation
 from app.db.models.email_token import EmailToken, EmailTokenPurpose
-from app.db.models.message import Message, MessageRole, MessageStatus
+from app.db.models.message import Message, MessageFeedback, MessageRole, MessageStatus
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.tier import Tier
 from app.db.models.usage_event import CostConfidence, KeySource, UsageEvent
@@ -36,6 +36,7 @@ __all__ = [
     "EmailTokenPurpose",
     "KeySource",
     "Message",
+    "MessageFeedback",
     "MessageRole",
     "MessageStatus",
     "RefreshToken",
