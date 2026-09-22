@@ -50,6 +50,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, MA_LOI, api, type MessageRa, type ModelRa } from "../../lib/api";
+import { chonMacDinh, type KetQuaMacDinh } from "../models/macDinh";
 import { moStream, type TayCamStream, type TrangThaiKetNoi, type UsageRa } from "../../lib/sse";
 import {
   batDauSinh,
@@ -108,8 +109,27 @@ export type KetQuaGui = "da-gui" | "ket-khoa" | "hong";
 
 export interface ChatDangDung {
   cay: TrangThaiCay;
-  models: ModelRa[];
-  modelChon: string | null;
+  /**
+   * T-3.6 — TANG 1 cua ba tang mac dinh: `conversations.default_model` cua
+   * hoi thoai dang mo. `null` = hoi thoai nay khong dat gi, hoac chua mo
+   * hoi thoai nao.
+   *
+   * Doc tu server o moi lan `lamTuoi()`, khong giu mot ban rieng: no la mot
+   * cot cua hang `conversations` va `PATCH` tra ve ca hang ay.
+   */
+  modelHoiThoai: string | null;
+  /**
+   * Ket qua day du cua `chonMacDinh()` tren ba tang: model dang dung, tang
+   * da quyet dinh no, va id hop le cua tung tang.
+   *
+   * Tinh MOT lan o day chu khong de moi ben tu tinh: `ModelPicker` ve rail
+   * va chip tu chinh phep chon ma `gui()` dung de dat `model_id`, nen hai
+   * phep chon roi nhau la mot man hinh chi vao model nay va mot request gui
+   * di model khac.
+   */
+  macDinh: KetQuaMacDinh;
+  /** Loi tat cua `macDinh.modelId` — model cho lan gui/thu lai KE TIEP. */
+  modelHieuLuc: string | null;
   /** `null` = khong co stream nao dang mo trong tab nay. */
   ketNoi: TrangThaiKetNoi | null;
   /** Id message assistant dang chay, hoac `null`. */
@@ -120,7 +140,13 @@ export interface ChatDangDung {
   ghiChu: Record<string, string[]>;
   loi: string | null;
 
-  chonModel: (modelId: string | null) => void;
+  /**
+   * T-3.6 — ghi TANG 1 (`PATCH /conversations/{id}` `{default_model}`).
+   *
+   * Khong lam gi khi chua mo hoi thoai nao: luc do chi con tang tai khoan,
+   * va no thuoc ve `usePhien` chu khong ve day.
+   */
+  datModelHoiThoai: (modelId: string) => Promise<void>;
   hoiThoaiMoi: () => Promise<void>;
   /** T-3.3 — sidebar chon mot hoi thoai da co. */
   moHoiThoai: (conversationId: string) => Promise<void>;
@@ -132,19 +158,60 @@ export interface ChatDangDung {
   thuLai: (messageId: string) => Promise<void>;
   suaCauHoi: (messageId: string, noiDung: string) => Promise<void>;
   chuyenNhanh: (node: MessageRa, huong: -1 | 1) => Promise<void>;
+  /** Dat mot cau loi len bang loi cua man chat (T-3.6 — xem `ChatScreen`). */
+  datLoi: (chu: string) => void;
   xoaLoi: () => void;
 }
 
-export function useChat(): ChatDangDung {
+/**
+ * Hai thu `useChat` can tu ben ngoai de dung duoc ba tang mac dinh (T-3.6).
+ *
+ * Danh muc model KHONG con nap trong hook nay: no da chuyen sang
+ * `features/models/useModels.ts`, noi co ca luat "mo picker khong goi API"
+ * (Cam bay ②). `useChat` chi la mot NGUOI DOC cua danh muc ay — no can
+ * danh sach de biet `default: true` cua catalog la model nao, va de bo qua
+ * mot `default_model` da bien mat khoi catalog (Cam bay ①).
+ */
+export interface TuyChonChat {
+  /** Danh sach cua `GET /models` — xem `useModels()`. */
+  models: ModelRa[];
+  /** TANG 2: `users.default_model` tu `GET /auth/me`. */
+  modelMacDinhTaiKhoan: string | null;
+}
+
+/**
+ * Mac dinh cho ban goi `useChat()` khong tham so (bo test cua T-3.4 va moi
+ * man hinh khong co picker). Hang so o TAM MODULE chu khong mot object
+ * literal trong chu ky ham: mot literal se la mot object MOI moi lan render,
+ * tuc moi `useCallback` phu thuoc vao no deu dung lai o moi khung hinh.
+ */
+const TUY_CHON_RONG: TuyChonChat = { models: [], modelMacDinhTaiKhoan: null };
+
+export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
+  const { models, modelMacDinhTaiKhoan } = tuyChon;
   const [cay, setCay] = useState<TrangThaiCay>(cayRong);
-  const [models, setModels] = useState<ModelRa[]>([]);
-  const [modelChon, setModelChon] = useState<string | null>(null);
+  const [modelHoiThoai, setModelHoiThoai] = useState<string | null>(null);
   const [ketNoi, setKetNoi] = useState<TrangThaiKetNoi | null>(null);
   const [dangChay, setDangChay] = useState<string | null>(null);
   const [dangBan, setDangBan] = useState(false);
   const [usage, setUsage] = useState<UsageRa | null>(null);
   const [ghiChu, setGhiChu] = useState<Record<string, string[]>>({});
   const [loi, setLoi] = useState<string | null>(null);
+
+  /*
+    Ba tang, mot phep chon, mot cho (T-3.6). `chonMacDinh` la ham THUAN nen
+    khong can `useMemo`: no duyet mot mang bon phan tu.
+
+    Day cung la cho Cam bay ① duoc dong cho CA hai tang tren: mot
+    `default_model` tro vao model da bien mat khoi catalog bi bo qua va roi
+    xuong tang duoi, thay vi tro thanh mot `model_id` gay `400 MODEL_UNKNOWN`
+    o lan gui ke tiep.
+  */
+  const macDinh = chonMacDinh(models, {
+    hoiThoai: modelHoiThoai,
+    taiKhoan: modelMacDinhTaiKhoan,
+  });
+  const modelHieuLuc = macDinh.modelId;
 
   //: Luat 4 — ban doc duoc ngay cua cung mot cay.
   const cayRef = useRef<TrangThaiCay>(cayRong());
@@ -252,6 +319,9 @@ export function useChat(): ChatDangDung {
     async (conversationId: string): Promise<TrangThaiCay | null> => {
       try {
         const chiTiet = await api.docHoiThoai(conversationId);
+        // TANG 1 di cung duong di: `GET /conversations/{id}` tra ca hai, nen
+        // khong co mot loi goi rieng nao de hai gia tri lech nhau.
+        setModelHoiThoai(chiTiet.default_model);
         return datCay((cu) => napHoiThoai(cu, chiTiet));
       } catch (e) {
         setLoi(loiThanhChu(e));
@@ -370,15 +440,15 @@ export function useChat(): ChatDangDung {
     [baoDamStream, lamTuoi],
   );
 
-  /** Models + hoi thoai ghi trong URL. Goi luc mount, va goi lai khi mang ve. */
+  /**
+   * Hoi thoai ghi trong URL. Goi luc mount, va goi lai khi mang ve.
+   *
+   * KHONG con nap `/models` o day (T-3.6): danh muc model doi chu — no can
+   * mot nut lam moi, mot moc gio, va luat "khong goi lai khi mo dropdown" —
+   * nen no co hook rieng (`features/models/useModels.ts`). Hai thu tung di
+   * chung chi vi ca hai cung phai chay luc mount.
+   */
   const napBanDau = useCallback(() => {
-    api
-      .danhSachModel()
-      .then(setModels)
-      // `/models` khong doi danh tinh, nen that bai o day la ha tang chu khong
-      // phai chua dang nhap — noi ro de khong ai di sua nham cho.
-      .catch((e: unknown) => setLoi(`khong doc duoc /models — ${loiThanhChu(e)}`));
-
     const id = docThamSoHoiThoai();
     if (id !== null) {
       void mo(id);
@@ -418,7 +488,7 @@ export function useChat(): ChatDangDung {
       setDangChay(null);
       setKetNoi(null);
       const hoiThoai = await api.taoHoiThoai(
-        modelChon === null ? {} : { default_model: modelChon },
+        modelHieuLuc === null ? {} : { default_model: modelHieuLuc },
       );
       await mo(hoiThoai.id);
     } catch (e) {
@@ -426,7 +496,7 @@ export function useChat(): ChatDangDung {
     } finally {
       setDangBan(false);
     }
-  }, [dongStream, mo, modelChon]);
+  }, [dongStream, mo, modelHieuLuc]);
 
   /**
    * T-3.3 — sidebar chon mot hoi thoai da co.
@@ -451,12 +521,32 @@ export function useChat(): ChatDangDung {
   );
 
   /** T-3.3 — hoi thoai dang mo vua bi xoa: khong con gi de hien. */
+  const datModelHoiThoai = useCallback(
+    async (modelId: string): Promise<void> => {
+      const conversationId = cayRef.current.conversationId;
+      if (conversationId === null) {
+        return;
+      }
+      /*
+        `PATCH` tra ve ca duong di (`HoiThoaiChiTiet`), nen khong goi them
+        mot `GET` nao — cung ly le da dung o `chuyenNhanh`. Doc
+        `default_model` TU RESPONSE chu khong tu `modelId` vua gui: server
+        la noi quyet dinh.
+      */
+      const chiTiet = await api.suaHoiThoai(conversationId, { default_model: modelId });
+      setModelHoiThoai(chiTiet.default_model);
+      datCay((cu) => napHoiThoai(cu, chiTiet));
+    },
+    [datCay],
+  );
+
   const dongHoiThoai = useCallback(() => {
     dongStream();
     setDangChay(null);
     setKetNoi(null);
     setUsage(null);
     setLoi(null);
+    setModelHoiThoai(null);
     datCay(() => cayRong());
     xoaThamSoHoiThoai();
   }, [datCay, dongStream]);
@@ -484,7 +574,7 @@ export function useChat(): ChatDangDung {
             content: noiDungMoi,
             // C14 — la CLIENT dang thay, khong de server tu lay.
             parent_id: cayRef.current.activeLeafId,
-            model_id: modelChon,
+            model_id: modelHieuLuc,
           },
           khoa,
         );
@@ -503,7 +593,7 @@ export function useChat(): ChatDangDung {
         setDangBan(false);
       }
     },
-    [lamTuoi, modelChon, moStreamCho],
+    [lamTuoi, modelHieuLuc, moStreamCho],
   );
 
   /**
@@ -531,7 +621,10 @@ export function useChat(): ChatDangDung {
       }
       setDangBan(true);
       try {
-        const ra = await api.thuLai(messageId, modelChon === null ? {} : { model_id: modelChon });
+        const ra = await api.thuLai(
+          messageId,
+          modelHieuLuc === null ? {} : { model_id: modelHieuLuc },
+        );
         moStreamCho(ra.stream_url, ra.assistant_message_id, conversationId);
         await lamTuoi(conversationId);
       } catch (e) {
@@ -540,7 +633,7 @@ export function useChat(): ChatDangDung {
         setDangBan(false);
       }
     },
-    [lamTuoi, modelChon, moStreamCho],
+    [lamTuoi, modelHieuLuc, moStreamCho],
   );
 
   const suaCauHoi = useCallback(
@@ -601,15 +694,16 @@ export function useChat(): ChatDangDung {
 
   return {
     cay,
-    models,
-    modelChon,
+    modelHoiThoai,
+    macDinh,
+    modelHieuLuc,
     ketNoi,
     dangChay,
     dangBan,
     usage,
     ghiChu,
     loi,
-    chonModel: setModelChon,
+    datModelHoiThoai,
     hoiThoaiMoi,
     moHoiThoai,
     dongHoiThoai,
@@ -618,6 +712,7 @@ export function useChat(): ChatDangDung {
     thuLai,
     suaCauHoi,
     chuyenNhanh,
+    datLoi: setLoi,
     xoaLoi: () => setLoi(null),
   };
 }

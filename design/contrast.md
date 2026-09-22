@@ -69,6 +69,18 @@ Không dùng lẫn.
 | `--color-disabled-foreground` | `--color-background` | 3.46 | 4.01 | 3:1 | ✅ |
 | `--color-disabled-foreground` | `--color-surface-panel` | 3.74 | 3.44 | 3:1 | ✅ |
 | `--color-disabled-foreground` | `--color-surface-sidebar` | 3.20 | 4.28 | 3:1 | ✅ |
+| `--color-disabled-foreground` | `--color-surface-disabled` | 3.23 | 3.86 | 3:1 | ✅ |
+| `--color-border-strong` (viền badge) | `--color-surface-disabled` | 3.15 | 4.03 | 3:1 | ✅ |
+
+`--color-surface-disabled` vào hệ ở T-3.6 (T-HD4): nền của hàng model không
+chọn được trong Model Picker. Hàng ấy vẫn **đọc được**, chỉ không bấm được —
+đó là lý do nó giữ ≥ 3:1 chứ không được miễn trừ hẳn.
+
+> **Lệch so với bản T-HD4.** Chú thích trong bản thiết kế ghi cặp này đạt
+> *4.6:1 (sáng) / 4.7:1 (tối)*. Tính lại từ chính hex trong `theme.css` thì
+> là **3.23 / 3.86**. Hai con số của bản vẽ không tái hiện được bằng bất kỳ
+> cặp nào trong hệ; số ở bảng này là số tính từ mã đang chạy. Vẫn đạt ngưỡng
+> 3:1 mà hàng "Chữ vô hiệu hoá" của bảng ngưỡng đặt ra, nên không đổi màu.
 
 ## 5. Thành phần đồ hoạ
 
@@ -116,10 +128,24 @@ là ≥ 1.05 cộng với viền hoặc shadow.
 | khối code ↔ bong bóng assistant | 1.266 | 1.190 | 1.05 | ✅ |
 | khối code ↔ bong bóng user | 1.108 | 1.320 | 1.05 | ✅ |
 | hover hàng ↔ nền app | 1.110 | 1.111 | 1.02 | ✅ |
+| hàng model bị khoá ↔ panel nổi | 1.157 | 1.115 | 1.05 | ✅ |
+| tooltip ↔ panel nổi | 16.230 | 1.303 | 1.05 | ✅ |
 
 Ở theme sáng, `surface-panel` và `surface-assistant` cùng là `#ffffff`: panel phân biệt
 bằng `--shadow-popover`, bong bóng assistant phân biệt bằng `--color-border`. Đây là
 lựa chọn có chủ đích — thêm một sắc trắng thứ hai chỉ tạo bẩn, không tạo thông tin.
+
+## 7b. Tooltip lý do của Model Picker (T-3.6)
+
+| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---|---:|---:|---:|:--:|
+| `--color-tooltip-foreground` | `--color-surface-tooltip` | 16.23 | 11.09 | 4.5:1 | ✅ |
+
+Tooltip là chỗ **duy nhất** trong hệ đảo bề mặt ở theme sáng (chữ sáng trên
+nền tối). Ở theme **tối** nó không đảo lại thành nền sáng mà chỉ nổi lên một
+bậc so với panel (1.303): câu lý do do server trả dài không đoán trước — bản
+T-HD4 đo một câu 150+ ký tự — và ném một mảng trắng cỡ đó vào giữa màn hình
+tối là chói, không phải rõ.
 
 ## 8. Tô màu cú pháp trong khối code (T-3.5)
 

@@ -51,6 +51,19 @@ export interface Phien {
   /** Tra `NguoiDungRa` khi thanh cong — caller can `status` de dinh tuyen (§11.1). */
   dangNhap: (email: string, matKhau: string) => Promise<NguoiDungRa | null>;
   dangXuat: () => Promise<void>;
+  /**
+   * T-3.6 — ghi `users.default_model` (`PUT /settings`) va cap nhat `hoSo`
+   * tai cho. UC-05 dong 4: *"user doi duoc va duoc nho theo user"*.
+   *
+   * O DAY chu khong trong `useChat`, vi day la mot truong cua `/auth/me` va
+   * `Layout` la nguoi duy nhat hoi cau hoi ay (xem docstring `Layout`). Giu
+   * mot ban sao thu hai trong man chat nghia la sau khi doi model, hai cho
+   * tren cung mot trang se noi hai chuyen khac nhau cho toi lan F5.
+   *
+   * Nem lai loi cho ben goi: `400 MODEL_UNKNOWN` la mot ket cuc co that
+   * (catalog sua nong — Cam bay ③ cua T-3.0) va man hinh phai noi duoc.
+   */
+  datModelMacDinh: (modelId: string | null) => Promise<void>;
 }
 
 export function usePhien(): Phien {
@@ -148,5 +161,20 @@ export function usePhien(): Phien {
     }
   }, []);
 
-  return { nguoiDung, hoSo, dangTai, biKhoa, loi, dangNhap, dangXuat };
+  const datModelMacDinh = useCallback(async (modelId: string | null): Promise<void> => {
+    const ra = await api.capNhatCaiDat(modelId);
+    /*
+      Doc lai tu RESPONSE chu khong tu `modelId` vua gui: server la noi
+      quyet dinh, va no tra `CaiDatRa` dung de ben goi khong phai suy ra
+      (xem docstring `CaiDatRa` cua backend).
+
+      Ca hai cho cung mang truong nay: `NguoiDungRa.default_model` la mot
+      cot cua hang `users` nen ca `/login`, `/refresh` lan `/me` deu tra —
+      cap nhat mot cho roi de cho kia lech la dung cai bay B-213 noi toi.
+    */
+    setHoSo((cu) => (cu === null ? cu : { ...cu, default_model: ra.default_model }));
+    setNguoiDung((cu) => (cu === null ? cu : { ...cu, default_model: ra.default_model }));
+  }, []);
+
+  return { nguoiDung, hoSo, dangTai, biKhoa, loi, dangNhap, dangXuat, datModelMacDinh };
 }

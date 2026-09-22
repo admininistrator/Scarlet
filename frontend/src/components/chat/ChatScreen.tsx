@@ -2,9 +2,23 @@ import { useSession } from "../../app/Layout";
 import { t } from "../../lib/i18n";
 import type { TrangThaiKetNoi } from "../../lib/sse";
 import { useChat } from "../../features/chat/useChat";
+import { ModelPicker } from "../../features/models/ModelPicker";
+import { useModels } from "../../features/models/useModels";
 import { Sidebar } from "../sidebar/Sidebar";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
+
+/**
+ * `Date` → `"14:32"`. Dinh dang o DAY chu khong trong `ModelPicker`, vi
+ * `t()` cua FE khong co interpolation (`lib/i18n.ts`): moc gio phai la mot
+ * phan tu rieng dung canh cau chu, khong phai mot chuoi ghep.
+ */
+function gioPhut(luc: Date | null): string {
+  if (luc === null) {
+    return t("model.checkedAtUnknown");
+  }
+  return luc.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+}
 
 const NHAN_KET_NOI = {
   "dang-mo": "chat.ketNoi.dangMo",
@@ -44,7 +58,18 @@ function NhanKetNoi({ ketNoi }: { ketNoi: TrangThaiKetNoi | null }) {
  * tuoi cung luc.
  */
 export function ChatScreen() {
-  const chat = useChat();
+  /*
+    T-3.6 — danh muc model song o mot hook rieng va duoc doc O DAY, roi day
+    xuong ca hai ben: `useChat` can no de giai ba tang mac dinh, `ModelPicker`
+    can no de ve danh sach. Mot nguon, hai nguoi doc — chu khong hai lan
+    `GET /models`.
+  */
+  const danhMuc = useModels();
+  const phien = useSession();
+  const chat = useChat({
+    models: danhMuc.models,
+    modelMacDinhTaiKhoan: phien.hoSo?.default_model ?? null,
+  });
   const { cay } = chat;
   /*
     T-3.4 — tran ky tu den tu `GET /auth/me` (`message_max_chars`, NQ-78),
@@ -54,7 +79,30 @@ export function ChatScreen() {
     `?? null` chu khong mot con so mac dinh: "chua biet tran" va "tran bang
     N" la hai chuyen khac nhau, va `Composer` xu ly ca dau rieng.
   */
-  const tranKyTu = useSession().hoSo?.message_max_chars ?? null;
+  const tranKyTu = phien.hoSo?.message_max_chars ?? null;
+
+  /*
+    Mot lan chon ghi CA HAI tang, va thu tu la co y:
+
+      1. `PUT /settings`  — tang tai khoan. UC-05 dong 4 (*"duoc nho theo
+         user"*) va DoD dong 2 cua T-3.6 deu do dung cot `users.default_model`.
+      2. `PATCH /conversations/{id}` — tang hoi thoai, de hoi thoai dang mo
+         giu model nay ke ca khi sau do ho doi mac dinh tai khoan sang cai
+         khac.
+
+    Tang tai khoan di TRUOC vi no la tang duy nhat ap dung khi chua mo hoi
+    thoai nao; neu buoc 2 hong (mat mang giua chung) thi thu da ghi duoc van
+    la thu co tac dung rong hon. Hong o buoc 1 thi dung han — khong ghi mot
+    nua roi bao thanh cong.
+  */
+  const chonModel = async (modelId: string): Promise<void> => {
+    try {
+      await phien.datModelMacDinh(modelId);
+      await chat.datModelHoiThoai(modelId);
+    } catch (e: unknown) {
+      chat.datLoi(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
@@ -76,21 +124,19 @@ export function ChatScreen() {
           goi mot ham la hai cho de lech. Model picker o lai day cho toi T-3.6.
         */}
         <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-3 text-sm">
-          <label className="flex items-center gap-2">
-            <span className="text-muted">{t("chat.model")}</span>
-            <select
-              value={chat.modelChon ?? ""}
-              onChange={(e) => chat.chonModel(e.target.value === "" ? null : e.target.value)}
-              className="rounded-sm border border-border bg-background px-2 py-1 text-foreground"
-            >
-              <option value="">{t("chat.modelMacDinh")}</option>
-              {chat.models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.display_name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {/*
+            T-3.6 / T-HD4 — picker o day la cho TAM cua T-1.14 con lai; ban
+            T-HD2 dat no trong composer va T-3.10 se dua no ve dung cho khi
+            dung bo cuc responsive. Doi bay gio nghia la doi hai lan.
+          */}
+          <ModelPicker
+            models={danhMuc.models}
+            macDinh={chat.macDinh}
+            nhanDocLuc={gioPhut(danhMuc.docLuc)}
+            dangLamMoi={danhMuc.dangLamMoi}
+            onLamMoi={() => void danhMuc.lamMoi()}
+            onChon={(id) => void chonModel(id)}
+          />
 
           {cay.conversationId !== null && (
             <code className="text-xs text-muted">{cay.conversationId}</code>

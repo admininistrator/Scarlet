@@ -5,7 +5,15 @@ import vi from "../locales/vi.json";
 const locales = { vi } as const;
 
 type Locale = keyof typeof locales;
-type Key = keyof (typeof locales)["vi"];
+/**
+ * Moi khoa co that trong `vi.json`.
+ *
+ * Xuat ra (T-3.6) vi cac bang tra cuu kieu `Record<TangMacDinh, ...>` phai
+ * khai duoc gia tri cua chung LA mot khoa — khong thi `t(BANG[x])` nhan mot
+ * `string` va TypeScript khong con bat duoc mot khoa go sai.
+ */
+export type KhoaChu = keyof (typeof locales)["vi"];
+type Key = KhoaChu;
 
 const currentLocale: Locale = "vi";
 

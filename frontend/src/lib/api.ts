@@ -213,6 +213,25 @@ export interface ModelRa {
   max_output: number;
   default: boolean;
   badge: string | null;
+  /**
+   * §18.3 — `false` = provider cua model nay khong tra loi luc do gan nhat.
+   *
+   * Model VAN nam trong danh sach (UC-05 dong 2 doi "hien xam", khong doi
+   * "bien mat"), nen moi cho duyet mang nay phai tu quyet dinh lam gi voi no.
+   */
+  available: boolean;
+  /**
+   * Cau tieng Viet hien NGUYEN VAN trong tooltip. `null` khi `available`.
+   *
+   * Khong dich va khong cat: do dai khong doan truoc duoc (ban T-HD4 do mot
+   * cau 150+ ky tu), nen cho hien no phai tu xuong dong.
+   */
+  unavailable_reason: string | null;
+}
+
+/** `PUT /settings` — §18.4, B-206/NQ-79. Cung hinh dang voi body gui di. */
+export interface CaiDatRa {
+  default_model: string | null;
 }
 
 // ─────────────────── kieu cua §11.2 (auth) va §16.3 (admin) ──────────────────
@@ -574,4 +593,30 @@ export const api = {
 
   quanTriNapCatalog: () =>
     request<NapCatalogRa>("/admin/catalog/reload", { method: "POST" }),
+
+  // ────────────────────── §18.4 — cai dat ca nhan (T-3.0) ───────────────────
+
+  /**
+   * Ghi model mac dinh CUA CHINH MINH (§18.4, UC-05 dong 4, B-206).
+   *
+   * Khong co tham so `userId`: duong dan khong mang `{id}` va body khong co
+   * truong nao tro sang nguoi khac — server lay danh tinh tu cookie phien.
+   *
+   * `null` = BO CHON, tuc quay ve bac thang mac dinh (§9.2). Do la mot y
+   * dinh co that chu khong phai "khong gui gi", nen kieu o day la
+   * `string | null` chu khong `string | undefined`.
+   *
+   * `400 MODEL_UNKNOWN` khi model khong con trong catalog hoac da tat:
+   * backend validate luc GHI chu khong luc doc (Cam bay ③ cua T-3.0), nen
+   * ben goi phai do duoc ca nhanh nay.
+   *
+   * KHONG co `getCaiDat()` di kem: ve `GET` cua §18.4 co y chua dung
+   * (`default_model` da di ra trong `GET /auth/me`) — xem docstring cua
+   * `backend/app/api/v1/settings.py`.
+   */
+  capNhatCaiDat: (defaultModel: string | null) =>
+    request<CaiDatRa>("/settings", {
+      method: "PUT",
+      body: JSON.stringify({ default_model: defaultModel }),
+    }),
 };

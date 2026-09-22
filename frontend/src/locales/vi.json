@@ -170,5 +170,25 @@
   "loi.500.moTa": "Một lỗi không xử lý được đã xảy ra khi vẽ màn hình.",
   "loi.500.taiLai": "Tải lại trang",
 
-  "loi.dong": "Đóng"
+  "loi.dong": "Đóng",
+
+  "model.picker": "Chọn mô hình",
+  "model.pickerOpen": "Chọn mô hình",
+  "model.listLabel": "Danh sách mô hình",
+  "model.closeSheet": "Đóng",
+  "model.checkedAtPrefix": "Trạng thái kiểm lúc",
+  "model.checkedAtUnknown": "chưa kiểm",
+  "model.refresh": "Kiểm lại trạng thái",
+  "model.refreshing": "Đang kiểm lại trạng thái",
+  "model.unavailable": "Không dùng được",
+  "model.capNone": "Không có khả năng đặc biệt",
+  "model.cap.tools": "Công cụ",
+  "model.cap.vision": "Hình ảnh",
+  "model.cap.reasoning": "Suy luận",
+  "model.cap.attachments": "Tệp đính kèm",
+  "model.tierConversation": "Mặc định hội thoại",
+  "model.tierAccount": "Mặc định tài khoản",
+  "model.tierCatalog": "Mặc định catalog",
+  "model.tierOrder": "Thứ tự thắng: hội thoại › tài khoản › catalog",
+  "model.trong": "Chưa có mô hình nào"
 }
