@@ -1,0 +1,103 @@
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "Ph"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "ở"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " Hà"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " Nội"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " là"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " món"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " ăn"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " đặc"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " trưng"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " của"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " thủ"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " đô"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " Việt"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " Nam"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " nổi"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " tiếng"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " với"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " nước"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " dùng"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " trong"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " v"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "ắt"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " ngọt"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " thanh"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " và"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " thơm"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " phức"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " mùi"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " gia"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " vị"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "."}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " S"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "ợi"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " ph"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "ở"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " của"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " món"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " ăn"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " này"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " rất"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " dai"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " mềm"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " và"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " ăn"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " kèm"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " với"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " thịt"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " b"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "ò"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": ","}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " gan"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " tim"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " và"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " rau"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " thơm"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "."}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " M"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "ón"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " ph"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "ở"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " này"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " thường"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " được"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " phục"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " vụ"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " vào"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " buổi"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " sáng"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " sớm"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " để"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " mang"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " lại"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " cảm"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " giác"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " ấm"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " áp"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "."}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " Ph"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "ở"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " không"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " chỉ"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " là"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " thức"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " ăn"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " mà"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " còn"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " là"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " biểu"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " tượng"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " văn"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " hóa"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " của"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " người"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " Hà"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " Nội"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "."}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": " \n"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {"content": "```"}}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "object": "chat.completion.chunk", "created": 1790101776, "model": "grok-4.6", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+{"id": "3fcd913d-78f5-9610-abb7-6a0a50ad8a16", "created": 1790101776, "model": "grok-4.6", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}}], "usage": {"completion_tokens": 3704, "prompt_tokens": 240, "total_tokens": 3944, "completion_tokens_details": {"reasoning_tokens": 3604}, "prompt_tokens_details": {"cached_tokens": 192}}}

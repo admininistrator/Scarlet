@@ -40,6 +40,15 @@
       "chunks": 31
     },
     {
+      "file": "grok-4.6.text.jsonl",
+      "model": "grok-4.6",
+      "provider": "sub2api",
+      "case": "text",
+      "prompt": "Hãy viết một đoạn ngắn khoảng bốn câu bằng tiếng Việt có dấu, giới thiệu về phở Hà Nội. Không dùng danh sách gạch đầu dòng.",
+      "chunks": 103,
+      "recorded_at": "2026-09-22T18:29:38+00:00"
+    },
+    {
       "file": "nr-gemini-flash.text.jsonl",
       "model": "nr-gemini-flash",
       "provider": "ninerouter",

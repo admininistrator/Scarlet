@@ -61,6 +61,15 @@
       "cost_reporting": "exact",
       "auth_style": "bearer",
       "verify_path": "/models"
+    },
+    "sub2api": {
+      "label": "Sub2API (local)",
+      "base_url": "http://host.docker.internal:18080/v1",
+      "availability": "always",
+      "byok_supported": false,
+      "cost_reporting": "exact",
+      "auth_style": "bearer",
+      "verify_path": "/models"
     }
   },
   "models": [
@@ -137,6 +146,21 @@
       "enabled": true,
       "default": false,
       "order": 40,
+      "badge": "Self-host"
+    },
+    {
+      "id": "grok-4.6",
+      "display_name": "Grok 4.6",
+      "provider": "sub2api",
+      "upstream_model": "openai/grok-4.6",
+      "capabilities": [],
+      "context_window": 32768,
+      "max_output": 4096,
+      "pricing": null,
+      "pricing_mode": "unmetered",
+      "enabled": true,
+      "default": false,
+      "order": 50,
       "badge": "Self-host"
     }
   ]

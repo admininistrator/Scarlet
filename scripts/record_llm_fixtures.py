@@ -180,19 +180,32 @@ def main() -> int:
                 )
                 print(f"{path.name}: {len(chunks)} chunk")
 
-    manifest = {
-        "recorded_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
-        "via": "LiteLLM (ADR-03) — khoá KHÔNG ghi vào đây",
-        "max_tokens": MAX_TOKENS,
-        "temperature": 0.0,
-        "stream_options": {"include_usage": True},
-        "entries": sorted(entries, key=lambda e: e["file"]),
-    }
+    now = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
     manifest_path = args.out_dir / "manifest.json"
+    if args.model and manifest_path.exists():
+        # B-248: ghi MỘT model thì GỘP vào manifest cũ, không thay cả file —
+        # bản trước xoá sạch mục của mọi model khác (7 mục) mà không báo gì.
+        # `recorded_at` ở đầu file là của lần ghi toàn bộ; mục ghi lẻ mang
+        # mốc riêng để không ai đọc nhầm fixture cũ thành fixture mới.
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        fresh = {e["file"] for e in entries}
+        kept = [e for e in manifest["entries"] if e["file"] not in fresh]
+        for entry in entries:
+            entry["recorded_at"] = now
+        manifest["entries"] = sorted(kept + entries, key=lambda e: e["file"])
+    else:
+        manifest = {
+            "recorded_at": now,
+            "via": "LiteLLM (ADR-03) — khoá KHÔNG ghi vào đây",
+            "max_tokens": MAX_TOKENS,
+            "temperature": 0.0,
+            "stream_options": {"include_usage": True},
+            "entries": sorted(entries, key=lambda e: e["file"]),
+        }
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"{manifest_path.name}: {len(entries)} mục")
+    print(f"{manifest_path.name}: ghi {len(entries)} mục, tổng {len(manifest['entries'])} mục")
     return 0
 
 
