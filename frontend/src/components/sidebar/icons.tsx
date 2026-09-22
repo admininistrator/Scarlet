@@ -19,6 +19,7 @@ const iconProps = {
   strokeLinecap: "round" as const,
   strokeLinejoin: "round" as const,
   "aria-hidden": true,
+  className: "motion-icon",
 };
 
 /** Nut bat/tat sidebar o header. */

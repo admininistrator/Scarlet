@@ -42,5 +42,10 @@ export default defineConfig({
     // `src/**` thoi: khong de vitest di lac vao `node_modules` hay `dist`.
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     restoreMocks: true,
+    // T-3.9: vitest mac dinh thay MOI file CSS bang chuoi rong, ke ca
+    // `theme.css?raw`. `HoatAnh.test.tsx` phai doc that khoi
+    // `@media (prefers-reduced-motion)` — jsdom khong tinh `@media`, nen day
+    // la cach duy nhat de ca am "xoa khoi @media ⇒ test do" co nghia.
+    css: { include: [/src\/styles\/theme\.css/] },
   },
 });

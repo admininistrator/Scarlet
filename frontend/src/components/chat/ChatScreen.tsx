@@ -155,7 +155,7 @@ export function ChatScreen() {
             <button
               type="button"
               onClick={chat.xoaLoi}
-              className="rounded-sm border border-border px-2 text-foreground"
+              className="motion-press rounded-sm border border-border px-2 text-foreground"
             >
               {t("loi.dong")}
             </button>

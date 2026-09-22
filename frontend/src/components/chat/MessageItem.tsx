@@ -111,10 +111,12 @@ export function MessageItem({
   return (
     <article
       aria-label={t("chat.assistantLabel")}
+      // T-3.9 / Cam bay ①: hoat anh o VUNG, chay mot lan khi bong bong mount.
+      // Hai nhanh chung mot `animation` nen doi sang trang thai loi khong kich lai.
       className={
         laLoi
-          ? "w-full rounded-bubble border border-danger bg-danger-subtle px-5 py-4"
-          : "w-full rounded-bubble border border-border bg-surface-assistant px-5 py-4"
+          ? "motion-enter w-full rounded-bubble border border-danger bg-danger-subtle px-5 py-4"
+          : "motion-enter w-full rounded-bubble border border-border bg-surface-assistant px-5 py-4"
       }
     >
       <h3 className="mb-2 flex items-center gap-2 text-2xs font-semibold tracking-wider uppercase text-muted">
@@ -133,7 +135,8 @@ export function MessageItem({
       )}
 
       {dangStream && (
-        <div className="min-h-6 text-body text-foreground">
+        // `motion-none`: phan tu nay doi noi dung 300+ lan mot luot sinh (T-1.14).
+        <div className="motion-none min-h-6 text-body text-foreground">
           <span className="sr-only">{t("chat.streaming")}</span>
           <Markdown text={chu} streaming />
         </div>
@@ -155,7 +158,7 @@ export function MessageItem({
           <button
             type="button"
             onClick={() => onThuLai(node.id)}
-            className="h-touch self-start rounded-md bg-danger px-4 text-base font-semibold text-danger-foreground hover:bg-danger-hover motion-control"
+            className="h-touch self-start rounded-md bg-danger px-4 text-base font-semibold text-danger-foreground hover:bg-danger-hover motion-press"
           >
             {t("chat.errorRetry")}
           </button>
@@ -279,7 +282,7 @@ function UserBubble({
             <button
               type="button"
               onClick={() => setDangSua(false)}
-              className="h-touch rounded-md px-4 text-base font-medium hover:bg-surface-hover motion-control"
+              className="h-touch rounded-md px-4 text-base font-medium hover:bg-surface-hover motion-press"
             >
               {t("chat.cancel")}
             </button>
@@ -292,7 +295,7 @@ function UserBubble({
             <button
               type="submit"
               disabled={dangBan}
-              className="h-touch rounded-md bg-accent px-4 text-base font-semibold text-accent-foreground hover:bg-accent-hover disabled:bg-surface-hover disabled:text-disabled-foreground motion-control"
+              className="h-touch rounded-md bg-accent px-4 text-base font-semibold text-accent-foreground hover:bg-accent-hover disabled:bg-surface-hover disabled:text-disabled-foreground motion-press"
             >
               {t("chat.save")}
             </button>
@@ -331,7 +334,7 @@ function UserBubble({
             setBan(chu);
             setDangSua(true);
           }}
-          className="h-touch rounded-md px-3 text-base font-medium text-muted hover:bg-surface-hover motion-control"
+          className="h-touch rounded-md px-3 text-base font-medium text-muted hover:bg-surface-hover motion-press"
         >
           {t("chat.edit")}
         </button>

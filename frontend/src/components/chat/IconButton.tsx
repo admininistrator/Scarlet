@@ -43,11 +43,11 @@ export function IconButton({
       aria-pressed={pressed}
       className={
         pressed === true
-          ? "grid size-touch place-items-center rounded-md border border-accent bg-accent-subtle text-accent-text motion-control"
-          : "grid size-touch place-items-center rounded-md border border-transparent text-muted hover:bg-surface-hover disabled:text-disabled-foreground motion-control"
+          ? "grid size-touch place-items-center rounded-md border border-accent bg-accent-subtle text-accent-text motion-press"
+          : "grid size-touch place-items-center rounded-md border border-transparent text-muted hover:bg-surface-hover disabled:text-disabled-foreground motion-press"
       }
     >
-      <span aria-hidden="true" className="text-lg">
+      <span aria-hidden="true" className="motion-icon text-lg">
         {glyph}
       </span>
     </button>

@@ -124,7 +124,7 @@ export function NutDuoiCauTraLoi({
         }}
         disabled={modelKhac === null}
         title={modelKhac === null ? t("chat.retryOtherModelSame") : t("chat.retryOtherModel")}
-        className="h-touch rounded-md px-3 text-base font-medium text-foreground hover:bg-surface-hover disabled:text-disabled-foreground motion-control"
+        className="h-touch rounded-md px-3 text-base font-medium text-foreground hover:bg-surface-hover disabled:text-disabled-foreground motion-press"
       >
         {t("chat.retryOtherModel")}
       </button>

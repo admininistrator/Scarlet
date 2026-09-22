@@ -194,7 +194,7 @@ export function Composer({
             <button
               type="button"
               onClick={onDung}
-              className="motion-control grid size-touch shrink-0 place-items-center rounded-lg border border-border-strong text-danger-text hover:bg-surface-hover"
+              className="motion-press grid size-touch shrink-0 place-items-center rounded-lg border border-border-strong text-danger-text hover:bg-surface-hover"
             >
               <StopIcon />
               <span className="sr-only">{t("chat.dung")}</span>
@@ -203,7 +203,7 @@ export function Composer({
             <button
               type="submit"
               disabled={!guiDuoc}
-              className="motion-control grid size-touch shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
+              className="motion-press grid size-touch shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
             >
               <SendIcon />
               <span className="sr-only">{t("chat.gui")}</span>
@@ -239,7 +239,7 @@ export function Composer({
             <button
               type="button"
               onClick={guiBangKhoaMoi}
-              className="motion-control h-touch rounded-md border border-border-strong px-3 text-base font-medium text-foreground hover:bg-surface-hover"
+              className="motion-press h-touch rounded-md border border-border-strong px-3 text-base font-medium text-foreground hover:bg-surface-hover"
             >
               {t("chat.guiKhoaMoi")}
             </button>

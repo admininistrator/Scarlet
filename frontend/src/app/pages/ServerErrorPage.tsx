@@ -64,7 +64,7 @@ export function ServerErrorPage({ error }: { error: unknown }) {
       <button
         type="button"
         onClick={() => window.location.reload()}
-        className="mt-6 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+        className="motion-press mt-6 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
       >
         {t("loi.500.taiLai")}
       </button>

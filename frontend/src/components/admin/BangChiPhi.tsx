@@ -109,7 +109,7 @@ export function BangChiPhi({
             type="button"
             aria-pressed={nguon === n}
             onClick={() => onDoiNguon(n)}
-            className={`rounded-sm border border-border px-2 py-1 ${
+            className={`motion-press rounded-sm border border-border px-2 py-1 ${
               nguon === n ? "bg-accent text-accent-foreground" : "hover:bg-accent hover:text-accent-foreground"
             }`}
           >

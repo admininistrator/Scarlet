@@ -59,7 +59,7 @@ export function Layout() {
               onClick={toggleSidebar}
               aria-expanded={sidebarOpen}
               aria-label={sidebarOpen ? t("header.closeSidebar") : t("header.openSidebar")}
-              className="motion-control grid size-touch place-items-center rounded-md text-foreground hover:bg-surface-hover"
+              className="motion-press grid size-touch place-items-center rounded-md text-foreground hover:bg-surface-hover"
             >
               <PanelIcon />
             </button>
@@ -87,7 +87,7 @@ export function Layout() {
           {session.nguoiDung === null ? (
             <Link
               to={PATHS.login}
-              className="rounded-md border border-border px-3 py-1.5 hover:bg-accent hover:text-accent-foreground"
+              className="motion-press rounded-md border border-border px-3 py-1.5 hover:bg-accent hover:text-accent-foreground"
             >
               {t("auth.dangNhap")}
             </Link>
@@ -99,7 +99,7 @@ export function Layout() {
                 onClick={() => {
                   void session.dangXuat().then(() => navigate(PATHS.home));
                 }}
-                className="rounded-md border border-border px-3 py-1.5 hover:bg-accent hover:text-accent-foreground"
+                className="motion-press rounded-md border border-border px-3 py-1.5 hover:bg-accent hover:text-accent-foreground"
               >
                 {t("auth.dangXuat")}
               </button>

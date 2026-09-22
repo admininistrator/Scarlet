@@ -281,7 +281,7 @@ function StripTrangThai({
         onClick={onLamMoi}
         aria-label={dangLamMoi ? t("model.refreshing") : t("model.refresh")}
         aria-busy={dangLamMoi || undefined}
-        className="motion-control flex size-touch shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground"
+        className="motion-press flex size-touch shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground"
       >
         <IconLamMoi quay={dangLamMoi} />
       </button>
@@ -350,7 +350,7 @@ export function ModelPicker(props: ModelPickerProps) {
     <button
       type="button"
       aria-label={t("model.pickerOpen")}
-      className="motion-control flex min-h-touch max-w-full items-center gap-2 rounded-lg border border-border bg-surface-panel px-3 py-1.5 text-left hover:bg-surface-hover"
+      className="motion-press flex min-h-touch max-w-full items-center gap-2 rounded-lg border border-border bg-surface-panel px-3 py-1.5 text-left hover:bg-surface-hover"
     >
       <span className="flex min-w-0 flex-col">
         <span className="truncate text-base font-semibold text-foreground">
@@ -387,7 +387,7 @@ export function ModelPicker(props: ModelPickerProps) {
               <Dialog.Title className="text-lg font-semibold">{t("model.picker")}</Dialog.Title>
               <Dialog.Close
                 aria-label={t("model.closeSheet")}
-                className="motion-control flex size-touch items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground"
+                className="motion-press flex size-touch items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground"
               >
                 <IconDong />
               </Dialog.Close>

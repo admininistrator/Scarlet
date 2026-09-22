@@ -41,7 +41,7 @@ export function AdminScreen() {
           type="button"
           disabled={qt.dangBan}
           onClick={() => void qt.lamTuoi()}
-          className="rounded-sm border border-border px-2 py-1 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+          className="motion-press rounded-sm border border-border px-2 py-1 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
         >
           {t("admin.lamTuoi")}
         </button>
@@ -49,7 +49,7 @@ export function AdminScreen() {
           type="button"
           disabled={qt.dangBan}
           onClick={() => void qt.napLaiCatalog()}
-          className="rounded-sm border border-border px-2 py-1 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+          className="motion-press rounded-sm border border-border px-2 py-1 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
         >
           {t("admin.napCatalog")}
         </button>

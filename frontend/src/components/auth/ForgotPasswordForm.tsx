@@ -99,7 +99,7 @@ export function ForgotPasswordForm() {
         <button
           type="submit"
           disabled={dangGui}
-          className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+          className="motion-press rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
         >
           {dangGui ? t("auth.dangXuLy") : t("quenMatKhau.gui")}
         </button>

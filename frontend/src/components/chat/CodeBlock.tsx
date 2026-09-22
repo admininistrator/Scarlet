@@ -87,7 +87,7 @@ export function CodeBlock({
           <button
             type="button"
             onClick={onCopy}
-            className="ml-auto h-touch rounded-md px-3 text-sm font-medium text-foreground hover:bg-surface-hover motion-control"
+            className="ml-auto h-touch rounded-md px-3 text-sm font-medium text-foreground hover:bg-surface-hover motion-press"
           >
             {copied ? t("code.copied") : t("code.copy")}
           </button>

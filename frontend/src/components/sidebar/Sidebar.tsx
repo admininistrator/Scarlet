@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import { ApiError, api, type HoiThoaiRa } from "../../lib/api";
 import { t } from "../../lib/i18n";
+import { usePresence } from "../../lib/motion";
 import { MoreIcon, PinIcon, SearchIcon } from "./icons";
 import { useSidebarOpen } from "./sidebarOpen";
 
@@ -43,6 +44,13 @@ import { useSidebarOpen } from "./sidebarOpen";
  * Nut bat/tat 44 × 44 o header luon hien, khong doi cho."* Vi vay component
  * nay tra `null` khi dong, va nut bat/tat song o `app/Layout.tsx` — trang thai
  * di qua `sidebarOpen.ts`.
+ *
+ * T-3.9 / T-HD5: "tra `null` khi dong" nay den SAU hoat anh, khong truoc.
+ * `usePresence` giu sidebar trong DOM them `--duration-normal` de chieu rong
+ * thu ve 0 — con so doc tu token, khong viet tay — roi moi go ra. Trong luc
+ * thu, khoi ngoai mang `inert` nen Tab khong roi vao mot danh sach dang bien
+ * mat. `prefers-reduced-motion: reduce` ⇒ `data-motion="none"`, bo class
+ * `motion-sidebar`, go ngay trong cung luot: tuc thi, khong "nhanh hon".
  *
  * ── Con tro phan trang den TU RESPONSE, khong suy ra tu danh sach ─────────
  *
@@ -181,6 +189,7 @@ export function Sidebar({
 }: SidebarProps) {
   const searchId = useId();
   const open = useSidebarOpen();
+  const presence = usePresence<HTMLDivElement>(open, "--duration-normal");
 
   const [items, setItems] = useState<HoiThoaiRa[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -345,7 +354,8 @@ export function Sidebar({
   const recent = visible.filter((item) => !item.pinned);
 
   // T-HD2: dong = 0 px, KHONG co dai icon. Nut bat/tat o header (`Layout.tsx`).
-  if (!open) {
+  // Go khoi DOM sau khi hoat anh dong chay xong (T-3.9) — xem `usePresence`.
+  if (!presence.mounted) {
     return null;
   }
 
@@ -374,70 +384,86 @@ export function Sidebar({
     onConfirmDelete: () => void remove(item.id),
   });
 
+  /*
+    Khoi ngoai mang chieu rong dang doi (0 ↔ `w-sidebar`) va cat phan thua;
+    `<nav>` ben trong giu nguyen be rong nen chu khong xuong dong lung tung
+    trong luc thu lai. `data-motion="none"` la thuoc tinh ma
+    `HoatAnh.test.tsx` doc.
+  */
   return (
-    <nav
-      aria-label={t("sidebar.title")}
-      className="flex w-sidebar shrink-0 flex-col border-r border-border bg-surface-sidebar p-3 motion-theme"
+    <div
+      ref={presence.ref}
+      data-state={presence.state}
+      data-motion={presence.reduced ? "none" : undefined}
+      inert={presence.state === "closed"}
+      className={`${presence.reduced ? "" : "motion-sidebar "}flex shrink-0 overflow-hidden ${
+        presence.state === "open" ? "w-sidebar" : "w-0"
+      }`}
     >
-      <button
-        type="button"
-        onClick={onNewChat}
-        className="motion-control h-touch w-full shrink-0 rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active"
+      <nav
+        aria-label={t("sidebar.title")}
+        className="flex w-sidebar shrink-0 flex-col border-r border-border bg-surface-sidebar p-3 motion-theme"
       >
-        {t("nav.newChat")}
-      </button>
+        <button
+          type="button"
+          onClick={onNewChat}
+          className="motion-press h-touch w-full shrink-0 rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active"
+        >
+          {t("nav.newChat")}
+        </button>
 
-      <label htmlFor={searchId} className="mt-3 block shrink-0">
-        <span className="sr-only">{t("sidebar.search")}</span>
-        <span className="relative block">
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute top-3.5 left-3 text-muted"
-          >
-            <SearchIcon />
+        <label htmlFor={searchId} className="mt-3 block shrink-0">
+          <span className="sr-only">{t("sidebar.search")}</span>
+          <span className="relative block">
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute top-3.5 left-3 text-muted"
+            >
+              <SearchIcon />
+            </span>
+            <input
+              id={searchId}
+              type="search"
+              value={query}
+              placeholder={t("sidebar.search")}
+              onChange={(e) => setQuery(e.target.value)}
+              className="motion-control h-touch w-full rounded-md border border-border-strong bg-background pr-3 pl-9 text-base text-foreground placeholder:text-muted"
+            />
           </span>
-          <input
-            id={searchId}
-            type="search"
-            value={query}
-            placeholder={t("sidebar.search")}
-            onChange={(e) => setQuery(e.target.value)}
-            className="motion-control h-touch w-full rounded-md border border-border-strong bg-background pr-3 pl-9 text-base text-foreground placeholder:text-muted"
-          />
-        </span>
-      </label>
-      <p className="mt-1 shrink-0 text-xs text-muted">{t("sidebar.searchScopeNote")}</p>
+        </label>
+        <p className="mt-1 shrink-0 text-xs text-muted">{t("sidebar.searchScopeNote")}</p>
 
-      {error !== null && (
-        <p className="mt-2 shrink-0 text-xs text-danger-text">{error}</p>
-      )}
-
-      <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
-        <ConversationGroup label={t("sidebar.pinnedGroup")} items={pinned} rowProps={rowProps} />
-        <ConversationGroup label={t("sidebar.recentGroup")} items={recent} rowProps={rowProps} />
-
-        {items.length === 0 && !loading && (
-          <p className="px-2 text-xs text-muted">{t("sidebar.empty")}</p>
+        {error !== null && (
+          <p className="mt-2 shrink-0 text-xs text-danger-text">{error}</p>
         )}
-        {items.length > 0 && visible.length === 0 && (
-          <p className="px-2 text-xs text-muted">{t("sidebar.noMatch")}</p>
-        )}
-        {loading && <p className="px-2 text-xs text-muted">{t("sidebar.loading")}</p>}
 
-        {cursor !== null && (
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void loadMore()}
-            className="motion-control mt-2 h-touch w-full rounded-md text-base font-medium text-accent-text hover:bg-surface-hover disabled:opacity-50"
-          >
-            {t("sidebar.loadMore")}
-          </button>
-        )}
-      </div>
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+          <ConversationGroup label={t("sidebar.pinnedGroup")} items={pinned} rowProps={rowProps} />
+          <ConversationGroup label={t("sidebar.recentGroup")} items={recent} rowProps={rowProps} />
 
-      <p className="mt-2 shrink-0 text-xs text-muted">{t("sidebar.pinScopeNote")}</p>
-    </nav>
+          {items.length === 0 && !loading && (
+            <p className="px-2 text-xs text-muted">{t("sidebar.empty")}</p>
+          )}
+          {items.length > 0 && visible.length === 0 && (
+            <p className="px-2 text-xs text-muted">{t("sidebar.noMatch")}</p>
+          )}
+          {loading && <p className="px-2 text-xs text-muted">{t("sidebar.loading")}</p>}
+
+          {cursor !== null && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void loadMore()}
+              className="motion-press mt-2 h-touch w-full rounded-md text-base font-medium text-accent-text hover:bg-surface-hover disabled:opacity-50"
+            >
+              {t("sidebar.loadMore")}
+            </button>
+          )}
+        </div>
+
+        <p className="mt-2 shrink-0 text-xs text-muted">{t("sidebar.pinScopeNote")}</p>
+      </nav>
+    </div>
   );
 }
 
@@ -541,14 +567,14 @@ function ConversationRow({
             <button
               type="submit"
               disabled={busy}
-              className="motion-control h-touch rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active disabled:opacity-50"
+              className="motion-press h-touch rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active disabled:opacity-50"
             >
               {t("sidebar.save")}
             </button>
             <button
               type="button"
               onClick={onCancelRename}
-              className="motion-control h-touch rounded-md border border-border px-3 text-base text-foreground hover:bg-surface-hover"
+              className="motion-press h-touch rounded-md border border-border px-3 text-base text-foreground hover:bg-surface-hover"
             >
               {t("sidebar.cancel")}
             </button>
@@ -569,14 +595,14 @@ function ConversationRow({
               type="button"
               disabled={busy}
               onClick={onConfirmDelete}
-              className="motion-control h-touch rounded-md bg-danger px-3 text-base font-semibold text-danger-foreground hover:bg-danger-hover disabled:opacity-50"
+              className="motion-press h-touch rounded-md bg-danger px-3 text-base font-semibold text-danger-foreground hover:bg-danger-hover disabled:opacity-50"
             >
               {t("sidebar.delete")}
             </button>
             <button
               type="button"
               onClick={onCancelDelete}
-              className="motion-control h-touch rounded-md border border-border px-3 text-base text-foreground hover:bg-surface-hover"
+              className="motion-press h-touch rounded-md border border-border px-3 text-base text-foreground hover:bg-surface-hover"
             >
               {t("sidebar.cancel")}
             </button>
@@ -628,8 +654,8 @@ function ConversationRow({
           }}
           className={
             active
-              ? "motion-control grid size-touch shrink-0 place-items-center rounded-md text-accent-text hover:bg-surface-hover disabled:opacity-50"
-              : "motion-control grid size-touch shrink-0 place-items-center rounded-md text-muted hover:bg-surface-hover disabled:opacity-50"
+              ? "motion-press grid size-touch shrink-0 place-items-center rounded-md text-accent-text hover:bg-surface-hover disabled:opacity-50"
+              : "motion-press grid size-touch shrink-0 place-items-center rounded-md text-muted hover:bg-surface-hover disabled:opacity-50"
           }
         >
           <MoreIcon />
