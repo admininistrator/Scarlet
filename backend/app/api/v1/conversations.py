@@ -355,6 +355,15 @@ async def update_conversation(
     /messages/{id}/siblings`). **Không xoá gì, không sửa message nào** — §8.2
     ghi đúng một dòng cho thao tác này: *"Chỉ đổi `active_leaf_id`"*.
 
+    **Con trỏ dừng ở LÁ SÂU NHẤT của nhánh được chọn, không ở đúng id client
+    gửi** (B-109, ngả (a) của NQ-35 — xem `_la_sau_nhat`). Anh em được chọn có
+    thể còn cả một đoạn hội thoại phía dưới, và `get_path` đi ngược từ con trỏ
+    lên gốc nên đậu lại ở đó sẽ cắt cụt màn hình. Vì thế `active_leaf_id` trong
+    response **có thể khác** id vừa gửi lên; nó là con số DB đang giữ, và đó là
+    lý do cả FE lẫn test phải đọc nó từ response chứ không giả định. Node đã là
+    lá thì hai con số bằng nhau — tức mọi lần chuyển nhánh giữa các anh em lá
+    (Retry) không đổi gì so với trước.
+
     Trả về **cùng hình dạng với `GET /conversations/{id}`**, tức kèm cả đường
     đi mới, vì đường đi chính là thứ vừa đổi: bắt FE gọi thêm một `GET` ngay
     sau mỗi lần bấm mũi tên là hai vòng mạng cho một thao tác mà người dùng
@@ -403,10 +412,10 @@ async def update_conversation(
                 conversation_id, user_id=user_id, thay_doi=thay_doi
             )
         if "active_leaf_id" in body.model_fields_set:
+            # B-109 ngả (a) — đi tiếp xuống lá sâu nhất của nhánh vừa chọn.
+            la = await _la_sau_nhat(session, body.active_leaf_id, user_id=user_id)
             try:
-                await conversations.set_active_leaf(
-                    conversation_id, user_id=user_id, message_id=body.active_leaf_id
-                )
+                await conversations.set_active_leaf(conversation_id, user_id=user_id, message_id=la)
             except MessageNotInConversationError as loi:
                 # §20: câu trả lời không nói message ấy có tồn tại ở hội thoại
                 # khác hay không. Trỏ con trỏ nhánh sang cây của hội thoại khác
@@ -458,6 +467,37 @@ async def delete_conversation(
             )
         await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _la_sau_nhat(
+    session: AsyncSession, leaf_id: uuid.UUID | None, *, user_id: uuid.UUID
+) -> uuid.UUID | None:
+    """`active_leaf_id` client gửi → lá SÂU NHẤT của nhánh đó (B-109, NQ-35).
+
+    `PATCH` nhận id của **anh em được chọn** (FE lấy từ `GET
+    /messages/{id}/siblings`), mà anh em ấy có thể còn cả một đoạn hội thoại
+    phía dưới — đúng ca hay gặp nhất: sửa một câu hỏi ở giữa rồi bấm `‹` quay
+    về bản cũ. `get_path` đi **ngược** từ con trỏ lên gốc, nên đặt con trỏ vào
+    node đó sẽ dừng đường đi ngay tại câu hỏi cũ và câu trả lời của nó biến
+    khỏi màn hình dù vẫn nằm nguyên trong DB. Đó là B-109.
+
+    NQ-35 chốt ngả (a): chỗ đi tiếp là **API**, không phải client. Hai ngả kia
+    bị bác vì (b) là N request theo độ sâu — đúng thứ §8.3 đã bác cho
+    `get_path` — còn (c) (`siblings` trả kèm `leaf_id`) tạo ra hai chỗ hiểu
+    "chuyển nhánh" khác nhau. Nhờ (a), `tree.ts` của FE **không phải sửa một
+    dòng nào**: nó vẫn gửi `PATCH {active_leaf_id: sibling.id}` như từ T-1.13.
+
+    Node không thấy được ⇒ trả lại **nguyên** id client gửi, để
+    `set_active_leaf` ném `MessageNotInConversationError` và handler trả đúng
+    `404 LEAF_NOT_FOUND` như trước. Một đường báo lỗi thứ hai ở đây sẽ chỉ để
+    nói lại cùng một câu, và nói trước cả phép kiểm quyền sở hữu hội thoại.
+
+    `null` đi thẳng qua: bỏ con trỏ nhánh không phải một lần chuyển nhánh.
+    """
+    if leaf_id is None:
+        return None
+    sau_nhat = await MessageRepository(session).get_deepest_leaf(leaf_id, user_id=user_id)
+    return leaf_id if sau_nhat is None else sau_nhat
 
 
 async def _duong_di(

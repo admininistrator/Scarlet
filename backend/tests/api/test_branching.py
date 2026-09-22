@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -154,6 +155,46 @@ async def _dem_message(
             .where(Message.conversation_id == conversation_id)
         )
         return int((await session.execute(stmt)).scalar_one())
+
+
+#: Hai `id` dựng tay cho các ca thứ tự ở dưới. UUID sinh ngẫu nhiên thì quan hệ
+#: lớn-bé giữa hai anh em là ngẫu nhiên, nên một ca "khoá `id` không được quyết"
+#: sẽ đúng 50% số lần chạy — tức không đo gì. Hai hằng này cắt đứt chuyện đó.
+_ID_NHO = uuid.UUID("00000000-0000-4000-8000-000000000001")
+_ID_LON = uuid.UUID("ffffffff-0000-4000-8000-00000000000f")
+
+
+async def _chen_message(
+    session_factory: async_sessionmaker[AsyncSession],
+    conversation_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    role: MessageRole,
+    giay: int,
+    *,
+    id: uuid.UUID | None = None,
+) -> uuid.UUID:
+    """`INSERT` thẳng một message với `id` và `created_at` DO TEST CHỌN.
+
+    Ngoại lệ có chủ ý với luật "đi qua endpoint thật" ở `_mot_luot`: ba khoá
+    sắp xếp của `get_deepest_leaf` chỉ phân biệt được nhau khi test điều khiển
+    được cả thời điểm lẫn `id`, mà không endpoint nào cho làm việc đó — đúng
+    như vậy, vì cả hai là do DB sinh.
+    """
+    moi = uuid.uuid4() if id is None else id
+    async with session_factory() as session:
+        await session.execute(
+            Message.__table__.insert().values(
+                id=moi,
+                conversation_id=conversation_id,
+                parent_id=parent_id,
+                role=role,
+                status=MessageStatus.COMPLETED,
+                content=f"node {giay}",
+                created_at=datetime(2026, 9, 22, 0, 0, giay, tzinfo=UTC),
+            )
+        )
+        await session.commit()
+    return moi
 
 
 async def _active_leaf(
@@ -800,6 +841,217 @@ async def test_active_leaf_id_cua_hoi_thoai_khac_tra_404(
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "LEAF_NOT_FOUND"
     assert await _active_leaf(session_factory, hai.id) is None
+
+
+# ───────── B-109 / NQ-35 ngả (a) — con trỏ đi tiếp xuống lá sâu nhất ────────
+
+
+async def test_chuyen_ve_cau_hoi_cu_khong_cat_cut_man_hinh(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """**B-109** — trỏ vào một node CÓ CON ⇒ con trỏ đi tiếp xuống hết nhánh.
+
+    Đây là ca mà T-3.8 sinh ra hằng ngày: sửa `u2` ở giữa hội thoại rồi bấm
+    `‹` để xem lại câu hỏi cũ. FE gửi đúng id của anh em được chọn (`u2`, C13
+    cấm nó tự đoán id khác), và `u2` còn cả `a2` phía dưới. Trước ngả (a),
+    đường đi dừng ở `u2` và câu trả lời cũ biến khỏi màn hình dù vẫn nằm
+    nguyên trong DB — mất hẳn một nửa của UC-04 dòng 1 (*"không xoá nhánh
+    cũ"*) ngay trên màn hình.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    u1, a1 = await _mot_luot(client, session_factory, conversation.id, user_a, "cau hoi 1")
+    u2, a2 = await _mot_luot(client, session_factory, conversation.id, user_a, "cau hoi 2")
+    await client.patch(SUA_MESSAGE.format(u2), headers=_phien(user_a), json={"content": "khac han"})
+
+    ve_cu = await client.patch(
+        HOI_THOAI.format(conversation.id),
+        headers=_phien(user_a),
+        json={"active_leaf_id": str(u2)},
+    )
+
+    assert ve_cu.status_code == 200, ve_cu.text
+    # Con trỏ KHÔNG dừng ở `u2`: nó đi tiếp xuống `a2`.
+    assert uuid.UUID(ve_cu.json()["active_leaf_id"]) == a2
+    assert await _active_leaf(session_factory, conversation.id) == a2
+    assert [uuid.UUID(m["id"]) for m in ve_cu.json()["path"]] == [u1, a1, u2, a2]
+    # Và `‹ n/m ›` của câu hỏi cũ vẫn do SQL tính (C13).
+    assert ve_cu.json()["path"][2]["sibling_index"] == 0
+    assert ve_cu.json()["path"][2]["sibling_count"] == 2
+
+
+async def test_tro_vao_mot_la_thi_khong_doi_gi(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """Ngả (a) là KHÔNG-OP cho mọi lần chuyển nhánh giữa các anh em lá (Retry).
+
+    Phép kiểm ngược của test trên: nếu `get_deepest_leaf` đi lạc sang nhánh
+    khác thì ca này đỏ, và nó là ca thường gặp nhất của `‹ n/m ›`.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    u1, a1 = await _mot_luot(client, session_factory, conversation.id, user_a, "a")
+    await client.post(RETRY.format(a1), headers=_phien(user_a))
+
+    resp = await client.patch(
+        HOI_THOAI.format(conversation.id),
+        headers=_phien(user_a),
+        json={"active_leaf_id": str(a1)},
+    )
+
+    assert uuid.UUID(resp.json()["active_leaf_id"]) == a1
+    assert [uuid.UUID(m["id"]) for m in resp.json()["path"]] == [u1, a1]
+
+
+async def test_hoa_DEPTH_thi_created_at_phan_xu_chu_khong_phai_id(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """Hoà `depth` ⇒ `created_at DESC` phân xử — đúng chữ "mới nhất" của B-109.
+
+    Hai anh em cùng sâu 1, và anh em **mới hơn** được cố ý cho `id` NHỎ hơn.
+    Nhờ thế ca này đỏ nếu ai đó rút `created_at` khỏi khoá sắp và để `id DESC`
+    gánh một mình — mà với UUID ngẫu nhiên thì một bộ test không dựng tay sẽ
+    đúng 50% số lần chạy, tức không bắt được gì.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    u1 = await _chen_message(session_factory, conversation.id, None, MessageRole.USER, 0)
+    cu = await _chen_message(
+        session_factory, conversation.id, u1, MessageRole.ASSISTANT, 1, id=_ID_LON
+    )
+    moi = await _chen_message(
+        session_factory, conversation.id, u1, MessageRole.ASSISTANT, 2, id=_ID_NHO
+    )
+
+    async with session_factory() as session:
+        la = await MessageRepository(session).get_deepest_leaf(u1, user_id=user_a)
+
+    assert la == moi, "phải là anh em sinh SAU, dù `id` của nó nhỏ hơn"
+    assert la != cu
+
+
+async def test_hoa_CA_created_at_thi_id_giu_ket_qua_xac_dinh(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """Khoá thứ ba — hai anh em TRÙNG `created_at` vẫn phải ra một kết quả.
+
+    NQ-18 đã ghi ca này cho `get_siblings`: `clock_timestamp()` chỉ phân giải
+    tới micro-giây nên script seed ghi hàng loạt vẫn tạo ra giá trị trùng. Ở
+    đây chốt chiều `id DESC`, và khẳng định ngược chiều với ca trên: rút
+    `created_at` đi thì ca trên đỏ, đổi `id DESC` thành `id ASC` thì ca này đỏ.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    u1 = await _chen_message(session_factory, conversation.id, None, MessageRole.USER, 0)
+    nho = await _chen_message(
+        session_factory, conversation.id, u1, MessageRole.ASSISTANT, 1, id=_ID_NHO
+    )
+    lon = await _chen_message(
+        session_factory, conversation.id, u1, MessageRole.ASSISTANT, 1, id=_ID_LON
+    )
+
+    async with session_factory() as session:
+        repo = MessageRepository(session)
+        lan_1 = await repo.get_deepest_leaf(u1, user_id=user_a)
+        lan_2 = await repo.get_deepest_leaf(u1, user_id=user_a)
+
+    assert lan_1 == lon and lan_2 == lon, "trùng `created_at` ⇒ `id` lớn hơn, và ổn định"
+    assert lan_1 != nho
+
+
+async def test_nhanh_DAI_hon_thang_nhanh_moi_hon(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """`depth` là khoá ĐẦU, `created_at` chỉ phân xử khi hoà.
+
+    Cây: `u1 → a1 → u2 → a2` (nhánh cũ, sâu 3) và `a1b` — một lần retry `a1`
+    chạy SAU cùng, nên nó là node mới nhất của cả hội thoại mà chỉ sâu 1. Trỏ
+    con trỏ vào `u1` phải ra `a2`, không phải `a1b`. Thứ tự dựng cây là cố ý:
+    dựng ngược lại thì node sâu nhất cũng là node mới nhất và ca này không còn
+    phân biệt được hai khoá.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    u1, a1 = await _mot_luot(client, session_factory, conversation.id, user_a, "a")
+    u2, a2 = await _mot_luot(client, session_factory, conversation.id, user_a, "b")
+    retry = await client.post(RETRY.format(a1), headers=_phien(user_a))
+    a1b = uuid.UUID(retry.json()["assistant_message_id"])
+
+    resp = await client.patch(
+        HOI_THOAI.format(conversation.id),
+        headers=_phien(user_a),
+        json={"active_leaf_id": str(u1)},
+    )
+
+    assert uuid.UUID(resp.json()["active_leaf_id"]) == a2
+    assert uuid.UUID(resp.json()["active_leaf_id"]) != a1b
+    assert [uuid.UUID(m["id"]) for m in resp.json()["path"]] == [u1, a1, u2, a2]
+
+
+async def test_di_xuoi_KHONG_nhay_qua_message_da_xoa_mem(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """C12 — `deleted_at IS NULL` ở CẢ HAI nhánh của CTE xuôi.
+
+    Xoá mềm `u2` ⇒ nhánh bị cắt tại đó, nên lá sâu nhất dưới `a1` là chính
+    `a1`. Thiếu điều kiện ở nhánh đệ quy thì con trỏ đậu xuống `a2` — một
+    message nằm **dưới** một message đã xoá, tức `get_path` sẽ trả về một
+    đường đi rỗng và màn hình trắng.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    _, a1 = await _mot_luot(client, session_factory, conversation.id, user_a, "a")
+    u2, _ = await _mot_luot(client, session_factory, conversation.id, user_a, "b")
+    async with session_factory() as session:
+        await session.execute(
+            Message.__table__.update().where(Message.id == u2).values(deleted_at=func.now())
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        la = await MessageRepository(session).get_deepest_leaf(a1, user_id=user_a)
+
+    assert la == a1
+
+
+async def test_get_deepest_leaf_cua_user_khac_tra_None(
+    session_factory: async_sessionmaker[AsyncSession],
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    user_b: uuid.UUID,
+    _db_cua_test: None,
+    arq_gia: ArqGia,
+) -> None:
+    """§20 — quyền sở hữu kiểm TRONG SQL; `None` để handler giữ nguyên 404.
+
+    Ca này là lý do `_la_sau_nhat` trả lại id gốc thay vì ném: đường báo lỗi
+    vẫn là `LEAF_NOT_FOUND` của `set_active_leaf`, đúng một chỗ.
+    """
+    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    _, a1 = await _mot_luot(client, session_factory, conversation.id, user_a, "a")
+
+    async with session_factory() as session:
+        la = await MessageRepository(session).get_deepest_leaf(a1, user_id=user_b)
+
+    assert la is None
 
 
 async def test_doi_tieu_de_model_va_ghim(

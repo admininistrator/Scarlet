@@ -604,6 +604,42 @@ class MessageRepository:
         )
         return (await self._session.execute(stmt)).scalars().all()
 
+    async def get_deepest_leaf(
+        self, message_id: uuid.UUID, *, user_id: uuid.UUID
+    ) -> uuid.UUID | None:
+        """Lá sâu nhất (mới nhất) của nhánh mọc từ `message_id` — B-109, NQ-35.
+
+        Truy vấn cây thứ **ba** cạnh `get_path`/`get_siblings`, và là cái duy
+        nhất đi **xuôi**: từ một node đi xuống theo `parent_id` của con.
+
+        Nó tồn tại vì `get_path` đi ngược từ `active_leaf_id` lên gốc, nên đặt
+        con trỏ nhánh vào một node **có con** sẽ cắt đường đi ngay tại node đó
+        — phần bên dưới vẫn nằm nguyên trong DB nhưng biến khỏi màn hình. Đó
+        là B-109, và ngả (a) của NQ-35 chốt rằng chỗ sửa là **API**, không phải
+        client: `PATCH /conversations/{id}` nhận id của anh em được chọn rồi tự
+        đi tiếp xuống hết nhánh ấy.
+
+        Trả `None` khi `message_id` không thấy được (không tồn tại, đã xoá mềm,
+        hoặc của user khác) — cùng lối đi tới 404 như `get_path`, và để chỗ gọi
+        giữ nguyên câu trả lời `LEAF_NOT_FOUND` của `set_active_leaf` thay vì
+        mọc thêm một đường báo lỗi thứ hai. Node **đã là lá** thì trả về chính
+        nó, nên chỗ gọi không cần một nhánh `if` nào.
+
+        `ORDER BY depth DESC, created_at DESC, id DESC` — ba khoá, và cả ba đều
+        cần. `depth` chọn nhánh dài nhất; khi hai nhánh dài bằng nhau thì
+        `created_at` chọn cái **mới nhất** (đúng chữ "mới nhất" của B-109); `id`
+        là khoá cuối cho kết quả **xác định** khi `created_at` hoà — cùng lý lẽ
+        NQ-18 đã dùng cho `get_siblings`, vì một con trỏ nhánh nhảy qua nhảy lại
+        giữa hai lần bấm cũng khó tìm y như một `sibling_index` nhảy.
+        """
+        cay = _subtree_cte(message_id, user_id=user_id)
+        stmt = (
+            select(cay.c.id)
+            .order_by(cay.c.depth.desc(), cay.c.created_at.desc(), cay.c.id.desc())
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
     async def _assert_conversation_visible(
         self, conversation_id: uuid.UUID, *, user_id: uuid.UUID
     ) -> None:
@@ -707,6 +743,61 @@ def _path_cte(leaf_id: uuid.UUID, *, user_id: uuid.UUID) -> CTE:
             # chặn ở đường đọc, để một dòng hỏng do tay người sửa DB không biến
             # thành ngữ cảnh lẫn hai hội thoại gửi lên model (C11).
             ancestor.conversation_id == anchor.c.conversation_id,
+        )
+    )
+    return anchor.union_all(step)
+
+
+def _subtree_cte(root_id: uuid.UUID, *, user_id: uuid.UUID) -> CTE:
+    """Recursive CTE đi XUÔI từ `root_id` xuống theo `parent_id` của con (B-109).
+
+    Ảnh soi gương của `_path_cte`, và ba ràng buộc của nó giữ nguyên vì lý do
+    giữ nguyên:
+
+    - chỉ mang 4 cột khoá, không `SELECT m.*` — `content` của cả một nhánh bị
+      lôi qua từng vòng lặp rồi vứt đi;
+    - `deleted_at IS NULL` ở **cả hai** nhánh (C12) — một node đã xoá mềm cắt
+      nhánh tại đó chứ không bị nhảy qua, nên con trỏ nhánh không bao giờ đậu
+      xuống dưới một message đã xoá;
+    - `conversation_id` khoá lại ở nhánh đệ quy: FK `messages.parent_id` chỉ
+      bảo đảm cha **tồn tại**, không bảo đảm cùng hội thoại (C11).
+
+    Khác `_path_cte` đúng một chỗ và chỗ ấy là bản chất: đi ngược thì mỗi tầng
+    có đúng **một** hàng (một node có một cha), đi xuôi thì một tầng có bao
+    nhiêu hàng tuỳ số nhánh. Vì thế `get_deepest_leaf` phải SẮP rồi lấy một,
+    chứ không đọc thẳng hàng cuối như `get_path`.
+    """
+    root = aliased(Message, name="root")
+    anchor = (
+        select(
+            root.id.label("id"),
+            root.conversation_id.label("conversation_id"),
+            root.created_at.label("created_at"),
+            literal_column("0", Integer).label("depth"),
+        )
+        # Quyền sở hữu kiểm ở ĐÂY, trong SQL (§20) và chỉ ở nhánh neo: nhánh
+        # đệ quy không rời khỏi hội thoại của gốc.
+        .join(Conversation, Conversation.id == root.conversation_id)
+        .where(
+            root.id == root_id,
+            root.deleted_at.is_(None),
+            Conversation.user_id == user_id,
+            Conversation.deleted_at.is_(None),
+        )
+        .cte("subtree", recursive=True)
+    )
+    child = aliased(Message, name="child")
+    step = (
+        select(
+            child.id,
+            child.conversation_id,
+            child.created_at,
+            anchor.c.depth + 1,
+        )
+        .join(anchor, child.parent_id == anchor.c.id)
+        .where(
+            child.deleted_at.is_(None),
+            child.conversation_id == anchor.c.conversation_id,
         )
     )
     return anchor.union_all(step)
