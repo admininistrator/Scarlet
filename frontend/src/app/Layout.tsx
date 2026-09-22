@@ -1,7 +1,6 @@
 import { Link, Outlet, useLocation, useNavigate, useOutletContext } from "react-router";
 
-import { PanelIcon } from "../components/sidebar/icons";
-import { toggleSidebar, useSidebarOpen } from "../components/sidebar/sidebarOpen";
+import { SidebarToggle } from "../components/sidebar/SidebarToggle";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { usePhien, type Phien } from "../features/auth/usePhien";
 import { t } from "../lib/i18n";
@@ -37,15 +36,14 @@ export function Layout() {
   const session = usePhien();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const sidebarOpen = useSidebarOpen();
 
   const isAdmin = session.nguoiDung?.role === "admin";
   /*
     T-3.3 / T-HD2 — nut bat/tat sidebar song o HEADER, khong trong sidebar
     ("sidebar dong = 0 px, khong co dai icon"). Nhung header nay boc ca
     `/admin` va sau man auth, va o do khong co sidebar nao de bat/tat — nen nut
-    chi hien tren duong co sidebar. Khi T-3.10 dung drawer, dung mot dieu kien
-    nay se doi, khong phai hai.
+    chi hien tren duong co sidebar. T-3.10: duoi 1024 px cung nut nay mo
+    drawer thay vi day cot — xem `SidebarToggle`.
   */
   const coSidebar = pathname === PATHS.home;
 
@@ -58,21 +56,21 @@ export function Layout() {
       duoi header. `dvh` chu khong `vh`: tren iOS `vh` tinh ca thanh dia chi.
     */
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
-        <div className="flex items-center gap-4">
-          {coSidebar && (
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              aria-expanded={sidebarOpen}
-              aria-label={sidebarOpen ? t("header.closeSidebar") : t("header.openSidebar")}
-              className="motion-press grid size-touch place-items-center rounded-md text-foreground hover:bg-surface-hover"
-            >
-              <PanelIcon />
-            </button>
-          )}
+      {/*
+        T-3.10 — header cao DUNG `--spacing-header` (56 px) o moi be rong, nhu
+        ban T-HD2 ghi ("ca desktop lan mobile"): KHONG `flex-wrap`, vi xuong
+        dong o 375 px la mot header 143 px an mat mot phan tu man chat (B-242).
+        De vua 375 px: email chi hien tu `sm` tro len (nut Dang xuat van o
+        do), va lề ngang theo token gutter cua T-HD2. Moi thu bam duoc cao
+        `min-h-touch` (44 px).
+      */}
+      <header className="flex h-header shrink-0 items-center justify-between gap-2 border-b border-border px-gutter lg:px-gutter-lg">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+          {coSidebar && <SidebarToggle />}
           <h1 className="text-lg font-semibold">
-            <Link to={PATHS.home}>{t("app.title")}</Link>
+            <Link to={PATHS.home} className="inline-flex min-h-touch items-center">
+              {t("app.title")}
+            </Link>
           </h1>
           {/*
             An nut nay khi khong phai admin la mot phep lich su voi nguoi
@@ -83,30 +81,32 @@ export function Layout() {
           {isAdmin && (
             <Link
               to={PATHS.admin}
-              className="rounded-sm border border-border px-2 py-1 text-sm hover:bg-accent hover:text-accent-foreground"
+              className="inline-flex min-h-touch items-center whitespace-nowrap rounded-md border border-border px-2 text-sm sm:px-3 hover:bg-accent hover:text-accent-foreground"
             >
               {t("admin.tieuDe")}
             </Link>
           )}
         </div>
 
-        <div className="flex items-center gap-3 text-sm">
+        <div className="flex shrink-0 items-center gap-2 text-sm sm:gap-3">
           {session.nguoiDung === null ? (
             <Link
               to={PATHS.login}
-              className="motion-press rounded-md border border-border px-3 py-1.5 hover:bg-accent hover:text-accent-foreground"
+              className="motion-press inline-flex min-h-touch items-center rounded-md border border-border px-3 hover:bg-accent hover:text-accent-foreground"
             >
               {t("auth.dangNhap")}
             </Link>
           ) : (
             <>
-              <span className="text-muted">{session.nguoiDung.email}</span>
+              <span className="hidden truncate text-muted sm:inline">
+                {session.nguoiDung.email}
+              </span>
               <button
                 type="button"
                 onClick={() => {
                   void session.dangXuat().then(() => navigate(PATHS.home));
                 }}
-                className="motion-press rounded-md border border-border px-3 py-1.5 hover:bg-accent hover:text-accent-foreground"
+                className="motion-press min-h-touch whitespace-nowrap rounded-md border border-border px-2 sm:px-3 hover:bg-accent hover:text-accent-foreground"
               >
                 {t("auth.dangXuat")}
               </button>

@@ -143,9 +143,9 @@ export function ChatScreen() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {coThanhTrangThai && (
-          <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-sm">
+          <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-gutter py-2 text-sm lg:px-gutter-lg">
             {cay.conversationId !== null && (
-              <code className="text-xs text-muted">{cay.conversationId}</code>
+              <code className="break-all text-xs text-muted">{cay.conversationId}</code>
             )}
             <NhanKetNoi ketNoi={chat.ketNoi} />
             {chat.usage !== null && (
@@ -157,12 +157,12 @@ export function ChatScreen() {
         )}
 
         {chat.loi !== null && (
-          <div className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-2 text-sm text-danger-text">
-            <span>{chat.loi}</span>
+          <div className="flex shrink-0 items-center gap-3 border-b border-border px-gutter py-2 text-sm text-danger-text lg:px-gutter-lg">
+            <span className="min-w-0 break-words">{chat.loi}</span>
             <button
               type="button"
               onClick={chat.xoaLoi}
-              className="motion-press rounded-sm border border-border px-2 text-foreground"
+              className="motion-press min-h-touch shrink-0 rounded-md border border-border px-3 text-foreground"
             >
               {t("loi.dong")}
             </button>
@@ -177,7 +177,7 @@ export function ChatScreen() {
         */}
         <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           {cay.conversationId === null ? (
-            <p className="px-6 py-8 text-muted">{t("chat.chuaCoHoiThoai")}</p>
+            <p className="px-gutter py-8 text-muted lg:px-gutter-lg">{t("chat.chuaCoHoiThoai")}</p>
           ) : (
             <div className="mx-auto flex w-full max-w-measure flex-col gap-4 px-gutter py-6 lg:px-gutter-lg">
               {cay.path.map((node) => (

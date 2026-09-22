@@ -32,7 +32,7 @@ export function NotFoundPage() {
       <p className="mt-2 text-sm text-muted">{t("loi.404.moTa")}</p>
       <Link
         to={PATHS.home}
-        className="mt-6 inline-block rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+        className="mt-6 inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
       >
         {t("loi.404.veTrangChu")}
       </Link>

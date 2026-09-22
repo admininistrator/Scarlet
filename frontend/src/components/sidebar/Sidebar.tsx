@@ -1,10 +1,17 @@
+import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { ApiError, api, type HoiThoaiRa } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { usePresence } from "../../lib/motion";
-import { MoreIcon, PinIcon, SearchIcon } from "./icons";
-import { useSidebarOpen } from "./sidebarOpen";
+import { useDrawerMode } from "../../lib/viewport";
+import { MoreIcon, PanelIcon, PinIcon, SearchIcon } from "./icons";
+import {
+  SIDEBAR_TOGGLE_ID,
+  setDrawerOpen,
+  useDrawerOpen,
+  useSidebarOpen,
+} from "./sidebarOpen";
 
 /**
  * Sidebar hoi thoai — T-3.3, dung theo ban T-HD2 giao (`AppShell.tsx`).
@@ -51,6 +58,24 @@ import { useSidebarOpen } from "./sidebarOpen";
  * thu, khoi ngoai mang `inert` nen Tab khong roi vao mot danh sach dang bien
  * mat. `prefers-reduced-motion: reduce` ⇒ `data-motion="none"`, bo class
  * `motion-sidebar`, go ngay trong cung luot: tuc thi, khong "nhanh hon".
+ *
+ * ── Duoi 1024 px: DRAWER, khong phai cot (T-3.10) ─────────────────────────
+ *
+ * Ban T-HD2 ve sidebar duoi 1024 px la mot drawer `--spacing-drawer` phu len
+ * man chat, co lop nen mo (`--color-scrim`). Cung mot noi dung, hai cai vo:
+ *
+ *   - Tren 1024 px: cot day bo cuc nhu T-3.3/T-3.9, trang thai `open` nho qua
+ *     F5.
+ *   - Duoi 1024 px: `Dialog` cua Radix (ADR-16, cung primitive voi sheet cua
+ *     Model Picker). No cho san bon thu task doi: Esc dong, cham lop phu dong,
+ *     bay tieu diem trong drawer, va khoa cuon phia sau (`react-remove-scroll`
+ *     huy `wheel`/`touchmove` roi vao ngoai drawer — `Drawer.test.tsx` do
+ *     dung dieu ay). Trang thai rieng, KHONG nho qua F5 — xem `sidebarOpen.ts`.
+ *
+ * Dong drawer thi tieu diem ve NUT MO o header (`SIDEBAR_TOGGLE_ID`), khong
+ * ve "phan tu dang focus luc mo". Chon mot hoi thoai hoac bam "Hoi thoai moi"
+ * trong drawer cung dong no: tren dien thoai, drawer con mo sau lan bam ay la
+ * mot man chat bi che ma nguoi dung phai tu di tim nut dong.
  *
  * ── Con tro phan trang den TU RESPONSE, khong suy ra tu danh sach ─────────
  *
@@ -189,6 +214,8 @@ export function Sidebar({
 }: SidebarProps) {
   const searchId = useId();
   const open = useSidebarOpen();
+  const drawerMode = useDrawerMode();
+  const drawerOpen = useDrawerOpen();
   const presence = usePresence<HTMLDivElement>(open, "--duration-normal");
 
   const [items, setItems] = useState<HoiThoaiRa[]>([]);
@@ -353,12 +380,6 @@ export function Sidebar({
   const pinned = visible.filter((item) => item.pinned);
   const recent = visible.filter((item) => !item.pinned);
 
-  // T-HD2: dong = 0 px, KHONG co dai icon. Nut bat/tat o header (`Layout.tsx`).
-  // Go khoi DOM sau khi hoat anh dong chay xong (T-3.9) — xem `usePresence`.
-  if (!presence.mounted) {
-    return null;
-  }
-
   const rowProps = (item: HoiThoaiRa) => ({
     item,
     active: item.id === openConversationId,
@@ -366,7 +387,10 @@ export function Sidebar({
     menuOpen: menuFor === item.id,
     renamingDraft: renaming?.id === item.id ? renaming.draft : null,
     confirmingDelete: confirming === item.id,
-    onSelect: () => onSelect(item.id),
+    onSelect: () => {
+      setDrawerOpen(false);
+      onSelect(item.id);
+    },
     onOpenMenu: () => setMenuFor((current) => (current === item.id ? null : item.id)),
     onTogglePin: () => void togglePin(item),
     onStartRename: () => {
@@ -384,6 +408,118 @@ export function Sidebar({
     onConfirmDelete: () => void remove(item.id),
   });
 
+  const body = (
+    <nav
+      aria-label={t("sidebar.title")}
+      className={`flex ${
+        drawerMode ? "min-h-0 w-full flex-1" : "w-sidebar shrink-0"
+      } flex-col border-r border-border bg-surface-sidebar p-3 motion-theme`}
+    >
+      <button
+        type="button"
+        onClick={() => {
+          setDrawerOpen(false);
+          onNewChat();
+        }}
+        className="motion-press h-touch w-full shrink-0 rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active"
+      >
+        {t("nav.newChat")}
+      </button>
+
+      <label htmlFor={searchId} className="mt-3 block shrink-0">
+        <span className="sr-only">{t("sidebar.search")}</span>
+        <span className="relative block">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-3.5 left-3 text-muted"
+          >
+            <SearchIcon />
+          </span>
+          <input
+            id={searchId}
+            type="search"
+            value={query}
+            placeholder={t("sidebar.search")}
+            onChange={(e) => setQuery(e.target.value)}
+            className="motion-control h-touch w-full rounded-md border border-border-strong bg-background pr-3 pl-9 text-base text-foreground placeholder:text-muted"
+          />
+        </span>
+      </label>
+      <p className="mt-1 shrink-0 text-xs text-muted">{t("sidebar.searchScopeNote")}</p>
+
+      {error !== null && (
+        <p className="mt-2 shrink-0 text-xs text-danger-text">{error}</p>
+      )}
+
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+        <ConversationGroup label={t("sidebar.pinnedGroup")} items={pinned} rowProps={rowProps} />
+        <ConversationGroup label={t("sidebar.recentGroup")} items={recent} rowProps={rowProps} />
+
+        {items.length === 0 && !loading && (
+          <p className="px-2 text-xs text-muted">{t("sidebar.empty")}</p>
+        )}
+        {items.length > 0 && visible.length === 0 && (
+          <p className="px-2 text-xs text-muted">{t("sidebar.noMatch")}</p>
+        )}
+        {loading && <p className="px-2 text-xs text-muted">{t("sidebar.loading")}</p>}
+
+        {cursor !== null && (
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void loadMore()}
+            className="motion-press mt-2 h-touch w-full rounded-md text-base font-medium text-accent-text hover:bg-surface-hover disabled:opacity-50"
+          >
+            {t("sidebar.loadMore")}
+          </button>
+        )}
+      </div>
+
+      <p className="mt-2 shrink-0 text-xs text-muted">{t("sidebar.pinScopeNote")}</p>
+    </nav>
+  );
+
+  if (drawerMode) {
+    /*
+      Drawer (T-3.10). `motion-drawer`/`motion-scrim` cua ban T-HD2 doc
+      `data-state` ma Radix tu dat, va Radix doi `animationend` roi moi go
+      khoi DOM — nen khong can `usePresence` o nhanh nay. Giam chuyen dong
+      thi `theme.css` tat animation, Radix go ngay.
+    */
+    return (
+      <Dialog.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="motion-scrim fixed inset-0 z-40 bg-scrim" />
+          <Dialog.Content
+            aria-describedby={undefined}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              document.getElementById(SIDEBAR_TOGGLE_ID)?.focus();
+            }}
+            className="motion-drawer fixed inset-y-0 left-0 z-50 flex w-drawer max-w-full flex-col bg-surface-sidebar shadow-popover"
+          >
+            <div className="flex h-header shrink-0 items-center justify-between gap-2 border-r border-b border-border px-3">
+              <Dialog.Title className="text-lg font-semibold">{t("sidebar.title")}</Dialog.Title>
+              <Dialog.Close
+                aria-label={t("header.closeSidebar")}
+                className="motion-press grid size-touch shrink-0 place-items-center rounded-md text-foreground hover:bg-surface-hover"
+              >
+                <PanelIcon />
+              </Dialog.Close>
+            </div>
+            {body}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    );
+  }
+
+  // T-HD2: dong = 0 px, KHONG co dai icon. Nut bat/tat o header (`Layout.tsx`).
+  // Go khoi DOM sau khi hoat anh dong chay xong (T-3.9) — xem `usePresence`.
+  if (!presence.mounted) {
+    return null;
+  }
+
   /*
     Khoi ngoai mang chieu rong dang doi (0 ↔ `w-sidebar`) va cat phan thua;
     `<nav>` ben trong giu nguyen be rong nen chu khong xuong dong lung tung
@@ -400,69 +536,7 @@ export function Sidebar({
         presence.state === "open" ? "w-sidebar" : "w-0"
       }`}
     >
-      <nav
-        aria-label={t("sidebar.title")}
-        className="flex w-sidebar shrink-0 flex-col border-r border-border bg-surface-sidebar p-3 motion-theme"
-      >
-        <button
-          type="button"
-          onClick={onNewChat}
-          className="motion-press h-touch w-full shrink-0 rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active"
-        >
-          {t("nav.newChat")}
-        </button>
-
-        <label htmlFor={searchId} className="mt-3 block shrink-0">
-          <span className="sr-only">{t("sidebar.search")}</span>
-          <span className="relative block">
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute top-3.5 left-3 text-muted"
-            >
-              <SearchIcon />
-            </span>
-            <input
-              id={searchId}
-              type="search"
-              value={query}
-              placeholder={t("sidebar.search")}
-              onChange={(e) => setQuery(e.target.value)}
-              className="motion-control h-touch w-full rounded-md border border-border-strong bg-background pr-3 pl-9 text-base text-foreground placeholder:text-muted"
-            />
-          </span>
-        </label>
-        <p className="mt-1 shrink-0 text-xs text-muted">{t("sidebar.searchScopeNote")}</p>
-
-        {error !== null && (
-          <p className="mt-2 shrink-0 text-xs text-danger-text">{error}</p>
-        )}
-
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
-          <ConversationGroup label={t("sidebar.pinnedGroup")} items={pinned} rowProps={rowProps} />
-          <ConversationGroup label={t("sidebar.recentGroup")} items={recent} rowProps={rowProps} />
-
-          {items.length === 0 && !loading && (
-            <p className="px-2 text-xs text-muted">{t("sidebar.empty")}</p>
-          )}
-          {items.length > 0 && visible.length === 0 && (
-            <p className="px-2 text-xs text-muted">{t("sidebar.noMatch")}</p>
-          )}
-          {loading && <p className="px-2 text-xs text-muted">{t("sidebar.loading")}</p>}
-
-          {cursor !== null && (
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => void loadMore()}
-              className="motion-press mt-2 h-touch w-full rounded-md text-base font-medium text-accent-text hover:bg-surface-hover disabled:opacity-50"
-            >
-              {t("sidebar.loadMore")}
-            </button>
-          )}
-        </div>
-
-        <p className="mt-2 shrink-0 text-xs text-muted">{t("sidebar.pinScopeNote")}</p>
-      </nav>
+      {body}
     </div>
   );
 }

@@ -35,13 +35,13 @@ export function AdminScreen() {
 
   return (
     <main className="flex flex-col">
-      <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-3 text-sm">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border px-gutter py-3 text-sm lg:px-gutter-lg">
         <h2 className="text-base font-semibold">{t("admin.tieuDe")}</h2>
         <button
           type="button"
           disabled={qt.dangBan}
           onClick={() => void qt.lamTuoi()}
-          className="motion-press rounded-sm border border-border px-2 py-1 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+          className="motion-press min-h-touch rounded-md border border-border px-3 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
         >
           {t("admin.lamTuoi")}
         </button>
@@ -49,7 +49,7 @@ export function AdminScreen() {
           type="button"
           disabled={qt.dangBan}
           onClick={() => void qt.napLaiCatalog()}
-          className="motion-press rounded-sm border border-border px-2 py-1 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+          className="motion-press min-h-touch rounded-md border border-border px-3 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
         >
           {t("admin.napCatalog")}
         </button>
@@ -61,13 +61,13 @@ export function AdminScreen() {
       </div>
 
       {qt.loi !== null && (
-        <p role="alert" className="border-b border-border px-6 py-3 text-sm text-danger-text">
+        <p role="alert" className="border-b border-border px-gutter py-3 text-sm text-danger-text lg:px-gutter-lg">
           {qt.loi.code} — {qt.loi.message}
         </p>
       )}
 
       {qt.dangTai ? (
-        <p className="px-6 py-4 text-sm text-muted">{t("admin.dangTai")}</p>
+        <p className="px-gutter py-4 text-sm text-muted lg:px-gutter-lg">{t("admin.dangTai")}</p>
       ) : (
         <>
           <BangChoDuyet

@@ -1,5 +1,6 @@
 import type { ChiPhiRa, HangChiPhi, NguonKhoa, SoTien } from "../../lib/api";
 import { t } from "../../lib/i18n";
+import { TableScroll } from "../ui/TableScroll";
 
 /**
  * Man "Chi phi" cua §16.3 — **hai cot tach rieng** `metered` / `unmetered`.
@@ -50,6 +51,7 @@ function BangTruc({ ten, hang }: { ten: string; hang: HangChiPhi[] }) {
       {hang.length === 0 ? (
         <p className="text-sm text-muted">{t("admin.chuaCoDuLieu")}</p>
       ) : (
+        <TableScroll label={ten}>
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border text-left text-muted">
@@ -81,6 +83,7 @@ function BangTruc({ ten, hang }: { ten: string; hang: HangChiPhi[] }) {
             ))}
           </tbody>
         </table>
+        </TableScroll>
       )}
     </div>
   );
@@ -98,7 +101,7 @@ export function BangChiPhi({
   onDoiNguon: (nguon: NguonKhoa | null) => void;
 }) {
   return (
-    <section className="px-6 py-4">
+    <section className="px-gutter py-4 lg:px-gutter-lg">
       <h3 className="mb-3 text-base font-semibold">{t("admin.chiPhi")}</h3>
 
       <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
@@ -109,7 +112,7 @@ export function BangChiPhi({
             type="button"
             aria-pressed={nguon === n}
             onClick={() => onDoiNguon(n)}
-            className={`motion-press rounded-sm border border-border px-2 py-1 ${
+            className={`motion-press min-h-touch rounded-md border border-border px-3 ${
               nguon === n ? "bg-accent text-accent-foreground" : "hover:bg-accent hover:text-accent-foreground"
             }`}
           >
@@ -144,6 +147,7 @@ export function BangChiPhi({
             )
           </span>
         </h4>
+        <TableScroll label={t("admin.tong")}>
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border text-left text-muted">
@@ -164,6 +168,7 @@ export function BangChiPhi({
             </tr>
           </tbody>
         </table>
+        </TableScroll>
       </div>
 
       <BangTruc ten={t("admin.theoNgay")} hang={chiPhi.by_day} />

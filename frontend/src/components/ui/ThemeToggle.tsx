@@ -78,7 +78,7 @@ export function ThemeToggle() {
       type="button"
       aria-label={t("theme.toggleLabel")}
       onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-      className="motion-press rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+      className="motion-press min-h-touch shrink-0 rounded-md border border-border bg-background px-2 text-sm sm:px-3 text-foreground hover:bg-accent hover:text-accent-foreground"
     >
       {nextLabel}
     </button>

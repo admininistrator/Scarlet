@@ -24,7 +24,7 @@ export function PendingApprovalScreen() {
       <p className="mt-2 text-sm text-muted">{t("choDuyet.moTa")}</p>
       <Link
         to={PATHS.login}
-        className="mt-6 inline-block rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+        className="mt-6 inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
       >
         {t("choDuyet.veDangNhap")}
       </Link>

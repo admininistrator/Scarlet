@@ -63,7 +63,7 @@
   --spacing-picker-max: 26rem;      /* 416px — trần khi tên model dài */
   --spacing-tooltip: 18rem;         /* 288px — tooltip lý do, buộc xuống dòng */
   --spacing-row-model: 4rem;        /* 64px — chiều cao hàng model (> 44px) */
-  --spacing-sheet-max: 80vh;        /* trần sheet ở 375px */
+  --spacing-sheet-max: 80dvh;       /* trần sheet ở 375px — dvh: vh của iOS tính cả thanh địa chỉ (T-3.10) */
   --spacing-rail: 0.1875rem;        /* 3px — rail tầng mặc định bên trái hàng */
   --spacing-grabber: 2.25rem;       /* 36px — tay nắm của sheet (T-3.6) */
 

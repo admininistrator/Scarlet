@@ -49,7 +49,7 @@ export function ResetPasswordForm() {
         </p>
         <Link
           to={PATHS.forgotPassword}
-          className="mt-6 inline-block rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+          className="mt-6 inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
         >
           {t("datLai.xinLienKetMoi")}
         </Link>
@@ -64,7 +64,7 @@ export function ResetPasswordForm() {
         <p className="mt-2 text-sm text-muted">{t("datLai.xong.moTa")}</p>
         <Link
           to={PATHS.login}
-          className="mt-6 inline-block rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+          className="mt-6 inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
         >
           {t("auth.dangNhap")}
         </Link>
@@ -110,7 +110,7 @@ export function ResetPasswordForm() {
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="rounded-sm border border-border bg-background px-2 py-1.5 text-foreground"
+            className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
           />
         </label>
         {/*
@@ -131,7 +131,7 @@ export function ResetPasswordForm() {
         <button
           type="submit"
           disabled={dangGui}
-          className="motion-press rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+          className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
         >
           {dangGui ? t("auth.dangXuLy") : t("datLai.dat")}
         </button>

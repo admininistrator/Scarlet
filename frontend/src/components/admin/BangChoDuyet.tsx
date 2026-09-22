@@ -1,5 +1,6 @@
 import type { AdminUserRa, HanhDongUser } from "../../lib/api";
 import { t } from "../../lib/i18n";
+import { TableScroll } from "../ui/TableScroll";
 
 /**
  * Man "Duyet user" cua §16.3 — danh sach `pending_approval`, hai nut.
@@ -24,7 +25,7 @@ export function BangChoDuyet({
   onDoiTrangThai: (userId: string, hanhDong: HanhDongUser) => void;
 }) {
   return (
-    <section className="px-6 py-4">
+    <section className="px-gutter py-4 lg:px-gutter-lg">
       <h3 className="mb-3 text-base font-semibold">
         {t("admin.choDuyet")} <span className="text-muted">({users.length})</span>
       </h3>
@@ -32,6 +33,7 @@ export function BangChoDuyet({
       {users.length === 0 ? (
         <p className="text-sm text-muted">{t("admin.khongAiChoDuyet")}</p>
       ) : (
+        <TableScroll label={t("admin.choDuyet")}>
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border text-left text-muted">
@@ -52,7 +54,7 @@ export function BangChoDuyet({
                     type="button"
                     disabled={dangBan}
                     onClick={() => onDoiTrangThai(u.id, "approve")}
-                    className="motion-press rounded-sm border border-border px-2 py-1 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                    className="motion-press min-h-touch rounded-md border border-border px-3 hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
                   >
                     {t("admin.duyet")}
                   </button>
@@ -60,7 +62,7 @@ export function BangChoDuyet({
                     type="button"
                     disabled={dangBan}
                     onClick={() => onDoiTrangThai(u.id, "reject")}
-                    className="motion-press rounded-sm border border-border px-2 py-1 text-danger-text hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                    className="motion-press min-h-touch rounded-md border border-border px-3 text-danger-text hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
                   >
                     {t("admin.tuChoi")}
                   </button>
@@ -69,6 +71,7 @@ export function BangChoDuyet({
             ))}
           </tbody>
         </table>
+        </TableScroll>
       )}
     </section>
   );

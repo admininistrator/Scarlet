@@ -85,6 +85,41 @@ export function useSidebarOpen(): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+// ───────────────────── drawer duoi 1024 px — T-3.10 ──────────────────────
+//
+// Mot trang thai THU HAI, rieng, va KHONG ghi xuong `localStorage`. Lua chon
+// "mo" cua desktop la mot cot nam canh man chat, nho qua F5 la dung; mang
+// dung lua chon ay sang dien thoai thi moi lan tai trang la mot drawer che
+// kin man chat. Nen drawer luon bat dau DONG, va doi be rong giua chung khong
+// lam mot ben keo theo ben kia.
+
+let drawerOpen = false;
+
+function getDrawerSnapshot(): boolean {
+  return drawerOpen;
+}
+
+export function setDrawerOpen(next: boolean): void {
+  if (next === drawerOpen) {
+    return;
+  }
+  drawerOpen = next;
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+export function useDrawerOpen(): boolean {
+  return useSyncExternalStore(subscribe, getDrawerSnapshot, getDrawerSnapshot);
+}
+
+/**
+ * `id` cua nut bat/tat o header. Drawer dong thi tieu diem ve DUNG nut nay —
+ * khong dua vao "phan tu dang focus luc mo", vi Safari khong focus mot
+ * `<button>` khi bam chuot, va luc do tieu diem se roi ve `<body>`.
+ */
+export const SIDEBAR_TOGGLE_ID = "sidebar-toggle";
+
 /**
  * Doc lai `localStorage` va bao cho moi nguoi nghe — **chi danh cho test**.
  *
@@ -94,6 +129,7 @@ export function useSidebarOpen(): boolean {
  */
 export function resetSidebarOpenForTest(): void {
   open = readStored();
+  drawerOpen = false;
   for (const listener of listeners) {
     listener();
   }

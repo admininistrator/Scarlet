@@ -2,7 +2,18 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      T-3.10 — `interactive-widget=resizes-content`: ban phim ao THU NHO khung
+      nhin bo cuc (Chrome Android), nen khung `h-dvh` co lai va o nhap o day
+      no noi len tren ban phim thay vi nam duoi. iOS Safari bo qua khoa nay va
+      tu cuon phan tu dang focus vao vung nhin thay.
+      KHONG dat `maximum-scale`/`user-scalable=no`: chan phong to la loi
+      `meta-viewport` cua Lighthouse Accessibility (S8).
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
+    />
     <title>Scarlet</title>
     <script>
       // Chay truoc khi React mount de tranh nhap nhay mau (FOUC) khi doi theme.

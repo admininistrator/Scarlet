@@ -202,7 +202,7 @@ function ResendBlock() {
           autoComplete="username"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="rounded-sm border border-border bg-background px-2 py-1.5 text-foreground"
+          className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
         />
       </label>
 
@@ -215,7 +215,7 @@ function ResendBlock() {
       <button
         type="submit"
         disabled={dangGui}
-        className="motion-press rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+        className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
       >
         {dangGui ? t("auth.dangXuLy") : t("verify.guiLai")}
       </button>
