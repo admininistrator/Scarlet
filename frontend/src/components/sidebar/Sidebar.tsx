@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { ApiError, api, type HoiThoaiRa } from "../../lib/api";
+import { ApiError, api, type ConversationOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { usePresence } from "../../lib/motion";
 import { useDrawerMode } from "../../lib/viewport";
@@ -136,7 +136,7 @@ export interface SidebarProps {
  * (`pinned`) la phan **chi FE biet** — xem cau 2 o dau file. No van can thiet
  * du man hinh da tach hai nhom: `ConversationGroup` giu nguyen thu tu mang.
  */
-export function sortConversations(items: readonly HoiThoaiRa[]): HoiThoaiRa[] {
+export function sortConversations(items: readonly ConversationOut[]): ConversationOut[] {
   return [...items].sort((a, b) => {
     if (a.pinned !== b.pinned) {
       return a.pinned ? -1 : 1;
@@ -150,10 +150,10 @@ export function sortConversations(items: readonly HoiThoaiRa[]): HoiThoaiRa[] {
 
 /** Noi trang moi vao trang cu, **mot hoi thoai mot lan**, ban moi thang. */
 export function mergePages(
-  current: readonly HoiThoaiRa[],
-  incoming: readonly HoiThoaiRa[],
-): HoiThoaiRa[] {
-  const byId = new Map<string, HoiThoaiRa>();
+  current: readonly ConversationOut[],
+  incoming: readonly ConversationOut[],
+): ConversationOut[] {
+  const byId = new Map<string, ConversationOut>();
   for (const item of current) {
     byId.set(item.id, item);
   }
@@ -164,7 +164,7 @@ export function mergePages(
 }
 
 /** Tieu de de hien: `null` (chua ai dat ten) co mot cau rieng, khong de trong. */
-export function conversationLabel(item: HoiThoaiRa): string {
+export function conversationLabel(item: ConversationOut): string {
   const title = item.title?.trim() ?? "";
   return title === "" ? t("sidebar.untitled") : title;
 }
@@ -177,7 +177,7 @@ export function conversationLabel(item: HoiThoaiRa): string {
  * `\p{Diacritic}` xoa chung — ca "đ" cua tieng Viet **khong** tach duoc theo
  * loi nay, nen no duoc doi tay truoc.
  */
-export function matchesQuery(item: HoiThoaiRa, query: string): boolean {
+export function matchesQuery(item: ConversationOut, query: string): boolean {
   const needle = foldVietnamese(query);
   if (needle === "") {
     return true;
@@ -204,7 +204,7 @@ function errorText(error: unknown): string {
 }
 
 /** Bo `path` khoi response cua `PATCH` — danh sach chi can metadata. */
-function metaOf(detail: HoiThoaiRa): HoiThoaiRa {
+function metaOf(detail: ConversationOut): ConversationOut {
   return {
     id: detail.id,
     title: detail.title,
@@ -232,7 +232,7 @@ export function Sidebar({
   const drawerOpen = useDrawerOpen();
   const presence = usePresence<HTMLDivElement>(open, "--duration-normal");
 
-  const [items, setItems] = useState<HoiThoaiRa[]>([]);
+  const [items, setItems] = useState<ConversationOut[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -249,8 +249,8 @@ export function Sidebar({
    * phai doc danh sach **moi nhat**, nhung neu `items` nam trong mang phu
    * thuoc cua no thi moi lan nap xong lai chay lai chinh no.
    */
-  const itemsRef = useRef<HoiThoaiRa[]>([]);
-  const applyItems = useCallback((change: (previous: HoiThoaiRa[]) => HoiThoaiRa[]) => {
+  const itemsRef = useRef<ConversationOut[]>([]);
+  const applyItems = useCallback((change: (previous: ConversationOut[]) => ConversationOut[]) => {
     const next = sortConversations(change(itemsRef.current));
     itemsRef.current = next;
     setItems(next);
@@ -260,7 +260,7 @@ export function Sidebar({
     setLoading(true);
     setError(null);
     try {
-      const page = await api.danhSachHoiThoai();
+      const page = await api.listConversations();
       applyItems(() => mergePages([], page.items));
       setCursor(page.next_cursor);
     } catch (e) {
@@ -316,7 +316,7 @@ export function Sidebar({
     setLoading(true);
     setError(null);
     try {
-      const page = await api.danhSachHoiThoai(cursor);
+      const page = await api.listConversations(cursor);
       applyItems((previous) => mergePages(previous, page.items));
       setCursor(page.next_cursor);
     } catch (e) {
@@ -327,12 +327,12 @@ export function Sidebar({
   }, [applyItems, cursor, loading]);
 
   const togglePin = useCallback(
-    async (item: HoiThoaiRa) => {
+    async (item: ConversationOut) => {
       setMenuFor(null);
       setBusyId(item.id);
       setError(null);
       try {
-        const detail = await api.suaHoiThoai(item.id, { pinned: !item.pinned });
+        const detail = await api.updateConversation(item.id, { pinned: !item.pinned });
         applyItems((previous) => mergePages(previous, [metaOf(detail)]));
       } catch (e) {
         setError(errorText(e));
@@ -354,7 +354,7 @@ export function Sidebar({
     try {
       // Rong ⇒ `null`, tuc XOA tieu de. `""` va `null` la hai thu khac nhau o
       // phia server, va mot tieu de rong chi de lai mot hang khong doc duoc.
-      const detail = await api.suaHoiThoai(id, { title: trimmed === "" ? null : trimmed });
+      const detail = await api.updateConversation(id, { title: trimmed === "" ? null : trimmed });
       applyItems((previous) => mergePages(previous, [metaOf(detail)]));
       setRenaming(null);
     } catch (e) {
@@ -369,7 +369,7 @@ export function Sidebar({
       setBusyId(id);
       setError(null);
       try {
-        await api.xoaHoiThoai(id);
+        await api.deleteConversation(id);
         // Bo khoi danh sach NGAY, khong doi mot lan `GET /conversations` nua:
         // server da xac nhan bang `204`, va mot vong mang thu hai chi de lam
         // bien mat mot hang la mot khoang thoi gian nguoi dung nhin thay.
@@ -394,7 +394,7 @@ export function Sidebar({
   const pinned = visible.filter((item) => item.pinned);
   const recent = visible.filter((item) => !item.pinned);
 
-  const rowProps = (item: HoiThoaiRa) => ({
+  const rowProps = (item: ConversationOut) => ({
     item,
     active: item.id === openConversationId,
     busy: busyId === item.id,
@@ -568,8 +568,8 @@ function ConversationGroup({
   rowProps,
 }: {
   label: string;
-  items: HoiThoaiRa[];
-  rowProps: (item: HoiThoaiRa) => ConversationRowProps;
+  items: ConversationOut[];
+  rowProps: (item: ConversationOut) => ConversationRowProps;
 }) {
   if (items.length === 0) {
     return null;
@@ -589,7 +589,7 @@ function ConversationGroup({
 }
 
 interface ConversationRowProps {
-  item: HoiThoaiRa;
+  item: ConversationOut;
   active: boolean;
   busy: boolean;
   menuOpen: boolean;

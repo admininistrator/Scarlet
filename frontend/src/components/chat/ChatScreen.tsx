@@ -3,11 +3,11 @@ import { Link } from "react-router";
 import { useSession } from "../../app/Layout";
 import { PATHS } from "../../app/paths";
 import { t } from "../../lib/i18n";
-import type { TrangThaiKetNoi } from "../../lib/sse";
+import type { ConnectionStatus } from "../../lib/sse";
 import { useChat } from "../../features/chat/useChat";
 import { ModelPicker } from "../../features/models/ModelPicker";
 import { useModels } from "../../features/models/useModels";
-import { QuotaBar } from "../../features/quota/ThanhQuota";
+import { QuotaBar } from "../../features/quota/QuotaBar";
 import { byokCovers, isSendBlocked, selectedProviderId } from "../../features/quota/quotaView";
 import { useQuota } from "../../features/quota/useQuota";
 import { Sidebar } from "../sidebar/Sidebar";
@@ -19,25 +19,25 @@ import { MessageItem } from "./MessageItem";
  * `t()` cua FE khong co interpolation (`lib/i18n.ts`): moc gio phai la mot
  * phan tu rieng dung canh cau chu, khong phai mot chuoi ghep.
  */
-function gioPhut(luc: Date | null): string {
-  if (luc === null) {
+function formatTime(at: Date | null): string {
+  if (at === null) {
     return t("model.checkedAtUnknown");
   }
-  return luc.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  return at.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 }
 
-const NHAN_KET_NOI = {
+const CONNECTION_LABELS = {
   "dang-mo": "chat.ketNoi.dangMo",
   "dang-chay": "chat.ketNoi.dangChay",
   "dang-noi-lai": "chat.ketNoi.dangNoiLai",
   dong: "chat.ketNoi.dong",
 } as const;
 
-function NhanKetNoi({ ketNoi }: { ketNoi: TrangThaiKetNoi | null }) {
-  if (ketNoi === null) {
+function ConnectionLabel({ connection }: { connection: ConnectionStatus | null }) {
+  if (connection === null) {
     return null;
   }
-  return <span className="text-xs text-muted">{t(NHAN_KET_NOI[ketNoi])}</span>;
+  return <span className="text-xs text-muted">{t(CONNECTION_LABELS[connection])}</span>;
 }
 
 /**
@@ -70,22 +70,22 @@ export function ChatScreen() {
     can no de ve danh sach. Mot nguon, hai nguoi doc — chu khong hai lan
     `GET /models`.
   */
-  const danhMuc = useModels();
-  const phien = useSession();
+  const modelCatalog = useModels();
+  const session = useSession();
   /*
     T-3.11 — thanh quota doc `/auth/me` cua `Layout` (khong mot luot goi nao
     them) va nghe hai nhip tu `useChat`: `quota_warning` cua `202`, va "mot
     luot vua khep / vua bi `429`" de hoi lai `/auth/me`. Khong co bo dem thoi
     gian lam tuoi nao (B-209).
   */
-  const quota = useQuota(phien);
+  const quota = useQuota(session);
   const chat = useChat({
-    models: danhMuc.models,
-    modelMacDinhTaiKhoan: phien.hoSo?.default_model ?? null,
+    models: modelCatalog.models,
+    accountDefaultModel: session.profile?.default_model ?? null,
     onQuotaWarning: quota.noteWarning,
-    onQuotaStale: () => void phien.refreshProfile(),
+    onQuotaStale: () => void session.refreshProfile(),
   });
-  const { cay } = chat;
+  const { tree } = chat;
   /*
     T-3.4 — tran ky tu den tu `GET /auth/me` (`message_max_chars`, NQ-78),
     khong tu mot hang so o FE (A3/L4). `Layout` da hoi mot lan roi nen o day
@@ -94,7 +94,7 @@ export function ChatScreen() {
     `?? null` chu khong mot con so mac dinh: "chua biet tran" va "tran bang
     N" la hai chuyen khac nhau, va `Composer` xu ly ca dau rieng.
   */
-  const tranKyTu = phien.hoSo?.message_max_chars ?? null;
+  const maxChars = session.profile?.message_max_chars ?? null;
 
   /*
     Mot lan chon ghi CA HAI tang, va thu tu la co y:
@@ -110,12 +110,12 @@ export function ChatScreen() {
     la thu co tac dung rong hon. Hong o buoc 1 thi dung han — khong ghi mot
     nua roi bao thanh cong.
   */
-  const chonModel = async (modelId: string): Promise<void> => {
+  const selectModel = async (modelId: string): Promise<void> => {
     try {
-      await phien.datModelMacDinh(modelId);
-      await chat.datModelHoiThoai(modelId);
+      await session.changeDefaultModel(modelId);
+      await chat.changeConversationModel(modelId);
     } catch (e: unknown) {
-      chat.datLoi(e instanceof Error ? e.message : String(e));
+      chat.showError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -125,24 +125,24 @@ export function ChatScreen() {
   */
   const modelPicker = (
     <ModelPicker
-      models={danhMuc.models}
-      macDinh={chat.macDinh}
-      nhanDocLuc={gioPhut(danhMuc.docLuc)}
-      dangLamMoi={danhMuc.dangLamMoi}
-      onLamMoi={() => void danhMuc.lamMoi()}
-      onChon={(id) => void chonModel(id)}
+      models={modelCatalog.models}
+      defaultPick={chat.defaultPick}
+      loadedAtLabel={formatTime(modelCatalog.loadedAt)}
+      refreshing={modelCatalog.refreshing}
+      onRefresh={() => void modelCatalog.refresh()}
+      onPick={(id) => void selectModel(id)}
     />
   );
   /*
     Provider cua model SE GUI — quyet dinh luot ay tru quota hay di bang khoa
-    rieng (Cam bay ①). Cung `modelHieuLuc` ma `gui()` dat vao `model_id`.
+    rieng (Cam bay ①). Cung `effectiveModel` ma `gui()` dat vao `model_id`.
     KHOA provider, khong phai nhan — B-257, xem `selectedProviderId`.
   */
-  const providerDangChon = selectedProviderId(danhMuc.models, chat.modelHieuLuc);
-  const quotaBlocked = isSendBlocked(quota.block, quota.byokProviders, providerDangChon);
+  const selectedProvider = selectedProviderId(modelCatalog.models, chat.effectiveModel);
+  const quotaBlocked = isSendBlocked(quota.block, quota.byokProviders, selectedProvider);
 
-  const coThanhTrangThai =
-    cay.conversationId !== null || chat.ketNoi !== null || chat.usage !== null;
+  const hasStatusBar =
+    tree.conversationId !== null || chat.connection !== null || chat.usage !== null;
 
   /*
     Bo cuc CO DINH (ban T-HD2, `AppShell.tsx`): header cua `Layout`, sidebar va
@@ -158,10 +158,10 @@ export function ChatScreen() {
         khong co gi de liet ke. Danh sach ben trong tu cuon (`overflow-y-auto`).
       */}
       <Sidebar
-        openConversationId={cay.conversationId}
-        onSelect={(id) => void chat.moHoiThoai(id)}
-        onNewChat={() => void chat.hoiThoaiMoi()}
-        onOpenConversationDeleted={chat.dongHoiThoai}
+        openConversationId={tree.conversationId}
+        onSelect={(id) => void chat.openConversation(id)}
+        onNewChat={() => void chat.newConversation()}
+        onOpenConversationDeleted={chat.closeConversation}
         footer={
           /*
             T-3.12 — loi vao trang Cai dat o chan sidebar: tren dien thoai day
@@ -177,12 +177,12 @@ export function ChatScreen() {
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {coThanhTrangThai && (
+        {hasStatusBar && (
           <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-gutter py-2 text-sm lg:px-gutter-lg">
-            {cay.conversationId !== null && (
-              <code className="break-all text-xs text-muted">{cay.conversationId}</code>
+            {tree.conversationId !== null && (
+              <code className="break-all text-xs text-muted">{tree.conversationId}</code>
             )}
-            <NhanKetNoi ketNoi={chat.ketNoi} />
+            <ConnectionLabel connection={chat.connection} />
             {chat.usage !== null && (
               <span className="text-xs text-muted">
                 in={chat.usage.in} out={chat.usage.out}
@@ -191,12 +191,12 @@ export function ChatScreen() {
           </div>
         )}
 
-        {chat.loi !== null && (
+        {chat.error !== null && (
           <div className="flex shrink-0 items-center gap-3 border-b border-border px-gutter py-2 text-sm text-danger-text lg:px-gutter-lg">
-            <span className="min-w-0 break-words">{chat.loi}</span>
+            <span className="min-w-0 break-words">{chat.error}</span>
             <button
               type="button"
-              onClick={chat.xoaLoi}
+              onClick={chat.clearError}
               className="motion-press min-h-touch shrink-0 rounded-md border border-border px-3 text-foreground"
             >
               {t("loi.dong")}
@@ -211,30 +211,30 @@ export function ChatScreen() {
           phai mep man hinh.
         */}
         <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-          {cay.conversationId === null ? (
+          {tree.conversationId === null ? (
             <p className="px-gutter py-8 text-muted lg:px-gutter-lg">{t("chat.chuaCoHoiThoai")}</p>
           ) : (
             <div className="mx-auto flex w-full max-w-measure flex-col gap-4 px-gutter py-6 lg:px-gutter-lg">
-              {cay.path.map((node) => (
+              {tree.path.map((node) => (
                 <MessageItem
                   key={node.id}
                   node={node}
-                  cay={cay}
-                  ghiChu={chat.ghiChu[node.id] ?? []}
-                  dangChay={chat.dangChay === node.id}
+                  tree={tree}
+                  notes={chat.notes[node.id] ?? []}
+                  running={chat.running === node.id}
                   // T-3.8 / B-232 — nut "Luu" cua bong bong nguoi dung tat
                   // trong luc mot thao tac doi cay con bay. `PATCH
                   // /messages/{id}` khong di qua §11.4 (NQ-93), nen bam hai
                   // lan la hai nhanh va hai hoa don.
-                  dangBan={chat.dangBan}
+                  busy={chat.busy}
                   // T-3.7 — nut "Doi model & thu lai" gui dung model dang
                   // chon tren picker. Mot nguon, khong hai: neu no bang model
                   // da sinh ra cau tra loi nay thi nut tu tat.
-                  modelDangChon={chat.modelHieuLuc}
-                  onThuLai={(id, modelId) => void chat.thuLai(id, modelId)}
-                  onDanhGia={(id, gia) => void chat.danhGia(id, gia)}
-                  onSua={(id, ban) => void chat.suaCauHoi(id, ban)}
-                  onChuyenNhanh={(n, huong) => void chat.chuyenNhanh(n, huong)}
+                  selectedModel={chat.effectiveModel}
+                  onRetry={(id, modelId) => void chat.retry(id, modelId)}
+                  onFeedback={(id, value) => void chat.sendFeedback(id, value)}
+                  onEdit={(id, draft) => void chat.editQuestion(id, draft)}
+                  onSwitchBranch={(n, direction) => void chat.switchBranch(n, direction)}
                 />
               ))}
             </div>
@@ -242,13 +242,13 @@ export function ChatScreen() {
         </main>
 
         <Composer
-          dangChay={chat.dangChay !== null}
-          moDuoc={cay.conversationId !== null && !chat.dangBan}
-          tranKyTu={tranKyTu}
+          running={chat.running !== null}
+          enabled={tree.conversationId !== null && !chat.busy}
+          maxChars={maxChars}
           // Tra nguyen `Promise<KetQuaGui>` chu khong `void`: `Composer` giu
           // khoa cua §11.4 va no phai biet ket qua moi biet nen giu hay bo.
-          onGui={chat.gui}
-          onDung={() => void chat.dung()}
+          onSend={chat.send}
+          onStop={() => void chat.stop()}
           modelPicker={modelPicker}
           quotaBlocked={quotaBlocked}
           quotaBar={
@@ -256,7 +256,7 @@ export function ChatScreen() {
               readings={quota.readings}
               warnPct={quota.warnPct}
               block={quota.block}
-              byokCovered={byokCovers(quota.byokProviders, providerDangChon)}
+              byokCovered={byokCovers(quota.byokProviders, selectedProvider)}
             />
           }
         />

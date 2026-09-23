@@ -1,5 +1,5 @@
-import type { LoaiHanMuc } from "../../lib/api";
-import { t, type KhoaChu } from "../../lib/i18n";
+import type { LimitType } from "../../lib/api";
+import { t, type TextKey } from "../../lib/i18n";
 import {
   formatUsd,
   quotaLevel,
@@ -26,7 +26,7 @@ import {
  * gio doc.
  */
 
-const WINDOW_LABEL: Record<LoaiHanMuc, KhoaChu> = {
+const WINDOW_LABEL: Record<LimitType, TextKey> = {
   "5h": "quota.window.5h",
   weekly: "quota.window.weekly",
 };
@@ -49,13 +49,13 @@ const PCT_TEXT: Record<QuotaLevel, string> = {
  * co the hoan lai vao mot ngay khac.
  */
 function formatMoment(ms: number, now: number): string {
-  const luc = new Date(ms);
-  const cungNgay = new Date(now).toDateString() === luc.toDateString();
-  return luc.toLocaleString("vi-VN", {
+  const at = new Date(ms);
+  const sameDay = new Date(now).toDateString() === at.toDateString();
+  return at.toLocaleString("vi-VN", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-    ...(cungNgay ? {} : { weekday: "long", day: "2-digit", month: "2-digit" }),
+    ...(sameDay ? {} : { weekday: "long", day: "2-digit", month: "2-digit" }),
   });
 }
 
@@ -67,7 +67,7 @@ function Moment({ ms, now }: { ms: number; now: number }) {
   );
 }
 
-function windowNames(windows: LoaiHanMuc[]): string {
+function windowNames(windows: LimitType[]): string {
   return windows.map((w) => t(WINDOW_LABEL[w])).join(` ${t("quota.and")} `);
 }
 
@@ -88,36 +88,36 @@ export function QuotaBar({
   now?: number;
 }) {
   // `quota: null` = chua do duoc (Redis chop) — an thanh, KHONG ve mot thanh
-  // rong (docstring `HoSoRa.quota`).
+  // rong (docstring `ProfileOut.quota`).
   if (readings.length === 0 || warnPct === null) {
     return null;
   }
-  const canhBao = block === null ? warningReading(readings, warnPct) : null;
+  const warning = block === null ? warningReading(readings, warnPct) : null;
   // Moc CU NHAT: "so lieu luc X" la mot can duoi trung thuc cho ca hai hang.
-  const docLuc = Math.min(...readings.map((r) => r.readAt));
+  const loadedAt = Math.min(...readings.map((r) => r.readAt));
 
   return (
     <section aria-label={t("quota.label")} className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-x-4 gap-y-2">
         {readings.map(({ window: w }) => {
-          const muc = quotaLevel(w.remaining_pct, warnPct);
-          const nhan = t(WINDOW_LABEL[w.limit_type]);
+          const level = quotaLevel(w.remaining_pct, warnPct);
+          const label = t(WINDOW_LABEL[w.limit_type]);
           return (
-            <div key={w.limit_type} className="flex min-w-0 flex-col gap-1.5" data-level={muc}>
+            <div key={w.limit_type} className="flex min-w-0 flex-col gap-1.5" data-level={level}>
               <div className="flex justify-between gap-2 text-sm">
-                <span className="truncate">{nhan}</span>
-                <span className={`tabular ${PCT_TEXT[muc]}`}>{w.remaining_pct}%</span>
+                <span className="truncate">{label}</span>
+                <span className={`tabular ${PCT_TEXT[level]}`}>{w.remaining_pct}%</span>
               </div>
               <div
                 role="meter"
-                aria-label={`${t("quota.label")} ${nhan}`}
+                aria-label={`${t("quota.label")} ${label}`}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={w.remaining_pct}
                 className="h-2 overflow-hidden rounded-full bg-quota-track"
               >
                 <div
-                  className={`motion-quota h-full ${FILL[muc]}`}
+                  className={`motion-quota h-full ${FILL[level]}`}
                   style={{ width: `${w.remaining_pct}%` }}
                 />
               </div>
@@ -150,21 +150,21 @@ export function QuotaBar({
         </p>
       )}
 
-      {canhBao !== null && (
+      {warning !== null && (
         <div
           role="status"
           className="rounded-md border border-border bg-warning-subtle px-3 py-2 text-sm text-warning-text"
         >
           <span className="font-semibold">
-            {t("quota.warning")} {t(WINDOW_LABEL[canhBao.window.limit_type])}:
+            {t("quota.warning")} {t(WINDOW_LABEL[warning.window.limit_type])}:
           </span>{" "}
-          {t("quota.remaining")} {formatUsd(canhBao.window.remaining_usd)} (
-          {canhBao.window.remaining_pct}%). {t("quota.stillSend")}
+          {t("quota.remaining")} {formatUsd(warning.window.remaining_usd)} (
+          {warning.window.remaining_pct}%). {t("quota.stillSend")}
         </div>
       )}
 
       <p className="text-xs text-muted">
-        {t("quota.readAt")} <Moment ms={docLuc} now={now} />
+        {t("quota.readAt")} <Moment ms={loadedAt} now={now} />
       </p>
     </section>
   );

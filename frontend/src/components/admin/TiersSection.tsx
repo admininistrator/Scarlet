@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 
 import { toApiError } from "../../features/admin/useResource";
 import { ApiError, api, type TierPatch, type TierRow } from "../../lib/api";
-import { t, type KhoaChu } from "../../lib/i18n";
+import { t, type TextKey } from "../../lib/i18n";
 import { TableScroll } from "../ui/TableScroll";
 import { EffectNotice, ErrorNotice, Switch, TD, TH, TH_NUMBER } from "./adminUi";
 import { formatClock, formatCount } from "./format";
@@ -40,7 +40,7 @@ type MoneyField = (typeof MONEY_FIELDS)[number];
 type BoolField = "can_execute_skills" | "can_use_web";
 const BOOL_FIELDS: readonly BoolField[] = ["can_execute_skills", "can_use_web"];
 
-const FIELD_LABEL: Record<MoneyField | IntField | BoolField | "allowed_model_tags", KhoaChu> = {
+const FIELD_LABEL: Record<MoneyField | IntField | BoolField | "allowed_model_tags", TextKey> = {
   limit_5h_usd: "admin.tiers.col.limit5h",
   limit_7d_usd: "admin.tiers.col.limit7d",
   can_execute_skills: "admin.tiers.col.skills",
@@ -243,7 +243,7 @@ function TierEditDialog({
             inputMode="decimal"
             autoComplete="off"
             value={money[f]}
-            onChange={(e) => setMoney((cu) => ({ ...cu, [f]: e.target.value }))}
+            onChange={(e) => setMoney((prev) => ({ ...prev, [f]: e.target.value }))}
             className="motion-control min-h-touch rounded-md border border-border-strong bg-background px-3 text-right text-base tabular text-foreground"
           />
         </div>
@@ -254,7 +254,7 @@ function TierEditDialog({
             <Switch
               checked={bools[f]}
               label={t(FIELD_LABEL[f])}
-              onChange={(next) => setBools((cu) => ({ ...cu, [f]: next }))}
+              onChange={(next) => setBools((prev) => ({ ...prev, [f]: next }))}
             />
             <span aria-hidden="true" className="text-sm text-foreground">
               {t(FIELD_LABEL[f])}
@@ -274,7 +274,7 @@ function TierEditDialog({
             step={1}
             inputMode="numeric"
             value={ints[f]}
-            onChange={(e) => setInts((cu) => ({ ...cu, [f]: e.target.value }))}
+            onChange={(e) => setInts((prev) => ({ ...prev, [f]: e.target.value }))}
             className="motion-control min-h-touch rounded-md border border-border-strong bg-background px-3 text-right text-base tabular text-foreground"
           />
         </div>

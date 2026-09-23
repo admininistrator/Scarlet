@@ -37,38 +37,38 @@ from app.db.repositories import ConversationRepository, MessageRepository, Provi
 from app.main import app
 from app.quota.windows import LimitType, Window, encode_member
 
-DUONG_DAN_TAO = "/api/v1/conversations/{}/messages"
-DUONG_DAN_RETRY = "/api/v1/messages/{}/retry"
-DUONG_DAN_SUA = "/api/v1/messages/{}"
+CREATE_PATH = "/api/v1/conversations/{}/messages"
+RETRY_PATH = "/api/v1/messages/{}/retry"
+EDIT_PATH = "/api/v1/messages/{}"
 
 
-class ArqGia:
+class FakeArq:
     """Pool arq giả — ở đây chỉ để đếm: lượt bị chặn phải đẩy **0** job."""
 
     def __init__(self) -> None:
-        self.da_day: list[tuple[str, tuple[Any, ...]]] = []
+        self.pushed: list[tuple[str, tuple[Any, ...]]] = []
 
-    async def enqueue_job(self, ten: str, *args: Any, **kwargs: Any) -> object:
-        self.da_day.append((ten, args))
+    async def enqueue_job(self, name: str, *args: Any, **kwargs: Any) -> object:
+        self.pushed.append((name, args))
         return object()
 
 
 @pytest.fixture
-def _db_cua_test(
+def _db_for_tests(
     monkeypatch: pytest.MonkeyPatch, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     monkeypatch.setattr("app.db.session.get_sessionmaker", lambda: session_factory)
 
 
 @pytest_asyncio.fixture
-async def arq_gia(monkeypatch: pytest.MonkeyPatch) -> ArqGia:
-    gia = ArqGia()
+async def fake_arq(monkeypatch: pytest.MonkeyPatch) -> FakeArq:
+    fake = FakeArq()
 
-    async def _pool() -> ArqGia:
-        return gia
+    async def _pool() -> FakeArq:
+        return fake
 
     monkeypatch.setattr("app.api.v1.messages.get_arq_pool", _pool)
-    return gia
+    return fake
 
 
 @pytest_asyncio.fixture
@@ -79,7 +79,7 @@ async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
         yield http
 
 
-def _phien(user_id: uuid.UUID) -> dict[str, str]:
+def _session(user_id: uuid.UUID) -> dict[str, str]:
     """Header `Cookie` mang phiên thật (§11.2) của `user_id` — T-3.1c.
 
     Trả một `dict` để truyền vào `headers=` của **từng request**, đúng chỗ mà
@@ -107,7 +107,7 @@ def _phien(user_id: uuid.UUID) -> dict[str, str]:
     return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
-async def _het_quota(
+async def _exhaust_quota(
     session_factory: async_sessionmaker[AsyncSession], redis: Any, user_id: uuid.UUID
 ) -> None:
     """Nạp đúng hạn mức 5 giờ của tier `free` vào cửa sổ ⇒ lượt tiếp theo bị chặn."""
@@ -117,7 +117,7 @@ async def _het_quota(
     }
 
 
-async def _hoi_thoai(
+async def _conversation(
     session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
 ) -> Conversation:
     async with session_factory() as session:
@@ -126,33 +126,33 @@ async def _hoi_thoai(
         return conversation
 
 
-async def _cap_cau_hoi_tra_loi(
+async def _question_answer_pair(
     session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Hội thoại + một cặp hỏi/đáp đã xong — nguyên liệu cho `retry` và `PATCH`."""
-    conversation = await _hoi_thoai(session_factory, user_id)
+    conversation = await _conversation(session_factory, user_id)
     async with session_factory() as session:
         messages = MessageRepository(session)
-        cau_hoi = await messages.create_message(
+        question = await messages.create_message(
             conversation_id=conversation.id,
             user_id=user_id,
             role=MessageRole.USER,
             parent_id=None,
             content="cau hoi cu",
         )
-        tra_loi = await messages.create_message(
+        answer = await messages.create_message(
             conversation_id=conversation.id,
             user_id=user_id,
             role=MessageRole.ASSISTANT,
-            parent_id=cau_hoi.id,
+            parent_id=question.id,
             content="cau tra loi cu",
             status=MessageStatus.COMPLETED,
         )
         await session.commit()
-        return conversation.id, cau_hoi.id, tra_loi.id
+        return conversation.id, question.id, answer.id
 
 
-async def _dem_message(
+async def _count_messages(
     session_factory: async_sessionmaker[AsyncSession], conversation_id: uuid.UUID
 ) -> int:
     async with session_factory() as session:
@@ -167,142 +167,142 @@ async def _dem_message(
 # ════════════════════ ba route sinh chữ, cùng một cửa ════════════════════
 
 
-async def test_post_messages_bi_chan_khi_het_quota(
+async def test_post_messages_blocked_when_quota_exhausted(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """S6 nửa kiểm được trong pytest: `429`, 0 message mới, 0 job."""
-    conversation = await _hoi_thoai(session_factory, user_a)
-    await _het_quota(session_factory, quota_redis, user_a)
+    conversation = await _conversation(session_factory, user_a)
+    await _exhaust_quota(session_factory, quota_redis, user_a)
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
     assert resp.status_code == 429
-    loi = resp.json()["error"]
-    assert loi["code"] == "QUOTA_EXCEEDED"
-    assert loi["details"]["limit_type"] == "5h"
-    assert resp.headers["Retry-After"] == str(loi["details"]["retry_after"])
+    error = resp.json()["error"]
+    assert error["code"] == "QUOTA_EXCEEDED"
+    assert error["details"]["limit_type"] == "5h"
+    assert resp.headers["Retry-After"] == str(error["details"]["retry_after"])
 
-    assert await _dem_message(session_factory, conversation.id) == 0, "transaction phải rollback"
-    assert arq_gia.da_day == [], "0 job ⇒ 0 USD (S6)"
+    assert await _count_messages(session_factory, conversation.id) == 0, "transaction phải rollback"
+    assert fake_arq.pushed == [], "0 job ⇒ 0 USD (S6)"
 
 
-async def test_retry_bi_chan_khi_het_quota(
+async def test_retry_blocked_when_quota_exhausted(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Đường tốn tiền dễ quên nhất: bấm Retry không tạo message user nào."""
-    conversation_id, _, tra_loi_id = await _cap_cau_hoi_tra_loi(session_factory, user_a)
-    truoc = await _dem_message(session_factory, conversation_id)
-    await _het_quota(session_factory, quota_redis, user_a)
+    conversation_id, _, answer_id = await _question_answer_pair(session_factory, user_a)
+    before = await _count_messages(session_factory, conversation_id)
+    await _exhaust_quota(session_factory, quota_redis, user_a)
 
-    resp = await client.post(DUONG_DAN_RETRY.format(tra_loi_id), headers=_phien(user_a), json={})
+    resp = await client.post(RETRY_PATH.format(answer_id), headers=_session(user_a), json={})
 
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == "QUOTA_EXCEEDED"
-    assert await _dem_message(session_factory, conversation_id) == truoc
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation_id) == before
+    assert fake_arq.pushed == []
 
 
-async def test_patch_message_bi_chan_khi_het_quota(
+async def test_patch_message_blocked_when_quota_exhausted(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
-    conversation_id, cau_hoi_id, _ = await _cap_cau_hoi_tra_loi(session_factory, user_a)
-    truoc = await _dem_message(session_factory, conversation_id)
-    await _het_quota(session_factory, quota_redis, user_a)
+    conversation_id, question_id, _ = await _question_answer_pair(session_factory, user_a)
+    before = await _count_messages(session_factory, conversation_id)
+    await _exhaust_quota(session_factory, quota_redis, user_a)
 
     resp = await client.patch(
-        DUONG_DAN_SUA.format(cau_hoi_id),
-        headers=_phien(user_a),
+        EDIT_PATH.format(question_id),
+        headers=_session(user_a),
         json={"content": "cau hoi da sua"},
     )
 
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == "QUOTA_EXCEEDED"
-    assert await _dem_message(session_factory, conversation_id) == truoc
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation_id) == before
+    assert fake_arq.pushed == []
 
 
 # ═══════════════════════ cảnh báo UC-07 trong body ════════════════════════
 
 
-async def test_con_it_quota_thi_202_kem_canh_bao_trong_body(
+async def test_low_quota_202_with_warning_in_body(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD dòng 4: còn 15% quota ⇒ request VẪN QUA, response có cảnh báo."""
-    conversation = await _hoi_thoai(session_factory, user_a)
+    conversation = await _conversation(session_factory, user_a)
     window = Window(LimitType.SHORT, settings.QUOTA_WINDOW_SHORT_S)
     quota_redis.zset[window.key(user_a)] = {
         encode_member(uuid.uuid4(), Decimal("0.425")): time.time() - 60
     }
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         # Model không có giá ⇒ dự toán 0 ⇒ 0.425 + 0 < 0.50, đi qua. Test này
         # đo CẢNH BÁO, không đo cửa chặn.
         json={"content": "xin chao", "model_id": "nr-gemini-flash"},
     )
 
     assert resp.status_code == 202
-    canh_bao = resp.json()["quota_warning"]
-    assert canh_bao is not None
-    assert canh_bao["limit_type"] == "5h"
-    assert canh_bao["remaining_pct"] == 15
-    assert Decimal(canh_bao["remaining_usd"]) == Decimal("0.075")
-    assert len(arq_gia.da_day) == 1, "cảnh báo KHÔNG được chặn (UC-07 dòng 1)"
+    warning = resp.json()["quota_warning"]
+    assert warning is not None
+    assert warning["limit_type"] == "5h"
+    assert warning["remaining_pct"] == 15
+    assert Decimal(warning["remaining_usd"]) == Decimal("0.075")
+    assert len(fake_arq.pushed) == 1, "cảnh báo KHÔNG được chặn (UC-07 dòng 1)"
 
 
-async def test_con_nhieu_quota_thi_khong_co_canh_bao(
+async def test_ample_quota_has_no_warning(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
-    conversation = await _hoi_thoai(session_factory, user_a)
+    conversation = await _conversation(session_factory, user_a)
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
     assert resp.status_code == 202
     assert resp.json()["quota_warning"] is None
 
 
-async def test_han_muc_rieng_cua_user_duoc_ton_trong(
+async def test_user_specific_limit_is_honored(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD dòng 1 chạy đúng bằng đường này: `limit_5h_usd = 0.001` cho một user."""
-    conversation = await _hoi_thoai(session_factory, user_a)
+    conversation = await _conversation(session_factory, user_a)
     async with session_factory() as session:
         await session.execute(
             text(
@@ -314,46 +314,46 @@ async def test_han_muc_rieng_cua_user_duoc_ton_trong(
         await session.commit()
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
     assert resp.status_code == 429
-    loi = resp.json()["error"]
-    assert loi["details"]["retry_after"] is None, "cửa sổ rỗng ⇒ không có gì để hẹn"
+    error = resp.json()["error"]
+    assert error["details"]["retry_after"] is None, "cửa sổ rỗng ⇒ không có gì để hẹn"
     assert "Retry-After" not in resp.headers
-    assert await _dem_message(session_factory, conversation.id) == 0
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation.id) == 0
+    assert fake_arq.pushed == []
 
 
-async def test_bi_chan_thi_KHONG_nhan_ghe_sinh(
+async def test_blocked_does_NOT_take_generation_seat(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
     ratelimit_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
-    """Thứ tự trong `_mo_luot_sinh` là hợp đồng: quota TRƯỚC, ghế SAU.
+    """Thứ tự trong `_open_generation` là hợp đồng: quota TRƯỚC, ghế SAU.
 
     Ghế bận chỉ được nhả bằng phép đối chiếu Postgres sau `PHANTOM_GRACE_S`
     (60 s), nên nhận ghế rồi mới từ chối vì quota là khoá một trong ba ghế của
     người dùng suốt một phút — cho một lượt sinh chưa từng tồn tại. Đảo hai
     dòng ấy không làm test nào khác đỏ, nên phép kiểm phải nằm ở đây.
     """
-    conversation = await _hoi_thoai(session_factory, user_a)
-    await _het_quota(session_factory, quota_redis, user_a)
+    conversation = await _conversation(session_factory, user_a)
+    await _exhaust_quota(session_factory, quota_redis, user_a)
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
     assert resp.status_code == 429
-    assert [ten for ten, _ in ratelimit_redis.calls] == ["bucket"], (
+    assert [name for name, _ in ratelimit_redis.calls] == ["bucket"], (
         "chỉ token bucket được chạy; script giữ ghế (`slot`) KHÔNG được chạm tới"
     )
 
@@ -366,77 +366,77 @@ async def test_bi_chan_thi_KHONG_nhan_ghe_sinh(
 # ở `tests/quota/test_meter.py` và `tests/workers/test_generate.py`.
 
 
-async def _luu_khoa_byok(
+async def _save_byok_key(
     session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
 ) -> str:
     """Khoá BYOK cho provider của model MẶC ĐỊNH — đúng model mà request sẽ gọi."""
     model = catalog.get_default_model()
     assert model is not None
-    khoa = "sk-" + "0123456789abcdef" * 2
+    key = "sk-" + "0123456789abcdef" * 2
     async with session_factory() as session:
         await ProviderKeyRepository(session).upsert(
             user_id=user_id,
             provider=model.provider,
-            sealed=seal(khoa),
-            masked=mask_secret(khoa),
+            sealed=seal(key),
+            masked=mask_secret(key),
             verified_at=None,
         )
         await session.commit()
     return model.provider
 
 
-async def test_byok_van_chat_duoc_khi_het_quota_he_thong(
+async def test_byok_still_chats_when_system_quota_exhausted(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """**DoD dòng 1 của T-2.15** (UC-07) ở mức HTTP: hết quota vẫn `202`.
 
     Cùng một người, cùng một hội thoại, cùng một cửa sổ quota đã đầy như
-    `test_post_messages_bi_chan_khi_het_quota` — khác đúng một thứ: có khoá
-    riêng. Gỡ nhánh `if key_source is KeySource.SYSTEM` ở `_mo_luot_sinh` ra
+    `test_post_messages_blocked_when_quota_exhausted` — khác đúng một thứ: có khoá
+    riêng. Gỡ nhánh `if key_source is KeySource.SYSTEM` ở `_open_generation` ra
     thì test này thành `429`.
     """
-    conversation = await _hoi_thoai(session_factory, user_a)
-    await _het_quota(session_factory, quota_redis, user_a)
-    await _luu_khoa_byok(session_factory, user_a)
+    conversation = await _conversation(session_factory, user_a)
+    await _exhaust_quota(session_factory, quota_redis, user_a)
+    await _save_byok_key(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
     assert resp.status_code == 202, resp.text
-    assert len(arq_gia.da_day) == 1, "lượt sinh phải thật sự mở ra"
+    assert len(fake_arq.pushed) == 1, "lượt sinh phải thật sự mở ra"
 
 
-async def test_byok_khong_kem_canh_bao_quota_trong_body(
+async def test_byok_body_has_no_quota_warning(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Thanh cảnh báo UC-07 nói về quota **hệ thống** — hiện nó ở đây là nói sai.
 
-    Cùng trạng thái ZSET với `test_con_it_quota_thi_202_kem_canh_bao_trong_body`
+    Cùng trạng thái ZSET với `test_low_quota_202_with_warning_in_body`
     (còn 15%), nhưng lượt này không trừ quota nên không có gì để cảnh báo.
     """
-    conversation = await _hoi_thoai(session_factory, user_a)
+    conversation = await _conversation(session_factory, user_a)
     window = Window(LimitType.SHORT, settings.QUOTA_WINDOW_SHORT_S)
     quota_redis.zset[window.key(user_a)] = {
         encode_member(uuid.uuid4(), Decimal("0.425")): time.time() - 60
     }
-    await _luu_khoa_byok(session_factory, user_a)
+    await _save_byok_key(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
@@ -444,29 +444,29 @@ async def test_byok_khong_kem_canh_bao_quota_trong_body(
     assert resp.json()["quota_warning"] is None
 
 
-async def test_byok_khong_doc_ZSET_quota(
+async def test_byok_does_not_read_quota_ZSET(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     quota_redis: Any,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Bỏ qua HẲN cửa chặn, không phải "ước tính rồi tha".
 
     Một `read_window` chỉ để vứt đi là một lần `503` không đáng có mỗi khi
     Redis chớp — cho một lượt mà quota không có quyền chặn.
     """
-    conversation = await _hoi_thoai(session_factory, user_a)
-    await _luu_khoa_byok(session_factory, user_a)
+    conversation = await _conversation(session_factory, user_a)
+    await _save_byok_key(session_factory, user_a)
     quota_redis.zset.clear()
-    truoc = len(quota_redis.zset)
+    before = len(quota_redis.zset)
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
     assert resp.status_code == 202, resp.text
-    assert len(quota_redis.zset) == truoc, "không cửa sổ nào được đụng tới"
+    assert len(quota_redis.zset) == before, "không cửa sổ nào được đụng tới"

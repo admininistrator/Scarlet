@@ -82,7 +82,7 @@ async def drain(adapter: SystemAdapter, **overrides: Any) -> list[Any]:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def test_from_settings_lay_base_url_va_key_cua_litellm(
+def test_from_settings_takes_litellm_base_url_and_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A4/A9: adapter không tự biết địa chỉ nào, nó nhận từ `Settings`."""
@@ -93,13 +93,13 @@ def test_from_settings_lay_base_url_va_key_cua_litellm(
     assert adapter._client.timeout == 42.0
 
 
-def test_khong_tu_retry() -> None:
+def test_does_not_retry_by_itself() -> None:
     """Gọi lại một lượt đã sinh dở là trả tiền lần hai (cùng lý do T-1.5)."""
     adapter = SystemAdapter(base_url="http://litellm:4000/v1", api_key="k", timeout_s=1.0)
     assert adapter._client.max_retries == 0
 
 
-async def test_luon_bat_include_usage() -> None:
+async def test_always_enables_include_usage() -> None:
     """C40 — không có cờ này thì nhiều provider im lặng bỏ chunk `usage`."""
     adapter, completions = fake_adapter()
     await drain(adapter)
@@ -107,7 +107,7 @@ async def test_luon_bat_include_usage() -> None:
     assert completions.kwargs["stream"] is True
 
 
-async def test_khong_co_tool_thi_khong_gui_khoa_tools() -> None:
+async def test_no_tools_omits_tools_key() -> None:
     """§9.4: model thiếu capability `tools` không được thấy khoá này."""
     adapter, completions = fake_adapter()
     await drain(adapter, tools=None)
@@ -116,14 +116,14 @@ async def test_khong_co_tool_thi_khong_gui_khoa_tools() -> None:
     assert completions.kwargs["tools"] is omit
 
 
-async def test_co_tool_thi_gui_nguyen_van() -> None:
+async def test_tools_sent_verbatim() -> None:
     adapter, completions = fake_adapter()
     tools = [{"type": "function", "function": {"name": "web_search"}}]
     await drain(adapter, tools=tools)
     assert completions.kwargs["tools"] == tools
 
 
-async def test_extra_di_thang_vao_body_va_rong_thi_khong_gui() -> None:
+async def test_extra_goes_into_body_and_empty_is_not_sent() -> None:
     """§9.8: tham số riêng của provider là dữ liệu, adapter không diễn giải."""
     adapter, completions = fake_adapter()
     await drain(adapter, extra={"reasoning_effort": "low"})
@@ -132,7 +132,7 @@ async def test_extra_di_thang_vao_body_va_rong_thi_khong_gui() -> None:
     assert completions.kwargs["extra_body"] is None
 
 
-async def test_model_max_tokens_temperature_di_nguyen_ven() -> None:
+async def test_model_max_tokens_temperature_pass_through() -> None:
     adapter, completions = fake_adapter()
     await drain(adapter, model="ten-tu-catalog", max_tokens=777, temperature=0.3)
     assert completions.kwargs["model"] == "ten-tu-catalog"
@@ -140,7 +140,7 @@ async def test_model_max_tokens_temperature_di_nguyen_ven() -> None:
     assert completions.kwargs["temperature"] == 0.3
 
 
-async def test_stream_tra_ve_chunk_da_chuan_hoa() -> None:
+async def test_stream_returns_normalized_chunks() -> None:
     adapter, _ = fake_adapter()
     chunks = await drain(adapter)
     assert [c.kind for c in chunks][-1] == "done"
@@ -148,7 +148,7 @@ async def test_stream_tra_ve_chunk_da_chuan_hoa() -> None:
     assert chunks[-1].usage is not None
 
 
-async def test_huy_giua_chung_thi_dong_stream_ngay() -> None:
+async def test_cancel_midway_closes_stream_immediately() -> None:
     """§7.5: chưa đóng là upstream vẫn sinh tiếp và vẫn tính tiền."""
     adapter, completions = fake_adapter("deepseek-flash.text.jsonl")
     stream = await adapter.stream(
@@ -167,7 +167,7 @@ async def test_huy_giua_chung_thi_dong_stream_ngay() -> None:
     assert completions.stream.closed is True
 
 
-async def test_chay_het_stream_cung_dong() -> None:
+async def test_draining_stream_also_closes() -> None:
     adapter, completions = fake_adapter()
     await drain(adapter)
     assert completions.stream.closed is True

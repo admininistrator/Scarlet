@@ -66,7 +66,7 @@ async def verify_password(password_hash: str, password: str) -> bool:
         return False
 
 
-def mat_khau_qua_pho_bien(password: str) -> bool:
+def is_common_password(password: str) -> bool:
     """`True` nếu mật khẩu quá yếu/phổ biến (điểm zxcvbn dưới ngưỡng cấu hình).
 
     §11.6 cho phép `zxcvbn` HOẶC một danh sách 10k mật khẩu phổ biến. Chọn
@@ -75,8 +75,8 @@ def mat_khau_qua_pho_bien(password: str) -> bool:
     chạy hoàn toàn offline sau khi cài, và bắt được cả biến thể ("Password1234"
     hay "passw0rd1234") mà một danh sách tĩnh chỉ khớp đúng chuỗi mới bắt được.
     """
-    ket_qua = zxcvbn(password)
-    return bool(ket_qua["score"] < settings.PASSWORD_MIN_ZXCVBN_SCORE)
+    result = zxcvbn(password)
+    return bool(result["score"] < settings.PASSWORD_MIN_ZXCVBN_SCORE)
 
 
 def _random_token(n_bytes: int) -> str:

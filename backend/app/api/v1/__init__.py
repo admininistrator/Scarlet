@@ -14,8 +14,8 @@ cột "Chat": §11.1 cho `pending_approval` chat bằng BYOK, và khoá BYOK và
 DB qua đúng router này — gắn `require_chat_access` ở đây là khoá vòng (muốn có
 khoá thì phải đã có khoá).
 
-`admin` (T-2.16) có danh sách **riêng** (`_QUAN_TRI`), không dùng
-`_CO_DANH_TINH`: nó cần thêm `require_admin` (§16.3) và **không** cần luật
+`admin` (T-2.16) có danh sách **riêng** (`_ADMIN`), không dùng
+`_AUTHENTICATED`: nó cần thêm `require_admin` (§16.3) và **không** cần luật
 §11.4 — mọi POST của nó nhắm vào một tài nguyên đã tồn tại (`{user_id}` trong
 đường dẫn) chứ không tạo ra cái gì, nên bấm hai lần là hai lần đổi cùng một
 hàng về cùng một trạng thái, không phải hai hàng mới. `change_user_status` tự
@@ -39,7 +39,7 @@ nhớ chép thêm một dòng. `auth` **không** có mặt vì khoá §11.4 mở
 `{user_id}` mà `register`/`login`/`refresh` chạy khi chưa có ai đăng nhập —
 xem docstring `app/core/idempotency.py`.
 
-`ROUTE_BAT_BUOC_IDEMPOTENCY` là danh sách route mà header là **bắt buộc**
+`IDEMPOTENCY_REQUIRED_ROUTES` là danh sách route mà header là **bắt buộc**
 (A8, thiếu ⇒ `400`); mọi POST còn lại của ba router là "tuỳ chọn": có header
 thì áp luật, không có thì đi tiếp. Danh sách nằm ở đây — cạnh
 `require_app_access` — chứ không trong `core/idempotency.py`, vì `core/`
@@ -66,29 +66,31 @@ from app.core.idempotency import require_idempotency
 #:
 #: `PATCH /messages/{id}` **vẫn ngoài vùng phủ** (B-232): nó không phải POST, và
 #: `GUARDED_METHOD` giữ nguyên `POST` theo đúng chữ §11.4/A8 — xem NQ-93.
-ROUTE_BAT_BUOC_IDEMPOTENCY = frozenset({messages.TEN_ROUTE_TAO_MESSAGE, messages.TEN_ROUTE_THU_LAI})
+IDEMPOTENCY_REQUIRED_ROUTES = frozenset(
+    {messages.CREATE_MESSAGE_ROUTE_NAME, messages.RETRY_ROUTE_NAME}
+)
 
-_idempotency = require_idempotency(ROUTE_BAT_BUOC_IDEMPOTENCY)
+_idempotency = require_idempotency(IDEMPOTENCY_REQUIRED_ROUTES)
 
 #: Hai luật đi cùng nhau ở mọi router có danh tính. Thứ tự là chủ ý:
 #: `require_app_access` chạy trước, nên một tài khoản `suspended` nhận `403`
 #: mà **không** để lại khoá `idem:` nào trong Redis.
-_CO_DANH_TINH = [Depends(require_app_access), Depends(_idempotency)]
+_AUTHENTICATED = [Depends(require_app_access), Depends(_idempotency)]
 
 #: §16.3 + cạm bẫy T-2.16 ("quên `require_admin` ở MỘT endpoint là đủ"): cả hai
 #: luật gắn ở ĐÂY, không rải vào `admin.py`. `require_app_access` đi trước —
 #: một admin mà tài khoản vừa bị khoá không còn là một admin, và để `/admin/*`
 #: không thành cánh cửa duy nhất của app không chịu bảng §11.1.
-_QUAN_TRI = [Depends(require_app_access), Depends(require_admin)]
+_ADMIN = [Depends(require_app_access), Depends(require_admin)]
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(models.router)
-router.include_router(admin.router, dependencies=_QUAN_TRI)
+router.include_router(admin.router, dependencies=_ADMIN)
 router.include_router(health.router)
-router.include_router(stream.router, dependencies=_CO_DANH_TINH)
-router.include_router(conversations.router, dependencies=_CO_DANH_TINH)
-router.include_router(messages.router, dependencies=_CO_DANH_TINH)
-router.include_router(settings_router.router, dependencies=_CO_DANH_TINH)
+router.include_router(stream.router, dependencies=_AUTHENTICATED)
+router.include_router(conversations.router, dependencies=_AUTHENTICATED)
+router.include_router(messages.router, dependencies=_AUTHENTICATED)
+router.include_router(settings_router.router, dependencies=_AUTHENTICATED)
 router.include_router(auth.router)
 
 # §18.6 — `/_debug/*` CHỈ tồn tại khi DEBUG=true. Gắn router có điều kiện thay

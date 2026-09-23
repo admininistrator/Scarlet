@@ -1,8 +1,8 @@
 import { useCallback, useId, useState } from "react";
 
 import { useResource } from "../../features/admin/useResource";
-import { api, type HangChiPhi, type NguonKhoa } from "../../lib/api";
-import { t, type KhoaChu } from "../../lib/i18n";
+import { api, type CostRow, type KeySource } from "../../lib/api";
+import { t, type TextKey } from "../../lib/i18n";
 import { TableScroll } from "../ui/TableScroll";
 import { CountCell, ErrorNotice, LoadingNote, MoneyCell, ScreenTitle, TD, TH, TH_NUMBER } from "./adminUi";
 import { formatDayKey, padMoney } from "./format";
@@ -24,7 +24,7 @@ import { formatDayKey, padMoney } from "./format";
  * file nay; `parseFloat` duy nhat la de tinh CHIEU CAO cot bieu do.
  *
  * Hai cot SO NGUYEN duoc cong o day — "Luot goi" va "Token vao/ra" — va do la
- * co y: docstring `HaiCot` cua backend noi *"muon cong thi tang hien thi tu
+ * co y: docstring `MeteredSplit` cua backend noi *"muon cong thi tang hien thi tu
  * cong, va khi ay nguoi viet ra phep cong biet minh dang cong cai gi"*. Dem so
  * lan goi / so token khong lam tron tien cua ai.
  *
@@ -39,12 +39,12 @@ import { formatDayKey, padMoney } from "./format";
 
 const RANGES = [7, 30] as const;
 type Range = (typeof RANGES)[number];
-const RANGE_LABEL: Record<Range, KhoaChu> = { 7: "admin.cost.range7", 30: "admin.cost.range30" };
+const RANGE_LABEL: Record<Range, TextKey> = { 7: "admin.cost.range7", 30: "admin.cost.range30" };
 const DAY_MS = 86_400_000;
 
-type Source = NguonKhoa | null;
+type Source = KeySource | null;
 const SOURCES: Source[] = ["system", "byok", null];
-function sourceLabel(source: Source): KhoaChu {
+function sourceLabel(source: Source): TextKey {
   return source === "system"
     ? "admin.cost.source.system"
     : source === "byok"
@@ -92,7 +92,7 @@ export function CostScreen() {
   const [source, setSource] = useState<Source>("system");
 
   const load = useCallback(
-    () => api.quanTriChiPhi(source, new Date(Date.now() - range * DAY_MS).toISOString()),
+    () => api.adminCosts(source, new Date(Date.now() - range * DAY_MS).toISOString()),
     [range, source],
   );
   const report = useResource(load);
@@ -193,8 +193,8 @@ function AxisTable({
 }: {
   caption: string;
   firstColumn: string;
-  rows: HangChiPhi[];
-  rowLabel: (row: HangChiPhi) => string;
+  rows: CostRow[];
+  rowLabel: (row: CostRow) => string;
   tokens: boolean;
 }) {
   if (rows.length === 0) {
@@ -261,7 +261,7 @@ function AxisTable({
  * chieu cao — khong hien, khong cong. Nhan "Cao nhat" la CHUOI GOC cua ngay
  * lon nhat, khong phai so tu sinh. Truc khong co vach so.
  */
-export function CostChart({ days }: { days: HangChiPhi[] }) {
+export function CostChart({ days }: { days: CostRow[] }) {
   const patternId = useId();
   const values = days.flatMap((d) => [d.metered.cost_usd, d.unmetered.cost_usd]);
   const maxString = values.reduce((a, b) => (parseFloat(b) > parseFloat(a) ? b : a), values[0] ?? "0");

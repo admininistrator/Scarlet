@@ -53,7 +53,7 @@ vận hành thật, khi đã biết mình cần gỡ cho ai.
 ra một lệnh chạy xong, mã thoát 0, in "0 khoa" — và người vận hành đọc nó
 thành "hạn mức đã tự hết hạn" rồi bấm tiếp và lại `429`. Đúng triệu chứng
 B-188 mô tả, chỉ lùi thêm một bước. Danh sách nhóm hợp lệ **không** được chép
-vào file này: nó là `NHOM_THEO_IP`/`GROUP_CHAT` của `core/ratelimit.py`, cùng
+vào file này: nó là `IP_GROUPS`/`GROUP_CHAT` của `core/ratelimit.py`, cùng
 chỗ với `ip_key`/`user_key`.
 
 **Vì sao `SCAN` chứ không `KEYS`.** `KEYS` chặn Redis trong suốt lượt quét, và
@@ -61,7 +61,7 @@ Redis ở đây là phụ thuộc cứng của cả app (A1) — một lệnh v�
 phép dừng mọi lượt stream đang chảy để tìm một khoá.
 
 **Trục `streams` cố ý KHÔNG có mặt.** `rl:streams:{uuid}` là ZSET ghế bận của
-§10.6 hàng 3, và nó đã có đường tự nhả (`nha_ghe_sinh` + đối chiếu Postgres +
+§10.6 hàng 3, và nó đã có đường tự nhả (`release_generation_seat` + đối chiếu Postgres +
 `PHANTOM_GRACE_S`). Thêm một đường xoá tay cạnh một đường tự nhả là mời người
 vận hành dùng cái thứ hai thay vì sửa cái thứ nhất khi nó kẹt.
 """
@@ -81,11 +81,11 @@ from app.config.settings import settings
 from app.core.log_redact import install_log_redaction
 from app.core.ratelimit import (
     GROUP_CHAT,
-    NHOM_THEO_IP,
+    IP_GROUPS,
     ip_key,
-    mau_khoa_ip,
-    mau_khoa_user,
+    ip_key_pattern,
     user_key,
+    user_key_pattern,
 )
 from app.core.redis import dispose_redis, get_redis
 from app.db.session import dispose_engine, session_scope
@@ -98,18 +98,18 @@ RESET_RATE_LIMIT = "reset-rate-limit"
 
 #: Hai trục của `reset-rate-limit`, khớp hai lớp đầu của §10.6. Xem docstring
 #: module cho lý do trục `streams` vắng mặt.
-TRUC_IP = "ip"
-TRUC_USER = "user"
+AXIS_IP = "ip"
+AXIS_USER = "user"
 
 #: Nhóm hợp lệ theo trục. **Tham chiếu**, không phải bản chép: cả hai vế đều
 #: sống ở `core/ratelimit.py` cạnh chính hàm dựng khoá.
-NHOM_THEO_TRUC: dict[str, tuple[str, ...]] = {
-    TRUC_IP: NHOM_THEO_IP,
-    TRUC_USER: (GROUP_CHAT,),
+GROUPS_BY_AXIS: dict[str, tuple[str, ...]] = {
+    AXIS_IP: IP_GROUPS,
+    AXIS_USER: (GROUP_CHAT,),
 }
 
 
-def _dung_logging() -> None:
+def _setup_logging() -> None:
     """Gắn handler cho cây logger `app.*` — cùng thân với `workers/main.py`.
 
     Không có nó thì mọi `logger.info` của `quota/rebuild.py` rơi vào
@@ -143,20 +143,20 @@ async def _rebuild_quota_all() -> int:
     async with session_scope() as session:
         reports = await rebuild_all(session, get_redis(), now=now)
 
-    tong_member = sum(r.members for r in reports)
-    print(f"{REBUILD_QUOTA}: {len(reports)} nguoi, {tong_member} member da nap lai")
+    total_members = sum(r.members for r in reports)
+    print(f"{REBUILD_QUOTA}: {len(reports)} nguoi, {total_members} member da nap lai")
     for report in reports:
-        chi_tiet = "  ".join(
+        details = "  ".join(
             f"{w.limit_type.value}={w.members} member/{w.spent} USD" for w in report.windows
         )
-        print(f"  {report.user_id}  {chi_tiet}")
+        print(f"  {report.user_id}  {details}")
     return 0
 
 
-async def _reset_rate_limit(truc: str, nhom: str, dinh_danh: str | None) -> int:
+async def _reset_rate_limit(axis: str, group: str, identity: str | None) -> int:
     """Thân của `reset-rate-limit`. Trả về mã thoát.
 
-    `dinh_danh is None` nghĩa là `--all` — `_parser` đã ép đúng một trong hai
+    `identity is None` nghĩa là `--all` — `_parser` đã ép đúng một trong hai
     có mặt, nên ở đây không có nhánh thứ ba.
 
     In `TTL` của từng khoá **trước** khi xoá, không chỉ tên nó. Một dòng
@@ -170,42 +170,42 @@ async def _reset_rate_limit(truc: str, nhom: str, dinh_danh: str | None) -> int:
     """
     redis = get_redis()
 
-    if dinh_danh is None:
-        mau = mau_khoa_ip(nhom) if truc == TRUC_IP else mau_khoa_user(nhom)
+    if identity is None:
+        pattern = ip_key_pattern(group) if axis == AXIS_IP else user_key_pattern(group)
         # SCAN chứ không KEYS — xem docstring module. `scan_iter` tự lặp cursor.
-        khoa_list = [k async for k in redis.scan_iter(match=mau, count=100)]
-    elif truc == TRUC_IP:
-        khoa_list = [ip_key(nhom, dinh_danh)]
+        keys = [k async for k in redis.scan_iter(match=pattern, count=100)]
+    elif axis == AXIS_IP:
+        keys = [ip_key(group, identity)]
     else:
-        khoa_list = [user_key(nhom, uuid.UUID(dinh_danh))]
+        keys = [user_key(group, uuid.UUID(identity))]
 
-    da_xoa = 0
-    for khoa in sorted(_chuoi(k) for k in khoa_list):
-        gia_tri = await redis.get(khoa) if truc == TRUC_IP else None
-        ttl = int(await redis.ttl(khoa))
-        if int(await redis.delete(khoa)) == 0:
+    deleted = 0
+    for key in sorted(_to_str(k) for k in keys):
+        value = await redis.get(key) if axis == AXIS_IP else None
+        ttl = int(await redis.ttl(key))
+        if int(await redis.delete(key)) == 0:
             # Khoá không tồn tại. Nói ra chứ không im lặng: với dạng một định
             # danh, đây là ca thường gặp nhất và cũng là ca dễ đọc nhầm nhất.
-            print(f"  {khoa}  khong co (han muc nay chua/khong con bi dem)")
+            print(f"  {key}  khong co (han muc nay chua/khong con bi dem)")
             continue
-        da_xoa += 1
-        mo_ta = f"con {ttl} giay" if ttl >= 0 else "khong co TTL"
-        so_lan = f"{_chuoi(gia_tri)} luot, " if gia_tri is not None else ""
-        print(f"  {khoa}  {so_lan}{mo_ta}  -> da xoa")
+        deleted += 1
+        description = f"con {ttl} giay" if ttl >= 0 else "khong co TTL"
+        count = f"{_to_str(value)} luot, " if value is not None else ""
+        print(f"  {key}  {count}{description}  -> da xoa")
 
-    print(f"{RESET_RATE_LIMIT}: {da_xoa} khoa da xoa")
+    print(f"{RESET_RATE_LIMIT}: {deleted} khoa da xoa")
     return 0
 
 
-def _chuoi(gia_tri: Any) -> str:
+def _to_str(value: Any) -> str:
     """`bytes` → `str`. Client thật trả `bytes`, Redis giả của test trả `str`."""
-    return gia_tri.decode() if isinstance(gia_tri, bytes) else str(gia_tri)
+    return value.decode() if isinstance(value, bytes) else str(value)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
-    lenh = parser.add_subparsers(dest="lenh", required=True)
-    rebuild = lenh.add_parser(
+    commands = parser.add_subparsers(dest="lenh", required=True)
+    rebuild = commands.add_parser(
         REBUILD_QUOTA,
         help="dung lai hai ZSET quota tu usage_events (RR-7, §10.3)",
     )
@@ -216,17 +216,17 @@ def _parser() -> argparse.ArgumentParser:
         help="dung lai cho moi nguoi co chi tieu trong cua so dai",
     )
 
-    reset = lenh.add_parser(
+    reset = commands.add_parser(
         RESET_RATE_LIMIT,
         help="xoa bo dem rate limit cua mot (truc, nhom, dinh danh) — §10.6, B-188",
     )
-    reset.add_argument("truc", choices=sorted(NHOM_THEO_TRUC), help="truc dem")
+    reset.add_argument("truc", choices=sorted(GROUPS_BY_AXIS), help="truc dem")
     reset.add_argument(
         "nhom",
         # Hợp của cả hai trục: `choices` của argparse không đọc được giá trị
         # của một positional khác. Cặp (trục, nhóm) được kiểm ngay bên dưới,
         # nơi biết cả hai.
-        choices=sorted({n for ds in NHOM_THEO_TRUC.values() for n in ds}),
+        choices=sorted({n for ds in GROUPS_BY_AXIS.values() for n in ds}),
         help="ten route (truc ip) hoac ten nhom route (truc user)",
     )
     reset.add_argument(
@@ -243,7 +243,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _kiem_reset(parser: argparse.ArgumentParser, args: argparse.Namespace) -> str | None:
+def _check_reset(parser: argparse.ArgumentParser, args: argparse.Namespace) -> str | None:
     """Kiểm ba thứ `argparse` không tự kiểm được, rồi trả `dinh_danh` đã chuẩn hoá.
 
     `parser.error` chứ không `ApiError`/`raise`: mã thoát 2 và một dòng trợ
@@ -251,10 +251,10 @@ def _kiem_reset(parser: argparse.ArgumentParser, args: argparse.Namespace) -> st
     """
     if args.all == (args.dinh_danh is not None):
         parser.error("can dung MOT trong hai: mot DINH-DANH, hoac --all")
-    if args.nhom not in NHOM_THEO_TRUC[args.truc]:
-        hop_le = " ".join(NHOM_THEO_TRUC[args.truc])
-        parser.error(f"truc {args.truc!r} khong co nhom {args.nhom!r}; nhom hop le: {hop_le}")
-    if args.truc == TRUC_USER and args.dinh_danh is not None:
+    if args.nhom not in GROUPS_BY_AXIS[args.truc]:
+        valid = " ".join(GROUPS_BY_AXIS[args.truc])
+        parser.error(f"truc {args.truc!r} khong co nhom {args.nhom!r}; nhom hop le: {valid}")
+    if args.truc == AXIS_USER and args.dinh_danh is not None:
         # Kiểm ở đây chứ không trong thân lệnh: một `ValueError` của
         # `uuid.UUID` giữa lượt chạy là một traceback, không phải một lời chỉ
         # ra chỗ gõ sai.
@@ -262,7 +262,7 @@ def _kiem_reset(parser: argparse.ArgumentParser, args: argparse.Namespace) -> st
             uuid.UUID(args.dinh_danh)
         except ValueError:
             parser.error(
-                f"truc {TRUC_USER} can mot user_id dang UUID, nhan duoc {args.dinh_danh!r}"
+                f"truc {AXIS_USER} can mot user_id dang UUID, nhan duoc {args.dinh_danh!r}"
             )
     return args.dinh_danh
 
@@ -276,16 +276,16 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = _parser()
     args = parser.parse_args(argv)
-    _dung_logging()
+    _setup_logging()
     if args.lenh == REBUILD_QUOTA:
-        return asyncio.run(_chay(_rebuild_quota_all()))
+        return asyncio.run(_run(_rebuild_quota_all()))
     if args.lenh == RESET_RATE_LIMIT:
-        dinh_danh = _kiem_reset(parser, args)
-        return asyncio.run(_chay(_reset_rate_limit(args.truc, args.nhom, dinh_danh)))
+        identity = _check_reset(parser, args)
+        return asyncio.run(_run(_reset_rate_limit(args.truc, args.nhom, identity)))
     raise AssertionError(f"lenh khong co nguoi xu ly: {args.lenh}")
 
 
-async def _chay(coro: Coroutine[Any, Any, int]) -> int:
+async def _run(coro: Coroutine[Any, Any, int]) -> int:
     """Chạy một lệnh rồi đóng cả hai pool.
 
     Engine và client Redis dựng **lười** (xem `db/session.py`,

@@ -26,7 +26,7 @@ import { PATHS } from "./paths";
  *
  * ── Ba nhanh, khong hai ────────────────────────────────────────────────────
  *
- * `dangTai` phai la nhanh RIENG. Trong lan `GET /auth/me` dau tien, `/admin`
+ * `loading` phai la nhanh RIENG. Trong lan `GET /auth/me` dau tien, `/admin`
  * chua biet minh co duoc vao hay khong; roi thang xuong nhanh "khong phai
  * admin" se day mot admin that ra khoi trang trong mot phan giay moi lan ho
  * mo `/admin` — dung kieu nhap nhay ma nguoi dung doc thanh "bam nham".
@@ -44,13 +44,13 @@ import { PATHS } from "./paths";
 export function AdminOnly({ children }: { children: ReactNode }) {
   const session = useSession();
 
-  if (session.dangTai) {
+  if (session.loading) {
     return <p className="px-6 py-4 text-sm text-muted">{t("admin.dangTai")}</p>;
   }
-  if (session.nguoiDung === null) {
+  if (session.user === null) {
     return <Navigate to={PATHS.login} replace />;
   }
-  if (session.nguoiDung.role !== "admin") {
+  if (session.user.role !== "admin") {
     return <Navigate to={PATHS.home} replace />;
   }
   return <>{children}</>;

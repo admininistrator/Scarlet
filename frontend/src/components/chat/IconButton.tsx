@@ -2,7 +2,7 @@
  * Nut vuong 44 x 44 mang mot ky tu — ban T-HD3, dung o hai cho.
  *
  * Hai cho do la `BranchNav` (`‹ n/m ›`, T-1.14/T-3.8) va hang nut duoi cau
- * tra loi (`NutDuoiCauTraLoi`, T-3.7). Ban thiet ke ve chung bang **mot**
+ * tra loi (`AnswerActions`, T-3.7). Ban thiet ke ve chung bang **mot**
  * component, va o day cung vay: 44 px la con so cua danh sach kiem T-HD3
  * ("moi nut trong artboard 375 px do duoc ≥ 44 px"), nen mot ban chep thu hai
  * la mot cho de no tut xuong 40 mà khong ai thay.

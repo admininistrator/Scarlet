@@ -21,36 +21,36 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useChat } from "./useChat";
-import { api, type HoiThoaiChiTiet, type MessageRa } from "../../lib/api";
+import { api, type ConversationDetail, type MessageOut } from "../../lib/api";
 
-vi.mock("../../lib/api", async (goc) => {
-  const that = await goc<typeof import("../../lib/api")>();
+vi.mock("../../lib/api", async (original) => {
+  const actual = await original<typeof import("../../lib/api")>();
   return {
-    ...that,
+    ...actual,
     api: {
-      docHoiThoai: vi.fn(),
-      thuLai: vi.fn(),
-      danhGia: vi.fn(),
+      getConversation: vi.fn(),
+      retry: vi.fn(),
+      sendFeedback: vi.fn(),
     },
   };
 });
 
 /*
-  `moStream` mo mot `EventSource` that — thu khong ton tai trong jsdom. Thay
+  `openStream` mo mot `EventSource` that — thu khong ton tai trong jsdom. Thay
   no bang mot tay cam rong: file nay do chuoi request di ra, khong do stream.
 */
-vi.mock("../../lib/sse", async (goc) => {
-  const that = await goc<typeof import("../../lib/sse")>();
-  return { ...that, moStream: () => ({ dong: () => {}, cursor: () => "" }) };
+vi.mock("../../lib/sse", async (original) => {
+  const actual = await original<typeof import("../../lib/sse")>();
+  return { ...actual, openStream: () => ({ close: () => {}, cursor: () => "" }) };
 });
 
-const HOI_THOAI = "conv-1";
-const CAU_TRA_LOI = "msg-assistant";
-const MODEL_KHAC = "mot-model-khac";
+const CONVERSATION = "conv-1";
+const ANSWER_ID = "msg-assistant";
+const OTHER_MODEL = "mot-model-khac";
 
-function node(chen: Partial<MessageRa> = {}): MessageRa {
+function node(overrides: Partial<MessageOut> = {}): MessageOut {
   return {
-    id: CAU_TRA_LOI,
+    id: ANSWER_ID,
     parent_id: "msg-user",
     role: "assistant",
     status: "completed",
@@ -63,17 +63,17 @@ function node(chen: Partial<MessageRa> = {}): MessageRa {
     sibling_index: 0,
     sibling_count: 1,
     feedback: null,
-    ...chen,
+    ...overrides,
   };
 }
 
-function chiTiet(): HoiThoaiChiTiet {
+function detail(): ConversationDetail {
   return {
-    id: HOI_THOAI,
+    id: CONVERSATION,
     title: null,
     default_model: null,
     system_prompt_override: null,
-    active_leaf_id: CAU_TRA_LOI,
+    active_leaf_id: ANSWER_ID,
     pinned: false,
     created_at: "2026-09-22T00:00:00Z",
     updated_at: "2026-09-22T00:00:00Z",
@@ -81,18 +81,18 @@ function chiTiet(): HoiThoaiChiTiet {
   };
 }
 
-const docHoiThoai = vi.mocked(api.docHoiThoai);
-const thuLai = vi.mocked(api.thuLai);
-const danhGia = vi.mocked(api.danhGia);
+const getConversation = vi.mocked(api.getConversation);
+const retry = vi.mocked(api.retry);
+const sendFeedback = vi.mocked(api.sendFeedback);
 
-/** Khoa cua lan goi `api.thuLai` thu `n` — tham so thu ba (B-231). */
-function khoaLanGoi(n: number): string {
-  return thuLai.mock.calls[n][2];
+/** Khoa cua lan goi `api.retry` thu `n` — tham so thu ba (B-231). */
+function keyOfCall(n: number): string {
+  return retry.mock.calls[n][2];
 }
 
 beforeEach(() => {
-  docHoiThoai.mockResolvedValue(chiTiet());
-  thuLai.mockResolvedValue({
+  getConversation.mockResolvedValue(detail());
+  retry.mockResolvedValue({
     assistant_message_id: "msg-moi",
     stream_url: "/api/v1/messages/msg-moi/stream",
     model_id: "model-cu",
@@ -101,18 +101,18 @@ beforeEach(() => {
 });
 
 /**
- * Treo lan goi `api.thuLai` KE TIEP lai cho toi khi goi `.nha()`.
+ * Treo lan goi `api.retry` KE TIEP lai cho toi khi goi `.nha()`.
  *
  * Mot object chu khong mot bien `let`: TypeScript khong theo duoc phep gan
  * xay ra trong mot callback, nen mot bien se bi thu hep ve `null` ngay dong
  * duoi. Thuoc tinh cua object thi khong.
  */
-function giuLaiMotLanGoi(): { nha: () => void } {
-  const cho = { nha: () => {} };
-  thuLai.mockImplementationOnce(
+function holdOneCall(): { release: () => void } {
+  const gate = { release: () => {} };
+  retry.mockImplementationOnce(
     () =>
       new Promise((resolve) => {
-        cho.nha = () =>
+        gate.release = () =>
           resolve({
             assistant_message_id: "msg-moi",
             stream_url: "/api/v1/messages/msg-moi/stream",
@@ -121,32 +121,32 @@ function giuLaiMotLanGoi(): { nha: () => void } {
           });
       }),
   );
-  return cho;
+  return gate;
 }
 
-/** Mot hook da mo san mot hoi thoai — `thuLai` khong lam gi khi chua mo. */
-async function hookDaMoHoiThoai() {
+/** Mot hook da mo san mot hoi thoai — `retry` khong lam gi khi chua mo. */
+async function hookWithOpenConversation() {
   const { result } = renderHook(() => useChat());
   await act(async () => {
-    await result.current.moHoiThoai(HOI_THOAI);
+    await result.current.openConversation(CONVERSATION);
   });
   return result;
 }
 
 describe("khoa idempotency cua nut Thu lai (B-231)", () => {
   it("1 — moi lan goi deu MANG mot khoa (route nay bat buoc tu NQ-93)", async () => {
-    const result = await hookDaMoHoiThoai();
+    const result = await hookWithOpenConversation();
 
     await act(async () => {
-      await result.current.thuLai(CAU_TRA_LOI);
+      await result.current.retry(ANSWER_ID);
     });
 
-    expect(thuLai).toHaveBeenCalledTimes(1);
-    expect(khoaLanGoi(0)).toMatch(/\S/);
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(keyOfCall(0)).toMatch(/\S/);
   });
 
   it("2 — hai lan bam CHONG LAN dung cung mot khoa (S5, C22)", async () => {
-    const result = await hookDaMoHoiThoai();
+    const result = await hookWithOpenConversation();
     /*
       Ca that: nguoi dung bam hai lan truoc khi request dau tra ve. Khoa phai
       la mot — do la toan bo ly do §11.4 ton tai. Giu request dau treo bang
@@ -156,98 +156,98 @@ describe("khoa idempotency cua nut Thu lai (B-231)", () => {
       dau tien, ma `await api.thuLai(...)` la dong ay — nen ca hai lan goi da
       toi noi truoc khi dong lenh ke tiep chay.
     */
-    const treo = giuLaiMotLanGoi();
+    const held = holdOneCall();
 
     await act(async () => {
-      void result.current.thuLai(CAU_TRA_LOI);
-      void result.current.thuLai(CAU_TRA_LOI);
-      treo.nha();
+      void result.current.retry(ANSWER_ID);
+      void result.current.retry(ANSWER_ID);
+      held.release();
     });
 
-    expect(thuLai).toHaveBeenCalledTimes(2);
-    expect(khoaLanGoi(0)).toBe(khoaLanGoi(1));
+    expect(retry).toHaveBeenCalledTimes(2);
+    expect(keyOfCall(0)).toBe(keyOfCall(1));
   });
 
   it("3 — sau `202` thi khoa duoc BO: lan bam sau la mot anh em that (§8.2)", async () => {
-    const result = await hookDaMoHoiThoai();
+    const result = await hookWithOpenConversation();
 
     await act(async () => {
-      await result.current.thuLai(CAU_TRA_LOI);
+      await result.current.retry(ANSWER_ID);
     });
     await act(async () => {
-      await result.current.thuLai(CAU_TRA_LOI);
+      await result.current.retry(ANSWER_ID);
     });
 
-    expect(khoaLanGoi(0)).not.toBe(khoaLanGoi(1));
+    expect(keyOfCall(0)).not.toBe(keyOfCall(1));
   });
 
   it("4 — HONG thi GIU khoa: bam lai van la cung mot y dinh (luat 2)", async () => {
-    const result = await hookDaMoHoiThoai();
-    thuLai.mockRejectedValueOnce(new Error("mang rot"));
+    const result = await hookWithOpenConversation();
+    retry.mockRejectedValueOnce(new Error("mang rot"));
 
     await act(async () => {
-      await result.current.thuLai(CAU_TRA_LOI);
+      await result.current.retry(ANSWER_ID);
     });
     await act(async () => {
-      await result.current.thuLai(CAU_TRA_LOI);
+      await result.current.retry(ANSWER_ID);
     });
 
-    expect(khoaLanGoi(0)).toBe(khoaLanGoi(1));
+    expect(keyOfCall(0)).toBe(keyOfCall(1));
   });
 
   it("5 — hai model KHAC nhau la hai y dinh, tuc hai khoa", async () => {
-    const result = await hookDaMoHoiThoai();
-    const treo = giuLaiMotLanGoi();
+    const result = await hookWithOpenConversation();
+    const held = holdOneCall();
 
     await act(async () => {
-      void result.current.thuLai(CAU_TRA_LOI);
-      void result.current.thuLai(CAU_TRA_LOI, MODEL_KHAC);
-      treo.nha();
+      void result.current.retry(ANSWER_ID);
+      void result.current.retry(ANSWER_ID, OTHER_MODEL);
+      held.release();
     });
 
     // Cung mot khoa se lam lan goi thu hai nhan BAN PHAT LAI cua lan dau, tuc
     // "Doi model & thu lai" khong doi duoc model nao ca.
-    expect(khoaLanGoi(0)).not.toBe(khoaLanGoi(1));
+    expect(keyOfCall(0)).not.toBe(keyOfCall(1));
   });
 });
 
 describe("hai nut Thu lai gui hai body khac nhau (T-3.7)", () => {
   it("nut tron KHONG gui `model_id` — backend dung lai model cu", async () => {
-    const result = await hookDaMoHoiThoai();
+    const result = await hookWithOpenConversation();
 
     await act(async () => {
-      await result.current.thuLai(CAU_TRA_LOI);
+      await result.current.retry(ANSWER_ID);
     });
 
-    expect(thuLai.mock.calls[0][1]).toEqual({});
+    expect(retry.mock.calls[0][1]).toEqual({});
   });
 
   it("nut 'Doi model' gui dung id duoc truyen vao", async () => {
-    const result = await hookDaMoHoiThoai();
+    const result = await hookWithOpenConversation();
 
     await act(async () => {
-      await result.current.thuLai(CAU_TRA_LOI, MODEL_KHAC);
+      await result.current.retry(ANSWER_ID, OTHER_MODEL);
     });
 
-    expect(thuLai.mock.calls[0][1]).toEqual({ model_id: MODEL_KHAC });
+    expect(retry.mock.calls[0][1]).toEqual({ model_id: OTHER_MODEL });
   });
 });
 
 describe("danhGia doc lai duong di tu server (T-3.7)", () => {
   it("ghi xong thi `GET /conversations/{id}` chay lai — khong tu va vao state", async () => {
-    const result = await hookDaMoHoiThoai();
-    danhGia.mockResolvedValue({
-      message_id: CAU_TRA_LOI,
+    const result = await hookWithOpenConversation();
+    sendFeedback.mockResolvedValue({
+      message_id: ANSWER_ID,
       feedback: "like",
       feedback_reason: null,
     });
-    docHoiThoai.mockClear();
+    getConversation.mockClear();
 
     await act(async () => {
-      await result.current.danhGia(CAU_TRA_LOI, "like");
+      await result.current.sendFeedback(ANSWER_ID, "like");
     });
 
-    expect(danhGia).toHaveBeenCalledWith(CAU_TRA_LOI, "like");
-    expect(docHoiThoai).toHaveBeenCalledWith(HOI_THOAI);
+    expect(sendFeedback).toHaveBeenCalledWith(ANSWER_ID, "like");
+    expect(getConversation).toHaveBeenCalledWith(CONVERSATION);
   });
 });

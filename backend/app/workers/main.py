@@ -55,10 +55,10 @@ from app.core.queue import GENERATE_JOB_NAME, redis_settings
 from app.db.session import dispose_engine
 from app.llm.adapters.system import SystemAdapter
 from app.workers.generate import CTX_LLM_CLIENT, generate
-from app.workers.reaper import REAPER_GIAY_TRONG_PHUT, REAPER_JOB_NAME, reaper
+from app.workers.reaper import REAPER_JOB_NAME, REAPER_SECONDS_IN_MINUTE, reaper
 from app.workers.spend_alert import (
     SPEND_ALERT_JOB_NAME,
-    SPEND_ALERT_PHUT_TRONG_GIO,
+    SPEND_ALERT_MINUTES_IN_HOUR,
     spend_alert,
 )
 
@@ -92,17 +92,17 @@ FUNCTIONS: list[Function] = [
 #: một sự kiện lúc khởi động, và một lần `docker compose up -d` lúc 23 giờ
 #: không nên tiêu mất lá thư duy nhất của ngày hôm đó.
 CRON_JOBS: list[CronJob] = [
-    cron(reaper, name=REAPER_JOB_NAME, second=set(REAPER_GIAY_TRONG_PHUT), run_at_startup=False),
+    cron(reaper, name=REAPER_JOB_NAME, second=set(REAPER_SECONDS_IN_MINUTE), run_at_startup=False),
     cron(
         spend_alert,
         name=SPEND_ALERT_JOB_NAME,
-        minute=set(SPEND_ALERT_PHUT_TRONG_GIO),
+        minute=set(SPEND_ALERT_MINUTES_IN_HOUR),
         run_at_startup=False,
     ),
 ]
 
 
-def _dung_logging() -> None:
+def _setup_logging() -> None:
     """Gắn handler cho cây logger `app.*`. Xem docstring module."""
     # C20 (T-2.14) — trước cả `return` sớm: bộ che là của TIẾN TRÌNH,
     # không của handler, nên nó phải được cài kể cả khi handler đã có.
@@ -120,7 +120,7 @@ def _dung_logging() -> None:
 
 async def on_startup(ctx: dict[str, Any]) -> None:
     """`PING` Redis, dựng `LLMClient` dùng chung, rồi in log DoD của T-1.5."""
-    _dung_logging()
+    _setup_logging()
     await ctx["redis"].ping()
     ctx[CTX_LLM_CLIENT] = SystemAdapter.from_settings()
     conn = redis_settings()

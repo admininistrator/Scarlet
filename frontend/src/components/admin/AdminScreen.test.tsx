@@ -16,14 +16,14 @@ import { Outlet, RouterProvider, createMemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/api", async (importOriginal) => {
-  const that = await importOriginal<typeof import("../../lib/api")>();
+  const actual = await importOriginal<typeof import("../../lib/api")>();
   return {
-    ...that,
+    ...actual,
     api: {
-      ...that.api,
-      quanTriDanhSachUser: vi.fn(),
-      quanTriDoiTrangThai: vi.fn(),
-      quanTriChiPhi: vi.fn(),
+      ...actual.api,
+      adminListUsers: vi.fn(),
+      adminChangeStatus: vi.fn(),
+      adminCosts: vi.fn(),
       adminUpdateUser: vi.fn(),
       adminListTiers: vi.fn(),
       adminSystem: vi.fn(),
@@ -33,13 +33,13 @@ vi.mock("../../lib/api", async (importOriginal) => {
   };
 });
 
-import type { Phien } from "../../features/auth/usePhien";
+import type { SessionState } from "../../features/auth/useSessionState";
 import {
   ApiError,
   api,
   type AdminUserListItem,
   type AuditEntry,
-  type ChiPhiRa,
+  type CostsOut,
   type SystemStatus,
   type TierList,
 } from "../../lib/api";
@@ -48,8 +48,8 @@ import { AdminScreen } from "./AdminScreen";
 const UUID = "4e1dd956-7a41-4c1e-9b1f-0c6a2b9f1d2e";
 const ADMIN_ID = "11111111-1111-4111-8111-111111111111";
 
-const PHIEN = {
-  nguoiDung: {
+const SESSION = {
+  user: {
     id: ADMIN_ID,
     email: "admin@scarlet.test",
     display_name: null,
@@ -58,12 +58,12 @@ const PHIEN = {
     tier_name: "trusted",
     default_model: null,
   },
-  hoSo: null,
+  profile: null,
   profileReadAt: null,
-  dangTai: false,
-  biKhoa: false,
-  loi: null,
-} as unknown as Phien;
+  loading: false,
+  locked: false,
+  error: null,
+} as unknown as SessionState;
 
 const TIERS: TierList = {
   tiers: [
@@ -84,7 +84,7 @@ const TIERS: TierList = {
   limits_cache_ttl_s: 45,
 };
 
-function nguoi(p: Partial<AdminUserListItem> = {}): AdminUserListItem {
+function userRow(p: Partial<AdminUserListItem> = {}): AdminUserListItem {
   return {
     id: UUID,
     email: "moi@scarlet.test",
@@ -104,69 +104,69 @@ function nguoi(p: Partial<AdminUserListItem> = {}): AdminUserListItem {
   };
 }
 
-function moTai(duong: string) {
+function renderAt(path: string) {
   const router = createMemoryRouter(
-    [{ element: <Outlet context={PHIEN} />, children: [{ path: "/admin", element: <AdminScreen /> }] }],
-    { initialEntries: [duong] },
+    [{ element: <Outlet context={SESSION} />, children: [{ path: "/admin", element: <AdminScreen /> }] }],
+    { initialEntries: [path] },
   );
   return render(<RouterProvider router={router} />);
 }
 
 beforeEach(() => {
-  vi.mocked(api.quanTriDanhSachUser).mockReset();
-  vi.mocked(api.quanTriDanhSachUser).mockImplementation(async (trangThai) =>
-    trangThai === "pending_approval"
-      ? { users: [nguoi({ status: "pending_approval" })] }
-      : { users: [nguoi()] },
+  vi.mocked(api.adminListUsers).mockReset();
+  vi.mocked(api.adminListUsers).mockImplementation(async (status) =>
+    status === "pending_approval"
+      ? { users: [userRow({ status: "pending_approval" })] }
+      : { users: [userRow()] },
   );
   vi.mocked(api.adminListTiers).mockResolvedValue(TIERS);
   vi.mocked(api.adminUpdateUser).mockReset();
-  vi.mocked(api.adminUpdateUser).mockResolvedValue(nguoi());
-  vi.mocked(api.quanTriDoiTrangThai).mockReset();
+  vi.mocked(api.adminUpdateUser).mockResolvedValue(userRow());
+  vi.mocked(api.adminChangeStatus).mockReset();
   vi.mocked(api.healthDeep).mockReset();
 });
 
 describe("Duyet nguoi dung", () => {
   it("nut dieu huong dem don cho duyet; bam Duyet goi dung endpoint roi DOC LAI danh sach", async () => {
     const nd = userEvent.setup();
-    vi.mocked(api.quanTriDoiTrangThai).mockResolvedValue(nguoi());
-    moTai("/admin");
+    vi.mocked(api.adminChangeStatus).mockResolvedValue(userRow());
+    renderAt("/admin");
 
     expect(await screen.findByRole("heading", { name: "Chờ duyệt" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Duyệt người dùng\s*1/ })).toBeInTheDocument();
-    const truoc = vi.mocked(api.quanTriDanhSachUser).mock.calls.length;
+    const before = vi.mocked(api.adminListUsers).mock.calls.length;
 
     await nd.click(screen.getByRole("button", { name: "Duyệt" }));
 
-    expect(api.quanTriDoiTrangThai).toHaveBeenCalledWith(UUID, "approve");
+    expect(api.adminChangeStatus).toHaveBeenCalledWith(UUID, "approve");
     await waitFor(() => {
-      expect(vi.mocked(api.quanTriDanhSachUser).mock.calls.length).toBe(truoc + 1);
+      expect(vi.mocked(api.adminListUsers).mock.calls.length).toBe(before + 1);
     });
   });
 });
 
 describe("Nguoi dung", () => {
   it("NQ-66: nguoi chua co hoi thoai hien 0 va 0.000000, khong o trong", async () => {
-    moTai("/admin?screen=users");
+    renderAt("/admin?screen=users");
 
-    const bang = await screen.findByRole("region", { name: "Người dùng" });
-    const hang = within(bang).getByRole("row", { name: /moi@scarlet\.test/ });
-    expect(within(hang).getByText("0.000000")).toBeInTheDocument();
-    expect(within(hang).getByText("0")).toBeInTheDocument();
-    expect(bang.textContent).not.toContain(UUID);
+    const table = await screen.findByRole("region", { name: "Người dùng" });
+    const row = within(table).getByRole("row", { name: /moi@scarlet\.test/ });
+    expect(within(row).getByText("0.000000")).toBeInTheDocument();
+    expect(within(row).getByText("0")).toBeInTheDocument();
+    expect(table.textContent).not.toContain(UUID);
   });
 
   it("bat skill ⇒ PATCH ca ban ghi de; cau hieu luc dung TTL cua SERVER; hang mang nhan cho", async () => {
     const nd = userEvent.setup();
-    moTai("/admin?screen=users");
+    renderAt("/admin?screen=users");
 
     await nd.click(await screen.findByRole("switch", { name: /Chạy skill — moi@scarlet\.test/ }));
 
     expect(api.adminUpdateUser).toHaveBeenCalledWith(UUID, {
       limit_override: { can_execute_skills: true },
     });
-    const thongBao = await screen.findByText(/Có hiệu lực trong vòng/);
-    expect(thongBao.textContent).toMatch(/Có hiệu lực trong vòng 45 giây\./);
+    const notice = await screen.findByText(/Có hiệu lực trong vòng/);
+    expect(notice.textContent).toMatch(/Có hiệu lực trong vòng 45 giây\./);
     expect(screen.queryByText(/60 giây/)).toBeNull();
     expect(await screen.findByText("Chờ hiệu lực")).toBeInTheDocument();
     // Cam bay ②: khong bao gio noi "da ap dung".
@@ -175,10 +175,10 @@ describe("Nguoi dung", () => {
 
   it("tat ve dung gia tri tier ⇒ go khoa, ban ghi de rong ⇒ null", async () => {
     const nd = userEvent.setup();
-    vi.mocked(api.quanTriDanhSachUser).mockResolvedValue({
-      users: [nguoi({ limit_override_json: { can_execute_skills: true } })],
+    vi.mocked(api.adminListUsers).mockResolvedValue({
+      users: [userRow({ limit_override_json: { can_execute_skills: true } })],
     });
-    moTai("/admin?screen=users");
+    renderAt("/admin?screen=users");
 
     await nd.click(await screen.findByRole("switch", { name: /Chạy skill/ }));
 
@@ -186,14 +186,14 @@ describe("Nguoi dung", () => {
   });
 
   it("KHONG ve cong tac `is_default` (Cam bay ③ / B-152)", async () => {
-    moTai("/admin?screen=users");
+    renderAt("/admin?screen=users");
 
     await screen.findByRole("region", { name: "Hạn mức theo tier" });
     expect(screen.queryByText(/mặc định/i)).toBeNull();
   });
 });
 
-const HE_THONG: SystemStatus = {
+const SYSTEM: SystemStatus = {
   version: "0.9.4",
   queue_depth: null,
   streams_dang_chay: 2,
@@ -206,8 +206,8 @@ const HE_THONG: SystemStatus = {
 
 describe("He thong", () => {
   it("B-193: ly do rong van noi duoc dieu gi do; hang doi `null` KHONG hien 0", async () => {
-    vi.mocked(api.adminSystem).mockResolvedValue(HE_THONG);
-    moTai("/admin?screen=system");
+    vi.mocked(api.adminSystem).mockResolvedValue(SYSTEM);
+    renderAt("/admin?screen=system");
 
     expect(await screen.findByText(/Máy chủ không gửi lý do \(chuỗi rỗng\)/)).toBeInTheDocument();
     expect(screen.getByText("Không đo được")).toBeInTheDocument();
@@ -222,7 +222,7 @@ describe("He thong", () => {
       status: "down",
       checks: { redis: { ok: false, latency_ms: 2001, error: "TimeoutError" } },
     });
-    moTai("/admin?screen=system");
+    renderAt("/admin?screen=system");
 
     expect(await screen.findByText("TimeoutError")).toBeInTheDocument();
     expect(screen.getByText("API quản trị không trả lời")).toBeInTheDocument();
@@ -231,7 +231,7 @@ describe("He thong", () => {
 
   it("loi 403 thi KHONG roi ve /health/deep — do la tu choi, khong phai su co", async () => {
     vi.mocked(api.adminSystem).mockRejectedValue(new ApiError(403, "ADMIN_REQUIRED", "x"));
-    moTai("/admin?screen=system");
+    renderAt("/admin?screen=system");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("ADMIN_REQUIRED");
     expect(api.healthDeep).not.toHaveBeenCalled();
@@ -239,7 +239,7 @@ describe("He thong", () => {
 });
 
 describe("Nhat ky", () => {
-  const dong = (p: Partial<AuditEntry>): AuditEntry => ({
+  const auditRow = (p: Partial<AuditEntry>): AuditEntry => ({
     id: 1,
     created_at: "2026-09-22T07:32:00Z",
     actor_id: ADMIN_ID,
@@ -257,24 +257,24 @@ describe("Nhat ky", () => {
 
   it("DoD dong 3 / B-191: ai va voi ai bang chu, khong UUID; nguoi da xoa chi con 8 ky tu", async () => {
     vi.mocked(api.adminAuditLogs).mockResolvedValue({
-      items: [dong({}), dong({ id: 2, target_email: null })],
+      items: [auditRow({}), auditRow({ id: 2, target_email: null })],
       next_cursor: null,
     });
-    moTai("/admin?screen=audit");
+    renderAt("/admin?screen=audit");
 
-    const bang = await screen.findByRole("region", { name: "Nhật ký quản trị" });
-    expect(within(bang).getAllByText("admin@scarlet.test").length).toBe(2);
-    expect(within(bang).getByText("moi@scarlet.test")).toBeInTheDocument();
-    expect(within(bang).getByText("4e1dd956")).toBeInTheDocument();
-    expect(within(bang).getByText("Tài khoản đã xoá")).toBeInTheDocument();
-    expect(bang.textContent).not.toContain(UUID);
+    const table = await screen.findByRole("region", { name: "Nhật ký quản trị" });
+    expect(within(table).getAllByText("admin@scarlet.test").length).toBe(2);
+    expect(within(table).getByText("moi@scarlet.test")).toBeInTheDocument();
+    expect(within(table).getByText("4e1dd956")).toBeInTheDocument();
+    expect(within(table).getByText("Tài khoản đã xoá")).toBeInTheDocument();
+    expect(table.textContent).not.toContain(UUID);
   });
 });
 
 describe("Chi phi", () => {
   it("tong la chuoi cua SERVER (khong cong hai cot); nhan 'Cao nhat' la chuoi goc", async () => {
-    const khong = { cost_usd: "0", prompt_tokens: 0, completion_tokens: 0, events: 0 };
-    const baoCao: ChiPhiRa = {
+    const zero = { cost_usd: "0", prompt_tokens: 0, completion_tokens: 0, events: 0 };
+    const report: CostsOut = {
       since: "2026-09-16T00:00:00Z",
       until: "2026-09-23T00:00:00Z",
       key_source: "system",
@@ -292,10 +292,10 @@ describe("Chi phi", () => {
       ],
       by_user: [],
       by_model: [],
-      by_key_source: [{ key: "byok", label: null, metered: khong, unmetered: khong }],
+      by_key_source: [{ key: "byok", label: null, metered: zero, unmetered: zero }],
     };
-    vi.mocked(api.quanTriChiPhi).mockResolvedValue(baoCao);
-    moTai("/admin?screen=cost");
+    vi.mocked(api.adminCosts).mockResolvedValue(report);
+    renderAt("/admin?screen=cost");
 
     expect(await screen.findByText("Metered trong kỳ (USD)")).toBeInTheDocument();
     expect(screen.getAllByText("0.300000").length).toBeGreaterThan(0);
@@ -303,7 +303,7 @@ describe("Chi phi", () => {
     // 0.3 + 0.2 KHONG duoc xuat hien o bat cu dau.
     expect(screen.queryByText("0.500000")).toBeNull();
     // Mac dinh B-178: loc tien he thong, 7 ngay.
-    expect(vi.mocked(api.quanTriChiPhi).mock.calls[0][0]).toBe("system");
+    expect(vi.mocked(api.adminCosts).mock.calls[0][0]).toBe("system");
     // Truc theo nguon KHONG bi loc — van ke dong BYOK.
     expect(screen.getByRole("region", { name: /Theo nguồn tiền/ })).toHaveTextContent("BYOK");
   });

@@ -25,8 +25,8 @@ import { RouterProvider, createMemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../lib/api", async (importOriginal) => {
-  const that = await importOriginal<typeof import("../lib/api")>();
-  return { ...that, api: { ...that.api, toiLaAi: vi.fn(), danhSachModel: vi.fn() } };
+  const actual = await importOriginal<typeof import("../lib/api")>();
+  return { ...actual, api: { ...actual.api, me: vi.fn(), listModels: vi.fn() } };
 });
 
 vi.mock("../components/chat/ChatScreen", () => ({
@@ -35,32 +35,32 @@ vi.mock("../components/chat/ChatScreen", () => ({
   },
 }));
 
-import { api, type HoSoRa } from "../lib/api";
+import { api, type ProfileOut } from "../lib/api";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PATHS } from "./paths";
 import { routes } from "./routes";
 
-function Bum(): never {
+function Boom(): never {
   throw new Error("component nay luon nem");
 }
 
 /**
  * Mot phien THAT, `active` — dieu kien de `/` render toi `ChatScreen`.
  *
- * Toi T-3.1b, `toiLaAi` o day tra `null` va ca 2 van chay: `StatusGate` cho
+ * Toi T-3.1b, `me` o day tra `null` va ca 2 van chay: `StatusGate` cho
  * nguoi chua dang nhap vao thang man chat (nhanh danh tinh tam cua Phase 1).
  * T-3.1c chan duong do, nen mot `null` se dung lai o `/dang-nhap` va man
  * hinh "no tung" khong bao gio duoc render — tuc ca 2 se xanh vi mot ly do
  * khac han ly do no ra doi.
  */
-const NGUOI_DUNG: HoSoRa = {
+const USER: ProfileOut = {
   id: "22222222-2222-4222-8222-222222222222",
   email: "nguoi-dung@scarlet.test",
   display_name: null,
   status: "active",
   role: "user",
   tier_name: "free",
-  // Ba truong cua `HoSoRa` — chi `GET /auth/me` tra chung (B-213, T-3.4).
+  // Ba truong cua `ProfileOut` — chi `GET /auth/me` tra chung (B-213, T-3.4).
   default_model: null,
   quota: null,
   message_max_chars: 24000,
@@ -72,8 +72,8 @@ beforeEach(() => {
   // Day la hanh vi dung cua React, nhung o day no lam ban output cua ca bo
   // test bang mot stack cua mot loi DUOC MONG DOI.
   vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.mocked(api.toiLaAi).mockResolvedValue(NGUOI_DUNG);
-  vi.mocked(api.danhSachModel).mockResolvedValue([]);
+  vi.mocked(api.me).mockResolvedValue(USER);
+  vi.mocked(api.listModels).mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -84,7 +84,7 @@ describe("ErrorBoundary", () => {
   it("component nem loi luc render -> trang 500, khong phai man trang", () => {
     const { container } = render(
       <ErrorBoundary>
-        <Bum />
+        <Boom />
       </ErrorBoundary>,
     );
 

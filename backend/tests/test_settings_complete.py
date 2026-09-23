@@ -47,7 +47,7 @@ SCRIPT_ONLY = frozenset({"DEV_DATABASE_URL", "DEV_LITELLM_BASE_URL"})
 
 #: Ba nhóm trên gộp lại: những tên được phép có trong `.env.example` mà không
 #: có trong `Settings`.
-NGOAI_SETTINGS = COMPOSE_ONLY | TEST_ONLY | SCRIPT_ONLY
+OUTSIDE_SETTINGS = COMPOSE_ONLY | TEST_ONLY | SCRIPT_ONLY
 
 
 def env_example_keys() -> set[str]:
@@ -63,39 +63,39 @@ REQUIRED_FIELDS = sorted(
 )
 
 
-def test_env_example_ton_tai() -> None:
+def test_env_example_exists() -> None:
     assert ENV_EXAMPLE.is_file(), f"không tìm thấy {ENV_EXAMPLE}"
     assert env_example_keys(), ".env.example không có dòng gán biến nào"
 
 
-def test_moi_bien_trong_env_example_deu_co_trong_settings() -> None:
-    thieu = env_example_keys() - NGOAI_SETTINGS - set(Settings.model_fields)
-    assert not thieu, f"có trong .env.example nhưng thiếu trong Settings: {sorted(thieu)}"
+def test_every_env_example_var_is_in_settings() -> None:
+    missing = env_example_keys() - OUTSIDE_SETTINGS - set(Settings.model_fields)
+    assert not missing, f"có trong .env.example nhưng thiếu trong Settings: {sorted(missing)}"
 
 
-def test_moi_field_cua_settings_deu_co_trong_env_example() -> None:
-    thieu = set(Settings.model_fields) - env_example_keys()
-    assert not thieu, f"có trong Settings nhưng thiếu trong .env.example: {sorted(thieu)}"
+def test_every_settings_field_is_in_env_example() -> None:
+    missing = set(Settings.model_fields) - env_example_keys()
+    assert not missing, f"có trong Settings nhưng thiếu trong .env.example: {sorted(missing)}"
 
 
-def test_danh_sach_compose_only_khong_muc_ruong() -> None:
+def test_compose_only_list_has_no_dead_entries() -> None:
     """Tên đã miễn trừ mà biến mất khỏi `.env.example` thì phải gỡ khỏi danh sách."""
-    thua = NGOAI_SETTINGS - env_example_keys()
-    assert not thua, f"danh sách miễn trừ còn tên không có trong .env.example: {sorted(thua)}"
+    loser = OUTSIDE_SETTINGS - env_example_keys()
+    assert not loser, f"danh sách miễn trừ còn tên không có trong .env.example: {sorted(loser)}"
 
 
-def test_compose_only_khong_lan_vao_settings() -> None:
+def test_compose_only_stays_out_of_settings() -> None:
     """Biến của compose/pytest lọt vào Settings nghĩa là backend đọc thứ không phải của nó."""
-    lan = NGOAI_SETTINGS & set(Settings.model_fields)
-    assert not lan, f"danh sách miễn trừ trùng field của Settings: {sorted(lan)}"
+    leaked = OUTSIDE_SETTINGS & set(Settings.model_fields)
+    assert not leaked, f"danh sách miễn trừ trùng field của Settings: {sorted(leaked)}"
 
 
-def test_co_it_nhat_mot_bien_bat_buoc() -> None:
+def test_at_least_one_required_var() -> None:
     assert REQUIRED_FIELDS, "không có biến bắt buộc nào — fail-fast trở thành vô nghĩa"
 
 
 @pytest.mark.parametrize("name", REQUIRED_FIELDS)
-def test_thieu_bien_bat_buoc_thi_raise_va_in_dung_ten(
+def test_missing_required_var_raises_and_prints_its_name(
     monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
     monkeypatch.delenv(name, raising=False)
@@ -105,7 +105,7 @@ def test_thieu_bien_bat_buoc_thi_raise_va_in_dung_ten(
 
 
 @pytest.mark.parametrize("name", ["JWT_SECRET", "MASTER_ENCRYPTION_KEY"])
-def test_secret_ngan_bi_tu_choi(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+def test_short_secret_is_rejected(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setenv(name, "short")
     with pytest.raises(ValidationError) as exc:
         Settings()
@@ -115,14 +115,14 @@ def test_secret_ngan_bi_tu_choi(monkeypatch: pytest.MonkeyPatch, name: str) -> N
 
 
 @pytest.mark.parametrize("name", ["LITELLM_MASTER_KEY", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"])
-def test_secret_bat_buoc_de_rong_bi_tu_choi(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+def test_required_secret_left_empty_is_rejected(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setenv(name, "")
     with pytest.raises(ValidationError) as exc:
         Settings()
     assert name in str(exc.value)
 
 
-def test_canh_bao_khi_turnstile_secret_rong(
+def test_warns_when_turnstile_secret_empty(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.delenv("TURNSTILE_SECRET", raising=False)
@@ -131,7 +131,7 @@ def test_canh_bao_khi_turnstile_secret_rong(
     assert "TURNSTILE_SECRET" in caplog.text
 
 
-def test_bien_la_trong_moi_truong_khong_lam_hong_settings(
+def test_unknown_env_var_does_not_break_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`extra="forbid"` chỉ chặn tham số khởi tạo, không chặn biến môi trường lạ.
@@ -144,12 +144,12 @@ def test_bien_la_trong_moi_truong_khong_lam_hong_settings(
     assert Settings().MINIO_BUCKET == "scarlet"
 
 
-def test_base_url_khong_bi_them_dau_gach_cheo(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_base_url_gets_no_extra_slash(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://scarlet.example/")
     assert Settings().PUBLIC_BASE_URL == "https://scarlet.example"
 
 
-def test_import_module_co_san_instance_settings() -> None:
+def test_module_import_provides_settings_instance() -> None:
     from app.config import settings as module
 
     assert isinstance(module.settings, Settings)

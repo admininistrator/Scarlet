@@ -118,7 +118,7 @@ async def read_snapshot(
     now = time.time()
     redis = get_redis()
 
-    ra: list[WindowSnapshot] = []
+    out: list[WindowSnapshot] = []
     for window in windows():
         try:
             state = await read_window(redis, window, user_id=user_id, now=now)
@@ -134,7 +134,7 @@ async def read_snapshot(
 
         limit = limits.for_window(window)
         remaining = max(Decimal(0), limit - state.spent)
-        ra.append(
+        out.append(
             WindowSnapshot(
                 limit_type=window.limit_type,
                 limit_usd=limit,
@@ -144,4 +144,4 @@ async def read_snapshot(
                 retry_after=state.retry_after_s(need_to_free=state.spent - limit, now=now),
             )
         )
-    return ra
+    return out

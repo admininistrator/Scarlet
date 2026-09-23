@@ -33,7 +33,7 @@ provider — mà ba kết luận đó dẫn tới ba việc sửa hoàn toàn kh
 
 **1. `t0` đặt TRƯỚC `POST`, không phải lúc nhận event `start`.** Đây là cạm
 bẫy T-1.12 ghi thẳng ra, và nó không phải chuyện câu chữ: `start` được
-`workers/generate.py` phát **sau** `_chuan_bi()`, tức sau khi job đã nằm chờ
+`workers/generate.py` phát **sau** `_prepare()`, tức sau khi job đã nằm chờ
 trong hàng đợi arq và sau khi `context.build` đã chạy xong. Bấm giờ từ `start`
 là tự tặng mình đúng hai chặng mà A1 vừa tạo ra — và người dùng thì đếm từ lúc
 bấm nút.
@@ -98,31 +98,31 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-GOC_REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(GOC_REPO / "backend"))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 # ──────────────────────────── hằng số của phép đo ───────────────────────────
 
 #: "30 lượt cho mỗi model" — con số trong "Việc cần làm" của T-1.12.
-SO_LUOT = 30
+RUNS = 30
 
 #: Hai ngưỡng p95 của S2 (§2.3). Để ở đây chứ không trong `Settings`: chúng là
 #: *tiêu chí nghiệm thu* của một script chạy tay, không phải cấu hình mà app
-#: đọc lúc boot — cùng chỗ đứng với `SO_LUOT`/`TRAN_MOT_LUOT_S` của
+#: đọc lúc boot — cùng chỗ đứng với `RUNS`/`MAX_RUN_S` của
 #: `test_resume.py`. Đổi số ở đây là đổi tiêu chí, và phải đổi §2.3 trước.
-TRAN_P95_LOCAL_S = 2.0
-TRAN_P95_API_S = 4.0
+P95_LIMIT_LOCAL_S = 2.0
+P95_LIMIT_API_S = 4.0
 
 #: Trần cho MỘT lượt. Bài học B-88 ở mức script: mọi vòng chờ phải có phanh,
 #: nếu không "hỏng" sẽ đội lốt "đang chạy". Rộng: 9Router đo được ~22 s ngay cả
 #: khi khoẻ, nên trần chặt sẽ cắt nhầm một phép đo đúng.
-TRAN_MOT_LUOT_S = 150.0
+MAX_RUN_S = 150.0
 
 #: Nghỉ giữa hai lượt. Không phải để làm đẹp số: 30 lượt bắn liên tiếp vào cùng
 #: một provider là cách nhanh nhất để nhận `429`, và một `429` ở đây sẽ được
 #: ghi thành `+∞` (quyết định 4) — tức một lỗi hạ tầng của phép đo trông y hệt
 #: một lần hệ thống chậm thật.
-NGHI_GIUA_HAI_LUOT_S = 0.5
+PAUSE_BETWEEN_RUNS_S = 0.5
 
 #: Câu hỏi. Ngắn và tầm thường có chủ ý — S2 đo **độ trễ tới token đầu**, nên
 #: mọi thứ làm câu trả lời dài ra chỉ thêm nhiễu. Với model reasoning
@@ -131,28 +131,28 @@ NGHI_GIUA_HAI_LUOT_S = 0.5
 PROMPT = "Trả lời thật ngắn, đúng một câu: thủ đô của Việt Nam là thành phố nào?"
 
 #: DoD: `evals/results/ttft-{date}.json`. Thư mục đã nằm trong `.gitignore`.
-THU_MUC_KET_QUA = GOC_REPO / "evals" / "results"
+RESULTS_DIR = REPO_ROOT / "evals" / "results"
 
 #: `.env` của repo — nguồn của `PUBLIC_BASE_URL` và hai biến `DEV_*` khi chạy
 #: từ WSL host (compose nạp file này cho container, host thì không).
-ENV_FILE = GOC_REPO / ".env"
+ENV_FILE = REPO_ROOT / ".env"
 
 #: Postgres nhìn từ host. `DATABASE_URL` ghi `postgres:5432`, chỉ phân giải
 #: được trong network `internal` (C17/C45).
-BIEN_DB = "DEV_DATABASE_URL"
+DB_VAR = "DEV_DATABASE_URL"
 
 #: LiteLLM nhìn từ host — cùng hình dạng vấn đề, cùng cách giải. `Settings`
 #: ghi `LITELLM_BASE_URL=http://litellm:4000/v1`, một tên chỉ sống trong
 #: network `internal`; đường ② của script chạy ở WSL host nên phải đi qua cổng
 #: mà `docker-compose.yml` publish. Không dùng `os.getenv(..., "mặc định")`:
 #: A4 cấm, và một baseline trỏ nhầm chỗ là một baseline sai trong im lặng.
-BIEN_LITELLM = "DEV_LITELLM_BASE_URL"
+LITELLM_VAR = "DEV_LITELLM_BASE_URL"
 
-_DONG_GAN = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
-_CHU_THICH_CUOI_DONG = re.compile(r"\s+#.*$")
+_ASSIGNMENT_LINE = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
+_TRAILING_COMMENT = re.compile(r"\s+#.*$")
 
 
-def nap_env() -> None:
+def load_env() -> None:
     """Nạp `.env` vào `os.environ` — **không đè** biến đã export sẵn.
 
     Bản sao có chủ ý của `scripts/test_resume.py::nap_env`: cùng lý do (một
@@ -161,15 +161,15 @@ def nap_env() -> None:
     """
     if not ENV_FILE.is_file():
         return
-    for dong in ENV_FILE.read_text(encoding="utf-8").splitlines():
-        khop = _DONG_GAN.match(dong.strip().rstrip("\r"))
-        if khop is None:
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        match = _ASSIGNMENT_LINE.match(line.strip().rstrip("\r"))
+        if match is None:
             continue
-        ten, gia_tri = khop.group(1), _CHU_THICH_CUOI_DONG.sub("", khop.group(2)).strip()
-        os.environ.setdefault(ten, gia_tri)
+        name, value = match.group(1), _TRAILING_COMMENT.sub("", match.group(2)).strip()
+        os.environ.setdefault(name, value)
 
 
-nap_env()
+load_env()
 
 import asyncpg  # noqa: E402
 import httpx  # noqa: E402
@@ -182,17 +182,17 @@ from app.db.models import UserRole, UserStatus  # noqa: E402
 from app.llm.adapters.system import SystemAdapter  # noqa: E402
 
 
-def bien_bat_buoc(ten: str, goi_y: str) -> str:
+def required_var(name: str, hint: str) -> str:
     """Đọc một biến `DEV_*`, thiếu thì **nổ ngay kèm tên biến** (A4)."""
-    gia_tri = os.environ.get(ten)
-    if not gia_tri:
-        raise SystemExit(f"thiếu {ten}. Đặt nó trong môi trường hoặc trong {ENV_FILE}. {goi_y}")
-    return gia_tri
+    value = os.environ.get(name)
+    if not value:
+        raise SystemExit(f"thiếu {name}. Đặt nó trong môi trường hoặc trong {ENV_FILE}. {hint}")
+    return value
 
 
 def dev_database_url() -> str:
-    url = bien_bat_buoc(
-        BIEN_DB, "Mẫu ở .env.example; cần `docker compose up -d postgres` publish 127.0.0.1:5432"
+    url = required_var(
+        DB_VAR, "Mẫu ở .env.example; cần `docker compose up -d postgres` publish 127.0.0.1:5432"
     )
     # asyncpg nhận DSN thuần, không hiểu phương ngữ `+asyncpg` của SQLAlchemy.
     return url.replace("postgresql+asyncpg://", "postgresql://")
@@ -201,7 +201,7 @@ def dev_database_url() -> str:
 # ═════════════════════════ nhóm ngưỡng của một model ═══════════════════════
 
 
-def nhom_cua(provider: Provider) -> str:
+def group_of(provider: Provider) -> str:
     """`api` (≤ 4.0 s) hay `local` (≤ 2.0 s) — xem docstring module.
 
     Đọc `base_url` của chính catalog thay vì giữ một danh sách tên provider ở
@@ -212,20 +212,20 @@ def nhom_cua(provider: Provider) -> str:
     return "api" if urlsplit(provider.base_url).scheme == "https" else "local"
 
 
-def tran_cua(nhom: str) -> float:
-    return TRAN_P95_API_S if nhom == "api" else TRAN_P95_LOCAL_S
+def limit_of(group: str) -> float:
+    return P95_LIMIT_API_S if group == "api" else P95_LIMIT_LOCAL_S
 
 
 # ═════════════════════════════ phân tích dòng SSE ══════════════════════════
 
 
 @dataclass(slots=True)
-class SuKien:
-    loai: str
+class SseEvent:
+    event: str
     data: str
 
 
-class BoDocSSE:
+class SseReader:
     """Gom byte thành event, chỉ phát ra khi đã gặp dòng trống kết thúc.
 
     Rút gọn từ `test_resume.py`: ở đây không ai ngắt giữa chừng nên `id:` không
@@ -234,98 +234,98 @@ class BoDocSSE:
     lên những byte chưa tới nơi.
     """
 
-    __slots__ = ("_dem", "_loai", "_data")
+    __slots__ = ("_buffer", "_event", "_data")
 
     def __init__(self) -> None:
-        self._dem = ""
+        self._buffer = ""
         self._reset()
 
     def _reset(self) -> None:
-        self._loai = "message"
+        self._event = "message"
         self._data: list[str] = []
 
-    def nap(self, khuc: str) -> list[SuKien]:
-        self._dem += khuc
-        ra: list[SuKien] = []
-        while "\n" in self._dem:
-            dong, self._dem = self._dem.split("\n", 1)
-            dong = dong.rstrip("\r")
-            if dong == "":
-                if self._data or self._loai != "message":
-                    ra.append(SuKien(self._loai, "\n".join(self._data)))
+    def feed(self, chunk: str) -> list[SseEvent]:
+        self._buffer += chunk
+        out: list[SseEvent] = []
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            line = line.rstrip("\r")
+            if line == "":
+                if self._data or self._event != "message":
+                    out.append(SseEvent(self._event, "\n".join(self._data)))
                 self._reset()
                 continue
-            if dong.startswith(":"):
+            if line.startswith(":"):
                 continue  # `: ping` của C2 — không phải event
-            ten, _, gia_tri = dong.partition(":")
-            gia_tri = gia_tri[1:] if gia_tri.startswith(" ") else gia_tri
-            if ten == "event":
-                self._loai = gia_tri
-            elif ten == "data":
-                self._data.append(gia_tri)
-        return ra
+            name, _, value = line.partition(":")
+            value = value[1:] if value.startswith(" ") else value
+            if name == "event":
+                self._event = value
+            elif name == "data":
+                self._data.append(value)
+        return out
 
 
 # ══════════════════════════════ một lượt đo ════════════════════════════════
 
 #: Giá trị của một chặng không đo được. Xem quyết định 4.
-HONG = math.inf
+FAILED = math.inf
 
 
 @dataclass(slots=True)
-class MotLuot:
+class Run:
     """Các mốc của một lượt, tính bằng giây kể từ `t0` (trước `POST`)."""
 
     luot: int
     model: str
     #: `POST` → `202`. Ngân sách §7.2 ① là < 100 ms; A1 sống hay chết ở đây.
-    http: float = HONG
+    http: float = FAILED
     #: `202` → lúc CLIENT ĐỌC ĐƯỢC event `start`. Ba thứ nằm trong đây, không
     #: phải hai: hàng đợi arq (arq poll theo nhịp, nên 0–`poll_delay`),
-    #: `_chuan_bi()` tức `context.build` (§7.2 ③), **và** thời gian mở kết nối
+    #: `_prepare()` tức `context.build` (§7.2 ③), **và** thời gian mở kết nối
     #: SSE qua Nginx — script chỉ `GET stream_url` sau khi `202` đã về, đúng
     #: như trình duyệt làm. Chặng này không tách nhỏ hơn được từ phía client;
     #: tách được thì phải đọc log `request_id` của §21.1 ở cả hai tiến trình.
-    hang_doi_context: float = HONG
+    hang_doi_context: float = FAILED
     #: `start` → `delta` đầu tiên. `client.stream()` + mẩu đầu của provider.
-    upstream: float = HONG
+    upstream: float = FAILED
     #: `t0` → `delta` đầu tiên. **Đây là con số của S2.**
-    tong: float = HONG
+    tong: float = FAILED
     #: `t0` → event `reasoning` đầu tiên, nếu model có (B-33). Không phải S2 —
     #: in ra vì với model reasoning, đây mới là lúc màn hình hết trống.
     reasoning: float | None = None
     #: Đường ② — gọi thẳng LiteLLM, không qua Scarlet.
-    baseline: float = HONG
+    baseline: float = FAILED
     #: Rỗng nếu lượt đo trọn vẹn. Một lượt hỏng được ở CẢ HAI đường, nên
-    #: `them_ly_do` nối chứ không ghi đè — mất một nửa lý do là mất đúng nửa
+    #: `add_reason` nối chứ không ghi đè — mất một nửa lý do là mất đúng nửa
     #: mà người đọc đang cần.
     ly_do_hong: str = ""
 
-    def them_ly_do(self, cau: str) -> None:
-        self.ly_do_hong = f"{self.ly_do_hong} · {cau}" if self.ly_do_hong else cau
+    def add_reason(self, sentence: str) -> None:
+        self.ly_do_hong = f"{self.ly_do_hong} · {sentence}" if self.ly_do_hong else sentence
 
 
 @dataclass(slots=True)
-class KetQuaModel:
+class ModelResult:
     model: str
     provider: str
-    nhom: str
-    tran_p95_s: float
-    luot: list[MotLuot] = field(default_factory=list)
+    group: str
+    p95_limit_s: float
+    luot: list[Run] = field(default_factory=list)
 
-    def cot(self, ten: str) -> list[float]:
-        return [getattr(mot, ten) for mot in self.luot]
-
-    @property
-    def so_hong(self) -> int:
-        return sum(1 for mot in self.luot if mot.ly_do_hong)
+    def column(self, name: str) -> list[float]:
+        return [getattr(run, name) for run in self.luot]
 
     @property
-    def dat(self) -> bool:
-        return phan_vi(self.cot("tong"), 95) <= self.tran_p95_s
+    def failed_count(self) -> int:
+        return sum(1 for run in self.luot if run.ly_do_hong)
+
+    @property
+    def passed(self) -> bool:
+        return percentile(self.column("tong"), 95) <= self.p95_limit_s
 
 
-def hieu_theo_luot(k: KetQuaModel) -> tuple[list[float], int]:
+def per_run_overhead(k: ModelResult) -> tuple[list[float], int]:
     """`TTFT − baseline` của TỪNG lượt, bỏ những lượt không định nghĩa được.
 
     Một lượt mà **một trong hai** đường không ra chữ thì hiệu của nó không có
@@ -335,30 +335,30 @@ def hieu_theo_luot(k: KetQuaModel) -> tuple[list[float], int]:
     cột duy nhất của bảng cần cả hai đường cùng thành công, nên nó là cột duy
     nhất được phép loại mẫu.
     """
-    cap = zip(k.cot("tong"), k.cot("baseline"), strict=True)
-    dung = [a - b for a, b in cap if math.isfinite(a) and math.isfinite(b)]
-    return dung, len(k.luot) - len(dung)
+    cap = zip(k.column("tong"), k.column("baseline"), strict=True)
+    usable = [a - b for a, b in cap if math.isfinite(a) and math.isfinite(b)]
+    return usable, len(k.luot) - len(usable)
 
 
-def phan_vi(mau: list[float], p: float) -> float:
+def percentile(samples: list[float], p: float) -> float:
     """Phân vị thứ `p` theo **thứ hạng gần nhất** — xem quyết định 5.
 
     `ceil(p/100 * N)` là hạng (1-based) của phần tử cần lấy. Với N=30: p50 →
     hạng 15, p95 → hạng 29. Mọi giá trị trả về đều là một lượt có thật, kể cả
     khi nó là `+∞` của một lượt hỏng.
     """
-    if not mau:
-        return HONG
-    xep = sorted(mau)
-    hang = math.ceil(p / 100 * len(xep))
-    return xep[min(max(hang, 1), len(xep)) - 1]
+    if not samples:
+        return FAILED
+    ordered = sorted(samples)
+    rank = math.ceil(p / 100 * len(ordered))
+    return ordered[min(max(rank, 1), len(ordered)) - 1]
 
 
-class QuaHan(Exception):  # noqa: N818 - tên theo nghiệp vụ
-    """Vượt `TRAN_MOT_LUOT_S`. Treo cũng là đỏ, chỉ là kiểu đỏ không tự khai."""
+class Timeout(Exception):  # noqa: N818 - tên theo nghiệp vụ
+    """Vượt `MAX_RUN_S`. Treo cũng là đỏ, chỉ là kiểu đỏ không tự khai."""
 
 
-async def dong_gon(vong: AsyncIterator[Any]) -> None:
+async def close_quietly(stream: AsyncIterator[Any]) -> None:
     """Đóng một async iterator sau khi thoát sớm khỏi nó.
 
     **Cả hai đường của script này đều thoát sớm** — đó là toàn bộ điểm của
@@ -373,12 +373,12 @@ async def dong_gon(vong: AsyncIterator[Any]) -> None:
     `AsyncIterator` **không** hứa có `aclose()` — hôm nay cả hai đều là async
     generator nên đều có. Không có thì cũng không có gì để đóng.
     """
-    aclose = getattr(vong, "aclose", None)
+    aclose = getattr(stream, "aclose", None)
     if aclose is not None:
         await aclose()
 
 
-class PhepDo:
+class Measurement:
     """Hai đường chạy của một model, dùng lại cho cả 30 lượt."""
 
     def __init__(
@@ -394,28 +394,28 @@ class PhepDo:
         self._cid = conversation_id
         self._on_am = on_am
 
-    def _log(self, *phan: object) -> None:
+    def _log(self, *parts: object) -> None:
         if not self._on_am:
-            print("   ", *phan, flush=True)
+            print("   ", *parts, flush=True)
 
-    async def mot_luot(self, so: int, model: ModelEntry, baseline_truoc: bool) -> MotLuot:
-        """Chạy cả hai đường. `baseline_truoc` đảo thứ tự — xem quyết định 3."""
-        kq = MotLuot(luot=so, model=model.id)
-        if baseline_truoc:
+    async def one_run(self, so: int, model: ModelEntry, baseline_first: bool) -> Run:
+        """Chạy cả hai đường. `baseline_first` đảo thứ tự — xem quyết định 3."""
+        kq = Run(luot=so, model=model.id)
+        if baseline_first:
             await self._do_baseline(kq, model)
-            await asyncio.sleep(NGHI_GIUA_HAI_LUOT_S)
-            await self._do_qua_scarlet(kq, model)
+            await asyncio.sleep(PAUSE_BETWEEN_RUNS_S)
+            await self._measure_via_scarlet(kq, model)
         else:
-            await self._do_qua_scarlet(kq, model)
-            await asyncio.sleep(NGHI_GIUA_HAI_LUOT_S)
+            await self._measure_via_scarlet(kq, model)
+            await asyncio.sleep(PAUSE_BETWEEN_RUNS_S)
             await self._do_baseline(kq, model)
         return kq
 
     # ───────────────────────── ① qua Scarlet ─────────────────────────
 
-    async def _do_qua_scarlet(self, kq: MotLuot, model: ModelEntry) -> None:
+    async def _measure_via_scarlet(self, kq: Run, model: ModelEntry) -> None:
         t0 = time.perf_counter()
-        han = t0 + TRAN_MOT_LUOT_S
+        deadline = t0 + MAX_RUN_S
         amid: str | None = None
         try:
             res = await self._http.post(
@@ -434,44 +434,44 @@ class PhepDo:
             kq.http = time.perf_counter() - t0
             body = res.json()
             amid = body["assistant_message_id"]
-            await self._doc_toi_delta_dau(kq, body["stream_url"], t0, han)
-        except QuaHan as loi:
-            kq.ly_do_hong = f"TREO — {loi}"
-        except httpx.HTTPError as loi:
-            kq.ly_do_hong = f"HTTP — {type(loi).__name__}: {loi}"
-        except (KeyError, ValueError) as loi:
-            kq.ly_do_hong = f"RESPONSE — {type(loi).__name__}: {loi}"
+            await self._read_until_first_delta(kq, body["stream_url"], t0, deadline)
+        except Timeout as error:
+            kq.ly_do_hong = f"TREO — {error}"
+        except httpx.HTTPError as error:
+            kq.ly_do_hong = f"HTTP — {type(error).__name__}: {error}"
+        except (KeyError, ValueError) as error:
+            kq.ly_do_hong = f"RESPONSE — {type(error).__name__}: {error}"
         finally:
             if amid is not None:
-                await self._huy(amid)
+                await self._cancel(amid)
 
-    async def _doc_toi_delta_dau(self, kq: MotLuot, stream_url: str, t0: float, han: float) -> None:
+    async def _read_until_first_delta(self, kq: Run, stream_url: str, t0: float, deadline: float) -> None:
         """Đọc SSE tới `delta` đầu tiên rồi đóng. Ghi mốc `start`/`reasoning` dọc đường."""
-        bo_doc = BoDocSSE()
+        reader = SseReader()
         t_start: float | None = None
         async with self._http.stream("GET", stream_url) as res:
             res.raise_for_status()
-            khuc_iter = res.aiter_text()
+            chunk_iter = res.aiter_text()
             try:
-                async for khuc in khuc_iter:
-                    if time.perf_counter() > han:
-                        raise QuaHan(f"quá {TRAN_MOT_LUOT_S:.0f}s chưa thấy `delta`")
-                    for su_kien in bo_doc.nap(khuc):
-                        moc = time.perf_counter() - t0
-                        if su_kien.loai == "start" and t_start is None:
-                            t_start = moc
-                            kq.hang_doi_context = moc - kq.http
-                        elif su_kien.loai == "reasoning" and kq.reasoning is None:
-                            kq.reasoning = moc
-                        elif su_kien.loai == "delta":
-                            kq.tong = moc
+                async for chunk in chunk_iter:
+                    if time.perf_counter() > deadline:
+                        raise Timeout(f"quá {MAX_RUN_S:.0f}s chưa thấy `delta`")
+                    for event in reader.feed(chunk):
+                        elapsed = time.perf_counter() - t0
+                        if event.event == "start" and t_start is None:
+                            t_start = elapsed
+                            kq.hang_doi_context = elapsed - kq.http
+                        elif event.event == "reasoning" and kq.reasoning is None:
+                            kq.reasoning = elapsed
+                        elif event.event == "delta":
+                            kq.tong = elapsed
                             # `start` phải tới trước `delta` (producer phát nó
                             # trước `client.stream`), nhưng không giả định:
                             # thiếu nó thì chặng upstream là không đo được,
                             # không phải bằng 0.
-                            kq.upstream = moc - t_start if t_start is not None else HONG
+                            kq.upstream = elapsed - t_start if t_start is not None else FAILED
                             return
-                        elif su_kien.loai in ("done", "error"):
+                        elif event.event in ("done", "error"):
                             # Mang theo cả payload: event `error` của §7.4 chở
                             # một MÃ (`UPSTREAM_ERROR`, `WORKER_LOST`…) và đó
                             # là câu trả lời duy nhất cho "vì sao lượt này
@@ -481,26 +481,26 @@ class PhepDo:
                             # script tự xoá dữ liệu của nó ở cuối nên message
                             # cũng không còn trong Postgres để hỏi lại.
                             kq.ly_do_hong = (
-                                f"kết thúc bằng `{su_kien.loai}` mà chưa có "
-                                f"`delta` — {su_kien.data[:200]}"
+                                f"kết thúc bằng `{event.event}` mà chưa có "
+                                f"`delta` — {event.data[:200]}"
                             )
                             return
             finally:
-                await dong_gon(khuc_iter)
+                await close_quietly(chunk_iter)
 
         # Stream đóng mà không `done`, không `error`, không `delta`.
         kq.ly_do_hong = "stream đóng khi chưa có `delta` nào"
 
-    async def _huy(self, assistant_message_id: str) -> None:
+    async def _cancel(self, assistant_message_id: str) -> None:
         """§7.5 — cắt hoá đơn. Lỗi ở đây KHÔNG được làm hỏng một phép đo đã xong."""
         try:
             await self._http.post(f"/api/v1/messages/{assistant_message_id}/cancel")
-        except httpx.HTTPError as loi:
-            self._log(f"(không huỷ được {assistant_message_id}: {type(loi).__name__}: {loi})")
+        except httpx.HTTPError as error:
+            self._log(f"(không huỷ được {assistant_message_id}: {type(error).__name__}: {error})")
 
     # ───────────────────────── ② baseline ─────────────────────────
 
-    async def _do_baseline(self, kq: MotLuot, model: ModelEntry) -> None:
+    async def _do_baseline(self, kq: Run, model: ModelEntry) -> None:
         """Gọi thẳng LiteLLM với ĐÚNG tham số mà `workers/generate.py` gửi.
 
         Giống tới từng tham số là điều kiện để hiệu hai số có nghĩa:
@@ -511,7 +511,7 @@ class PhepDo:
         `context.build` dựng — chênh lệch đó **là** thứ cần đo.
         """
         t0 = time.perf_counter()
-        han = t0 + TRAN_MOT_LUOT_S
+        deadline = t0 + MAX_RUN_S
         try:
             stream = await self._adapter.stream(
                 model=model.id,
@@ -523,28 +523,28 @@ class PhepDo:
             )
             try:
                 async for chunk in stream:
-                    if time.perf_counter() > han:
-                        raise QuaHan(f"quá {TRAN_MOT_LUOT_S:.0f}s chưa thấy chunk `delta`")
+                    if time.perf_counter() > deadline:
+                        raise Timeout(f"quá {MAX_RUN_S:.0f}s chưa thấy chunk `delta`")
                     if chunk.kind == "delta" and chunk.text:
                         kq.baseline = time.perf_counter() - t0
                         return
                     if chunk.kind == "done":
                         break
             finally:
-                await dong_gon(stream)
-        except QuaHan as loi:
-            kq.them_ly_do(f"BASELINE TREO — {loi}")
+                await close_quietly(stream)
+        except Timeout as error:
+            kq.add_reason(f"BASELINE TREO — {error}")
             return
-        except Exception as loi:  # noqa: BLE001 — mọi lỗi provider đều là một lượt hỏng
-            kq.them_ly_do(f"BASELINE — {type(loi).__name__}: {loi}")
+        except Exception as error:  # noqa: BLE001 — mọi lỗi provider đều là một lượt hỏng
+            kq.add_reason(f"BASELINE — {type(error).__name__}: {error}")
             return
-        kq.them_ly_do("BASELINE — hết stream mà không có chunk `delta`")
+        kq.add_reason("BASELINE — hết stream mà không có chunk `delta`")
 
 
 # ═══════════════════════════ dựng và dọn dữ liệu ═══════════════════════════
 
 
-def cookie_phien(user_id: uuid.UUID, tier: str) -> dict[str, str]:
+def session_cookie(user_id: uuid.UUID, tier: str) -> dict[str, str]:
     """Header `Cookie` mang một access JWT thật cho `user_id` (§11.2).
 
     T-3.1c xoá nhánh danh tính tạm của Phase 1, thứ script này mang danh tính
@@ -553,7 +553,7 @@ def cookie_phien(user_id: uuid.UUID, tier: str) -> dict[str, str]:
     — rẻ hơn hẳn đường `POST /auth/login` (cần một mật khẩu Argon2id thật, một
     lần Turnstile, và một suất trong hạn mức §10.6 cho mỗi lần chạy DoD).
 
-    `status=ACTIVE` khớp đúng hàng mà `tao_user` chèn vào Postgres, và `tier`
+    `status=ACTIVE` khớp đúng hàng mà `create_user` chèn vào Postgres, và `tier`
     đọc từ chính hàng ấy chứ không gõ tay (A3): một claim nói khác DB sẽ chạy
     được hôm nay — §11.1 đọc trạng thái từ claim — rồi hỏng vào đúng ngày ai
     đó đổi nó sang đọc DB.
@@ -568,26 +568,26 @@ def cookie_phien(user_id: uuid.UUID, tier: str) -> dict[str, str]:
     return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
-async def tao_user(pool: asyncpg.Pool, dau_vet: str) -> tuple[uuid.UUID, str]:
+async def create_user(pool: asyncpg.Pool, marker: str) -> tuple[uuid.UUID, str]:
     """`users` chưa có model ORM (Phase 2, T-2.1) nên chèn bằng SQL thô.
 
-    Trả kèm `tier_name` để `cookie_phien` khỏi phải gõ lại tên tier (A3).
+    Trả kèm `tier_name` để `session_cookie` khỏi phải gõ lại tên tier (A3).
     """
     async with pool.acquire() as conn:
-        hang = await conn.fetchrow(
+        rank = await conn.fetchrow(
             # `status='active'` từ T-3.1c: cookie phiên mang claim `active`
-            # (xem `cookie_phien`), và hàng trong DB phải nói cùng một câu.
+            # (xem `session_cookie`), và hàng trong DB phải nói cùng một câu.
             "INSERT INTO users (email, password_hash, status) "
             "VALUES ($1, $2, 'active') RETURNING id, tier_name",
-            f"{dau_vet}@scarlet.test",
+            f"{marker}@scarlet.test",
             "khong-phai-hash-that",
         )
-    assert hang is not None
-    assert isinstance(hang["id"], uuid.UUID)
-    return hang["id"], str(hang["tier_name"])
+    assert rank is not None
+    assert isinstance(rank["id"], uuid.UUID)
+    return rank["id"], str(rank["tier_name"])
 
 
-async def don_dep(pool: asyncpg.Pool, user_id: uuid.UUID) -> tuple[int, int]:
+async def cleanup(pool: asyncpg.Pool, user_id: uuid.UUID) -> tuple[int, int]:
     """Xoá **cứng** mọi thứ script vừa tạo (B-81).
 
     `conversations.active_leaf_id` trỏ vào `messages` nên phải gỡ con trỏ
@@ -615,7 +615,7 @@ async def don_dep(pool: asyncpg.Pool, user_id: uuid.UUID) -> tuple[int, int]:
 # ═════════════════════════════ in bảng và ghi JSON ═════════════════════════
 
 #: Các chặng in ra bảng, theo thứ tự thời gian của một lượt.
-CHANG = (
+STAGES = (
     ("http", "POST→202"),
     ("hang_doi_context", "→start"),
     ("upstream", "→delta"),
@@ -624,7 +624,7 @@ CHANG = (
 )
 
 
-def s(gia_tri: float) -> str:
+def s(value: float) -> str:
     """Giây → chuỗi rộng 8.
 
     `∞` là một lượt **không ra chữ nào** (quyết định 4), không phải "thiếu dữ
@@ -632,16 +632,16 @@ def s(gia_tri: float) -> str:
     trừ nào đó lọt `inf - inf`; in ra chứ không để nó thành chuỗi `nan` giữa
     một cột số.
     """
-    if math.isnan(gia_tri):
+    if math.isnan(value):
         return f"{'—':>8}"
-    if math.isinf(gia_tri):
-        return f"{'-∞' if gia_tri < 0 else '∞':>8}"
-    return f"{gia_tri:8.3f}"
+    if math.isinf(value):
+        return f"{'-∞' if value < 0 else '∞':>8}"
+    return f"{value:8.3f}"
 
 
 #: Hai câu phải đứng ngay dưới bảng, vì không có chúng thì bảng đọc sai được
 #: theo đúng hai cách mà một người cẩn thận sẽ mắc.
-CHU_THICH_BANG = (
+TABLE_NOTES = (
     "mỗi chặng lấy phân vị ĐỘC LẬP trên cột của nó, nên bốn dòng đầu KHÔNG"
     " cộng lại thành dòng TTFT —\n    p95 của mỗi chặng đến từ một lượt khác"
     " nhau.",
@@ -651,44 +651,44 @@ CHU_THICH_BANG = (
 )
 
 
-def in_bang(ket_qua: list[KetQuaModel], bo_qua: set[str]) -> None:
-    rong = max(len(k.model) for k in ket_qua)
+def print_table(results: list[ModelResult], bo_qua: set[str]) -> None:
+    width = max(len(k.model) for k in results)
     print("\n" + "═" * 78)
     print("TTFT — giây, từ TRƯỚC `POST` tới event `delta` đầu tiên (S2, §2.3)")
     print("═" * 78)
-    for k in ket_qua:
-        tran = f"p95 ≤ {k.tran_p95_s:.1f}s"
-        mien = "  [MIỄN TRỪ]" if k.model in bo_qua else ""
-        print(f"\n{k.model:<{rong}}  ({k.provider} · nhóm {k.nhom} · {tran}){mien}")
+    for k in results:
+        limit = f"p95 ≤ {k.p95_limit_s:.1f}s"
+        exempt = "  [MIỄN TRỪ]" if k.model in bo_qua else ""
+        print(f"\n{k.model:<{width}}  ({k.provider} · nhóm {k.group} · {limit}){exempt}")
         print(f"  {'chặng':<18}{'p50':>8}{'p95':>8}{'max':>8}")
-        for ten, nhan in CHANG:
-            cot = k.cot(ten)
-            print(f"  {nhan:<18}{s(phan_vi(cot, 50))}{s(phan_vi(cot, 95))}{s(max(cot))}")
-        them, bo = hieu_theo_luot(k)
-        nhan = "Scarlet cộng thêm"
-        duoi = f"  — bỏ {bo}/{len(k.luot)} lượt không đủ hai đầu" if bo else ""
+        for name, label in STAGES:
+            column = k.column(name)
+            print(f"  {label:<18}{s(percentile(column, 50))}{s(percentile(column, 95))}{s(max(column))}")
+        added, dropped = per_run_overhead(k)
+        label = "Scarlet cộng thêm"
+        suffix = f"  — bỏ {dropped}/{len(k.luot)} lượt không đủ hai đầu" if dropped else ""
         print(
-            f"  {nhan:<18}{s(phan_vi(them, 50))}{s(phan_vi(them, 95))}"
-            f"{s(max(them) if them else HONG)}{duoi}"
+            f"  {label:<18}{s(percentile(added, 50))}{s(percentile(added, 95))}"
+            f"{s(max(added) if added else FAILED)}{suffix}"
         )
-        co_reasoning = [mot.reasoning for mot in k.luot if mot.reasoning is not None]
-        if co_reasoning:
+        with_reasoning = [run.reasoning for run in k.luot if run.reasoning is not None]
+        if with_reasoning:
             print(
-                f"  {'(→reasoning đầu)':<18}{s(phan_vi(co_reasoning, 50))}"
-                f"{s(phan_vi(co_reasoning, 95))}{s(max(co_reasoning))}  "
-                f"— {len(co_reasoning)}/{len(k.luot)} lượt (B-33, không phải S2)"
+                f"  {'(→reasoning đầu)':<18}{s(percentile(with_reasoning, 50))}"
+                f"{s(percentile(with_reasoning, 95))}{s(max(with_reasoning))}  "
+                f"— {len(with_reasoning)}/{len(k.luot)} lượt (B-33, không phải S2)"
             )
-        if k.so_hong:
-            print(f"  ✗ {k.so_hong}/{len(k.luot)} lượt hỏng — đếm là ∞ (quyết định 4):")
-            for mot in k.luot:
-                if mot.ly_do_hong:
-                    print(f"      lượt {mot.luot}: {mot.ly_do_hong}")
+        if k.failed_count:
+            print(f"  ✗ {k.failed_count}/{len(k.luot)} lượt hỏng — đếm là ∞ (quyết định 4):")
+            for run in k.luot:
+                if run.ly_do_hong:
+                    print(f"      lượt {run.luot}: {run.ly_do_hong}")
     print()
-    for cau in CHU_THICH_BANG:
-        print(f"  · {cau}")
+    for sentence in TABLE_NOTES:
+        print(f"  · {sentence}")
 
 
-def _ten_con_trong(goc: Path) -> Path:
+def _free_name(base: Path) -> Path:
     """Tên đầu tiên chưa bị chiếm, thử `-hhmm` rồi `-hhmm-2`, `-hhmm-3`…
 
     Hậu tố phút một mình là **chưa đủ** và đó không phải chuyện lý thuyết: một
@@ -697,17 +697,17 @@ def _ten_con_trong(goc: Path) -> Path:
     phiên vá B-106 này. Vòng lặp chạy tới khi tìm được tên trống nên hàm này
     **không bao giờ** trả về một đường dẫn đã có file.
     """
-    phut = datetime.now().strftime("%H%M")
-    ung_vien = goc.with_name(f"{goc.stem}-{phut}{goc.suffix}")
-    lan = 2
-    while ung_vien.is_file():
-        ung_vien = goc.with_name(f"{goc.stem}-{phut}-{lan}{goc.suffix}")
-        lan += 1
-    return ung_vien
+    minute = datetime.now().strftime("%H%M")
+    candidate = base.with_name(f"{base.stem}-{minute}{base.suffix}")
+    attempt = 2
+    while candidate.is_file():
+        candidate = base.with_name(f"{base.stem}-{minute}-{attempt}{base.suffix}")
+        attempt += 1
+    return candidate
 
 
-def ghi_json(
-    ket_qua: list[KetQuaModel], bo_qua: set[str], duong_dan: Path, *, ghi_de: bool = False
+def write_json(
+    results: list[ModelResult], bo_qua: set[str], path: Path, *, ghi_de: bool = False
 ) -> None:
     """DoD: `evals/results/ttft-{date}.json`.
 
@@ -733,10 +733,10 @@ def ghi_json(
     tiền thật và tính bằng chục phút, nên vứt kết quả đi để bảo vệ kết quả cũ
     là đổi một mất mát lấy một mất mát khác. Ngả này không mất bên nào.
     """
-    duong_dan.parent.mkdir(parents=True, exist_ok=True)
-    da_co = duong_dan.is_file()
-    if da_co and not ghi_de:
-        duong_dan = _ten_con_trong(duong_dan)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    exists = path.is_file()
+    if exists and not ghi_de:
+        path = _free_name(path)
 
     def so(v: float) -> float | None:
         # `math.isfinite` chứ không phải `math.isinf`: `nan` cũng không phải
@@ -747,124 +747,124 @@ def ghi_json(
     payload = {
         "tieu_chi": "S2",
         "sinh_luc": datetime.now(UTC).isoformat(timespec="seconds"),
-        "so_luot": len(ket_qua[0].luot) if ket_qua else 0,
+        "so_luot": len(results[0].luot) if results else 0,
         "prompt": PROMPT,
         "base_url": settings.PUBLIC_BASE_URL,
-        "nguong_p95_s": {"local": TRAN_P95_LOCAL_S, "api": TRAN_P95_API_S},
+        "nguong_p95_s": {"local": P95_LIMIT_LOCAL_S, "api": P95_LIMIT_API_S},
         "bo_qua": sorted(bo_qua),
         "models": [
             {
                 "model": k.model,
                 "provider": k.provider,
-                "nhom": k.nhom,
-                "tran_p95_s": k.tran_p95_s,
-                "dat": k.dat,
+                "nhom": k.group,
+                "tran_p95_s": k.p95_limit_s,
+                "dat": k.passed,
                 "mien_tru": k.model in bo_qua,
-                "so_hong": k.so_hong,
+                "so_hong": k.failed_count,
                 "phan_vi": {
-                    ten: {
-                        "p50": so(phan_vi(k.cot(ten), 50)),
-                        "p95": so(phan_vi(k.cot(ten), 95)),
-                        "max": so(max(k.cot(ten))),
+                    name: {
+                        "p50": so(percentile(k.column(name), 50)),
+                        "p95": so(percentile(k.column(name), 95)),
+                        "max": so(max(k.column(name))),
                     }
-                    for ten, _ in CHANG
+                    for name, _ in STAGES
                 },
                 "scarlet_cong_them": {
-                    "p50": so(phan_vi(hieu_theo_luot(k)[0], 50)),
-                    "p95": so(phan_vi(hieu_theo_luot(k)[0], 95)),
-                    "so_luot_bo": hieu_theo_luot(k)[1],
+                    "p50": so(percentile(per_run_overhead(k)[0], 50)),
+                    "p95": so(percentile(per_run_overhead(k)[0], 95)),
+                    "so_luot_bo": per_run_overhead(k)[1],
                 },
-                "mau": [_mot_json(mot, so) for mot in k.luot],
+                "mau": [_run_json(run, so) for run in k.luot],
             }
-            for k in ket_qua
+            for k in results
         ],
     }
-    duong_dan.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    if da_co and ghi_de:
-        print(f"\nĐÈ LÊN {duong_dan.relative_to(GOC_REPO)}  (--ghi-de)")
-    elif da_co:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if exists and ghi_de:
+        print(f"\nĐÈ LÊN {path.relative_to(REPO_ROOT)}  (--ghi-de)")
+    elif exists:
         print(
-            f"\nđã ghi {duong_dan.relative_to(GOC_REPO)}"
+            f"\nđã ghi {path.relative_to(REPO_ROOT)}"
             f"\n  (hôm nay đã có một phép đo rồi nên KHÔNG đè lên nó; `--ghi-de` nếu muốn đè)"
         )
     else:
-        print(f"\nđã ghi {duong_dan.relative_to(GOC_REPO)}")
+        print(f"\nđã ghi {path.relative_to(REPO_ROOT)}")
 
 
-def _mot_json(mot: MotLuot, so: Callable[[float], float | None]) -> dict[str, object]:
+def _run_json(run: Run, so: Callable[[float], float | None]) -> dict[str, object]:
     """Một lượt → object JSON, với mọi chặng đã đi qua `so()`."""
-    return {**asdict(mot), **{ten: so(getattr(mot, ten)) for ten, _ in CHANG}}
+    return {**asdict(run), **{name: so(getattr(run, name)) for name, _ in STAGES}}
 
 
-def in_phan_quyet(ket_qua: list[KetQuaModel], bo_qua: set[str]) -> int:
+def print_verdict(results: list[ModelResult], bo_qua: set[str]) -> int:
     """Một dòng cho mỗi model, rồi một dòng tổng. Mã thoát ≠ 0 nếu có model trượt."""
     print("\n" + "═" * 78)
-    truot: list[str] = []
-    for k in ket_qua:
-        p95 = phan_vi(k.cot("tong"), 95)
-        if k.dat:
-            dau = "PASS"
+    failing: list[str] = []
+    for k in results:
+        p95 = percentile(k.column("tong"), 95)
+        if k.passed:
+            verdict = "PASS"
         elif k.model in bo_qua:
-            dau = "MIỄN"
+            verdict = "MIỄN"
         else:
-            dau = "FAIL"
-            truot.append(k.model)
-        print(f"  {dau}  {k.model}: p95 = {s(p95).strip()}s (trần {k.tran_p95_s:.1f}s)")
+            verdict = "FAIL"
+            failing.append(k.model)
+        print(f"  {verdict}  {k.model}: p95 = {s(p95).strip()}s (trần {k.p95_limit_s:.1f}s)")
     print("═" * 78)
-    print(f"{'FAIL' if truot else 'PASS'} {len(ket_qua) - len(truot)}/{len(ket_qua)}")
-    if truot:
-        print(f"S2 chưa đạt: {', '.join(truot)}")
-    return 1 if truot else 0
+    print(f"{'FAIL' if failing else 'PASS'} {len(results) - len(failing)}/{len(results)}")
+    if failing:
+        print(f"S2 chưa đạt: {', '.join(failing)}")
+    return 1 if failing else 0
 
 
 # ══════════════════════════════════ chạy ═══════════════════════════════════
 
 
-def chon_model(args: argparse.Namespace) -> list[ModelEntry]:
-    dang_bat = [m for m in get_catalog().models if m.enabled]
+def pick_models(args: argparse.Namespace) -> list[ModelEntry]:
+    enabled_models = [m for m in get_catalog().models if m.enabled]
     if args.model:
-        xin = set(args.model)
-        chon = [m for m in dang_bat if m.id in xin]
-        thieu = xin - {m.id for m in chon}
-        if thieu:
-            raise SystemExit(f"model không có trong catalog hoặc đã tắt: {sorted(thieu)}")
-        return chon
-    if not dang_bat:
+        requested = set(args.model)
+        chosen = [m for m in enabled_models if m.id in requested]
+        missing = requested - {m.id for m in chosen}
+        if missing:
+            raise SystemExit(f"model không có trong catalog hoặc đã tắt: {sorted(missing)}")
+        return chosen
+    if not enabled_models:
         raise SystemExit("catalog không có model nào đang bật (§9.2)")
-    return dang_bat
+    return enabled_models
 
 
-async def chay(args: argparse.Namespace) -> int:
-    models = chon_model(args)
+async def run(args: argparse.Namespace) -> int:
+    models = pick_models(args)
     bo_qua = set(args.bo_qua)
-    la = {m.id for m in models}
-    if khong_biet := bo_qua - la:
-        raise SystemExit(f"--bo-qua nhắc model không nằm trong lượt đo: {sorted(khong_biet)}")
+    known = {m.id for m in models}
+    if unknown := bo_qua - known:
+        raise SystemExit(f"--bo-qua nhắc model không nằm trong lượt đo: {sorted(unknown)}")
 
-    dau_vet = f"t112-{uuid.uuid4().hex[:8]}"
-    litellm_url = bien_bat_buoc(
-        BIEN_LITELLM, "Mẫu ở .env.example; cần `docker compose up -d litellm` publish cổng 4000"
+    marker = f"t112-{uuid.uuid4().hex[:8]}"
+    litellm_url = required_var(
+        LITELLM_VAR, "Mẫu ở .env.example; cần `docker compose up -d litellm` publish cổng 4000"
     )
     print(
         f"models={[m.id for m in models]}  luot={args.luot}\n"
-        f"base={settings.PUBLIC_BASE_URL}  baseline={litellm_url}  dau_vet={dau_vet}"
+        f"base={settings.PUBLIC_BASE_URL}  baseline={litellm_url}  dau_vet={marker}"
     )
 
     catalog = get_catalog()
-    ket_qua = [
-        KetQuaModel(
+    results = [
+        ModelResult(
             model=m.id,
             provider=m.provider,
-            nhom=(nhom := nhom_cua(catalog.providers[m.provider])),
-            tran_p95_s=tran_cua(nhom),
+            group=(group := group_of(catalog.providers[m.provider])),
+            p95_limit_s=limit_of(group),
         )
         for m in models
     ]
-    theo_model = {k.model: k for k in ket_qua}
+    by_model = {k.model: k for k in results}
 
     pool = await asyncpg.create_pool(dev_database_url(), min_size=1, max_size=2)
     assert pool is not None
-    user_id, tier = await tao_user(pool, dau_vet)
+    user_id, tier = await create_user(pool, marker)
     adapter = SystemAdapter(
         base_url=litellm_url,
         api_key=settings.LITELLM_MASTER_KEY.get_secret_value(),
@@ -874,27 +874,27 @@ async def chay(args: argparse.Namespace) -> int:
     try:
         async with httpx.AsyncClient(
             base_url=settings.PUBLIC_BASE_URL,
-            headers=cookie_phien(user_id, tier),
+            headers=session_cookie(user_id, tier),
             verify=args.cacert or False,
-            timeout=httpx.Timeout(TRAN_MOT_LUOT_S, read=TRAN_MOT_LUOT_S),
+            timeout=httpx.Timeout(MAX_RUN_S, read=MAX_RUN_S),
         ) as http:
-            res = await http.post("/api/v1/conversations", json={"title": f"S2 {dau_vet}"})
+            res = await http.post("/api/v1/conversations", json={"title": f"S2 {marker}"})
             res.raise_for_status()
             conversation_id = uuid.UUID(res.json()["id"])
 
-            do = PhepDo(http, adapter, conversation_id, on_am=args.im_lang)
-            bat_dau = time.monotonic()
+            do = Measurement(http, adapter, conversation_id, on_am=args.im_lang)
+            started = time.monotonic()
             for i in range(args.luot):
                 # Access token sống `ACCESS_TOKEN_TTL_MIN` (15 phút, §11.2) còn
                 # cả lượt đo này dài hơn thế. Làm mới ở đầu mỗi lượt là việc mà
                 # một client thật làm bằng `POST /auth/refresh`; ở đây ký thẳng
                 # rẻ hơn và không tiêu một refresh token nào.
-                http.headers.update(cookie_phien(user_id, tier))
+                http.headers.update(session_cookie(user_id, tier))
                 # Vòng tròn: một lượt chạy hết cả bốn model rồi mới sang lượt
                 # sau — xem quyết định 3.
                 for model in models:
-                    kq = await do.mot_luot(i + 1, model, baseline_truoc=i % 2 == 1)
-                    theo_model[model.id].luot.append(kq)
+                    kq = await do.one_run(i + 1, model, baseline_first=i % 2 == 1)
+                    by_model[model.id].luot.append(kq)
                     if not args.im_lang:
                         print(
                             f"  luot {i + 1:>3}/{args.luot}  {model.id:<18}"
@@ -902,31 +902,31 @@ async def chay(args: argparse.Namespace) -> int:
                             f"{'  ✗ ' + kq.ly_do_hong if kq.ly_do_hong else ''}",
                             flush=True,
                         )
-                    await asyncio.sleep(NGHI_GIUA_HAI_LUOT_S)
-            print(f"\nxong {args.luot * len(models)} lượt trong {time.monotonic() - bat_dau:.0f}s")
+                    await asyncio.sleep(PAUSE_BETWEEN_RUNS_S)
+            print(f"\nxong {args.luot * len(models)} lượt trong {time.monotonic() - started:.0f}s")
     finally:
         await adapter.close()
         if args.khong_don_dep:
             print(f"\n(giữ lại dữ liệu: user_id={user_id})")
         else:
-            so_msg, so_ht = await don_dep(pool, user_id)
+            so_msg, so_ht = await cleanup(pool, user_id)
             print(f"\nđã dọn: {so_msg} message, {so_ht} hội thoại, 1 user")
         await pool.close()
 
-    in_bang(ket_qua, bo_qua)
-    ghi_json(
-        ket_qua,
+    print_table(results, bo_qua)
+    write_json(
+        results,
         bo_qua,
-        THU_MUC_KET_QUA / f"ttft-{date.today().isoformat()}.json",
+        RESULTS_DIR / f"ttft-{date.today().isoformat()}.json",
         ghi_de=args.ghi_de,
     )
-    return in_phan_quyet(ket_qua, bo_qua)
+    return print_verdict(results, bo_qua)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--luot", type=int, default=SO_LUOT, help=f"số lượt mỗi model (mặc định {SO_LUOT})"
+        "--luot", type=int, default=RUNS, help=f"số lượt mỗi model (mặc định {RUNS})"
     )
     parser.add_argument(
         "--model", action="append", default=[], help="chỉ đo model này (lặp lại được)"
@@ -950,7 +950,7 @@ def main() -> int:
     parser.add_argument("--cacert", default=None, help="CA của mkcert; không có thì bỏ kiểm TLS")
     parser.add_argument("--khong-don-dep", action="store_true", help="giữ user/hội thoại lại")
     parser.add_argument("--im-lang", action="store_true", help="không in tiến trình từng lượt")
-    return asyncio.run(chay(parser.parse_args()))
+    return asyncio.run(run(parser.parse_args()))
 
 
 if __name__ == "__main__":

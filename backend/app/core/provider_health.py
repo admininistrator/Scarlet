@@ -22,7 +22,7 @@ liên tiếp. Model Picker mở nhiều hơn màn Hệ thống rất nhiều l�
 /models` còn được gọi lúc mở trang. Một lượt đo cho mỗi request nghĩa là mỗi
 lần mở app cộng thêm gần một giây, cho một câu trả lời đổi vài lần một ngày.
 
-Vì vậy kết quả sống trong `_bo_nho` với hạn `TTL_S`. Hệ quả phải nói thẳng:
+Vì vậy kết quả sống trong `_cache` với hạn `TTL_S`. Hệ quả phải nói thẳng:
 câu trả lời có thể **cũ tới `TTL_S` giây**. Đó là đánh đổi có chủ ý — thứ tệ
 nhất một câu trả lời cũ gây ra là một hàng xám thêm nửa phút (hoặc một hàng
 sáng mà bấm vào thì `POST .../messages` trả lỗi của provider). FE **không**
@@ -90,7 +90,7 @@ HOST_DEPENDENT = "host-dependent"
 #: Có dấu, khác các `message` của `core/errors.py`: những câu kia là mã cho
 #: FE phân nhánh (§18 khung lỗi), câu này đi thẳng lên màn hình người dùng —
 #: cùng hạng với `badge` trong `model_catalog.json`, thứ cũng có dấu.
-LY_DO_KHONG_PHAN_HOI = (
+NO_RESPONSE_REASON = (
     "{label} đang không phản hồi, nên các model của nguồn này tạm thời không "
     "chọn được. Hãy thử lại sau ít phút, hoặc xem mục Hệ thống để biết chi tiết."
 )
@@ -113,13 +113,13 @@ class ProviderStatus:
 #: sinh ra nó**. Vế thứ ba là cách bộ nhớ này tự hết hiệu lực sau `POST
 #: /admin/catalog/reload`: `catalog.reload()` thay cả object, nên một phép so
 #: sánh `is` là đủ — không cần ai nhớ gọi một hàm dọn (§19.1, S7).
-_bo_nho: dict[str, ProviderStatus] = {}
-_het_han: float = 0.0
-_catalog_da_do: Catalog | None = None
+_cache: dict[str, ProviderStatus] = {}
+_expires_at: float = 0.0
+_probed_catalog: Catalog | None = None
 
 #: Hai tab mở cùng lúc lúc bộ nhớ vừa hết hạn là hai lượt đo song song cho
 #: cùng một câu hỏi. Khoá này gộp chúng lại làm một.
-_khoa = asyncio.Lock()
+_lock = asyncio.Lock()
 
 
 async def probe_provider(provider: Provider) -> None:
@@ -141,7 +141,7 @@ async def probe_provider(provider: Provider) -> None:
         resp.raise_for_status()
 
 
-async def _do_mot(provider: Provider) -> ProviderStatus:
+async def _probe_one(provider: Provider) -> ProviderStatus:
     """Đo một provider `host-dependent`. **Không bao giờ ném.**
 
     Thiếu `health_path` thì trả `available=True` chứ không `False`: không đo
@@ -164,21 +164,21 @@ async def _do_mot(provider: Provider) -> ProviderStatus:
         logger.info("provider '%s' khong phan hoi: %s", provider.label, str(exc)[:200])
         return ProviderStatus(
             available=False,
-            reason=LY_DO_KHONG_PHAN_HOI.format(label=provider.label),
+            reason=NO_RESPONSE_REASON.format(label=provider.label),
         )
     return ProviderStatus(available=True, reason=None)
 
 
-async def _do_tat_ca(cat: Catalog) -> dict[str, ProviderStatus]:
+async def _probe_all(cat: Catalog) -> dict[str, ProviderStatus]:
     """Một lượt đo cho cả catalog. Các provider chạy **song song**."""
-    can_do = [(khoa, p) for khoa, p in cat.providers.items() if p.availability == HOST_DEPENDENT]
-    ket_qua = {khoa: ProviderStatus(available=True, reason=None) for khoa in cat.providers}
+    can_do = [(key, p) for key, p in cat.providers.items() if p.availability == HOST_DEPENDENT]
+    result = {key: ProviderStatus(available=True, reason=None) for key in cat.providers}
     if not can_do:
-        return ket_qua
-    da_do = await asyncio.gather(*(_do_mot(p) for _, p in can_do))
-    for (khoa, _), trang_thai in zip(can_do, da_do, strict=True):
-        ket_qua[khoa] = trang_thai
-    return ket_qua
+        return result
+    probed = await asyncio.gather(*(_probe_one(p) for _, p in can_do))
+    for (key, _), status in zip(can_do, probed, strict=True):
+        result[key] = status
+    return result
 
 
 async def provider_statuses() -> dict[str, ProviderStatus]:
@@ -187,26 +187,26 @@ async def provider_statuses() -> dict[str, ProviderStatus]:
     Khoá của dict là khoá provider trong `model_catalog.json` (`ModelEntry.provider`
     trỏ vào đúng đó), **không** phải `label`.
     """
-    global _bo_nho, _het_han, _catalog_da_do
+    global _cache, _expires_at, _probed_catalog
 
     cat = get_catalog()
-    if _catalog_da_do is cat and time.monotonic() < _het_han:
-        return _bo_nho
+    if _probed_catalog is cat and time.monotonic() < _expires_at:
+        return _cache
 
-    async with _khoa:
+    async with _lock:
         # Người khác vừa đo xong trong lúc mình chờ khoá.
         cat = get_catalog()
-        if _catalog_da_do is cat and time.monotonic() < _het_han:
-            return _bo_nho
-        _bo_nho = await _do_tat_ca(cat)
-        _het_han = time.monotonic() + TTL_S
-        _catalog_da_do = cat
-    return _bo_nho
+        if _probed_catalog is cat and time.monotonic() < _expires_at:
+            return _cache
+        _cache = await _probe_all(cat)
+        _expires_at = time.monotonic() + TTL_S
+        _probed_catalog = cat
+    return _cache
 
 
-def quen_het() -> None:
+def forget_all() -> None:
     """Vứt bộ nhớ đi. Cho test, và cho một lượt đo lại tường minh."""
-    global _bo_nho, _het_han, _catalog_da_do
-    _bo_nho = {}
-    _het_han = 0.0
-    _catalog_da_do = None
+    global _cache, _expires_at, _probed_catalog
+    _cache = {}
+    _expires_at = 0.0
+    _probed_catalog = None

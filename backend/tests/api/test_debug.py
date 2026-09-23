@@ -17,6 +17,6 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_debug_sse_tra_404_khi_debug_tat() -> None:
+def test_debug_sse_is_404_when_debug_off() -> None:
     assert settings.DEBUG is False
     assert client.get("/api/v1/_debug/sse").status_code == 404

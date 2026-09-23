@@ -24,9 +24,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
 
-const fetchGia = vi.fn();
+const fakeFetch = vi.fn();
 
-function traVe(status: number, body: unknown = null): Response {
+function respond(status: number, body: unknown = null): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -36,16 +36,16 @@ function traVe(status: number, body: unknown = null): Response {
 }
 
 /** URL cua lan goi `fetch` thu `n` (dem tu 0). */
-function urlLanGoi(n: number): string {
-  return String(fetchGia.mock.calls[n][0]);
+function urlOfCall(n: number): string {
+  return String(fakeFetch.mock.calls[n][0]);
 }
 
-function initLanGoi(n: number): RequestInit {
-  return fetchGia.mock.calls[n][1] as RequestInit;
+function initOfCall(n: number): RequestInit {
+  return fakeFetch.mock.calls[n][1] as RequestInit;
 }
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", fetchGia);
+  vi.stubGlobal("fetch", fakeFetch);
 });
 
 afterEach(() => {
@@ -54,67 +54,67 @@ afterEach(() => {
 
 describe("danhSachHoiThoai", () => {
   it("khong co con tro ⇒ khong co query string nao", async () => {
-    fetchGia.mockResolvedValue(traVe(200, { items: [], next_cursor: null }));
+    fakeFetch.mockResolvedValue(respond(200, { items: [], next_cursor: null }));
 
-    await api.danhSachHoiThoai();
+    await api.listConversations();
 
-    expect(urlLanGoi(0)).toBe("/api/v1/conversations");
+    expect(urlOfCall(0)).toBe("/api/v1/conversations");
   });
 
   it("co con tro ⇒ `?updated_before=`, va dau `+` cua mui gio duoc ma hoa", async () => {
-    fetchGia.mockResolvedValue(traVe(200, { items: [], next_cursor: null }));
+    fakeFetch.mockResolvedValue(respond(200, { items: [], next_cursor: null }));
 
-    await api.danhSachHoiThoai("2026-09-02T03:04:05.678901+00:00");
+    await api.listConversations("2026-09-02T03:04:05.678901+00:00");
 
     // `+` ⇒ `%2B`. Khong ma hoa thi server doc ra mot dau cach va tra 422.
-    expect(urlLanGoi(0)).toBe(
+    expect(urlOfCall(0)).toBe(
       "/api/v1/conversations?updated_before=2026-09-02T03%3A04%3A05.678901%2B00%3A00",
     );
   });
 
   it("`null` duoc doi xu nhu vang mat (khong gui `updated_before=null`)", async () => {
-    fetchGia.mockResolvedValue(traVe(200, { items: [], next_cursor: null }));
+    fakeFetch.mockResolvedValue(respond(200, { items: [], next_cursor: null }));
 
-    await api.danhSachHoiThoai(null);
+    await api.listConversations(null);
 
-    expect(urlLanGoi(0)).toBe("/api/v1/conversations");
+    expect(urlOfCall(0)).toBe("/api/v1/conversations");
   });
 });
 
 describe("suaHoiThoai", () => {
   it("chi gui DUNG nhung truong nguoi goi dat — vang mat khac `null`", async () => {
-    fetchGia.mockResolvedValue(traVe(200, {}));
+    fakeFetch.mockResolvedValue(respond(200, {}));
 
-    await api.suaHoiThoai("abc", { pinned: true });
-    expect(initLanGoi(0).method).toBe("PATCH");
-    expect(JSON.parse(String(initLanGoi(0).body))).toEqual({ pinned: true });
+    await api.updateConversation("abc", { pinned: true });
+    expect(initOfCall(0).method).toBe("PATCH");
+    expect(JSON.parse(String(initOfCall(0).body))).toEqual({ pinned: true });
 
-    await api.suaHoiThoai("abc", { title: null });
+    await api.updateConversation("abc", { title: null });
     // `title: null` = "xoa tieu de". No PHAI di ra day, khong bi `JSON.stringify`
     // bo mat — do la khac biet giua "xoa tieu de" va "dung dung toi tieu de".
-    expect(JSON.parse(String(initLanGoi(1).body))).toEqual({ title: null });
+    expect(JSON.parse(String(initOfCall(1).body))).toEqual({ title: null });
 
-    await api.suaHoiThoai("abc", { default_model: "mot-model" });
-    expect(JSON.parse(String(initLanGoi(2).body))).toEqual({ default_model: "mot-model" });
+    await api.updateConversation("abc", { default_model: "mot-model" });
+    expect(JSON.parse(String(initOfCall(2).body))).toEqual({ default_model: "mot-model" });
   });
 });
 
 describe("xoaHoiThoai", () => {
   it("`DELETE` va nuot duoc `204` (khong body de `json()` doc)", async () => {
-    fetchGia.mockResolvedValue(traVe(204));
+    fakeFetch.mockResolvedValue(respond(204));
 
-    await expect(api.xoaHoiThoai("abc")).resolves.toBeUndefined();
+    await expect(api.deleteConversation("abc")).resolves.toBeUndefined();
 
-    expect(urlLanGoi(0)).toBe("/api/v1/conversations/abc");
-    expect(initLanGoi(0).method).toBe("DELETE");
+    expect(urlOfCall(0)).toBe("/api/v1/conversations/abc");
+    expect(initOfCall(0).method).toBe("DELETE");
   });
 
   it("`404` (xoa lan hai) ⇒ `ApiError` mang `code` cua §18", async () => {
-    fetchGia.mockResolvedValue(
-      traVe(404, { error: { code: "CONVERSATION_NOT_FOUND", message: "khong tim thay" } }),
+    fakeFetch.mockResolvedValue(
+      respond(404, { error: { code: "CONVERSATION_NOT_FOUND", message: "khong tim thay" } }),
     );
 
-    await expect(api.xoaHoiThoai("abc")).rejects.toMatchObject({
+    await expect(api.deleteConversation("abc")).rejects.toMatchObject({
       status: 404,
       code: "CONVERSATION_NOT_FOUND",
     });

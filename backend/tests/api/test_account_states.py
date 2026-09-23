@@ -1,6 +1,6 @@
 """Máy trạng thái tài khoản + phân quyền (§11.1, UC-01) — T-2.7.
 
-Ma trận **5 trạng thái × 4 hành động = 20 ca** của DoD nằm trong `MA_TRAN`
+Ma trận **5 trạng thái × 4 hành động = 20 ca** của DoD nằm trong `MATRIX`
 ngay dưới, một dòng một ô của bảng §11.1. Viết thành một bảng dữ liệu chứ
 không 20 hàm rời: bảng trong kế hoạch có hình dạng gì thì bảng ở đây có đúng
 hình dạng ấy, nên thêm một trạng thái thứ sáu là thêm bốn dòng — và quên mất
@@ -46,14 +46,14 @@ from app.db.repositories import ConversationRepository
 from app.db.repositories.users import UserRepository
 from app.main import app
 
-DUONG_DAN_LOGIN = "/api/v1/auth/login"
-DUONG_DAN_ME = "/api/v1/auth/me"
-DUONG_DAN_HOI_THOAI = "/api/v1/conversations/{}"
-DUONG_DAN_MESSAGES = "/api/v1/conversations/{}/messages"
-DUONG_DAN_RETRY = "/api/v1/messages/{}/retry"
-DUONG_DAN_SUA = "/api/v1/messages/{}"
+LOGIN_PATH = "/api/v1/auth/login"
+ME_PATH = "/api/v1/auth/me"
+CONVERSATION_PATH = "/api/v1/conversations/{}"
+MESSAGES_PATH = "/api/v1/conversations/{}/messages"
+RETRY_PATH = "/api/v1/messages/{}/retry"
+EDIT_PATH = "/api/v1/messages/{}"
 
-_MAT_KHAU = "mot-mat-khau-du-manh-cho-test-t27-123"
+_PASSWORD = "mot-mat-khau-du-manh-cho-test-t27-123"
 
 #: Bốn cột của bảng §11.1, dưới dạng tên hành động.
 LOGIN = "dang_nhap"
@@ -65,7 +65,7 @@ CHAT_BYOK = "chat_byok"
 # ═══════════════════════════ hạ tầng của bộ test ════════════════════════════
 
 
-class _RedisGia:
+class _FakeRedis:
     """Blacklist rỗng — mọi token đều "chưa bị thu hồi" (§11.3).
 
     Bộ test này đo phép kiểm **trạng thái**, không đo blacklist (đó là việc của
@@ -83,41 +83,41 @@ class _RedisGia:
         return True
 
 
-class _ArqGia:
+class _FakeArq:
     """Pool arq giả — ghi lại lần enqueue thay vì nối `redis:6379`."""
 
     def __init__(self) -> None:
-        self.da_day: list[tuple[str, tuple[Any, ...]]] = []
+        self.pushed: list[tuple[str, tuple[Any, ...]]] = []
 
-    async def enqueue_job(self, ten: str, *args: Any, **_: Any) -> object:
-        self.da_day.append((ten, args))
+    async def enqueue_job(self, name: str, *args: Any, **_: Any) -> object:
+        self.pushed.append((name, args))
         return object()
 
 
 @pytest.fixture(autouse=True)
-def redis_gia(monkeypatch: pytest.MonkeyPatch) -> _RedisGia:
-    gia = _RedisGia()
-    monkeypatch.setattr("app.core.deps.get_redis", lambda: gia)
+def fake_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
+    fake = _FakeRedis()
+    monkeypatch.setattr("app.core.deps.get_redis", lambda: fake)
     # `app.core.ratelimit.get_redis` KHÔNG patch ở đây nữa (T-2.9): fixture
     # autouse `ratelimit_redis` của `tests/api/conftest.py` đã phủ cả ba lớp
-    # của module đó, kể cả hai script Lua mà `_RedisGia` không biết. Patch đè
+    # của module đó, kể cả hai script Lua mà `_FakeRedis` không biết. Patch đè
     # lên nó sẽ làm ba route sinh chữ trả `503` — đúng cái đã đo được khi thử.
-    return gia
+    return fake
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def arq_gia(monkeypatch: pytest.MonkeyPatch) -> _ArqGia:
-    gia = _ArqGia()
+async def fake_arq(monkeypatch: pytest.MonkeyPatch) -> _FakeArq:
+    fake = _FakeArq()
 
-    async def _pool() -> _ArqGia:
-        return gia
+    async def _pool() -> _FakeArq:
+        return fake
 
     monkeypatch.setattr("app.api.v1.messages.get_arq_pool", _pool)
-    return gia
+    return fake
 
 
 @pytest.fixture(autouse=True)
-def _db_cua_test(
+def _db_for_tests(
     monkeypatch: pytest.MonkeyPatch, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """`session_scope()` trong handler trỏ vào ĐÚNG kết nối của test (NQ-17)."""
@@ -138,7 +138,7 @@ async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
 #: Khoá BYOK giả, GHÉP lúc chạy. Một chuỗi khớp `sk-[a-zA-Z0-9]{20,}` nằm
 #: nguyên văn trong repo làm `scripts/check_hardcode.sh` lệnh 4 đỏ vĩnh viễn —
 #: cùng lý do và cùng cách làm với `tests/core/test_log_redact.py` (T-2.14).
-_KHOA_GIA = "sk-" + "abcdefghij" * 3
+_FAKE_KEY = "sk-" + "abcdefghij" * 3
 
 
 def _provider_byok() -> str:
@@ -162,19 +162,19 @@ def _provider_byok() -> str:
     return model.provider
 
 
-def _provider_khac_voi_mac_dinh() -> str:
+def _non_default_provider() -> str:
     """Một provider **khác** provider của model mặc định — nguyên liệu của B-140."""
-    mac_dinh = _provider_byok()
-    khac = [ten for ten in sorted(catalog.get_catalog().providers) if ten != mac_dinh]
-    assert khac, "catalog phải có ít nhất hai provider để đo khe hở B-140"
-    return khac[0]
+    default = _provider_byok()
+    others = [name for name in sorted(catalog.get_catalog().providers) if name != default]
+    assert others, "catalog phải có ít nhất hai provider để đo khe hở B-140"
+    return others[0]
 
 
-async def _tao_user(
+async def _create_user(
     session_factory: async_sessionmaker[AsyncSession],
-    trang_thai: UserStatus,
+    status: UserStatus,
     *,
-    co_byok: bool = False,
+    with_byok: bool = False,
     provider_byok: str | None = None,
 ) -> tuple[uuid.UUID, str]:
     """User với hash Argon2 thật, đặt sẵn `status`, tuỳ chọn thêm một khoá BYOK.
@@ -191,12 +191,12 @@ async def _tao_user(
     email = f"{uuid.uuid4().hex}@scarlet.example"
     async with session_factory() as session:
         user = await UserRepository(session).create_pending_user(
-            email=email, password_hash=await hash_password(_MAT_KHAU)
+            email=email, password_hash=await hash_password(_PASSWORD)
         )
         assert user is not None
-        await session.execute(update(User).where(User.id == user.id).values(status=trang_thai))
-        if co_byok:
-            sealed = seal(_KHOA_GIA)
+        await session.execute(update(User).where(User.id == user.id).values(status=status))
+        if with_byok:
+            sealed = seal(_FAKE_KEY)
             await session.execute(
                 text(
                     "INSERT INTO user_provider_keys "
@@ -212,14 +212,14 @@ async def _tao_user(
                     "provider": provider_byok or _provider_byok(),
                     "cipher": sealed.cipher,
                     "nonce": sealed.nonce,
-                    "last4": mask_secret(_KHOA_GIA),
+                    "last4": mask_secret(_FAKE_KEY),
                 },
             )
         await session.commit()
         return user.id, email
 
 
-def _dat_cookie_phien(client: AsyncClient, user_id: uuid.UUID, trang_thai: UserStatus) -> None:
+def _set_session_cookie(client: AsyncClient, user_id: uuid.UUID, status: UserStatus) -> None:
     """Cookie phiên mang đúng `status` cần đo — claim `status` là thứ
     `require_status` đọc (xem `app/core/deps.py`)."""
     client.cookies.set(
@@ -228,13 +228,13 @@ def _dat_cookie_phien(client: AsyncClient, user_id: uuid.UUID, trang_thai: UserS
             user_id=user_id,
             role=UserRole.USER,
             tier="free",
-            status=trang_thai,
+            status=status,
             ttl_minutes=15,
         ),
     )
 
 
-async def _tao_hoi_thoai(
+async def _create_conversation(
     session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
 ) -> uuid.UUID:
     async with session_factory() as session:
@@ -248,7 +248,7 @@ async def _tao_hoi_thoai(
 # `(trạng thái, hành động, status code chờ đợi, mã lỗi chờ đợi)`.
 # `None` ở cột cuối = ca thành công, không có `error.code` nào để so.
 
-MA_TRAN: list[tuple[UserStatus, str, int, ApiErrorCode | None]] = [
+MATRIX: list[tuple[UserStatus, str, int, ApiErrorCode | None]] = [
     # ── pending_email: vào được, nhìn được, KHÔNG chat bằng đường nào ──
     (UserStatus.PENDING_EMAIL, LOGIN, 200, None),
     (UserStatus.PENDING_EMAIL, VIEW, 200, None),
@@ -276,96 +276,90 @@ MA_TRAN: list[tuple[UserStatus, str, int, ApiErrorCode | None]] = [
 ]
 
 
-@pytest.mark.parametrize(("trang_thai", "hanh_dong", "ma_http", "ma_loi"), MA_TRAN)
-async def test_bang_phan_quyen_11_1(
+@pytest.mark.parametrize(("status", "action", "http_status", "error_code"), MATRIX)
+async def test_permission_table_11_1(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    trang_thai: UserStatus,
-    hanh_dong: str,
-    ma_http: int,
-    ma_loi: ApiErrorCode | None,
+    status: UserStatus,
+    action: str,
+    http_status: int,
+    error_code: ApiErrorCode | None,
 ) -> None:
     """DoD T-2.7: **cả 5 trạng thái × 4 hành động = 20 case** của bảng §11.1."""
-    user_id, email = await _tao_user(session_factory, trang_thai, co_byok=hanh_dong == CHAT_BYOK)
+    user_id, email = await _create_user(session_factory, status, with_byok=action == CHAT_BYOK)
 
-    if hanh_dong == LOGIN:
-        resp = await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU})
-    elif hanh_dong == VIEW:
-        _dat_cookie_phien(client, user_id, trang_thai)
-        resp = await client.get(DUONG_DAN_ME)
+    if action == LOGIN:
+        resp = await client.post(LOGIN_PATH, json={"email": email, "password": _PASSWORD})
+    elif action == VIEW:
+        _set_session_cookie(client, user_id, status)
+        resp = await client.get(ME_PATH)
     else:
-        _dat_cookie_phien(client, user_id, trang_thai)
-        conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+        _set_session_cookie(client, user_id, status)
+        conversation_id = await _create_conversation(session_factory, user_id)
         resp = await client.post(
-            DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "xin chao"}
+            MESSAGES_PATH.format(conversation_id), json={"content": "xin chao"}
         )
 
-    assert resp.status_code == ma_http, resp.text
-    if ma_loi is not None:
+    assert resp.status_code == http_status, resp.text
+    if error_code is not None:
         body = resp.json()["error"]
-        assert body["code"] == ma_loi
+        assert body["code"] == error_code
         # `details.status` nói đúng trạng thái đang chặn — thứ duy nhất phân
         # biệt `rejected` với `suspended` (hai ca dùng chung `ACCOUNT_DISABLED`).
-        assert body["details"]["status"] == trang_thai.value
+        assert body["details"]["status"] == status.value
 
 
 # ═══════════ năm dòng DoD, tách riêng cho đọc được một mình ═════════════════
 
 
-async def test_pending_email_gui_message_tra_403_email_not_verified(
+async def test_pending_email_sending_message_403_email_not_verified(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """DoD T-2.7 dòng 2 (và UC-01): `pending_email` gọi `POST .../messages`."""
-    user_id, _ = await _tao_user(session_factory, UserStatus.PENDING_EMAIL)
-    _dat_cookie_phien(client, user_id, UserStatus.PENDING_EMAIL)
-    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+    user_id, _ = await _create_user(session_factory, UserStatus.PENDING_EMAIL)
+    _set_session_cookie(client, user_id, UserStatus.PENDING_EMAIL)
+    conversation_id = await _create_conversation(session_factory, user_id)
 
-    resp = await client.post(
-        DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "xin chao"}
-    )
+    resp = await client.post(MESSAGES_PATH.format(conversation_id), json={"content": "xin chao"})
 
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == ApiErrorCode.EMAIL_NOT_VERIFIED
 
 
-async def test_pending_approval_khong_byok_tra_403_pending_approval(
+async def test_pending_approval_without_byok_403_pending_approval(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """DoD T-2.7 dòng 3: chờ duyệt mà chưa có khoá riêng thì chưa chat được."""
-    user_id, _ = await _tao_user(session_factory, UserStatus.PENDING_APPROVAL)
-    _dat_cookie_phien(client, user_id, UserStatus.PENDING_APPROVAL)
-    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+    user_id, _ = await _create_user(session_factory, UserStatus.PENDING_APPROVAL)
+    _set_session_cookie(client, user_id, UserStatus.PENDING_APPROVAL)
+    conversation_id = await _create_conversation(session_factory, user_id)
 
-    resp = await client.post(
-        DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "xin chao"}
-    )
+    resp = await client.post(MESSAGES_PATH.format(conversation_id), json={"content": "xin chao"})
 
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == ApiErrorCode.PENDING_APPROVAL
 
 
-async def test_pending_approval_co_byok_tra_202(
-    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], arq_gia: _ArqGia
+async def test_pending_approval_with_byok_is_202(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], fake_arq: _FakeArq
 ) -> None:
     """DoD T-2.7 dòng 4 — "case dễ bỏ sót nhất" (§10.5, §11.1).
 
     Không chỉ đo mã `202`: job **thật sự** được đẩy đi, tức một lượt sinh đã mở
     ra chứ không phải một response lịch sự rồi thôi.
     """
-    user_id, _ = await _tao_user(session_factory, UserStatus.PENDING_APPROVAL, co_byok=True)
-    _dat_cookie_phien(client, user_id, UserStatus.PENDING_APPROVAL)
-    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+    user_id, _ = await _create_user(session_factory, UserStatus.PENDING_APPROVAL, with_byok=True)
+    _set_session_cookie(client, user_id, UserStatus.PENDING_APPROVAL)
+    conversation_id = await _create_conversation(session_factory, user_id)
 
-    resp = await client.post(
-        DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "xin chao"}
-    )
+    resp = await client.post(MESSAGES_PATH.format(conversation_id), json={"content": "xin chao"})
 
     assert resp.status_code == 202, resp.text
-    assert len(arq_gia.da_day) == 1
+    assert len(fake_arq.pushed) == 1
 
 
-async def test_pending_approval_co_byok_SAI_PROVIDER_van_403(
-    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], arq_gia: _ArqGia
+async def test_pending_approval_with_WRONG_PROVIDER_byok_still_403(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], fake_arq: _FakeArq
 ) -> None:
     """**B-140 đóng ở T-2.15**: khoá phải là khoá của provider model đang gọi.
 
@@ -374,28 +368,26 @@ async def test_pending_approval_co_byok_SAI_PROVIDER_van_403(
     của provider B sẽ đi lọt — và đi lọt bằng **system key**, tức tiêu tiền
     của người vận hành đúng thứ §11.1 cấm.
 
-    Gỡ phép kiểm chính xác ở `_mo_luot_sinh` ra thì test này thành `202`.
+    Gỡ phép kiểm chính xác ở `_open_generation` ra thì test này thành `202`.
     """
-    khac = _provider_khac_voi_mac_dinh()
-    user_id, _ = await _tao_user(
-        session_factory, UserStatus.PENDING_APPROVAL, co_byok=True, provider_byok=khac
+    others = _non_default_provider()
+    user_id, _ = await _create_user(
+        session_factory, UserStatus.PENDING_APPROVAL, with_byok=True, provider_byok=others
     )
-    _dat_cookie_phien(client, user_id, UserStatus.PENDING_APPROVAL)
-    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+    _set_session_cookie(client, user_id, UserStatus.PENDING_APPROVAL)
+    conversation_id = await _create_conversation(session_factory, user_id)
 
-    resp = await client.post(
-        DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "xin chao"}
-    )
+    resp = await client.post(MESSAGES_PATH.format(conversation_id), json={"content": "xin chao"})
 
     assert resp.status_code == 403, resp.text
     assert resp.json()["error"]["code"] == ApiErrorCode.PENDING_APPROVAL
-    assert arq_gia.da_day == [], "0 job ⇒ 0 USD của người vận hành"
+    assert fake_arq.pushed == [], "0 job ⇒ 0 USD của người vận hành"
 
 
-async def test_pending_approval_khoa_KHONG_GIAI_MA_DUOC_van_403(
+async def test_pending_approval_UNDECRYPTABLE_key_still_403(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    arq_gia: _ArqGia,
+    fake_arq: _FakeArq,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Khoá có hàng nhưng `MASTER_ENCRYPTION_KEY` đã xoay ⇒ coi như KHÔNG có.
@@ -404,23 +396,21 @@ async def test_pending_approval_khoa_KHONG_GIAI_MA_DUOC_van_403(
     cửa cho một khoá không dùng được là để lượt sinh ấy rơi xuống system key
     — tức đúng cái §11.1 cấm, chỉ chậm hơn một bước.
     """
-    user_id, _ = await _tao_user(session_factory, UserStatus.PENDING_APPROVAL, co_byok=True)
-    _dat_cookie_phien(client, user_id, UserStatus.PENDING_APPROVAL)
-    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+    user_id, _ = await _create_user(session_factory, UserStatus.PENDING_APPROVAL, with_byok=True)
+    _set_session_cookie(client, user_id, UserStatus.PENDING_APPROVAL)
+    conversation_id = await _create_conversation(session_factory, user_id)
     monkeypatch.setattr(
         settings, "MASTER_ENCRYPTION_KEY", SecretStr("khoa-khac-hoan-toan-de-xoay-vong")
     )
 
-    resp = await client.post(
-        DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "xin chao"}
-    )
+    resp = await client.post(MESSAGES_PATH.format(conversation_id), json={"content": "xin chao"})
 
     assert resp.status_code == 403, resp.text
     assert resp.json()["error"]["code"] == ApiErrorCode.PENDING_APPROVAL
-    assert arq_gia.da_day == []
+    assert fake_arq.pushed == []
 
 
-async def test_byok_cua_NGUOI_KHAC_khong_mo_cua_cho_minh(
+async def test_SOMEONE_ELSES_byok_does_not_open_the_door(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Phép kiểm BYOK lọc `user_id` **trong câu SQL** (§20, CLAUDE.md).
@@ -430,20 +420,18 @@ async def test_byok_cua_NGUOI_KHAC_khong_mo_cua_cho_minh(
     sẽ mở cửa cho cả nhà chỉ vì một người hàng xóm đã cấu hình BYOK, và
     không ca nào của ma trận ở trên bắt được điều đó (mỗi ca chỉ có một user).
     """
-    await _tao_user(session_factory, UserStatus.PENDING_APPROVAL, co_byok=True)
-    user_id, _ = await _tao_user(session_factory, UserStatus.PENDING_APPROVAL)
-    _dat_cookie_phien(client, user_id, UserStatus.PENDING_APPROVAL)
-    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+    await _create_user(session_factory, UserStatus.PENDING_APPROVAL, with_byok=True)
+    user_id, _ = await _create_user(session_factory, UserStatus.PENDING_APPROVAL)
+    _set_session_cookie(client, user_id, UserStatus.PENDING_APPROVAL)
+    conversation_id = await _create_conversation(session_factory, user_id)
 
-    resp = await client.post(
-        DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "xin chao"}
-    )
+    resp = await client.post(MESSAGES_PATH.format(conversation_id), json={"content": "xin chao"})
 
     assert resp.status_code == 403, resp.text
     assert resp.json()["error"]["code"] == ApiErrorCode.PENDING_APPROVAL
 
 
-async def test_suspended_khong_dang_nhap_duoc(
+async def test_suspended_cannot_log_in(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """DoD T-2.7 dòng 5: `suspended` → không đăng nhập được.
@@ -453,15 +441,15 @@ async def test_suspended_khong_dang_nhap_duoc(
     vẫn không vào được. Không rò gì cho người lạ — phải qua được cửa mật khẩu
     mới thấy được câu này.
     """
-    _, email = await _tao_user(session_factory, UserStatus.SUSPENDED)
+    _, email = await _create_user(session_factory, UserStatus.SUSPENDED)
 
-    resp = await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU})
+    resp = await client.post(LOGIN_PATH, json={"email": email, "password": _PASSWORD})
 
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == ApiErrorCode.ACCOUNT_DISABLED
 
 
-async def test_suspended_sai_mat_khau_van_tra_401_invalid_credentials(
+async def test_suspended_wrong_password_still_401_invalid_credentials(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Thứ tự của hai phép kiểm trong `login`, đo được: mật khẩu TRƯỚC.
@@ -469,17 +457,17 @@ async def test_suspended_sai_mat_khau_van_tra_401_invalid_credentials(
     Ngược lại thì gõ một email bất kỳ là biết tài khoản đó có tồn tại và đang
     ở trạng thái nào — đúng kênh dò mà §11.5 đóng.
     """
-    _, email = await _tao_user(session_factory, UserStatus.SUSPENDED)
+    _, email = await _create_user(session_factory, UserStatus.SUSPENDED)
 
     resp = await client.post(
-        DUONG_DAN_LOGIN, json={"email": email, "password": "mat-khau-khac-han-va-du-dai"}
+        LOGIN_PATH, json={"email": email, "password": "mat-khau-khac-han-va-du-dai"}
     )
 
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == ApiErrorCode.INVALID_CREDENTIALS
 
 
-async def test_suspended_dang_nhap_hong_khong_phat_hanh_cookie_nao(
+async def test_suspended_failed_login_issues_no_cookie(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Phép kiểm trạng thái đứng TRƯỚC lúc phát hành refresh family.
@@ -488,9 +476,9 @@ async def test_suspended_dang_nhap_hong_khong_phat_hanh_cookie_nao(
     và nếu nó cầm được thì `POST /auth/refresh` sẽ là một đường vòng đi quanh
     đúng bức tường vừa dựng.
     """
-    _, email = await _tao_user(session_factory, UserStatus.SUSPENDED)
+    _, email = await _create_user(session_factory, UserStatus.SUSPENDED)
 
-    resp = await client.post(DUONG_DAN_LOGIN, json={"email": email, "password": _MAT_KHAU})
+    resp = await client.post(LOGIN_PATH, json={"email": email, "password": _PASSWORD})
 
     assert resp.status_code == 403
     assert "set-cookie" not in resp.headers
@@ -499,7 +487,7 @@ async def test_suspended_dang_nhap_hong_khong_phat_hanh_cookie_nao(
 # ════════ cạm bẫy của task: MỘT luật, không phải mỗi endpoint một luật ══════
 
 
-async def test_moi_route_sinh_chu_deu_chan_pending_email(
+async def test_every_generation_route_blocks_pending_email(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Cạm bẫy T-2.7 ở dạng kiểm được: lặp qua **danh sách** route sinh chữ.
@@ -513,22 +501,22 @@ async def test_moi_route_sinh_chu_deu_chan_pending_email(
     ngược lại nói cho một tài khoản chưa xác thực email biết message nào có
     thật (§20).
     """
-    user_id, _ = await _tao_user(session_factory, UserStatus.PENDING_EMAIL)
-    _dat_cookie_phien(client, user_id, UserStatus.PENDING_EMAIL)
-    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+    user_id, _ = await _create_user(session_factory, UserStatus.PENDING_EMAIL)
+    _set_session_cookie(client, user_id, UserStatus.PENDING_EMAIL)
+    conversation_id = await _create_conversation(session_factory, user_id)
     message_id = uuid.uuid4()
 
-    phan_hoi = [
-        await client.post(DUONG_DAN_MESSAGES.format(conversation_id), json={"content": "a"}),
-        await client.post(DUONG_DAN_RETRY.format(message_id), json={}),
-        await client.patch(DUONG_DAN_SUA.format(message_id), json={"content": "b"}),
+    responses = [
+        await client.post(MESSAGES_PATH.format(conversation_id), json={"content": "a"}),
+        await client.post(RETRY_PATH.format(message_id), json={}),
+        await client.patch(EDIT_PATH.format(message_id), json={"content": "b"}),
     ]
-    for resp in phan_hoi:
+    for resp in responses:
         assert resp.status_code == 403, resp.text
         assert resp.json()["error"]["code"] == ApiErrorCode.EMAIL_NOT_VERIFIED
 
 
-async def test_route_khong_sinh_chu_khong_bi_chan_boi_luat_chat(
+async def test_non_generation_route_not_blocked_by_chat_rule(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Mặt kia của cùng một luật: `pending_email` vẫn xem được hội thoại.
@@ -537,16 +525,16 @@ async def test_route_khong_sinh_chu_khong_bi_chan_boi_luat_chat(
     thành một bức tường trắng — và người dùng không còn chỗ nào để bấm "gửi
     lại thư".
     """
-    user_id, _ = await _tao_user(session_factory, UserStatus.PENDING_EMAIL)
-    _dat_cookie_phien(client, user_id, UserStatus.PENDING_EMAIL)
-    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
+    user_id, _ = await _create_user(session_factory, UserStatus.PENDING_EMAIL)
+    _set_session_cookie(client, user_id, UserStatus.PENDING_EMAIL)
+    conversation_id = await _create_conversation(session_factory, user_id)
 
-    resp = await client.get(DUONG_DAN_HOI_THOAI.format(conversation_id))
+    resp = await client.get(CONVERSATION_PATH.format(conversation_id))
 
     assert resp.status_code == 200
 
 
-async def test_suspended_khong_doc_duoc_hoi_thoai_cua_chinh_minh(
+async def test_suspended_cannot_read_own_conversation(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """Cột "Xem UI" của §11.1 áp cho CẢ router `conversations`, không chỉ `/me`.
@@ -554,11 +542,11 @@ async def test_suspended_khong_doc_duoc_hoi_thoai_cua_chinh_minh(
     Đây là phép kiểm mà cách gắn dependency ở `api/v1/__init__.py` tồn tại vì
     nó: một route không ai nhớ tới vẫn phải đóng.
     """
-    user_id, _ = await _tao_user(session_factory, UserStatus.SUSPENDED)
-    conversation_id = await _tao_hoi_thoai(session_factory, user_id)
-    _dat_cookie_phien(client, user_id, UserStatus.SUSPENDED)
+    user_id, _ = await _create_user(session_factory, UserStatus.SUSPENDED)
+    conversation_id = await _create_conversation(session_factory, user_id)
+    _set_session_cookie(client, user_id, UserStatus.SUSPENDED)
 
-    resp = await client.get(DUONG_DAN_HOI_THOAI.format(conversation_id))
+    resp = await client.get(CONVERSATION_PATH.format(conversation_id))
 
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == ApiErrorCode.ACCOUNT_DISABLED

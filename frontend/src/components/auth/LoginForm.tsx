@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MA_LOI, type ApiError } from "../../lib/api";
+import { ERROR_CODES, type ApiError } from "../../lib/api";
 import { t } from "../../lib/i18n";
 
 /**
@@ -24,16 +24,16 @@ import { t } from "../../lib/i18n";
  * `turnstile_token` (xem `api/v1/auth.py`). Chong do mat khau o duong nay la
  * viec cua rate limit §10.6, da co tu T-2.9.
  */
-export function FormDangNhap({
-  onGui,
-  loi,
+export function LoginForm({
+  onSend,
+  error,
 }: {
-  onGui: (email: string, matKhau: string) => Promise<boolean>;
-  loi: ApiError | null;
+  onSend: (email: string, password: string) => Promise<boolean>;
+  error: ApiError | null;
 }) {
   const [email, setEmail] = useState("");
-  const [matKhau, setMatKhau] = useState("");
-  const [dangGui, setDangGui] = useState(false);
+  const [password, setPassword] = useState("");
+  const [sending, setSending] = useState(false);
 
   return (
     <main className="mx-auto w-full max-w-sm px-6 py-12">
@@ -43,8 +43,8 @@ export function FormDangNhap({
         className="flex flex-col gap-3"
         onSubmit={(e) => {
           e.preventDefault();
-          setDangGui(true);
-          void onGui(email, matKhau).finally(() => setDangGui(false));
+          setSending(true);
+          void onSend(email, password).finally(() => setSending(false));
         }}
       >
         <label className="flex flex-col gap-1 text-sm">
@@ -65,25 +65,25 @@ export function FormDangNhap({
             type="password"
             required
             autoComplete="current-password"
-            value={matKhau}
-            onChange={(e) => setMatKhau(e.target.value)}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
             className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
           />
         </label>
 
-        {loi !== null && (
+        {error !== null && (
           <p role="alert" className="text-sm text-danger-text">
-            {loi.code === MA_LOI.SAI_MAT_KHAU
+            {error.code === ERROR_CODES.WRONG_PASSWORD
               ? t("auth.saiMatKhau")
-              : loi.code === MA_LOI.TAI_KHOAN_BI_KHOA
+              : error.code === ERROR_CODES.ACCOUNT_DISABLED
                 ? t("auth.taiKhoanBiKhoa")
-                : loi.message}
+                : error.message}
           </p>
         )}
 
         <button
           type="submit"
-          disabled={dangGui}
+          disabled={sending}
           className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
         >
           {t("auth.dangNhap")}

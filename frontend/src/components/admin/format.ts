@@ -53,13 +53,13 @@ const partsFormat = new Intl.DateTimeFormat(DISPLAY_LOCALE, {
 });
 
 function parts(iso: string): Record<"day" | "month" | "year" | "hour" | "minute", string> {
-  const ra = { day: "", month: "", year: "", hour: "", minute: "" };
+  const output = { day: "", month: "", year: "", hour: "", minute: "" };
   for (const p of partsFormat.formatToParts(new Date(iso))) {
-    if (p.type in ra) {
-      ra[p.type as keyof typeof ra] = p.value;
+    if (p.type in output) {
+      output[p.type as keyof typeof output] = p.value;
     }
   }
-  return ra;
+  return output;
 }
 
 /** `22/09/2026 09:14` — thoi diem dang ky (man Duyet), kiem khoa (Cai dat). */

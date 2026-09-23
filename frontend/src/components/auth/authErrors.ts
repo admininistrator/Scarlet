@@ -1,4 +1,4 @@
-import { ApiError, MA_LOI } from "../../lib/api";
+import { ApiError, ERROR_CODES } from "../../lib/api";
 import { t } from "../../lib/i18n";
 
 /**
@@ -26,22 +26,22 @@ import { t } from "../../lib/i18n";
  * `PASSWORD_TOO_*` va `RATE_LIMITED`. Ba ban chep cua cung mot chuoi `if` la
  * ba cho de mot man hinh im lang khi hai man kia da noi.
  */
-const THEO_MA: Record<string, string> = {
-  [MA_LOI.TURNSTILE_HONG]: "auth.turnstileTuChoi",
-  [MA_LOI.MAT_KHAU_QUA_NGAN]: "auth.matKhauQuaNgan",
-  [MA_LOI.MAT_KHAU_QUA_YEU]: "auth.matKhauQuaYeu",
-  [MA_LOI.QUA_NHIEU_LAN]: "auth.quaNhieuLan",
-  [MA_LOI.SAI_MAT_KHAU]: "auth.saiMatKhau",
-  [MA_LOI.TAI_KHOAN_BI_KHOA]: "auth.taiKhoanBiKhoa",
+const BY_CODE: Record<string, string> = {
+  [ERROR_CODES.TURNSTILE_FAILED]: "auth.turnstileTuChoi",
+  [ERROR_CODES.PASSWORD_TOO_SHORT]: "auth.matKhauQuaNgan",
+  [ERROR_CODES.PASSWORD_TOO_WEAK]: "auth.matKhauQuaYeu",
+  [ERROR_CODES.TOO_MANY_ATTEMPTS]: "auth.quaNhieuLan",
+  [ERROR_CODES.WRONG_PASSWORD]: "auth.saiMatKhau",
+  [ERROR_CODES.ACCOUNT_DISABLED]: "auth.taiKhoanBiKhoa",
 };
 
-export function authErrorText(loi: unknown): string {
-  if (!(loi instanceof ApiError)) {
-    return String(loi);
+export function authErrorText(error: unknown): string {
+  if (!(error instanceof ApiError)) {
+    return String(error);
   }
-  const khoa = THEO_MA[loi.code];
+  const key = BY_CODE[error.code];
   // `as never` chi de noi voi `t()` rang chuoi nay la mot khoa that: bang tren
   // go kieu `Record<string, string>` nen TypeScript khong theo doi duoc tung
   // gia tri. Khoa sai se lo ra ngay o man hinh — `t()` tra lai chinh khoa.
-  return khoa === undefined ? loi.message : t(khoa as never);
+  return key === undefined ? error.message : t(key as never);
 }

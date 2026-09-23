@@ -52,54 +52,54 @@ from app.main import app
 #: lý do fixture `event_hooks` tồn tại thay cho một hằng import được).
 FakeRateLimitRedis = Any
 
-DUONG_DAN_TAO = "/api/v1/conversations/{}/messages"
-DUONG_DAN_RETRY = "/api/v1/messages/{}/retry"
-DUONG_DAN_SUA = "/api/v1/messages/{}"
-DUONG_DAN_HUY = "/api/v1/messages/{}/cancel"
-DUONG_DAN_ANH_EM = "/api/v1/messages/{}/siblings"
-DUONG_DAN_STREAM = "/api/v1/messages/{}/stream"
+CREATE_PATH = "/api/v1/conversations/{}/messages"
+RETRY_PATH = "/api/v1/messages/{}/retry"
+EDIT_PATH = "/api/v1/messages/{}"
+CANCEL_PATH = "/api/v1/messages/{}/cancel"
+SIBLINGS_PATH = "/api/v1/messages/{}/siblings"
+STREAM_PATH = "/api/v1/messages/{}/stream"
 
 #: `[allowed, remaining, retry_after_ms, reset_ms]` — xô đã cạn.
-XO_CAN = [0, 0, 3000, 60000]
+EMPTY_BUCKET = [0, 0, 3000, 60000]
 #: `[cho_phep, dang_chay]` — đã đủ ghế.
-HET_GHE = [0, settings.MAX_CONCURRENT_STREAMS]
+NO_SEATS = [0, settings.MAX_CONCURRENT_STREAMS]
 
 
-class _RedisCoHuy:
+class _RedisWithCancel:
     """Chỉ đúng một lệnh mà `POST /messages/{id}/cancel` dùng (§7.5)."""
 
     async def set(self, name: str, value: str, *, ex: int | None = None) -> bool:
         return True
 
 
-class _ArqGia:
+class _FakeArq:
     def __init__(self) -> None:
-        self.da_day: list[tuple[str, tuple[Any, ...]]] = []
-        self.no_ra = False
+        self.pushed: list[tuple[str, tuple[Any, ...]]] = []
+        self.raises = False
 
-    async def enqueue_job(self, ten: str, *args: Any, **_: Any) -> object:
-        if self.no_ra:
+    async def enqueue_job(self, name: str, *args: Any, **_: Any) -> object:
+        if self.raises:
             raise ConnectionError("redis chet giua chung (gia lap)")
-        self.da_day.append((ten, args))
+        self.pushed.append((name, args))
         return object()
 
 
 @pytest.fixture
-def _db_cua_test(
+def _db_for_tests(
     monkeypatch: pytest.MonkeyPatch, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     monkeypatch.setattr("app.db.session.get_sessionmaker", lambda: session_factory)
 
 
 @pytest_asyncio.fixture
-async def arq_gia(monkeypatch: pytest.MonkeyPatch) -> _ArqGia:
-    gia = _ArqGia()
+async def fake_arq(monkeypatch: pytest.MonkeyPatch) -> _FakeArq:
+    fake = _FakeArq()
 
-    async def _pool() -> _ArqGia:
-        return gia
+    async def _pool() -> _FakeArq:
+        return fake
 
     monkeypatch.setattr("app.api.v1.messages.get_arq_pool", _pool)
-    return gia
+    return fake
 
 
 @pytest_asyncio.fixture
@@ -110,7 +110,7 @@ async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
         yield http
 
 
-def _phien(user_id: uuid.UUID) -> dict[str, str]:
+def _session(user_id: uuid.UUID) -> dict[str, str]:
     """Header `Cookie` mang phiên thật (§11.2) của `user_id` — T-3.1c.
 
     Trả một `dict` để truyền vào `headers=` của **từng request**, đúng chỗ mà
@@ -138,7 +138,7 @@ def _phien(user_id: uuid.UUID) -> dict[str, str]:
     return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
-async def _hoi_thoai_co_luot_sinh(
+async def _conversation_with_generation(
     session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
 ) -> tuple[Conversation, Message, Message]:
     """Một hội thoại với một câu hỏi và một câu trả lời đã `completed`."""
@@ -146,25 +146,25 @@ async def _hoi_thoai_co_luot_sinh(
         conversations = ConversationRepository(session)
         messages = MessageRepository(session)
         conversation = await conversations.create_conversation(user_id=user_id)
-        cau_hoi = await messages.create_message(
+        question = await messages.create_message(
             conversation_id=conversation.id,
             user_id=user_id,
             role=MessageRole.USER,
             content="viet ham sort",
         )
-        tra_loi = await messages.create_message(
+        answer = await messages.create_message(
             conversation_id=conversation.id,
             user_id=user_id,
             role=MessageRole.ASSISTANT,
-            parent_id=cau_hoi.id,
+            parent_id=question.id,
             status=MessageStatus.COMPLETED,
             content="xong",
         )
         await session.commit()
-        return conversation, cau_hoi, tra_loi
+        return conversation, question, answer
 
 
-async def _dem_message(
+async def _count_messages(
     session_factory: async_sessionmaker[AsyncSession], conversation_id: uuid.UUID
 ) -> int:
     async with session_factory() as session:
@@ -176,68 +176,68 @@ async def _dem_message(
         return int((await session.execute(stmt)).scalar_one())
 
 
-def _cac_script(redis: FakeRateLimitRedis) -> list[str]:
-    return [ten for ten, _ in redis.calls]
+def _scripts(redis: FakeRateLimitRedis) -> list[str]:
+    return [name for name, _ in redis.calls]
 
 
 # ═════════════ ba route sinh chữ đi qua token bucket, ba route kia thì không ═
 
 
-@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
-async def test_tao_message_bi_chan_boi_token_bucket(
+@pytest.mark.usefixtures("_db_for_tests", "fake_arq")
+async def test_create_message_blocked_by_token_bucket(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     ratelimit_redis: FakeRateLimitRedis,
-    arq_gia: _ArqGia,
+    fake_arq: _FakeArq,
 ) -> None:
     """DoD dòng 1, nhìn từ tầng route: hết token ⇒ `429` + `Retry-After`."""
-    conversation, _, _ = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
-    truoc = await _dem_message(session_factory, conversation.id)
-    ratelimit_redis.bucket = XO_CAN
+    conversation, _, _ = await _conversation_with_generation(session_factory, user_a)
+    before = await _count_messages(session_factory, conversation.id)
+    ratelimit_redis.bucket = EMPTY_BUCKET
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
     assert resp.headers["retry-after"] == "3"
-    assert await _dem_message(session_factory, conversation.id) == truoc
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation.id) == before
+    assert fake_arq.pushed == []
 
 
-@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
-async def test_retry_bi_chan_boi_token_bucket(
+@pytest.mark.usefixtures("_db_for_tests", "fake_arq")
+async def test_retry_blocked_by_token_bucket(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     ratelimit_redis: FakeRateLimitRedis,
 ) -> None:
-    _, _, tra_loi = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
-    ratelimit_redis.bucket = XO_CAN
+    _, _, answer = await _conversation_with_generation(session_factory, user_a)
+    ratelimit_redis.bucket = EMPTY_BUCKET
 
-    resp = await client.post(DUONG_DAN_RETRY.format(tra_loi.id), headers=_phien(user_a))
+    resp = await client.post(RETRY_PATH.format(answer.id), headers=_session(user_a))
 
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
 
 
-@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
-async def test_sua_cau_hoi_bi_chan_boi_token_bucket(
+@pytest.mark.usefixtures("_db_for_tests", "fake_arq")
+async def test_edit_question_blocked_by_token_bucket(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     ratelimit_redis: FakeRateLimitRedis,
 ) -> None:
-    _, cau_hoi, _ = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
-    ratelimit_redis.bucket = XO_CAN
+    _, question, _ = await _conversation_with_generation(session_factory, user_a)
+    ratelimit_redis.bucket = EMPTY_BUCKET
 
     resp = await client.patch(
-        DUONG_DAN_SUA.format(cau_hoi.id),
-        headers=_phien(user_a),
+        EDIT_PATH.format(question.id),
+        headers=_session(user_a),
         json={"content": "hoi lai"},
     )
 
@@ -245,8 +245,8 @@ async def test_sua_cau_hoi_bi_chan_boi_token_bucket(
     assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
 
 
-@pytest.mark.usefixtures("_db_cua_test")
-async def test_cancel_khong_di_qua_han_muc_nao(
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_cancel_passes_through_no_limit(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
@@ -256,37 +256,37 @@ async def test_cancel_khong_di_qua_han_muc_nao(
     """Chặn nút Dừng nghĩa là một lượt sinh đang chảy không ai dừng được nữa —
     và nó cũng không tốn đồng nào (cùng lý lẽ T-2.7 không gắn
     `require_chat_access` cho `cancel`)."""
-    _, _, tra_loi = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
-    ratelimit_redis.bucket = XO_CAN
-    ratelimit_redis.slot = HET_GHE
+    _, _, answer = await _conversation_with_generation(session_factory, user_a)
+    ratelimit_redis.bucket = EMPTY_BUCKET
+    ratelimit_redis.slot = NO_SEATS
     # Cờ huỷ `cancel:{id}` đi qua một Redis KHÁC (`app.api.v1.messages.get_redis`)
     # — giữ hai đường riêng để phép đếm script bên dưới không lẫn.
-    monkeypatch.setattr("app.api.v1.messages.get_redis", lambda: _RedisCoHuy())
+    monkeypatch.setattr("app.api.v1.messages.get_redis", lambda: _RedisWithCancel())
 
-    resp = await client.post(DUONG_DAN_HUY.format(tra_loi.id), headers=_phien(user_a))
+    resp = await client.post(CANCEL_PATH.format(answer.id), headers=_session(user_a))
 
     assert resp.status_code == 200
-    assert _cac_script(ratelimit_redis) == []
+    assert _scripts(ratelimit_redis) == []
 
 
-@pytest.mark.usefixtures("_db_cua_test")
-async def test_siblings_khong_di_qua_han_muc_nao(
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_siblings_pass_through_no_limit(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     ratelimit_redis: FakeRateLimitRedis,
 ) -> None:
-    _, _, tra_loi = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
-    ratelimit_redis.bucket = XO_CAN
+    _, _, answer = await _conversation_with_generation(session_factory, user_a)
+    ratelimit_redis.bucket = EMPTY_BUCKET
 
-    resp = await client.get(DUONG_DAN_ANH_EM.format(tra_loi.id), headers=_phien(user_a))
+    resp = await client.get(SIBLINGS_PATH.format(answer.id), headers=_session(user_a))
 
     assert resp.status_code == 200
-    assert _cac_script(ratelimit_redis) == []
+    assert _scripts(ratelimit_redis) == []
 
 
-@pytest.mark.usefixtures("_db_cua_test")
-async def test_stream_khong_dem_ghe_va_khong_ton_token(
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_stream_counts_no_seat_and_costs_no_token(
     client: AsyncClient,
     user_a: uuid.UUID,
     ratelimit_redis: FakeRateLimitRedis,
@@ -301,77 +301,77 @@ async def test_stream_khong_dem_ghe_va_khong_ton_token(
     stream, nên test không phải dựng Redis Stream — mà `404` vẫn chứng minh
     điều cần chứng minh, vì hạn mức là *dependency*, chạy trước handler.
     """
-    resp = await client.get(DUONG_DAN_STREAM.format(uuid.uuid4()), headers=_phien(user_a))
+    resp = await client.get(STREAM_PATH.format(uuid.uuid4()), headers=_session(user_a))
 
     assert resp.status_code == 404
-    assert _cac_script(ratelimit_redis) == [], "không xô, không ghế"
+    assert _scripts(ratelimit_redis) == [], "không xô, không ghế"
 
 
 # ═══════════════════ trần đồng thời (§10.6 hàng 4, B-85, NQ-49) ═════════════
 
 
-@pytest.mark.usefixtures("_db_cua_test")
-async def test_het_ghe_tra_429_TOO_MANY_STREAMS_va_khong_ghi_hang_nao(
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_no_seats_429_TOO_MANY_STREAMS_and_writes_no_row(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     ratelimit_redis: FakeRateLimitRedis,
-    arq_gia: _ArqGia,
+    fake_arq: _FakeArq,
 ) -> None:
     """DoD dòng 3. Và phần quan trọng hơn con số `429`: phép kiểm nằm **trong**
     transaction, nên một lượt bị từ chối không để lại message mồ côi nào."""
-    conversation, _, _ = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
-    truoc = await _dem_message(session_factory, conversation.id)
-    ratelimit_redis.slot = HET_GHE
+    conversation, _, _ = await _conversation_with_generation(session_factory, user_a)
+    before = await _count_messages(session_factory, conversation.id)
+    ratelimit_redis.slot = NO_SEATS
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "cau hoi thu tu"},
     )
 
     assert resp.status_code == 429
-    loi = resp.json()["error"]
-    assert loi["code"] == ApiErrorCode.TOO_MANY_STREAMS
-    assert loi["details"] == {
+    error = resp.json()["error"]
+    assert error["code"] == ApiErrorCode.TOO_MANY_STREAMS
+    assert error["details"] == {
         "limit": settings.MAX_CONCURRENT_STREAMS,
         "active": settings.MAX_CONCURRENT_STREAMS,
     }
     assert "retry-after" not in resp.headers, "không ai biết model sinh xong lúc nào"
-    assert await _dem_message(session_factory, conversation.id) == truoc
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation.id) == before
+    assert fake_arq.pushed == []
 
 
-@pytest.mark.usefixtures("_db_cua_test")
-async def test_ghe_giu_TRUOC_khi_day_job(
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_seat_held_BEFORE_enqueue(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     ratelimit_redis: FakeRateLimitRedis,
-    arq_gia: _ArqGia,
+    fake_arq: _FakeArq,
 ) -> None:
     """Thứ tự là hợp đồng: giữ ghế xong mới đẩy job. Đảo lại thì một lượt bị
     từ chối vẫn có job trong hàng đợi, và worker vẫn sinh chữ, vẫn tính tiền."""
-    conversation, _, _ = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
-    ratelimit_redis.slot = HET_GHE
+    conversation, _, _ = await _conversation_with_generation(session_factory, user_a)
+    ratelimit_redis.slot = NO_SEATS
 
     await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
-    assert "slot" in _cac_script(ratelimit_redis)
-    assert arq_gia.da_day == []
+    assert "slot" in _scripts(ratelimit_redis)
+    assert fake_arq.pushed == []
 
 
-@pytest.mark.usefixtures("_db_cua_test")
-async def test_day_job_that_bai_thi_NHA_ghe_ngay(
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_failed_enqueue_RELEASES_seat_immediately(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     ratelimit_redis: FakeRateLimitRedis,
-    arq_gia: _ArqGia,
+    fake_arq: _FakeArq,
 ) -> None:
     """Transaction sắp rollback ⇒ hàng `messages` mang id đó sẽ không tồn tại.
 
@@ -379,24 +379,24 @@ async def test_day_job_that_bai_thi_NHA_ghe_ngay(
     Postgres phải đợi hết `PHANTOM_GRACE_S` mới dọn được — 60 giây trong đó
     người dùng mất một phần ba hạn mức của mình vì một sự cố của Redis.
     """
-    conversation, _, _ = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
-    arq_gia.no_ra = True
+    conversation, _, _ = await _conversation_with_generation(session_factory, user_a)
+    fake_arq.raises = True
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == ApiErrorCode.ENQUEUE_FAILED
-    assert len(ratelimit_redis.da_nha) == 1
-    khoa, _ = ratelimit_redis.da_nha[0]
-    assert khoa == ratelimit.stream_slot_key(user_a)
+    assert len(ratelimit_redis.released) == 1
+    key, _ = ratelimit_redis.released[0]
+    assert key == ratelimit.stream_slot_key(user_a)
 
 
-@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
-async def test_duong_chay_dung_co_du_ba_header_ratelimit(
+@pytest.mark.usefixtures("_db_for_tests", "fake_arq")
+async def test_happy_path_has_all_three_ratelimit_headers(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
@@ -404,12 +404,12 @@ async def test_duong_chay_dung_co_du_ba_header_ratelimit(
 ) -> None:
     """§10.6 đòi `X-RateLimit-*` chứ không chỉ `Retry-After`: FE cần biết mình
     sắp hết hạn mức TRƯỚC khi hết."""
-    conversation, _, _ = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
+    conversation, _, _ = await _conversation_with_generation(session_factory, user_a)
     ratelimit_redis.bucket = [1, 17, 0, 9000]
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
@@ -420,8 +420,8 @@ async def test_duong_chay_dung_co_du_ba_header_ratelimit(
     assert ratelimit.HEADER_RETRY_AFTER not in resp.headers
 
 
-@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
-async def test_ghe_cap_cho_dung_message_assistant_vua_tao(
+@pytest.mark.usefixtures("_db_for_tests", "fake_arq")
+async def test_seat_granted_to_the_just_created_assistant_message(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
@@ -430,17 +430,17 @@ async def test_ghe_cap_cho_dung_message_assistant_vua_tao(
     """Member của ZSET phải là `assistant_message_id` — đó là thứ duy nhất
     Postgres trả lời được câu "còn đang sinh không". Cấp ghế cho một token
     ngẫu nhiên thì phép đối chiếu mất luôn điểm tựa."""
-    conversation, _, _ = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
+    conversation, _, _ = await _conversation_with_generation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
     assert resp.status_code == 202
-    ten, argv = next(goi for goi in ratelimit_redis.calls if goi[0] == "slot")
-    assert ten == "slot"
+    name, argv = next(call for call in ratelimit_redis.calls if call[0] == "slot")
+    assert name == "slot"
     assert argv[0] == ratelimit.stream_slot_key(user_a)
     assert argv[4] == resp.json()["assistant_message_id"]
 
@@ -448,13 +448,13 @@ async def test_ghe_cap_cho_dung_message_assistant_vua_tao(
 # ═══════ BYOK không mua được quyền miễn rate limit (§10.5, T-2.15) ═══════
 
 
-@pytest.mark.usefixtures("_db_cua_test", "arq_gia")
-async def test_byok_van_bi_token_bucket_chan(
+@pytest.mark.usefixtures("_db_for_tests", "fake_arq")
+async def test_byok_still_blocked_by_token_bucket(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     ratelimit_redis: FakeRateLimitRedis,
-    arq_gia: _ArqGia,
+    fake_arq: _FakeArq,
 ) -> None:
     """**DoD dòng 4 của T-2.15.** §10.5 hàng "Rate limit": *"Vẫn áp dụng"*.
 
@@ -463,35 +463,35 @@ async def test_byok_van_bi_token_bucket_chan(
     Người dùng BYOK vẫn dùng worker, vẫn chiếm kết nối Postgres/Redis, vẫn
     gửi được 1000 request/phút nếu không ai chặn.
 
-    Lớp chặn là một **dependency** của route (`_ROUTE_SINH_CHU`), tức nó chạy
+    Lớp chặn là một **dependency** của route (`_GENERATION_ROUTE`), tức nó chạy
     xong trước khi handler biết BYOK tồn tại — nên tính chất này giữ được
     "miễn phí". Test canh đúng chiều đó: chuyển nó thành một phép kiểm bên
-    trong `_mo_luot_sinh` là mở đường cho một nhánh `if byok: bo_qua`.
+    trong `_open_generation` là mở đường cho một nhánh `if byok: bo_qua`.
     """
-    conversation, _, _ = await _hoi_thoai_co_luot_sinh(session_factory, user_a)
+    conversation, _, _ = await _conversation_with_generation(session_factory, user_a)
     model = catalog.get_default_model()
     assert model is not None
-    khoa = "sk-" + "0123456789abcdef" * 2
+    key = "sk-" + "0123456789abcdef" * 2
     async with session_factory() as session:
         await ProviderKeyRepository(session).upsert(
             user_id=user_a,
             provider=model.provider,
-            sealed=seal(khoa),
-            masked=mask_secret(khoa),
+            sealed=seal(key),
+            masked=mask_secret(key),
             verified_at=None,
         )
         await session.commit()
-    truoc = await _dem_message(session_factory, conversation.id)
-    ratelimit_redis.bucket = XO_CAN
+    before = await _count_messages(session_factory, conversation.id)
+    ratelimit_redis.bucket = EMPTY_BUCKET
 
     resp = await client.post(
-        DUONG_DAN_TAO.format(conversation.id),
-        headers=_phien(user_a),
+        CREATE_PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
     assert resp.status_code == 429
     assert resp.json()["error"]["code"] == ApiErrorCode.RATE_LIMITED
     assert resp.headers["retry-after"] == "3"
-    assert await _dem_message(session_factory, conversation.id) == truoc
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation.id) == before
+    assert fake_arq.pushed == []

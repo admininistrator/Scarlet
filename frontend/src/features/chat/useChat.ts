@@ -21,19 +21,19 @@
  * `active_leaf_id`** (C14). Hai tab cung mo mot hoi thoai thi tab thu hai van
  * gan dung vao cho no dang nhin, va server tra `branched: true` de noi ra.
  *
- * **3. Mot luc chi mot `EventSource` cho moi tab.** `moStreamCho` dong cai cu
+ * **3. Mot luc chi mot `EventSource` cho moi tab.** `openStreamFor` dong cai cu
  * truoc khi mo cai moi — khong phai de tiet kiem ket noi ma vi hai stream cua
  * cung mot message se cung noi chu vao mot cho. (Hai TAB thi khac: moi tab mot
  * cursor rieng, va §7.4/C7 doi ca hai cung chay.)
  *
  * **5. Delta duoc GOM theo khung hinh, khong day thang vao state** (B-234,
  * quy tac 4 cua ban T-HD3). Xem khoi "GOM DELTA THEO KHUNG HINH" duoi than
- * hook — day la cho duy nhat `noiDelta`/`noiReasoning` duoc goi.
+ * hook — day la cho duy nhat `appendDelta`/`appendReasoning` duoc goi.
  *
  * **4. Cay giu them o mot `ref`, khong chi trong `useState`.** Ham cap nhat
  * cua React chay luc RENDER chu khong luc goi, nen `setCay(cu => ...)` khong
- * tra lai duoc cay moi cho dong lenh ke tiep — ma `lamTuoi()` phai tra ve cay
- * vua doc de goi thang `baoDamStream()`. Doc tu `ref` cung tranh mot ca stale
+ * tra lai duoc cay moi cho dong lenh ke tiep — ma `reload()` phai tra ve cay
+ * vua doc de goi thang `ensureStream()`. Doc tu `ref` cung tranh mot ca stale
  * closure that: `gui()` can `activeLeafId` MOI NHAT (luat 2), khong phai gia
  * tri cua lan render tao ra no.
  *
@@ -44,10 +44,10 @@
  * cong"* — ma `useChat` khong nhin thay o nhap: no chi thay nhung lan `gui()`
  * duoc goi, va mot `ref` o day song het doi hook nen no cung khong chet khi
  * nguoi dung xoa trang o nhap roi go mot cau khac han. Khoa gio thuoc ve
- * `Composer`; `gui()` nhan no nhu mot tham so va tra ve `KetQuaGui` de chu
+ * `Composer`; `gui()` nhan no nhu mot tham so va tra ve `SendResult` de chu
  * so huu biet nen giu hay nen bo.
  *
- * ── ...nhung C22 cua `thuLai` thi O DAY (T-3.7 / B-231) ───────────────────
+ * ── ...nhung C22 cua `retry` thi O DAY (T-3.7 / B-231) ───────────────────
  *
  * NQ-93 dua `POST /messages/{id}/retry` vao danh sach BAT BUOC `Idempotency-Key`,
  * nen nut Thu lai cung phai cam mot khoa. Khoa ay o lai `useChat` chu khong
@@ -70,58 +70,58 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
-  MA_LOI,
+  ERROR_CODES,
   api,
-  type DanhGia,
-  type MessageRa,
-  type ModelRa,
+  type Feedback,
+  type MessageOut,
+  type ModelOut,
   type QuotaWarning,
 } from "../../lib/api";
-import { khoaMoi } from "../../lib/idempotency";
-import { chonMacDinh, type KetQuaMacDinh } from "../models/macDinh";
-import { moStream, type TayCamStream, type TrangThaiKetNoi, type UsageRa } from "../../lib/sse";
+import { newKey } from "../../lib/idempotency";
+import { pickDefault, type DefaultPick } from "../models/defaults";
+import { openStream, type StreamHandle, type ConnectionStatus, type UsageOut } from "../../lib/sse";
 import {
-  batDauSinh,
+  startGeneration,
   canStream,
-  cayRong,
-  idAnhEmKe,
-  napHoiThoai,
-  noiDelta,
-  noiReasoning,
-  type TrangThaiCay,
+  emptyTree,
+  adjacentSiblingId,
+  loadConversation,
+  appendDelta,
+  appendReasoning,
+  type TreeState,
 } from "../../lib/tree";
 
 /** Tham so URL giu hoi thoai dang mo — de F5 quay lai dung cho (M3). */
-const THAM_SO_HOI_THOAI = "c";
+const CONVERSATION_PARAM = "c";
 
-function docThamSoHoiThoai(): string | null {
-  return new URLSearchParams(window.location.search).get(THAM_SO_HOI_THOAI);
+function readConversationParam(): string | null {
+  return new URLSearchParams(window.location.search).get(CONVERSATION_PARAM);
 }
 
-function ghiThamSoHoiThoai(id: string): void {
+function writeConversationParam(id: string): void {
   const url = new URL(window.location.href);
-  url.searchParams.set(THAM_SO_HOI_THOAI, id);
+  url.searchParams.set(CONVERSATION_PARAM, id);
   window.history.replaceState(null, "", url);
 }
 
 /** T-3.3 — hoi thoai vua bi xoa thi `?c=` cua no khong duoc song sot qua F5. */
-function xoaThamSoHoiThoai(): void {
+function clearConversationParam(): void {
   const url = new URL(window.location.href);
-  url.searchParams.delete(THAM_SO_HOI_THOAI);
+  url.searchParams.delete(CONVERSATION_PARAM);
   window.history.replaceState(null, "", url);
 }
 
-function loiThanhChu(loi: unknown): string {
-  if (loi instanceof ApiError) {
-    return `${loi.code}: ${loi.message}`;
+function errorText(error: unknown): string {
+  if (error instanceof ApiError) {
+    return `${error.code}: ${error.message}`;
   }
-  return loi instanceof Error ? loi.message : String(loi);
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
  * Ba ket cuc cua mot lan bam Gui — T-3.4.
  *
- * `gui()` tra ve thay vi chi `setLoi()`, vi tu T-3.4 **khoa `Idempotency-Key`
+ * `gui()` tra ve thay vi chi `setError()`, vi tu T-3.4 **khoa `Idempotency-Key`
  * khong con song o day** (C22: no thuoc ve mot lan soan thao, tuc ve
  * `Composer`). Nguoi giu khoa phai biet duoc lam gi voi no:
  *
@@ -133,21 +133,21 @@ function loiThanhChu(loi: unknown): string {
  *   `hong`     — moi ket cuc con lai. GIU ca chu lan khoa: C22 doi lan thu
  *                lai mang **dung mot** khoa, va chu da go khong duoc bien mat.
  */
-export type KetQuaGui = "da-gui" | "ket-khoa" | "hong";
+export type SendResult = "da-gui" | "ket-khoa" | "hong";
 
-export interface ChatDangDung {
-  cay: TrangThaiCay;
+export interface ChatState {
+  tree: TreeState;
   /**
    * T-3.6 — TANG 1 cua ba tang mac dinh: `conversations.default_model` cua
    * hoi thoai dang mo. `null` = hoi thoai nay khong dat gi, hoac chua mo
    * hoi thoai nao.
    *
-   * Doc tu server o moi lan `lamTuoi()`, khong giu mot ban rieng: no la mot
+   * Doc tu server o moi lan `reload()`, khong giu mot ban rieng: no la mot
    * cot cua hang `conversations` va `PATCH` tra ve ca hang ay.
    */
-  modelHoiThoai: string | null;
+  conversationModel: string | null;
   /**
-   * Ket qua day du cua `chonMacDinh()` tren ba tang: model dang dung, tang
+   * Ket qua day du cua `pickDefault()` tren ba tang: model dang dung, tang
    * da quyet dinh no, va id hop le cua tung tang.
    *
    * Tinh MOT lan o day chu khong de moi ben tu tinh: `ModelPicker` ve rail
@@ -155,64 +155,64 @@ export interface ChatDangDung {
    * phep chon roi nhau la mot man hinh chi vao model nay va mot request gui
    * di model khac.
    */
-  macDinh: KetQuaMacDinh;
+  defaultPick: DefaultPick;
   /**
-   * Loi tat cua `macDinh.modelId` — model cho lan GUI ke tiep.
+   * Loi tat cua `defaultPick.modelId` — model cho lan GUI ke tiep.
    *
-   * Tu T-3.7 no **khong** con di kem moi lan `thuLai`: hai nut Thu lai canh
+   * Tu T-3.7 no **khong** con di kem moi lan `retry`: hai nut Thu lai canh
    * nhau chi khac nhau o cho ay, nen nut tron giu model cu con nut "Doi model
    * & thu lai" truyen `modelId` tuong minh. Gia tri nay van la thu nut thu hai
    * gui di — no la model dang chon tren picker.
    */
-  modelHieuLuc: string | null;
+  effectiveModel: string | null;
   /** `null` = khong co stream nao dang mo trong tab nay. */
-  ketNoi: TrangThaiKetNoi | null;
+  connection: ConnectionStatus | null;
   /** Id message assistant dang chay, hoac `null`. */
-  dangChay: string | null;
-  dangBan: boolean;
-  usage: UsageRa | null;
+  running: string | null;
+  busy: boolean;
+  usage: UsageOut | null;
   /** Chip cua `tool_call`/`tool_result`/`artifact`, theo `message_id`. */
-  ghiChu: Record<string, string[]>;
-  loi: string | null;
+  notes: Record<string, string[]>;
+  error: string | null;
 
   /**
    * T-3.6 — ghi TANG 1 (`PATCH /conversations/{id}` `{default_model}`).
    *
    * Khong lam gi khi chua mo hoi thoai nao: luc do chi con tang tai khoan,
-   * va no thuoc ve `usePhien` chu khong ve day.
+   * va no thuoc ve `useSessionState` chu khong ve day.
    */
-  datModelHoiThoai: (modelId: string) => Promise<void>;
-  hoiThoaiMoi: () => Promise<void>;
+  changeConversationModel: (modelId: string) => Promise<void>;
+  newConversation: () => Promise<void>;
   /** T-3.3 — sidebar chon mot hoi thoai da co. */
-  moHoiThoai: (conversationId: string) => Promise<void>;
+  openConversation: (conversationId: string) => Promise<void>;
   /** T-3.3 — hoi thoai dang mo vua bi xoa: roi khoi no, khong mo cai nao. */
-  dongHoiThoai: () => void;
-  /** `khoa` do NGUOI GOI cam (C22) — xem `KetQuaGui`. */
-  gui: (noiDung: string, khoa: string) => Promise<KetQuaGui>;
-  dung: () => Promise<void>;
+  closeConversation: () => void;
+  /** `khoa` do NGUOI GOI cam (C22) — xem `SendResult`. */
+  send: (content: string, key: string) => Promise<SendResult>;
+  stop: () => Promise<void>;
   /**
    * §8.2 — sinh lai cau tra loi `messageId` thanh mot anh em cua no.
    *
    * `modelId` vang mat (nut "Thu lai" tron) ⇒ **khong** gui `model_id`, va
-   * backend dung lai dung model cua chinh cau tra loi ay (`_chon_model`).
+   * backend dung lai dung model cua chinh cau tra loi ay (`_pick_model`).
    * Truyen mot id (nut "Doi model & thu lai") la cho duy nhat doi model.
    *
    * Khoa §11.4 khong o chu ky nay: xem khoi C22 o docstring module.
    */
-  thuLai: (messageId: string, modelId?: string) => Promise<void>;
+  retry: (messageId: string, modelId?: string) => Promise<void>;
   /**
    * §18.2 — Like/Dislike. `gia === null` la **go** danh gia (bam lai lan hai).
    *
-   * Khong nhan `lyDo`: ban T-HD3 chi co hai nut sang/toi, khong co o nhap ly
+   * Khong nhan `reason`: ban T-HD3 chi co hai nut sang/toi, khong co o nhap ly
    * do — va mot ly do gui len hom nay khong doc lai duoc o dau (B-244).
-   * `api.danhGia` van mo duong cho no.
+   * `api.sendFeedback` van mo duong cho no.
    */
-  danhGia: (messageId: string, gia: DanhGia | null) => Promise<void>;
-  suaCauHoi: (messageId: string, noiDung: string) => Promise<void>;
-  chuyenNhanh: (node: MessageRa, huong: -1 | 1) => Promise<void>;
+  sendFeedback: (messageId: string, value: Feedback | null) => Promise<void>;
+  editQuestion: (messageId: string, content: string) => Promise<void>;
+  switchBranch: (node: MessageOut, direction: -1 | 1) => Promise<void>;
   /** Dat mot cau loi len bang loi cua man chat (T-3.6 — xem `ChatScreen`). */
-  datLoi: (chu: string) => void;
-  xoaLoi: () => void;
+  showError: (text: string) => void;
+  clearError: () => void;
 }
 
 /**
@@ -224,11 +224,11 @@ export interface ChatDangDung {
  * danh sach de biet `default: true` cua catalog la model nao, va de bo qua
  * mot `default_model` da bien mat khoi catalog (Cam bay ①).
  */
-export interface TuyChonChat {
+export interface ChatOptions {
   /** Danh sach cua `GET /models` — xem `useModels()`. */
-  models: ModelRa[];
+  models: ModelOut[];
   /** TANG 2: `users.default_model` tu `GET /auth/me`. */
-  modelMacDinhTaiKhoan: string | null;
+  accountDefaultModel: string | null;
   /**
    * T-3.11 — `quota_warning` cua mot `202` (gui, thu lai, sua). Nguon THU HAI
    * cua con so thanh quota dang hien; nguoi nghe quyet dinh ghep the nao.
@@ -248,48 +248,48 @@ export interface TuyChonChat {
  * literal trong chu ky ham: mot literal se la mot object MOI moi lan render,
  * tuc moi `useCallback` phu thuoc vao no deu dung lai o moi khung hinh.
  */
-const TUY_CHON_RONG: TuyChonChat = { models: [], modelMacDinhTaiKhoan: null };
+const NO_OPTIONS: ChatOptions = { models: [], accountDefaultModel: null };
 
-export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
-  const { models, modelMacDinhTaiKhoan } = tuyChon;
+export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
+  const { models, accountDefaultModel } = options;
   /*
     Hai callback quota di qua `ref`: `ChatScreen` truyen chung la closure moi
-    moi lan render, va dua chung vao phu thuoc cua `moStreamCho`/`gui` se dung
+    moi lan render, va dua chung vao phu thuoc cua `openStreamFor`/`gui` se dung
     lai ca chuoi `useCallback` o moi khung hinh.
   */
   const quotaHooksRef = useRef({
-    onQuotaWarning: tuyChon.onQuotaWarning,
-    onQuotaStale: tuyChon.onQuotaStale,
+    onQuotaWarning: options.onQuotaWarning,
+    onQuotaStale: options.onQuotaStale,
   });
   useEffect(() => {
     quotaHooksRef.current = {
-      onQuotaWarning: tuyChon.onQuotaWarning,
-      onQuotaStale: tuyChon.onQuotaStale,
+      onQuotaWarning: options.onQuotaWarning,
+      onQuotaStale: options.onQuotaStale,
     };
   });
   /** `202` vua ve — chuyen `quota_warning` (neu co) cho nguoi nghe. */
-  const baoCanhBaoQuota = useCallback((warning: QuotaWarning | null | undefined) => {
+  const reportQuotaWarning = useCallback((warning: QuotaWarning | null | undefined) => {
     if (warning !== null && warning !== undefined) {
       quotaHooksRef.current.onQuotaWarning?.(warning);
     }
   }, []);
   /** Loi cua mot lan tao luot sinh — `429 QUOTA_EXCEEDED` thi quota da doi. */
-  const baoLoiQuota = useCallback((loi: unknown) => {
-    if (loi instanceof ApiError && loi.code === MA_LOI.QUOTA_EXCEEDED) {
+  const reportQuotaError = useCallback((error: unknown) => {
+    if (error instanceof ApiError && error.code === ERROR_CODES.QUOTA_EXCEEDED) {
       quotaHooksRef.current.onQuotaStale?.();
     }
   }, []);
-  const [cay, setCay] = useState<TrangThaiCay>(cayRong);
-  const [modelHoiThoai, setModelHoiThoai] = useState<string | null>(null);
-  const [ketNoi, setKetNoi] = useState<TrangThaiKetNoi | null>(null);
-  const [dangChay, setDangChay] = useState<string | null>(null);
-  const [dangBan, setDangBan] = useState(false);
-  const [usage, setUsage] = useState<UsageRa | null>(null);
-  const [ghiChu, setGhiChu] = useState<Record<string, string[]>>({});
-  const [loi, setLoi] = useState<string | null>(null);
+  const [tree, setTree] = useState<TreeState>(emptyTree);
+  const [conversationModel, setConversationModel] = useState<string | null>(null);
+  const [connection, setConnection] = useState<ConnectionStatus | null>(null);
+  const [running, setRunning] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [usage, setUsage] = useState<UsageOut | null>(null);
+  const [notes, setNotes] = useState<Record<string, string[]>>({});
+  const [error, setError] = useState<string | null>(null);
 
   /*
-    Ba tang, mot phep chon, mot cho (T-3.6). `chonMacDinh` la ham THUAN nen
+    Ba tang, mot phep chon, mot cho (T-3.6). `pickDefault` la ham THUAN nen
     khong can `useMemo`: no duyet mot mang bon phan tu.
 
     Day cung la cho Cam bay ① duoc dong cho CA hai tang tren: mot
@@ -297,15 +297,15 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
     xuong tang duoi, thay vi tro thanh mot `model_id` gay `400 MODEL_UNKNOWN`
     o lan gui ke tiep.
   */
-  const macDinh = chonMacDinh(models, {
-    hoiThoai: modelHoiThoai,
-    taiKhoan: modelMacDinhTaiKhoan,
+  const defaultPick = pickDefault(models, {
+    conversation: conversationModel,
+    account: accountDefaultModel,
   });
-  const modelHieuLuc = macDinh.modelId;
+  const effectiveModel = defaultPick.modelId;
 
   //: Luat 4 — ban doc duoc ngay cua cung mot cay.
-  const cayRef = useRef<TrangThaiCay>(cayRong());
-  const streamRef = useRef<TayCamStream | null>(null);
+  const treeRef = useRef<TreeState>(emptyTree());
+  const streamRef = useRef<StreamHandle | null>(null);
   /*
     C22 cho nut Thu lai (B-231): `${messageId}:${modelId}` → khoa §11.4.
 
@@ -316,23 +316,23 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
     dung gi.
 
     `ref` chu khong `state`: hai lan bam trong cung mot luot render phai doc
-    duoc CUNG mot gia tri (cai bay S5, y het `khoaRef` cua `Composer`).
+    duoc CUNG mot gia tri (cai bay S5, y het `keyRef` cua `Composer`).
 
     Muc chi bi xoa khi `202` ve, nen mot lan hong se de lai mot muc song het
     doi hook. Do la co y (luat 2 cua C22) va no khong phai mot cho ro: so muc
     bi chan boi so bong bong nguoi dung da bam nham, khong boi thoi gian.
   */
-  const khoaThuLaiRef = useRef<Map<string, string>>(new Map());
+  const retryKeysRef = useRef<Map<string, string>>(new Map());
 
-  const datCay = useCallback((doi: (cu: TrangThaiCay) => TrangThaiCay): TrangThaiCay => {
-    const moi = doi(cayRef.current);
-    cayRef.current = moi;
-    setCay(moi);
-    return moi;
+  const updateTree = useCallback((updater: (prev: TreeState) => TreeState): TreeState => {
+    const next = updater(treeRef.current);
+    treeRef.current = next;
+    setTree(next);
+    return next;
   }, []);
 
-  const themGhiChu = useCallback((messageId: string, chu: string) => {
-    setGhiChu((cu) => ({ ...cu, [messageId]: [...(cu[messageId] ?? []), chu] }));
+  const addNote = useCallback((messageId: string, text: string) => {
+    setNotes((prev) => ({ ...prev, [messageId]: [...(prev[messageId] ?? []), text] }));
   }, []);
 
   // ╔══════════════════════════════════════════════════════════════════════╗
@@ -340,7 +340,7 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
   // ╚══════════════════════════════════════════════════════════════════════╝
   //
   // T-1.14 do duoc **309 delta trong 3,768 giay**, khoang cach lon nhat giua
-  // hai manh la 22 ms. Day thang moi manh vao `setCay` nghia la 309 lan React
+  // hai manh la 22 ms. Day thang moi manh vao `setTree` nghia la 309 lan React
   // dung lai ca bong bong trong 4 giay — nhanh hon han toc do man hinh ve
   // duoc (60 Hz = mot khung moi 16,7 ms), tuc phan lon cong ay khong bao gio
   // xuat hien truoc mat ai.
@@ -356,7 +356,7 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
   //      xa sau do se noi chu cu vao sau chu moi — dung trieu chung C3 nhung
   //      do loi cua client.
   //   2. **`done`/`error`/dong stream XA NGAY, khong doi khung hinh ke.**
-  //      Sau `done` la `lamTuoi()`, va mot manh xa muon hon no se noi them
+  //      Sau `done` la `reload()`, va mot manh xa muon hon no se noi them
   //      chu vao mot message da khep.
   //   3. **Tab bi an thi `requestAnimationFrame` khong chay** — dung nhu mong
   //      muon: chu don lai trong bo dem, khong ai ve gi ca, va mot lan xa duy
@@ -375,27 +375,27 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
     if (pending.size === 0) {
       return;
     }
-    // Thay bang Map moi TRUOC khi dung: `datCay` goi `setCay`, va mot manh
+    // Thay bang Map moi TRUOC khi dung: `updateTree` goi `setTree`, va mot manh
     // den giua chung phai roi vao lo hang sau chu khong vao lo dang xa.
     pendingRef.current = new Map();
-    datCay((c) => {
-      let moi = c;
-      for (const [messageId, manh] of pending) {
-        if (manh.content !== "") {
-          moi = noiDelta(moi, messageId, manh.content);
+    updateTree((c) => {
+      let next = c;
+      for (const [messageId, piece] of pending) {
+        if (piece.content !== "") {
+          next = appendDelta(next, messageId, piece.content);
         }
-        if (manh.reasoning !== "") {
-          moi = noiReasoning(moi, messageId, manh.reasoning);
+        if (piece.reasoning !== "") {
+          next = appendReasoning(next, messageId, piece.reasoning);
         }
       }
-      return moi;
+      return next;
     });
-  }, [datCay]);
+  }, [updateTree]);
 
   const queueDelta = useCallback(
-    (messageId: string, field: "content" | "reasoning", manh: string) => {
-      const cu = pendingRef.current.get(messageId) ?? { content: "", reasoning: "" };
-      pendingRef.current.set(messageId, { ...cu, [field]: cu[field] + manh });
+    (messageId: string, field: "content" | "reasoning", piece: string) => {
+      const prev = pendingRef.current.get(messageId) ?? { content: "", reasoning: "" };
+      pendingRef.current.set(messageId, { ...prev, [field]: prev[field] + piece });
       if (frameRef.current === null) {
         frameRef.current = window.requestAnimationFrame(() => {
           frameRef.current = null;
@@ -413,105 +413,105 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
    * hoi thoai, doi nhanh, unmount), va phan chu da nhan duoc thi da nhan
    * duoc. Bo no di la lam mat 16 ms cuoi cua cau tra loi vi mot ly do ky
    * thuat khong ai nhin thay. Ca DUY NHAT phai bo la `start`, va no bo tay o
-   * `onSuKien` chu khong o day.
+   * `onEvent` chu khong o day.
    */
-  const dongStream = useCallback(() => {
+  const closeStream = useCallback(() => {
     flushDeltas();
-    streamRef.current?.dong();
+    streamRef.current?.close();
     streamRef.current = null;
   }, [flushDeltas]);
 
   /** Doc lai duong di tu server — luat 1. Tra ve cay moi de goi tiep. */
-  const lamTuoi = useCallback(
-    async (conversationId: string): Promise<TrangThaiCay | null> => {
+  const reload = useCallback(
+    async (conversationId: string): Promise<TreeState | null> => {
       try {
-        const chiTiet = await api.docHoiThoai(conversationId);
+        const detail = await api.getConversation(conversationId);
         // TANG 1 di cung duong di: `GET /conversations/{id}` tra ca hai, nen
         // khong co mot loi goi rieng nao de hai gia tri lech nhau.
-        setModelHoiThoai(chiTiet.default_model);
-        return datCay((cu) => napHoiThoai(cu, chiTiet));
+        setConversationModel(detail.default_model);
+        return updateTree((prev) => loadConversation(prev, detail));
       } catch (e) {
-        setLoi(loiThanhChu(e));
+        setError(errorText(e));
         return null;
       }
     },
-    [datCay],
+    [updateTree],
   );
 
-  const moStreamCho = useCallback(
+  const openStreamFor = useCallback(
     (url: string, messageId: string, conversationId: string) => {
       // Luat 3: mot tab, mot stream.
-      dongStream();
-      setDangChay(messageId);
+      closeStream();
+      setRunning(messageId);
       setUsage(null);
 
-      streamRef.current = moStream({
+      streamRef.current = openStream({
         url,
-        onTrangThai: (trangThai) => {
-          setKetNoi(trangThai);
+        onStatus: (status) => {
+          setConnection(status);
           // Noi lai duoc thi bang loi cua lan dut truoc KHONG duoc o lai tren
           // man hinh: DoD "Offline 5 s roi bat lai" ket thuc bang mot man hinh
           // dang chay, ma mot dong "Failed to fetch" nam yen o do doc y het
           // mot cai hong chua duoc sua (B-115).
-          if (trangThai === "dang-chay") {
-            setLoi(null);
+          if (status === "dang-chay") {
+            setError(null);
           }
         },
-        onChet: (chu) => {
+        onFatal: (text) => {
           // Stream chet giua chung: phan da nhan duoc phai len man hinh, neu
           // khong thi 16 ms cuoi bien mat cung voi ket noi (luat 5, diem 2).
           flushDeltas();
-          setLoi(chu);
+          setError(text);
         },
-        onCanhBao: setLoi,
-        onSuKien: (suKien) => {
-          switch (suKien.event) {
+        onWarning: setError,
+        onEvent: (event) => {
+          switch (event.event) {
             case "start":
               // Xoa phan cu: `start` nghia la "bat dau tu dau" ke ca khi no
               // den tu duong dung lai bang Postgres (§7.4, diem 4 cua sse.ts).
-              // Bo dem phai bi bo TRUOC `batDauSinh`, khong phai xa: mot manh
+              // Bo dem phai bi bo TRUOC `startGeneration`, khong phai xa: mot manh
               // cua lan sinh truoc ma xa sau `start` se noi chu cu vao sau
               // chu moi (luat 5, diem 1).
-              pendingRef.current.delete(suKien.data.message_id);
-              datCay((c) => batDauSinh(c, suKien.data.message_id));
+              pendingRef.current.delete(event.data.message_id);
+              updateTree((c) => startGeneration(c, event.data.message_id));
               break;
             case "delta":
-              queueDelta(messageId, "content", suKien.data.t);
+              queueDelta(messageId, "content", event.data.t);
               break;
             case "reasoning":
-              queueDelta(messageId, "reasoning", suKien.data.t);
+              queueDelta(messageId, "reasoning", event.data.t);
               break;
             case "tool_call":
-              themGhiChu(messageId, `tool_call ${suKien.data.name}`);
+              addNote(messageId, `tool_call ${event.data.name}`);
               break;
             case "tool_result":
-              themGhiChu(
+              addNote(
                 messageId,
-                `tool_result ${suKien.data.name} ${suKien.data.ok ? "ok" : "loi"}`,
+                `tool_result ${event.data.name} ${event.data.ok ? "ok" : "loi"}`,
               );
               break;
             case "artifact":
-              themGhiChu(messageId, `artifact ${suKien.data.artifact_id} v${suKien.data.version}`);
+              addNote(messageId, `artifact ${event.data.artifact_id} v${event.data.version}`);
               break;
             case "usage":
-              setUsage(suKien.data);
+              setUsage(event.data);
               break;
             case "done":
-              // Xa TRUOC `lamTuoi()`: mot manh xa muon hon no se noi them chu
+              // Xa TRUOC `reload()`: mot manh xa muon hon no se noi them chu
               // vao mot message da khep (luat 5, diem 2).
               flushDeltas();
-              if (suKien.data.usage !== null) {
-                setUsage(suKien.data.usage);
+              if (event.data.usage !== null) {
+                setUsage(event.data.usage);
               }
-              setDangChay(null);
-              void lamTuoi(conversationId);
+              setRunning(null);
+              void reload(conversationId);
               quotaHooksRef.current.onQuotaStale?.();
               break;
             case "error":
               flushDeltas();
-              setLoi(`${suKien.data.code}: ${suKien.data.message}`);
-              setDangChay(null);
-              void lamTuoi(conversationId);
+              setError(`${event.data.code}: ${event.data.message}`);
+              setRunning(null);
+              void reload(conversationId);
               // Mot luot hong giua chung van co the da tieu tien (worker ghi
               // `usage_events` cho phan da sinh), nen `error` cung lam tuoi.
               quotaHooksRef.current.onQuotaStale?.();
@@ -520,7 +520,7 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
         },
       });
     },
-    [datCay, dongStream, flushDeltas, lamTuoi, queueDelta, themGhiChu],
+    [updateTree, closeStream, flushDeltas, reload, queueDelta, addNote],
   );
 
   /**
@@ -529,26 +529,26 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
    * Day la toan bo phan "F5 giua luc stream" (M3) va "dong tab, mo lai sau 30
    * giay": khong co gi luu o client, cau tra loi nam trong Postgres va Redis.
    */
-  const baoDamStream = useCallback(
-    (cayMoi: TrangThaiCay) => {
-      const node = canStream(cayMoi);
-      if (node === null || cayMoi.conversationId === null) {
+  const ensureStream = useCallback(
+    (nextTree: TreeState) => {
+      const node = canStream(nextTree);
+      if (node === null || nextTree.conversationId === null) {
         return;
       }
-      moStreamCho(`/api/v1/messages/${node.id}/stream`, node.id, cayMoi.conversationId);
+      openStreamFor(`/api/v1/messages/${node.id}/stream`, node.id, nextTree.conversationId);
     },
-    [moStreamCho],
+    [openStreamFor],
   );
 
-  const mo = useCallback(
+  const open = useCallback(
     async (conversationId: string) => {
-      const cayMoi = await lamTuoi(conversationId);
-      if (cayMoi !== null) {
-        ghiThamSoHoiThoai(conversationId);
-        baoDamStream(cayMoi);
+      const nextTree = await reload(conversationId);
+      if (nextTree !== null) {
+        writeConversationParam(conversationId);
+        ensureStream(nextTree);
       }
     },
-    [baoDamStream, lamTuoi],
+    [ensureStream, reload],
   );
 
   /**
@@ -559,16 +559,16 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
    * nen no co hook rieng (`features/models/useModels.ts`). Hai thu tung di
    * chung chi vi ca hai cung phai chay luc mount.
    */
-  const napBanDau = useCallback(() => {
-    const id = docThamSoHoiThoai();
+  const loadInitial = useCallback(() => {
+    const id = readConversationParam();
     if (id !== null) {
-      void mo(id);
+      void open(id);
     }
-  }, [mo]);
+  }, [open]);
 
   // ── nap lan dau, va nap LAI neu lan dau roi dung luc mat mang ──
   useEffect(() => {
-    napBanDau();
+    loadInitial();
 
     /**
      * F5 trong luc DevTools con dat Offline thi ca `/models` lan
@@ -579,35 +579,35 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
      * Chi lo phan KHOI DONG: stream dang song thi `sse.ts` tu lo lay phan cua
      * no, dung vao day la mo thua mot ket noi.
      */
-    function khiCoMang(): void {
-      if (cayRef.current.conversationId === null) {
-        napBanDau();
+    function handleOnline(): void {
+      if (treeRef.current.conversationId === null) {
+        loadInitial();
       }
     }
 
-    window.addEventListener("online", khiCoMang);
+    window.addEventListener("online", handleOnline);
     return () => {
-      window.removeEventListener("online", khiCoMang);
-      dongStream();
+      window.removeEventListener("online", handleOnline);
+      closeStream();
     };
-  }, [dongStream, napBanDau]);
+  }, [closeStream, loadInitial]);
 
-  const hoiThoaiMoi = useCallback(async () => {
-    setDangBan(true);
+  const newConversation = useCallback(async () => {
+    setBusy(true);
     try {
-      dongStream();
-      setDangChay(null);
-      setKetNoi(null);
-      const hoiThoai = await api.taoHoiThoai(
-        modelHieuLuc === null ? {} : { default_model: modelHieuLuc },
+      closeStream();
+      setRunning(null);
+      setConnection(null);
+      const conversation = await api.createConversation(
+        effectiveModel === null ? {} : { default_model: effectiveModel },
       );
-      await mo(hoiThoai.id);
+      await open(conversation.id);
     } catch (e) {
-      setLoi(loiThanhChu(e));
+      setError(errorText(e));
     } finally {
-      setDangBan(false);
+      setBusy(false);
     }
-  }, [dongStream, mo, modelHieuLuc]);
+  }, [closeStream, open, effectiveModel]);
 
   /**
    * T-3.3 — sidebar chon mot hoi thoai da co.
@@ -616,51 +616,51 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
    * tab mot `EventSource`, va mot stream con song cua hoi thoai truoc se noi
    * chu cua no vao cay vua nap.
    */
-  const moHoiThoai = useCallback(
+  const openConversation = useCallback(
     async (conversationId: string) => {
-      if (conversationId === cayRef.current.conversationId) {
+      if (conversationId === treeRef.current.conversationId) {
         return;
       }
-      dongStream();
-      setDangChay(null);
-      setKetNoi(null);
+      closeStream();
+      setRunning(null);
+      setConnection(null);
       setUsage(null);
-      setLoi(null);
-      await mo(conversationId);
+      setError(null);
+      await open(conversationId);
     },
-    [dongStream, mo],
+    [closeStream, open],
   );
 
   /** T-3.3 — hoi thoai dang mo vua bi xoa: khong con gi de hien. */
-  const datModelHoiThoai = useCallback(
+  const changeConversationModel = useCallback(
     async (modelId: string): Promise<void> => {
-      const conversationId = cayRef.current.conversationId;
+      const conversationId = treeRef.current.conversationId;
       if (conversationId === null) {
         return;
       }
       /*
-        `PATCH` tra ve ca duong di (`HoiThoaiChiTiet`), nen khong goi them
-        mot `GET` nao — cung ly le da dung o `chuyenNhanh`. Doc
+        `PATCH` tra ve ca duong di (`ConversationDetail`), nen khong goi them
+        mot `GET` nao — cung ly le da dung o `switchBranch`. Doc
         `default_model` TU RESPONSE chu khong tu `modelId` vua gui: server
         la noi quyet dinh.
       */
-      const chiTiet = await api.suaHoiThoai(conversationId, { default_model: modelId });
-      setModelHoiThoai(chiTiet.default_model);
-      datCay((cu) => napHoiThoai(cu, chiTiet));
+      const detail = await api.updateConversation(conversationId, { default_model: modelId });
+      setConversationModel(detail.default_model);
+      updateTree((prev) => loadConversation(prev, detail));
     },
-    [datCay],
+    [updateTree],
   );
 
-  const dongHoiThoai = useCallback(() => {
-    dongStream();
-    setDangChay(null);
-    setKetNoi(null);
+  const closeConversation = useCallback(() => {
+    closeStream();
+    setRunning(null);
+    setConnection(null);
     setUsage(null);
-    setLoi(null);
-    setModelHoiThoai(null);
-    datCay(() => cayRong());
-    xoaThamSoHoiThoai();
-  }, [datCay, dongStream]);
+    setError(null);
+    setConversationModel(null);
+    updateTree(() => emptyTree());
+    clearConversationParam();
+  }, [updateTree, closeStream]);
 
   /**
    * §7.2 ① — tao message roi mo stream. KHONG sinh mot chu nao o day (A1).
@@ -670,43 +670,43 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
    * dung — dung cai bay ma C22 ta. Chu so huu khoa la `Composer`, vi don vi
    * cua C22 la "lan soan thao" chu khong "loi goi HTTP".
    */
-  const gui = useCallback(
-    async (noiDungMoi: string, khoa: string): Promise<KetQuaGui> => {
-      const conversationId = cayRef.current.conversationId;
+  const send = useCallback(
+    async (newContent: string, key: string): Promise<SendResult> => {
+      const conversationId = treeRef.current.conversationId;
       if (conversationId === null) {
-        setLoi("chua co hoi thoai nao dang mo");
+        setError("chua co hoi thoai nao dang mo");
         return "hong";
       }
-      setDangBan(true);
+      setBusy(true);
       try {
-        const ra = await api.guiTinNhan(
+        const output = await api.sendMessage(
           conversationId,
           {
-            content: noiDungMoi,
+            content: newContent,
             // C14 — la CLIENT dang thay, khong de server tu lay.
-            parent_id: cayRef.current.activeLeafId,
-            model_id: modelHieuLuc,
+            parent_id: treeRef.current.activeLeafId,
+            model_id: effectiveModel,
           },
-          khoa,
+          key,
         );
-        if (ra.branched) {
-          setLoi("da mo mot nhanh moi (parent_id khac la hien tai) — C14");
+        if (output.branched) {
+          setError("da mo mot nhanh moi (parent_id khac la hien tai) — C14");
         }
-        baoCanhBaoQuota(ra.quota_warning);
-        moStreamCho(ra.stream_url, ra.assistant_message_id, conversationId);
-        await lamTuoi(conversationId);
+        reportQuotaWarning(output.quota_warning);
+        openStreamFor(output.stream_url, output.assistant_message_id, conversationId);
+        await reload(conversationId);
         return "da-gui";
       } catch (e) {
-        setLoi(loiThanhChu(e));
-        baoLoiQuota(e);
+        setError(errorText(e));
+        reportQuotaError(e);
         // `IN_PROGRESS` (khoa dang bi giu) chu khong `GENERATION_IN_PROGRESS`
-        // (message dang sinh) — hai ma, xem `MA_LOI`.
-        return e instanceof ApiError && e.code === MA_LOI.KHOA_DANG_GIU ? "ket-khoa" : "hong";
+        // (message dang sinh) — hai ma, xem `ERROR_CODES`.
+        return e instanceof ApiError && e.code === ERROR_CODES.KEY_IN_USE ? "ket-khoa" : "hong";
       } finally {
-        setDangBan(false);
+        setBusy(false);
       }
     },
-    [baoCanhBaoQuota, baoLoiQuota, lamTuoi, modelHieuLuc, moStreamCho],
+    [reportQuotaWarning, reportQuotaError, reload, effectiveModel, openStreamFor],
   );
 
   /**
@@ -715,68 +715,68 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
    * Worker van phat `done` (kem `finish_reason='cancelled'`) va van ghi phan
    * da sinh xuong Postgres. Dong stream o day la vut mat ca hai.
    */
-  const dung = useCallback(async () => {
-    if (dangChay === null) {
+  const stop = useCallback(async () => {
+    if (running === null) {
       return;
     }
     try {
-      await api.huy(dangChay);
+      await api.cancel(running);
     } catch (e) {
-      setLoi(loiThanhChu(e));
+      setError(errorText(e));
     }
-  }, [dangChay]);
+  }, [running]);
 
   /**
    * §8.2 — mot anh em moi cho cung mot cau hoi. Xem khoi C22 o docstring module.
    *
-   * **Khong con nhet `modelHieuLuc` vao moi lan thu lai** (ban T-3.6 lam vay).
+   * **Khong con nhet `effectiveModel` vao moi lan thu lai** (ban T-3.6 lam vay).
    * T-3.7 dung HAI nut canh nhau, va chung chi khac nhau o dung diem ay: "Thu
    * lai" giu nguyen model cu, "Doi model & thu lai" moi doi. Gui model dang
    * chon cho ca hai la lam nut thu nhat lang le doi model — dung thu
-   * `_chon_model` cua backend viet ro la khong duoc ("bam Retry ma khong chon
+   * `_pick_model` cua backend viet ro la khong duoc ("bam Retry ma khong chon
    * gi phai sinh lai bang dung model cu").
    */
-  const thuLai = useCallback(
+  const retry = useCallback(
     async (messageId: string, modelId?: string) => {
-      const conversationId = cayRef.current.conversationId;
+      const conversationId = treeRef.current.conversationId;
       if (conversationId === null) {
         return;
       }
       // Mot cap (message, model) = mot y dinh = mot khoa. Hai lan bam nhanh
       // doc cung gia tri nay vi no la `ref` chu khong `state` (cai bay S5).
-      const dinhDanh = `${messageId}:${modelId ?? ""}`;
-      const khoa = khoaThuLaiRef.current.get(dinhDanh) ?? khoaMoi();
-      khoaThuLaiRef.current.set(dinhDanh, khoa);
-      setDangBan(true);
+      const identity = `${messageId}:${modelId ?? ""}`;
+      const key = retryKeysRef.current.get(identity) ?? newKey();
+      retryKeysRef.current.set(identity, key);
+      setBusy(true);
       try {
-        const ra = await api.thuLai(
+        const output = await api.retry(
           messageId,
           modelId === undefined ? {} : { model_id: modelId },
-          khoa,
+          key,
         );
         // Luat 3 cua C22: bo khoa KHI VA CHI KHI `202` ve. Lan bam sau tren
         // cung cau tra loi la mot y dinh moi, tuc mot anh em that.
-        khoaThuLaiRef.current.delete(dinhDanh);
-        baoCanhBaoQuota(ra.quota_warning);
-        moStreamCho(ra.stream_url, ra.assistant_message_id, conversationId);
-        await lamTuoi(conversationId);
+        retryKeysRef.current.delete(identity);
+        reportQuotaWarning(output.quota_warning);
+        openStreamFor(output.stream_url, output.assistant_message_id, conversationId);
+        await reload(conversationId);
       } catch (e) {
         // Luat 2: GIU khoa. Mang rot hay `503` thi lan bam sau van la cung
         // mot y dinh, va §11.4 chi lam viec duoc khi hai lan ay cung khoa.
-        setLoi(loiThanhChu(e));
-        baoLoiQuota(e);
+        setError(errorText(e));
+        reportQuotaError(e);
       } finally {
-        setDangBan(false);
+        setBusy(false);
       }
     },
-    [baoCanhBaoQuota, baoLoiQuota, lamTuoi, moStreamCho],
+    [reportQuotaWarning, reportQuotaError, reload, openStreamFor],
   );
 
   /**
    * §18.2 — ghi Like/Dislike roi DOC LAI duong di tu server.
    *
    * Doc lai chu khong tu va `feedback` vao node dang co trong state: "Viec"
-   * dong 3 cua T-3.7 doi hai nut ve tu `feedback` cua `MessageRa` chu khong tu
+   * dong 3 cua T-3.7 doi hai nut ve tu `feedback` cua `MessageOut` chu khong tu
    * mot ban rieng o FE, va cach re nhat de dieu do dung mai la khong bao gio
    * co ban thu hai de lech. Cung luat 1 cua hook nay, ap cho mot truong thay
    * vi cho hinh dang cay.
@@ -784,42 +784,42 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
    * `null` = go danh gia (bam Like lan thu hai). Endpoint idempotent theo
    * message nen bam bao nhieu lan cung ra mot hang.
    */
-  const danhGia = useCallback(
-    async (messageId: string, gia: DanhGia | null) => {
-      const conversationId = cayRef.current.conversationId;
+  const sendFeedback = useCallback(
+    async (messageId: string, value: Feedback | null) => {
+      const conversationId = treeRef.current.conversationId;
       if (conversationId === null) {
         return;
       }
       try {
-        await api.danhGia(messageId, gia);
-        await lamTuoi(conversationId);
+        await api.sendFeedback(messageId, value);
+        await reload(conversationId);
       } catch (e) {
-        setLoi(loiThanhChu(e));
+        setError(errorText(e));
       }
     },
-    [lamTuoi],
+    [reload],
   );
 
-  const suaCauHoi = useCallback(
-    async (messageId: string, noiDungMoi: string) => {
-      const conversationId = cayRef.current.conversationId;
+  const editQuestion = useCallback(
+    async (messageId: string, newContent: string) => {
+      const conversationId = treeRef.current.conversationId;
       if (conversationId === null) {
         return;
       }
-      setDangBan(true);
+      setBusy(true);
       try {
-        const ra = await api.suaCauHoi(messageId, noiDungMoi);
-        baoCanhBaoQuota(ra.quota_warning);
-        moStreamCho(ra.stream_url, ra.assistant_message_id, conversationId);
-        await lamTuoi(conversationId);
+        const output = await api.editQuestion(messageId, newContent);
+        reportQuotaWarning(output.quota_warning);
+        openStreamFor(output.stream_url, output.assistant_message_id, conversationId);
+        await reload(conversationId);
       } catch (e) {
-        setLoi(loiThanhChu(e));
-        baoLoiQuota(e);
+        setError(errorText(e));
+        reportQuotaError(e);
       } finally {
-        setDangBan(false);
+        setBusy(false);
       }
     },
-    [baoCanhBaoQuota, baoLoiQuota, lamTuoi, moStreamCho],
+    [reportQuotaWarning, reportQuotaError, reload, openStreamFor],
   );
 
   /**
@@ -829,57 +829,57 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
    * biet id cua anh em ke ben (C13 cam FE tu dem). `PATCH` tra ve LUON duong
    * di moi nen khong can `GET` lan ba.
    */
-  const chuyenNhanh = useCallback(
-    async (node: MessageRa, huong: -1 | 1) => {
-      const conversationId = cayRef.current.conversationId;
+  const switchBranch = useCallback(
+    async (node: MessageOut, direction: -1 | 1) => {
+      const conversationId = treeRef.current.conversationId;
       if (conversationId === null) {
         return;
       }
-      setDangBan(true);
+      setBusy(true);
       try {
-        const anhEm = await api.anhEm(node.id);
-        const dich = idAnhEmKe(anhEm, huong);
-        if (dich === null) {
+        const siblings = await api.siblings(node.id);
+        const target = adjacentSiblingId(siblings, direction);
+        if (target === null) {
           return;
         }
         // NQ-35: gui dung id anh em. Khi nga (a) cua B-109 co mat, server tu di
         // tiep xuong la sau nhat cua nhanh nay va dong nay khong phai sua.
-        const chiTiet = await api.suaHoiThoai(conversationId, { active_leaf_id: dich });
-        dongStream();
-        setDangChay(null);
-        setKetNoi(null);
-        baoDamStream(datCay((cu) => napHoiThoai(cu, chiTiet)));
+        const detail = await api.updateConversation(conversationId, { active_leaf_id: target });
+        closeStream();
+        setRunning(null);
+        setConnection(null);
+        ensureStream(updateTree((prev) => loadConversation(prev, detail)));
       } catch (e) {
-        setLoi(loiThanhChu(e));
+        setError(errorText(e));
       } finally {
-        setDangBan(false);
+        setBusy(false);
       }
     },
-    [baoDamStream, datCay, dongStream],
+    [ensureStream, updateTree, closeStream],
   );
 
   return {
-    cay,
-    modelHoiThoai,
-    macDinh,
-    modelHieuLuc,
-    ketNoi,
-    dangChay,
-    dangBan,
+    tree,
+    conversationModel,
+    defaultPick,
+    effectiveModel,
+    connection,
+    running,
+    busy,
     usage,
-    ghiChu,
-    loi,
-    datModelHoiThoai,
-    hoiThoaiMoi,
-    moHoiThoai,
-    dongHoiThoai,
-    gui,
-    dung,
-    thuLai,
-    danhGia,
-    suaCauHoi,
-    chuyenNhanh,
-    datLoi: setLoi,
-    xoaLoi: () => setLoi(null),
+    notes,
+    error,
+    changeConversationModel,
+    newConversation,
+    openConversation,
+    closeConversation,
+    send,
+    stop,
+    retry,
+    sendFeedback,
+    editQuestion,
+    switchBranch,
+    showError: setError,
+    clearError: () => setError(null),
   };
 }

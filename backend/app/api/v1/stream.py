@@ -42,10 +42,10 @@ from app.db.repositories import MessageRepository
 from app.db.session import session_scope
 from app.streaming.consumer import (
     SSE_HEADERS,
-    CursorKhongHopLe,
+    InvalidCursor,
     MessageSnapshot,
     StreamConsumer,
-    doc_cursor,
+    parse_cursor,
 )
 
 router = APIRouter(tags=["stream"])
@@ -75,9 +75,9 @@ async def stream_message(
     một cục khi xong; triệu chứng đó rất dễ bị đọc nhầm thành "model chậm".
     """
     try:
-        vi_tri = doc_cursor(last_event_id, cursor)
-    except CursorKhongHopLe as loi:
-        raise ApiError(status.HTTP_400_BAD_REQUEST, ApiErrorCode.CURSOR_INVALID, str(loi)) from loi
+        position = parse_cursor(last_event_id, cursor)
+    except InvalidCursor as exc:
+        raise ApiError(status.HTTP_400_BAD_REQUEST, ApiErrorCode.CURSOR_INVALID, str(exc)) from exc
 
     async with session_scope() as session:
         message = await MessageRepository(session).get_message(message_id, user_id=user_id)
@@ -91,7 +91,7 @@ async def stream_message(
 
     consumer = StreamConsumer(get_redis(), snapshot, heartbeat_s=settings.STREAM_HEARTBEAT_S)
     return StreamingResponse(
-        consumer.frames(vi_tri),
+        consumer.frames(position),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )

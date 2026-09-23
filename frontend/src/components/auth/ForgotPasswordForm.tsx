@@ -15,7 +15,7 @@ import { useTurnstile } from "./useTurnstile";
  *
  * Cung hinh dang `RegisterForm` va cung ly le §11.5: email co that va email
  * khong ton tai cho ra man hinh GIONG HET nhau, vi backend tra dung mot
- * `_PHAN_HOI_QUEN_MAT_KHAU` cho ca hai. Khac dung mot thu — khong co o mat
+ * `_FORGOT_PASSWORD_RESPONSE` cho ca hai. Khac dung mot thu — khong co o mat
  * khau — nen no la mot file rieng chu khong mot co `che_do` tren mot form
  * dung chung: hai form co hai truong khac nhau, hai cau khac nhau, hai duong
  * di tiep khac nhau, va thu duy nhat chung chia se (bon viec cua Turnstile)
@@ -26,12 +26,12 @@ import { useTurnstile } from "./useTurnstile";
  */
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
-  const [dangGui, setDangGui] = useState(false);
-  const [loi, setLoi] = useState<string | null>(null);
-  const [xong, setXong] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
   const turnstile = useTurnstile();
 
-  if (xong) {
+  if (done) {
     return (
       <main className="mx-auto w-full max-w-sm px-6 py-12">
         <h2 className="text-lg font-semibold">{t("quenMatKhau.daGui.tieuDe")}</h2>
@@ -46,21 +46,21 @@ export function ForgotPasswordForm() {
     );
   }
 
-  async function gui() {
-    if (turnstile.thieuToken) {
-      setLoi(t("auth.turnstileChua"));
+  async function submit() {
+    if (turnstile.missingToken) {
+      setError(t("auth.turnstileChua"));
       return;
     }
-    setLoi(null);
-    setDangGui(true);
+    setError(null);
+    setSending(true);
     try {
-      await api.quenMatKhau(email, turnstile.token);
-      setXong(true);
+      await api.forgotPassword(email, turnstile.token);
+      setDone(true);
     } catch (e) {
-      setLoi(authErrorText(e));
+      setError(authErrorText(e));
       turnstile.reset();
     } finally {
-      setDangGui(false);
+      setSending(false);
     }
   }
 
@@ -73,7 +73,7 @@ export function ForgotPasswordForm() {
         className="flex flex-col gap-3"
         onSubmit={(e) => {
           e.preventDefault();
-          void gui();
+          void submit();
         }}
       >
         <label className="flex flex-col gap-1 text-sm">
@@ -90,18 +90,18 @@ export function ForgotPasswordForm() {
 
         <Turnstile onToken={turnstile.onToken} ref={turnstile.ref} className="my-1" />
 
-        {loi !== null && (
+        {error !== null && (
           <p role="alert" className="text-sm text-danger-text">
-            {loi}
+            {error}
           </p>
         )}
 
         <button
           type="submit"
-          disabled={dangGui}
+          disabled={sending}
           className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
         >
-          {dangGui ? t("auth.dangXuLy") : t("quenMatKhau.gui")}
+          {sending ? t("auth.dangXuLy") : t("quenMatKhau.gui")}
         </button>
       </form>
 

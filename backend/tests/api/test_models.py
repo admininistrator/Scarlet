@@ -35,7 +35,7 @@ from app.main import app
 client = TestClient(app)
 
 
-class _SessionGia:
+class _FakeSession:
     """Session không ghi gì — `AuditLogRepository.record` gọi đúng hai lệnh này."""
 
     def add(self, _row: Any) -> None:
@@ -49,17 +49,17 @@ class _SessionGia:
 
 
 @asynccontextmanager
-async def _khong_ghi_so() -> AsyncIterator[_SessionGia]:
+async def _no_ledger_writes() -> AsyncIterator[_FakeSession]:
     """Thay `session_scope()` của `admin.py` — xem `test_reload_endpoint_...`."""
-    yield _SessionGia()
+    yield _FakeSession()
 
 
 async def _probe_ok(_provider: object) -> None:
-    """Provider trả lời được — xem `_khong_do_mang_that`."""
+    """Provider trả lời được — xem `_no_real_network_probe`."""
     return None
 
 
-class _RedisGia:
+class _FakeRedis:
     """Blacklist rỗng — `get_access_claims` hỏi Redis ở MỌI request có cookie."""
 
     async def mget(self, keys: list[str]) -> list[str | None]:
@@ -67,7 +67,7 @@ class _RedisGia:
 
 
 @pytest.fixture
-def phien_admin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def admin_session(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Cookie phiên `role=admin` trên `client` cho ca `reload` — T-2.16.
 
     Không cần hàng `users` nào trong Postgres: `require_admin` đọc `role` từ
@@ -77,7 +77,7 @@ def phien_admin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     sẽ đi theo mọi ca chạy sau, và khi ấy một test "gọi không đăng nhập" sẽ
     xanh vì lý do hoàn toàn khác với lý do nó tưởng.
     """
-    monkeypatch.setattr("app.core.deps.get_redis", lambda: _RedisGia())
+    monkeypatch.setattr("app.core.deps.get_redis", lambda: _FakeRedis())
     client.cookies.set(
         SESSION_COOKIE_NAME,
         encode_access_token(
@@ -93,15 +93,15 @@ def phien_admin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _khoi_phuc_catalog_that() -> None:
+def _restore_real_catalog() -> None:
     """Mỗi test tự dọn cache về catalog thật, tránh rò rỉ giữa các test."""
     yield
     catalog.reload(path=catalog.CATALOG_PATH)
-    provider_health.quen_het()
+    provider_health.forget_all()
 
 
 @pytest.fixture(autouse=True)
-def _khong_do_mang_that(monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_real_network_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """T-3.6 — `GET /models` nay hỏi `provider_health`, thứ gọi ra ngoài.
 
     Thay đúng **một** hàm (`probe_provider`, lời gọi mạng duy nhất) chứ không
@@ -112,10 +112,10 @@ def _khong_do_mang_that(monkeypatch: pytest.MonkeyPatch) -> None:
     nguyên ý nghĩa. Ca nào cần chiều ngược lại thì tự `monkeypatch` lại.
     """
     monkeypatch.setattr(provider_health, "probe_provider", _probe_ok)
-    provider_health.quen_het()
+    provider_health.forget_all()
 
 
-def test_get_models_khong_lo_base_url_hay_pricing() -> None:
+def test_get_models_does_not_leak_base_url_or_pricing() -> None:
     resp = client.get("/api/v1/models")
     assert resp.status_code == 200
     body = resp.json()
@@ -128,7 +128,7 @@ def test_get_models_khong_lo_base_url_hay_pricing() -> None:
     assert "pricing" not in first
 
 
-def test_get_models_co_dung_mot_default_deepseek_flash() -> None:
+def test_get_models_has_exactly_one_default_deepseek_flash() -> None:
     resp = client.get("/api/v1/models")
     body = resp.json()
     defaults = [m for m in body if m["default"]]
@@ -136,7 +136,7 @@ def test_get_models_co_dung_mot_default_deepseek_flash() -> None:
     assert defaults[0]["id"] == "deepseek-flash"
 
 
-def test_reload_phan_anh_ngay_khong_can_restart(tmp_path: Path) -> None:
+def test_reload_takes_effect_without_restart(tmp_path: Path) -> None:
     raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
     raw["models"][0]["display_name"] = "DeepSeek Flash (test reload)"
     fixture = tmp_path / "model_catalog.json"
@@ -149,14 +149,14 @@ def test_reload_phan_anh_ngay_khong_can_restart(tmp_path: Path) -> None:
     assert "DeepSeek Flash (test reload)" in names
 
 
-@pytest.mark.usefixtures("phien_admin")
-def test_reload_endpoint_tra_ve_so_luong_model(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.usefixtures("admin_session")
+def test_reload_endpoint_returns_model_count(monkeypatch: pytest.MonkeyPatch) -> None:
     """Từ T-2.16, endpoint này ghi một dòng `audit_logs` — xem docstring module.
 
     Ca này đo **catalog**, không đo sổ, nên nó thay `session_scope` bằng một
     stub thay vì kéo cả Postgres vào một file test của T-0.7.
     """
-    monkeypatch.setattr("app.api.v1.admin.session_scope", _khong_ghi_so)
+    monkeypatch.setattr("app.api.v1.admin.session_scope", _no_ledger_writes)
 
     resp = client.post("/api/v1/admin/catalog/reload")
 
@@ -167,7 +167,7 @@ def test_reload_endpoint_tra_ve_so_luong_model(monkeypatch: pytest.MonkeyPatch) 
 # ═════════════════ T-3.6 — `available` + `unavailable_reason` (§18.3) ════════
 
 
-def test_get_models_co_hai_truong_kha_dung_cua_18_3() -> None:
+def test_get_models_has_the_two_availability_fields_of_18_3() -> None:
     """§18.3: *"có `available: bool` và `unavailable_reason`"*. T-0.7 dựng
     `GET /models` **tối thiểu** và bỏ hai trường này lại; T-3.6 đặt chúng vào."""
     body = client.get("/api/v1/models").json()
@@ -178,36 +178,36 @@ def test_get_models_co_hai_truong_kha_dung_cua_18_3() -> None:
         assert "unavailable_reason" in m
 
 
-def test_provider_song_thi_moi_model_kha_dung_va_khong_co_ly_do() -> None:
+def test_live_provider_makes_every_model_available_without_reason() -> None:
     body = client.get("/api/v1/models").json()
 
     assert all(m["available"] for m in body)
     assert all(m["unavailable_reason"] is None for m in body)
 
 
-def test_provider_host_dependent_tat_thi_dung_model_cua_no_bi_xam(
+def test_host_dependent_provider_down_greys_out_its_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """RR-5 / UC-05 dòng 2 — 9Router tắt là ca THƯỜNG. Chỉ model của provider
     ấy mất `available`; DeepSeek và Anthropic không liên quan."""
 
-    async def probe_hong(_provider: object) -> None:
+    async def failing_probe(_provider: object) -> None:
         raise ConnectionError("Connection refused")
 
-    monkeypatch.setattr(provider_health, "probe_provider", probe_hong)
-    provider_health.quen_het()
+    monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
+    provider_health.forget_all()
 
     body = client.get("/api/v1/models").json()
 
     cat = catalog.get_catalog()
-    tat = {
+    disabled = {
         m.id
         for m in cat.models
         if m.enabled and cat.providers[m.provider].availability == "host-dependent"
     }
-    assert tat, "catalog thật phải còn ít nhất một model `host-dependent`"
+    assert disabled, "catalog thật phải còn ít nhất một model `host-dependent`"
     for m in body:
-        if m["id"] in tat:
+        if m["id"] in disabled:
             assert m["available"] is False
             assert m["unavailable_reason"]
         else:
@@ -215,62 +215,62 @@ def test_provider_host_dependent_tat_thi_dung_model_cua_no_bi_xam(
             assert m["unavailable_reason"] is None
 
 
-def test_model_khong_kha_dung_VAN_nam_trong_danh_sach(
+def test_unavailable_model_STILL_in_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """UC-05 dòng 2 đòi *hiện xám*, không đòi biến mất. Lọc nó đi thì
     `conversations.default_model` của một hội thoại cũ trỏ vào một model
     không còn trong danh sách nào — Cạm bẫy ① của T-3.6 ở một dạng khác."""
 
-    async def probe_hong(_provider: object) -> None:
+    async def failing_probe(_provider: object) -> None:
         raise ConnectionError("Connection refused")
 
-    monkeypatch.setattr(provider_health, "probe_provider", probe_hong)
-    provider_health.quen_het()
+    monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
+    provider_health.forget_all()
 
-    so_luong_khi_tat = len(client.get("/api/v1/models").json())
+    count_when_off = len(client.get("/api/v1/models").json())
 
     monkeypatch.setattr(provider_health, "probe_provider", _probe_ok)
-    provider_health.quen_het()
-    so_luong_khi_song = len(client.get("/api/v1/models").json())
+    provider_health.forget_all()
+    count_when_alive = len(client.get("/api/v1/models").json())
 
-    assert so_luong_khi_tat == so_luong_khi_song
+    assert count_when_off == count_when_alive
 
 
-def test_ly_do_lay_ten_provider_tu_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reason_takes_provider_name_from_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     """A3 — câu hiện lên màn hình không được ghim tên một provider cụ thể."""
 
-    async def probe_hong(_provider: object) -> None:
+    async def failing_probe(_provider: object) -> None:
         raise TimeoutError("het gio cho")
 
-    monkeypatch.setattr(provider_health, "probe_provider", probe_hong)
-    provider_health.quen_het()
+    monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
+    provider_health.forget_all()
 
     body = client.get("/api/v1/models").json()
     cat = catalog.get_catalog()
-    nhan = {
+    label = {
         cat.providers[m.provider].label
         for m in cat.models
         if m.enabled and cat.providers[m.provider].availability == "host-dependent"
     }
 
-    ly_do = [m["unavailable_reason"] for m in body if not m["available"]]
-    assert ly_do
-    assert all(any(n in r for n in nhan) for r in ly_do)
+    reason = [m["unavailable_reason"] for m in body if not m["available"]]
+    assert reason
+    assert all(any(n in r for n in label) for r in reason)
 
 
-def test_get_models_khong_lo_base_url_khi_provider_tat(
+def test_get_models_does_not_leak_base_url_when_provider_down(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Câu lý do đi ra ngoài cho MỌI người dùng. `str(exc)` của httpx mang
     nguyên URL nội bộ (`http://host.docker.internal:20128/v1/models`), nên nó
     phải ở lại trong log — ADR-12, §9.3 hàng đầu tiên."""
 
-    async def probe_hong(_provider: object) -> None:
+    async def failing_probe(_provider: object) -> None:
         raise ConnectionError("All connection attempts failed: http://host.docker.internal:20128")
 
-    monkeypatch.setattr(provider_health, "probe_provider", probe_hong)
-    provider_health.quen_het()
+    monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
+    provider_health.forget_all()
 
     body = client.get("/api/v1/models").json()
 
@@ -282,7 +282,7 @@ def test_get_models_khong_lo_base_url_khi_provider_tat(
 # ═══════════════ B-257 — `provider_id`: khoá để so, tách khỏi nhãn để hiện ══════
 
 
-def test_provider_id_la_khoa_catalog_chu_khong_phai_nhan() -> None:
+def test_provider_id_is_catalog_key_not_label() -> None:
     """B-257 — `provider` là NHÃN (`DeepSeek AI`), `provider_id` là KHOÁ
     (`deepseek`). FE so khoá BYOK của người dùng với `provider_id`; so với
     nhãn thì không bao giờ khớp.
@@ -304,7 +304,7 @@ def test_provider_id_la_khoa_catalog_chu_khong_phai_nhan() -> None:
     )
 
 
-def test_provider_id_trung_khoa_ma_settings_keys_nhan() -> None:
+def test_provider_id_matches_key_accepted_by_settings_keys() -> None:
     """B-257 — `provider_id` phải là chuỗi mà `PUT /settings/keys/{provider}`
     tra trong `providers` của catalog: đó là hai đầu của cùng một phép so."""
     cat = catalog.get_catalog()

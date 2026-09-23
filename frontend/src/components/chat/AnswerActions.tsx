@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 
-import type { DanhGia } from "../../lib/api";
-import { saoChep } from "../../lib/clipboard";
+import type { Feedback } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 import { t } from "../../lib/i18n";
 import { IconButton } from "./IconButton";
 
@@ -17,13 +17,13 @@ import { IconButton } from "./IconButton";
  * ║  KHONG MOT TRANG THAI NAO CUA SERVER DUOC GIU O DAY                    ║
  * ╚════════════════════════════════════════════════════════════════════════╝
  *
- * `feedback` di VAO nhu mot prop va no den tu `MessageRa` cua duong di, tuc
+ * `feedback` di VAO nhu mot prop va no den tu `MessageOut` cua duong di, tuc
  * tu Postgres. Component nay KHONG co `useState` nao cho Thich/Khong thich —
  * "Viec" dong 3 cua T-3.7 viet ro, va ly do la F5: mot ban sao o FE se sang
  * len ngay luc bam roi bien mat sau khi tai lai trang, tuc man hinh noi doi
  * trong dung khoang thoi gian nguoi dung tin no nhat.
  *
- * Mot `useState` duy nhat o day la `daChep` — trang thai cua **trinh duyet
+ * Mot `useState` duy nhat o day la `copied` — trang thai cua **trinh duyet
  * nay, giay nay** (chu "Da sao chep" trong 1,6 s). No khong co ban nao tren
  * server de lech.
  *
@@ -40,8 +40,8 @@ import { IconButton } from "./IconButton";
  * └──────────────────────────────────────────────────────────────────────┘
  *
  * "Thu lai" gui `POST .../retry` **khong** kem `model_id`, nen backend dung
- * lai dung model da sinh ra cau tra loi nay (`_chon_model`). "Doi model & thu
- * lai" gui `modelDangChon` — model dang chon tren picker (T-3.6).
+ * lai dung model da sinh ra cau tra loi nay (`_pick_model`). "Doi model & thu
+ * lai" gui `selectedModel` — model dang chon tren picker (T-3.6).
  *
  * Nut thu hai **tat** khi hai model la mot: no khong con gi de doi, va mot
  * nut ten la "Doi model" ma gui di dung model cu la mot nut noi doi. Do cung
@@ -53,77 +53,77 @@ import { IconButton } from "./IconButton";
  * │  KHONG CO O NHAP LY DO (B-244)                                       │
  * └──────────────────────────────────────────────────────────────────────┘
  *
- * §18.2 cho phep mot `reason` kem Dislike va `api.danhGia` mo san duong cho
+ * §18.2 cho phep mot `reason` kem Dislike va `api.sendFeedback` mo san duong cho
  * no, nhung hom nay mot ly do gui len thi **khong doc lai duoc o dau**:
- * `MessageRa` co y khong mang `feedback_reason`. Go mot cau roi F5 va thay no
+ * `MessageOut` co y khong mang `feedback_reason`. Go mot cau roi F5 va thay no
  * bien mat te hon la chua bao gio moi go. Ban T-HD3 cung chi ve hai nut.
  */
-export function NutDuoiCauTraLoi({
-  chu,
+export function AnswerActions({
+  text,
   feedback,
-  modelDangDung,
-  modelDangChon,
-  onDanhGia,
-  onThuLai,
-  onThuLaiModel,
+  usedModel,
+  selectedModel,
+  onFeedback,
+  onRetry,
+  onRetryWithModel,
 }: {
   /** Chu se vao clipboard — noi dung cau tra loi, khong kem chip hay nhan. */
-  chu: string;
-  /** `MessageRa.feedback`, tuc tu server. `null` = chua ai bam gi. */
-  feedback: DanhGia | null;
-  /** `MessageRa.model_id` — model DA sinh ra cau tra loi nay. */
-  modelDangDung: string | null;
-  /** Model dang chon tren picker (`modelHieuLuc`). `null` = chua biet. */
-  modelDangChon: string | null;
-  onDanhGia: (gia: DanhGia | null) => void;
-  onThuLai: () => void;
-  onThuLaiModel: (modelId: string) => void;
+  text: string;
+  /** `MessageOut.feedback`, tuc tu server. `null` = chua ai bam gi. */
+  feedback: Feedback | null;
+  /** `MessageOut.model_id` — model DA sinh ra cau tra loi nay. */
+  usedModel: string | null;
+  /** Model dang chon tren picker (`effectiveModel`). `null` = chua biet. */
+  selectedModel: string | null;
+  onFeedback: (value: Feedback | null) => void;
+  onRetry: () => void;
+  onRetryWithModel: (modelId: string) => void;
 }) {
-  const [daChep, setDaChep] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const khiChep = useCallback(() => {
-    void saoChep(chu).then((xong) => {
-      if (!xong) {
+  const handleCopy = useCallback(() => {
+    void copyText(text).then((done) => {
+      if (!done) {
         return;
       }
-      setDaChep(true);
-      window.setTimeout(() => setDaChep(false), 1600);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
     });
-  }, [chu]);
+  }, [text]);
 
   //: `null` = khong co model nao KHAC de doi sang, tuc nut thu hai phai tat.
-  const modelKhac =
-    modelDangChon !== null && modelDangChon !== modelDangDung ? modelDangChon : null;
+  const otherModel =
+    selectedModel !== null && selectedModel !== usedModel ? selectedModel : null;
 
   return (
     <>
       <IconButton
-        label={daChep ? t("chat.copied") : t("chat.copy")}
+        label={copied ? t("chat.copied") : t("chat.copy")}
         glyph="⧉"
-        onClick={khiChep}
+        onClick={handleCopy}
       />
       <IconButton
         label={feedback === "like" ? t("chat.liked") : t("chat.like")}
         glyph="↑"
         pressed={feedback === "like"}
-        onClick={() => onDanhGia(feedback === "like" ? null : "like")}
+        onClick={() => onFeedback(feedback === "like" ? null : "like")}
       />
       <IconButton
         label={feedback === "dislike" ? t("chat.disliked") : t("chat.dislike")}
         glyph="↓"
         pressed={feedback === "dislike"}
-        onClick={() => onDanhGia(feedback === "dislike" ? null : "dislike")}
+        onClick={() => onFeedback(feedback === "dislike" ? null : "dislike")}
       />
-      <IconButton label={t("chat.errorRetry")} glyph="↻" onClick={onThuLai} />
+      <IconButton label={t("chat.errorRetry")} glyph="↻" onClick={onRetry} />
       <button
         type="button"
         onClick={() => {
-          if (modelKhac !== null) {
-            onThuLaiModel(modelKhac);
+          if (otherModel !== null) {
+            onRetryWithModel(otherModel);
           }
         }}
-        disabled={modelKhac === null}
-        title={modelKhac === null ? t("chat.retryOtherModelSame") : t("chat.retryOtherModel")}
+        disabled={otherModel === null}
+        title={otherModel === null ? t("chat.retryOtherModelSame") : t("chat.retryOtherModel")}
         className="h-touch rounded-md px-3 text-base font-medium text-foreground hover:bg-surface-hover disabled:text-disabled-foreground motion-press"
       >
         {t("chat.retryOtherModel")}

@@ -27,14 +27,14 @@ vi.mock("../../lib/api", async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
-      danhSachHoiThoai: vi.fn(),
-      suaHoiThoai: vi.fn(),
-      xoaHoiThoai: vi.fn(),
+      listConversations: vi.fn(),
+      updateConversation: vi.fn(),
+      deleteConversation: vi.fn(),
     },
   };
 });
 
-import { api, type HoiThoaiRa } from "../../lib/api";
+import { api, type ConversationOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { DRAWER_QUERY } from "../../lib/viewport";
 import { Sidebar } from "./Sidebar";
@@ -54,7 +54,7 @@ function stubViewport(drawer: boolean): void {
   }));
 }
 
-const CONVERSATION: HoiThoaiRa = {
+const CONVERSATION: ConversationOut = {
   id: "c-1",
   title: "Han muc quota",
   default_model: null,
@@ -102,7 +102,7 @@ function scrollIsBlocked(target: Element): boolean {
 beforeEach(() => {
   localStorage.clear();
   resetSidebarOpenForTest();
-  vi.mocked(api.danhSachHoiThoai).mockResolvedValue({ items: [CONVERSATION], next_cursor: null });
+  vi.mocked(api.listConversations).mockResolvedValue({ items: [CONVERSATION], next_cursor: null });
 });
 
 describe("Drawer duoi 1024 px", () => {
@@ -111,7 +111,7 @@ describe("Drawer duoi 1024 px", () => {
     renderShell();
     // Sidebar van nap trang dau khi drawer dong (de mo ra la co ngay); cho no
     // ve xong de khong co cap nhat state nao roi ra ngoai `act`.
-    await waitFor(() => expect(api.danhSachHoiThoai).toHaveBeenCalled());
+    await waitFor(() => expect(api.listConversations).toHaveBeenCalled());
     await act(async () => {});
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

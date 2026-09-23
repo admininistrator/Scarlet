@@ -43,7 +43,7 @@
  *
  * **2. Performance bi bo qua TUONG MINH, khong bi lo di.** `only_categories`
  * trong `config/audit.json` co dung mot phan tu. Neu lighthouse van in ra mot
- * con so Performance thi ham `chayLighthouse()` khong doc no, va ban tom tat noi
+ * con so Performance thi ham `runLighthouse()` khong doc no, va ban tom tat noi
  * thanh loi rang no khong duoc doc — vi ly do gi (NQ-77: Vite dev server phuc
  * vu ES module chua minify cong client HMR, mot diem cham o day khong noi gi
  * ve san pham se deploy; `Performance >= 80` da chuyen sang T-9.4 / P9).
@@ -89,25 +89,25 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { env, exit } from "node:process";
 
-const DUONG_CONFIG = new URL("../config/audit.json", import.meta.url);
+const CONFIG_PATH = new URL("../config/audit.json", import.meta.url);
 
 // Chrome chay bang root trong container nen sandbox cua nhan phai tat; va
 // /dev/shm mac dinh cua Docker chi 64 MB, du de Chrome chet giua chung.
-const CO_CHROME = ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
+const CHROME_FLAGS = ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Chay mot lenh, tra { code, stdout, stderr }. Khong nem khi code != 0. */
-function chay(lenh, thamSo, timeoutMs) {
+function run(command, args, timeoutMs) {
   return new Promise((resolve) => {
     execFile(
-      lenh,
-      thamSo,
+      command,
+      args,
       { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, encoding: "utf8" },
-      (loi, out, err) => {
+      (error, out, err) => {
         resolve({
-          code: loi?.code ?? (loi ? 1 : 0),
-          killed: loi?.killed === true,
+          code: error?.code ?? (error ? 1 : 0),
+          killed: error?.killed === true,
           stdout: out ?? "",
           stderr: err ?? "",
         });
@@ -117,16 +117,16 @@ function chay(lenh, thamSo, timeoutMs) {
 }
 
 /** Tach doi tuong JSON dau tien trong mot chuoi co the lan ca log. */
-function docJSON(chuoi) {
-  const dau = chuoi.indexOf("{");
-  const cuoi = chuoi.lastIndexOf("}");
-  if (dau === -1 || cuoi <= dau) {
-    throw new Error(`khong tim thay JSON trong dau ra (${chuoi.length} ky tu)`);
+function parseJson(text) {
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first === -1 || last <= first) {
+    throw new Error(`khong tim thay JSON trong dau ra (${text.length} ky tu)`);
   }
-  return JSON.parse(chuoi.slice(dau, cuoi + 1));
+  return JSON.parse(text.slice(first, last + 1));
 }
 
-async function choWebSanSang(baseUrl, { so_lan_thu, nghi_giua_hai_lan_ms }) {
+async function waitForWeb(baseUrl, { so_lan_thu, nghi_giua_hai_lan_ms }) {
   for (let i = 1; i <= so_lan_thu; i += 1) {
     try {
       const res = await fetch(baseUrl, { redirect: "manual" });
@@ -148,137 +148,137 @@ async function choWebSanSang(baseUrl, { so_lan_thu, nghi_giua_hai_lan_ms }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function chayLighthouse(url, cauHinh, timeoutMs) {
-  const kq = await chay(
+async function runLighthouse(url, config, timeoutMs) {
+  const kq = await run(
     "lighthouse",
     [
       url,
       "--quiet",
       "--output=json",
       "--output-path=stdout",
-      `--only-categories=${cauHinh.only_categories.join(",")}`,
-      `--chrome-flags=${CO_CHROME.join(" ")}`,
+      `--only-categories=${config.only_categories.join(",")}`,
+      `--chrome-flags=${CHROME_FLAGS.join(" ")}`,
     ],
     timeoutMs,
   );
 
   if (kq.killed) {
-    return { loi: `lighthouse qua han ${timeoutMs / 1000}s` };
+    return { error: `lighthouse qua han ${timeoutMs / 1000}s` };
   }
   // Ma thoat doc TRUOC JSON: khi lighthouse gap "runtime error" no van do mot
   // ban bao cao DANG DO ra stdout, va mot loi cu phap JSON o dong 2316 la cau
   // tra loi te nhat co the co cho cau hoi "vi sao trang khong tai duoc".
   if (kq.code !== 0) {
-    return { loi: `lighthouse thoat ${kq.code}: ${kq.stderr.trim().split("\n").pop()}` };
+    return { error: `lighthouse thoat ${kq.code}: ${kq.stderr.trim().split("\n").pop()}` };
   }
-  let bao;
+  let report;
   try {
-    bao = docJSON(kq.stdout);
+    report = parseJson(kq.stdout);
   } catch (e) {
-    return { loi: `lighthouse: ${e.message}${kq.stderr ? ` · stderr: ${kq.stderr.trim()}` : ""}` };
+    return { error: `lighthouse: ${e.message}${kq.stderr ? ` · stderr: ${kq.stderr.trim()}` : ""}` };
   }
 
-  const diem = {};
-  for (const ten of cauHinh.only_categories) {
+  const scores = {};
+  for (const name of config.only_categories) {
     // Lighthouse tra 0..1; nhan 100 de cung thang voi nguong trong config.
-    const raw = bao.categories?.[ten]?.score;
-    diem[ten] = raw === null || raw === undefined ? null : Math.round(raw * 100);
+    const raw = report.categories?.[name]?.score;
+    scores[name] = raw === null || raw === undefined ? null : Math.round(raw * 100);
   }
 
   // Cac audit thuoc nhom accessibility da TRUOT — de in ra khi diem thap.
-  const truot = Object.values(bao.audits ?? {})
+  const failing = Object.values(report.audits ?? {})
     .filter((a) => a.score !== null && a.score < 1 && a.scoreDisplayMode === "binary")
     .map((a) => a.id);
 
-  return { diem, truot };
+  return { scores, failing };
 }
 
-async function chayAxe(url, cauHinh, timeoutMs) {
-  const kq = await chay(
+async function runAxe(url, config, timeoutMs) {
+  const kq = await run(
     "axe",
     [
       url,
       "--stdout",
       "--chromedriver-path=/usr/bin/chromedriver",
-      `--chrome-options=${CO_CHROME.map((c) => c.replace(/^--/, "")).join(",")}`,
+      `--chrome-options=${CHROME_FLAGS.map((c) => c.replace(/^--/, "")).join(",")}`,
     ],
     timeoutMs,
   );
 
   if (kq.killed) {
-    return { loi: `axe qua han ${timeoutMs / 1000}s` };
+    return { error: `axe qua han ${timeoutMs / 1000}s` };
   }
-  let bao;
+  let report;
   try {
     // `--stdout` in mot MANG mot phan tu (mot phan tu cho moi url).
-    const dau = kq.stdout.indexOf("[");
-    const cuoi = kq.stdout.lastIndexOf("]");
-    if (dau === -1 || cuoi <= dau) {
+    const first = kq.stdout.indexOf("[");
+    const last = kq.stdout.lastIndexOf("]");
+    if (first === -1 || last <= first) {
       throw new Error(`khong tim thay JSON trong dau ra (${kq.stdout.length} ky tu)`);
     }
-    bao = JSON.parse(kq.stdout.slice(dau, cuoi + 1))[0];
+    report = JSON.parse(kq.stdout.slice(first, last + 1))[0];
   } catch (e) {
-    return { loi: `axe: ${e.message}${kq.stderr ? ` · stderr: ${kq.stderr.trim()}` : ""}` };
+    return { error: `axe: ${e.message}${kq.stderr ? ` · stderr: ${kq.stderr.trim()}` : ""}` };
   }
 
   // `target` la CSS selector cua dung phan tu hong, va `data` mang fgColor /
   // bgColor / contrastRatio — day la thu tra loi cau hoi "loi tuong phan o
   // dau" ma ca am cua DoD doi.
-  const gon = (r) => ({
+  const compact = (r) => ({
     id: r.id,
     impact: r.impact,
     help: r.help,
-    noi: r.nodes.map((n) => ({
+    nodes: r.nodes.map((n) => ({
       target: n.target.join(" "),
-      chiTiet: [...(n.any ?? []), ...(n.none ?? []), ...(n.all ?? [])]
+      details: [...(n.any ?? []), ...(n.none ?? []), ...(n.all ?? [])]
         .flatMap((c) => Object.entries(c.data ?? {}))
         .map(([k, val]) => `${k}=${val}`)
         .join(" "),
     })),
   });
 
-  const viPham = (bao?.violations ?? []).map(gon);
-  const chuaKetLuan = (bao?.incomplete ?? []).map(gon);
+  const violations = (report?.violations ?? []).map(compact);
+  const incomplete = (report?.incomplete ?? []).map(compact);
 
   return {
-    viPham,
-    chuaKetLuan,
-    nang: viPham.filter((v) => cauHinh.fail_impacts.includes(v.impact)),
+    violations,
+    incomplete,
+    severe: violations.filter((v) => config.fail_impacts.includes(v.impact)),
     // `incomplete` cua nhung luat ma "khong ket luan duoc" != "dat".
-    canSoat: chuaKetLuan.filter((v) => cauHinh.fail_incomplete_rules.includes(v.id)),
+    needsReview: incomplete.filter((v) => config.fail_incomplete_rules.includes(v.id)),
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function inViPham(tienTo, v) {
-  console.log(`  ${tienTo}[${v.impact ?? "—"}] ${v.id} — ${v.help}`);
-  for (const n of v.noi) {
-    console.log(`      ${n.target}${n.chiTiet ? `  (${n.chiTiet})` : ""}`);
+function printViolation(prefix, v) {
+  console.log(`  ${prefix}[${v.impact ?? "—"}] ${v.id} — ${v.help}`);
+  for (const n of v.nodes) {
+    console.log(`      ${n.target}${n.details ? `  (${n.details})` : ""}`);
   }
 }
 
 async function main() {
-  const cauHinh = JSON.parse(await readFile(DUONG_CONFIG, "utf8"));
-  const timeoutMs = cauHinh.timeout_moi_lenh_s * 1000;
+  const config = JSON.parse(await readFile(CONFIG_PATH, "utf8"));
+  const timeoutMs = config.timeout_moi_lenh_s * 1000;
 
-  const loc = env.DUONG?.trim();
-  const duongs = loc ? cauHinh.routes.filter((d) => d === loc) : cauHinh.routes;
+  const routeFilter = env.DUONG?.trim();
+  const duongs = routeFilter ? config.routes.filter((d) => d === routeFilter) : config.routes;
   if (duongs.length === 0) {
     console.error(
-      `DUONG=${loc} khong nam trong \`routes\` cua config/audit.json ` +
-        `(${cauHinh.routes.join(" ")})`,
+      `DUONG=${routeFilter} khong nam trong \`routes\` cua config/audit.json ` +
+        `(${config.routes.join(" ")})`,
     );
     return 1;
   }
 
-  const nguongA11y = cauHinh.lighthouse.min_scores.accessibility;
+  const a11yThreshold = config.lighthouse.min_scores.accessibility;
 
-  console.log(`Scarlet — audit S8 · ${cauHinh.base_url} · ${cauHinh.lighthouse.form_factor}`);
+  console.log(`Scarlet — audit S8 · ${config.base_url} · ${config.lighthouse.form_factor}`);
   console.log(
-    `Nguong: Lighthouse Accessibility >= ${nguongA11y} · axe 0 loi ` +
-      `${cauHinh.axe.fail_impacts.join("/")} · 0 ket qua \`incomplete\` cua ` +
-      `${cauHinh.axe.fail_incomplete_rules.join("/")}`,
+    `Nguong: Lighthouse Accessibility >= ${a11yThreshold} · axe 0 loi ` +
+      `${config.axe.fail_impacts.join("/")} · 0 ket qua \`incomplete\` cua ` +
+      `${config.axe.fail_incomplete_rules.join("/")}`,
   );
   console.log(
     "Performance: KHONG do o day. Phep do chay tren Vite dev server " +
@@ -287,67 +287,67 @@ async function main() {
   );
   console.log("");
 
-  await choWebSanSang(cauHinh.base_url, cauHinh.cho_san_sang);
+  await waitForWeb(config.base_url, config.cho_san_sang);
 
-  const ketQua = [];
-  for (const duong of duongs) {
-    const url = new URL(duong, cauHinh.base_url).toString();
-    const batDau = Date.now();
-    const lh = await chayLighthouse(url, cauHinh.lighthouse, timeoutMs);
-    const ax = await chayAxe(url, cauHinh.axe, timeoutMs);
-    ketQua.push({ duong, url, lh, ax });
-    console.log(`  da do ${url}  (${((Date.now() - batDau) / 1000).toFixed(1)}s)`);
+  const results = [];
+  for (const route of duongs) {
+    const url = new URL(route, config.base_url).toString();
+    const startedAt = Date.now();
+    const lh = await runLighthouse(url, config.lighthouse, timeoutMs);
+    const ax = await runAxe(url, config.axe, timeoutMs);
+    results.push({ route, url, lh, ax });
+    console.log(`  da do ${url}  (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`);
   }
   console.log("");
 
   // ── Bang tom tat ──────────────────────────────────────────────────────────
-  const rong = Math.max(...duongs.map((d) => d.length), "DUONG".length);
-  console.log(`${"DUONG".padEnd(rong)}  A11Y  AXE nang  AXE can soat  KET LUAN`);
-  console.log(`${"-".repeat(rong)}  ----  --------  ------------  --------`);
+  const width = Math.max(...duongs.map((d) => d.length), "DUONG".length);
+  console.log(`${"DUONG".padEnd(width)}  A11Y  AXE nang  AXE can soat  KET LUAN`);
+  console.log(`${"-".repeat(width)}  ----  --------  ------------  --------`);
 
-  let soTruot = 0;
-  for (const r of ketQua) {
-    const diem = r.lh.loi ? "LOI" : String(r.lh.diem.accessibility ?? "?");
-    const soNang = r.ax.loi ? "LOI" : String(r.ax.nang.length);
-    const soSoat = r.ax.loi ? "LOI" : String(r.ax.canSoat.length);
-    r.dat =
-      !r.lh.loi &&
-      !r.ax.loi &&
-      r.lh.diem.accessibility !== null &&
-      r.lh.diem.accessibility >= nguongA11y &&
-      r.ax.nang.length === 0 &&
-      r.ax.canSoat.length === 0;
-    if (!r.dat) soTruot += 1;
+  let failedCount = 0;
+  for (const r of results) {
+    const scores = r.lh.error ? "LOI" : String(r.lh.scores.accessibility ?? "?");
+    const severeCount = r.ax.error ? "LOI" : String(r.ax.severe.length);
+    const reviewCount = r.ax.error ? "LOI" : String(r.ax.needsReview.length);
+    r.passed =
+      !r.lh.error &&
+      !r.ax.error &&
+      r.lh.scores.accessibility !== null &&
+      r.lh.scores.accessibility >= a11yThreshold &&
+      r.ax.severe.length === 0 &&
+      r.ax.needsReview.length === 0;
+    if (!r.passed) failedCount += 1;
     console.log(
-      `${r.duong.padEnd(rong)}  ${diem.padStart(4)}  ${soNang.padStart(8)}  ` +
-        `${soSoat.padStart(12)}  ${r.dat ? "DAT" : "TRUOT"}`,
+      `${r.route.padEnd(width)}  ${scores.padStart(4)}  ${severeCount.padStart(8)}  ` +
+        `${reviewCount.padStart(12)}  ${r.passed ? "DAT" : "TRUOT"}`,
     );
   }
   console.log("");
 
   // ── Chi tiet cho tung duong truot ─────────────────────────────────────────
-  for (const r of ketQua) {
-    if (r.dat) continue;
+  for (const r of results) {
+    if (r.passed) continue;
 
-    console.log(`--- ${r.duong} ---`);
-    if (r.lh.loi) console.log(`  lighthouse: ${r.lh.loi}`);
-    if (!r.lh.loi && (r.lh.diem.accessibility ?? 0) < nguongA11y) {
+    console.log(`--- ${r.route} ---`);
+    if (r.lh.error) console.log(`  lighthouse: ${r.lh.error}`);
+    if (!r.lh.error && (r.lh.scores.accessibility ?? 0) < a11yThreshold) {
       console.log(
-        `  lighthouse accessibility = ${r.lh.diem.accessibility} (< ${nguongA11y}); ` +
-          `audit truot: ${r.lh.truot.join(", ") || "(khong co audit binary nao truot)"}`,
+        `  lighthouse accessibility = ${r.lh.scores.accessibility} (< ${a11yThreshold}); ` +
+          `audit truot: ${r.lh.failing.join(", ") || "(khong co audit binary nao truot)"}`,
       );
     }
-    if (r.ax.loi) console.log(`  axe: ${r.ax.loi}`);
-    for (const v of r.ax.nang ?? []) inViPham("", v);
-    for (const v of r.ax.canSoat ?? []) inViPham("chua ket luan · ", v);
+    if (r.ax.error) console.log(`  axe: ${r.ax.error}`);
+    for (const v of r.ax.severe ?? []) printViolation("", v);
+    for (const v of r.ax.needsReview ?? []) printViolation("chua ket luan · ", v);
     console.log("");
   }
 
-  if (soTruot > 0) {
-    console.log(`audit: THAT BAI — ${soTruot}/${ketQua.length} duong truot`);
-    return soTruot;
+  if (failedCount > 0) {
+    console.log(`audit: THAT BAI — ${failedCount}/${results.length} duong truot`);
+    return failedCount;
   }
-  console.log(`audit: OK — ${ketQua.length}/${ketQua.length} duong dat`);
+  console.log(`audit: OK — ${results.length}/${results.length} duong dat`);
   return 0;
 }
 

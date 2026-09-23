@@ -24,29 +24,29 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/api", async (importOriginal) => {
-  const that = await importOriginal<typeof import("../../lib/api")>();
+  const actual = await importOriginal<typeof import("../../lib/api")>();
   return {
-    ...that,
+    ...actual,
     api: {
-      ...that.api,
-      danhSachModel: vi.fn(),
-      docHoiThoai: vi.fn(),
-      guiTinNhan: vi.fn(),
+      ...actual.api,
+      listModels: vi.fn(),
+      getConversation: vi.fn(),
+      sendMessage: vi.fn(),
       listProviderKeys: vi.fn(),
     },
   };
 });
 
-/** jsdom khong co `EventSource` — giu `onSuKien` de test tu phat `done`. */
-const stream: { phat: ((suKien: SuKienStream) => void) | null } = { phat: null };
+/** jsdom khong co `EventSource` — giu `onEvent` de test tu phat `done`. */
+const stream: { emit: ((event: StreamEvent) => void) | null } = { emit: null };
 
 vi.mock("../../lib/sse", async (importOriginal) => {
-  const that = await importOriginal<typeof import("../../lib/sse")>();
+  const actual = await importOriginal<typeof import("../../lib/sse")>();
   return {
-    ...that,
-    moStream: vi.fn((thamSo: { onSuKien: (suKien: SuKienStream) => void }) => {
-      stream.phat = thamSo.onSuKien;
-      return { dong: vi.fn(), cursor: () => "" };
+    ...actual,
+    openStream: vi.fn((params: { onEvent: (event: StreamEvent) => void }) => {
+      stream.emit = params.onEvent;
+      return { close: vi.fn(), cursor: () => "" };
     }),
   };
 });
@@ -54,15 +54,15 @@ vi.mock("../../lib/sse", async (importOriginal) => {
 import {
   ApiError,
   api,
-  type CuaSoQuota,
-  type HoSoRa,
-  type HoiThoaiChiTiet,
+  type QuotaWindow,
+  type ProfileOut,
+  type ConversationDetail,
   type QuotaWarning,
 } from "../../lib/api";
-import type { SuKienStream } from "../../lib/sse";
+import type { StreamEvent } from "../../lib/sse";
 import { Composer } from "../../components/chat/Composer";
 import { useChat } from "../chat/useChat";
-import { QuotaBar } from "./ThanhQuota";
+import { QuotaBar } from "./QuotaBar";
 import {
   byokCovers,
   isSendBlocked,
@@ -74,11 +74,11 @@ import {
 import { useQuota } from "./useQuota";
 
 /** Nguong cua `.env.example` (`QUOTA_WARN_REMAINING_PCT`) — den qua `/auth/me`. */
-const NGUONG = 20;
-const DOC_LUC = new Date(2026, 8, 23, 14, 0, 0).getTime();
+const THRESHOLD = 20;
+const READ_AT = new Date(2026, 8, 23, 14, 0, 0).getTime();
 const PROVIDER = "deepseek";
 
-function cuaSo(thayDoi: Partial<CuaSoQuota> = {}): CuaSoQuota {
+function quotaWindow(overrides: Partial<QuotaWindow> = {}): QuotaWindow {
   return {
     limit_type: "5h",
     limit_usd: "0.5000",
@@ -86,35 +86,35 @@ function cuaSo(thayDoi: Partial<CuaSoQuota> = {}): CuaSoQuota {
     remaining_usd: "0.4000",
     remaining_pct: 80,
     retry_after: null,
-    ...thayDoi,
+    ...overrides,
   };
 }
 
-function docTai(...cacCuaSo: CuaSoQuota[]): QuotaReading[] {
-  return cacCuaSo.map((window) => ({ window, readAt: DOC_LUC }));
+function readingsAt(...windows: QuotaWindow[]): QuotaReading[] {
+  return windows.map((window) => ({ window, readAt: READ_AT }));
 }
 
 /**
  * `QuotaBar` + `Composer`, noi bang DUNG hai ham cua `ChatScreen`. Nut gui
  * chi bat khi co chu, nen moi ca go san mot cau truoc khi hoi nut.
  */
-async function ve(readings: QuotaReading[], byok: ReadonlySet<string> | null = new Set()) {
+async function renderView(readings: QuotaReading[], byok: ReadonlySet<string> | null = new Set()) {
   const block = quotaBlock(readings);
   render(
     <Composer
-      dangChay={false}
-      moDuoc
-      tranKyTu={null}
-      onGui={vi.fn()}
-      onDung={vi.fn()}
+      running={false}
+      enabled
+      maxChars={null}
+      onSend={vi.fn()}
+      onStop={vi.fn()}
       quotaBlocked={isSendBlocked(block, byok, PROVIDER)}
       quotaBar={
         <QuotaBar
           readings={readings}
-          warnPct={NGUONG}
+          warnPct={THRESHOLD}
           block={block}
           byokCovered={byokCovers(byok, PROVIDER)}
-          now={DOC_LUC}
+          now={READ_AT}
         />
       }
     />,
@@ -122,63 +122,63 @@ async function ve(readings: QuotaReading[], byok: ReadonlySet<string> | null = n
   await userEvent.type(screen.getByRole("textbox"), "cau hoi");
 }
 
-const nutGui = () => screen.getByRole("button", { name: "Gửi" });
-const canhBao = () => screen.queryByText(/Sắp hết hạn mức/);
+const sendButton = () => screen.getByRole("button", { name: "Gửi" });
+const warning = () => screen.queryByText(/Sắp hết hạn mức/);
 
 describe("nguong canh bao va nut gui", () => {
   it("1. con 21% ⇒ KHONG canh bao, nut gui bat", async () => {
-    await ve(docTai(cuaSo({ remaining_pct: 21, remaining_usd: "0.1050" })));
+    await renderView(readingsAt(quotaWindow({ remaining_pct: 21, remaining_usd: "0.1050" })));
 
-    expect(canhBao()).toBeNull();
+    expect(warning()).toBeNull();
     expect(screen.getByText("21%").closest("[data-level]")).toHaveAttribute("data-level", "normal");
-    expect(nutGui()).toBeEnabled();
+    expect(sendButton()).toBeEnabled();
   });
 
   it("2. con 20% ⇒ canh bao, va KHONG chan (UC-07 dong 1)", async () => {
-    await ve(docTai(cuaSo({ remaining_pct: 20, remaining_usd: "0.1000" })));
+    await renderView(readingsAt(quotaWindow({ remaining_pct: 20, remaining_usd: "0.1000" })));
 
-    expect(canhBao()).not.toBeNull();
+    expect(warning()).not.toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent("20%");
     expect(screen.getByText("20%").closest("[data-level]")).toHaveAttribute(
       "data-level",
       "warning",
     );
-    expect(nutGui()).toBeEnabled();
+    expect(sendButton()).toBeEnabled();
   });
 
   it("3. con 0% ⇒ nut gui disabled + thoi diem hoan lai CHINH XAC toi giay", async () => {
     // 14:00:00 + 754 s = 14:12:34 — cung phep cong `readAt + retry_after`.
-    await ve(docTai(cuaSo({ remaining_pct: 0, remaining_usd: "0", retry_after: 754 })));
+    await renderView(readingsAt(quotaWindow({ remaining_pct: 0, remaining_usd: "0", retry_after: 754 })));
 
-    expect(nutGui()).toBeDisabled();
-    const baoHet = screen.getByRole("alert");
-    expect(baoHet).toHaveTextContent("Đã dùng hết hạn mức 5 giờ");
-    expect(baoHet).toHaveTextContent("14:12:34");
-    expect(baoHet.querySelector("time")).toHaveAttribute(
+    expect(sendButton()).toBeDisabled();
+    const exhaustedAlert = screen.getByRole("alert");
+    expect(exhaustedAlert).toHaveTextContent("Đã dùng hết hạn mức 5 giờ");
+    expect(exhaustedAlert).toHaveTextContent("14:12:34");
+    expect(exhaustedAlert.querySelector("time")).toHaveAttribute(
       "dateTime",
-      new Date(DOC_LUC + 754_000).toISOString(),
+      new Date(READ_AT + 754_000).toISOString(),
     );
     // Het roi thi khong con "sap het" — mot thong diep, khong hai.
-    expect(canhBao()).toBeNull();
+    expect(warning()).toBeNull();
   });
 
   it("4. het CA HAI cua so ⇒ moc hoan lai la moc MUON NHAT", async () => {
-    await ve(
-      docTai(
-        cuaSo({ remaining_pct: 0, retry_after: 60 }),
-        cuaSo({ limit_type: "weekly", remaining_pct: 0, retry_after: 7200 }),
+    await renderView(
+      readingsAt(
+        quotaWindow({ remaining_pct: 0, retry_after: 60 }),
+        quotaWindow({ limit_type: "weekly", remaining_pct: 0, retry_after: 7200 }),
       ),
     );
 
-    expect(nutGui()).toBeDisabled();
+    expect(sendButton()).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("5 giờ và 7 ngày");
     expect(screen.getByRole("alert")).toHaveTextContent("16:00:00");
   });
 
   it("5. het ma KHONG biet luc nao hoan lai ⇒ noi dung nhu vay, khong bia gio", async () => {
-    await ve(docTai(cuaSo({ limit_usd: "0", remaining_pct: 0, retry_after: null })));
+    await renderView(readingsAt(quotaWindow({ limit_usd: "0", remaining_pct: 0, retry_after: null })));
 
-    expect(nutGui()).toBeDisabled();
+    expect(sendButton()).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("Chưa xác định");
     expect(screen.getByRole("alert").querySelector("time")).toBeNull();
   });
@@ -187,29 +187,29 @@ describe("nguong canh bao va nut gui", () => {
 /** Cam bay ① — BYOK van gui duoc khi het quota system key (UC-07 dong 4). */
 describe("BYOK", () => {
   it("6. het quota nhung model dang chon di bang khoa rieng ⇒ nut VAN bat", async () => {
-    await ve(docTai(cuaSo({ remaining_pct: 0, retry_after: 60 })), new Set([PROVIDER]));
+    await renderView(readingsAt(quotaWindow({ remaining_pct: 0, retry_after: 60 })), new Set([PROVIDER]));
 
-    expect(nutGui()).toBeEnabled();
+    expect(sendButton()).toBeEnabled();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent("khoá API riêng");
   });
 
   it("7. khoa rieng cua provider KHAC ⇒ van khoa", async () => {
-    await ve(docTai(cuaSo({ remaining_pct: 0, retry_after: 60 })), new Set(["anthropic"]));
+    await renderView(readingsAt(quotaWindow({ remaining_pct: 0, retry_after: 60 })), new Set(["anthropic"]));
 
-    expect(nutGui()).toBeDisabled();
+    expect(sendButton()).toBeDisabled();
   });
 
   it("8. chua biet co khoa rieng hay khong (loi tai) ⇒ KHONG khoa nham", async () => {
-    await ve(docTai(cuaSo({ remaining_pct: 0, retry_after: 60 })), null);
+    await renderView(readingsAt(quotaWindow({ remaining_pct: 0, retry_after: 60 })), null);
 
-    expect(nutGui()).toBeEnabled();
+    expect(sendButton()).toBeEnabled();
   });
 
   /*
     B-257 — ba ca tren dua THANG `PROVIDER` vao `isSendBlocked`, nen chung khong
     do duoc cho `ChatScreen` lay provider tu dau. Ca nay di dung duong ay: mot
-    `ModelRa` hinh dang that cua `GET /models` (nhan KHAC khoa) va mot tap
+    `ModelOut` hinh dang that cua `GET /models` (nhan KHAC khoa) va mot tap
     khoa BYOK hinh dang that cua `GET /settings/keys` (khoa catalog).
   */
   it("8b. provider cua model lay theo KHOA catalog, khong theo nhan (B-257)", () => {
@@ -217,16 +217,16 @@ describe("BYOK", () => {
       { id: "deepseek-flash", provider: "DeepSeek AI", provider_id: "deepseek" },
       { id: "claude-haiku", provider: "Anthropic", provider_id: "anthropic" },
     ];
-    const khoaRieng = new Set(["deepseek"]);
-    const block = quotaBlock(docTai(cuaSo({ remaining_pct: 0, retry_after: 60 })));
+    const byokProviders = new Set(["deepseek"]);
+    const block = quotaBlock(readingsAt(quotaWindow({ remaining_pct: 0, retry_after: 60 })));
 
     const provider = selectedProviderId(models, "deepseek-flash");
 
     expect(provider).toBe("deepseek");
-    expect(isSendBlocked(block, khoaRieng, provider)).toBe(false);
-    expect(byokCovers(khoaRieng, provider)).toBe(true);
+    expect(isSendBlocked(block, byokProviders, provider)).toBe(false);
+    expect(byokCovers(byokProviders, provider)).toBe(true);
     // Doi chung: model cua provider KHONG co khoa rieng thi van khoa.
-    expect(isSendBlocked(block, khoaRieng, selectedProviderId(models, "claude-haiku"))).toBe(true);
+    expect(isSendBlocked(block, byokProviders, selectedProviderId(models, "claude-haiku"))).toBe(true);
     // Model khong co trong danh muc ⇒ khong biet provider ⇒ khoa (server se `429`).
     expect(selectedProviderId(models, "khong-co")).toBeNull();
   });
@@ -234,7 +234,7 @@ describe("BYOK", () => {
 
 /** Cam bay ④ — hai nguon, MOT con so moi cua so. */
 describe("hai nguon", () => {
-  const canhBao202: QuotaWarning = {
+  const warning202: QuotaWarning = {
     limit_type: "5h",
     limit_usd: "0.5000",
     spent_usd: "0.4200",
@@ -243,28 +243,28 @@ describe("hai nguon", () => {
   };
 
   it("9. `202` MOI hon `/auth/me` ⇒ thay dung cua so ay, cua so kia giu nguyen", () => {
-    const ra = mergeReadings(
-      [cuaSo({ remaining_pct: 40 }), cuaSo({ limit_type: "weekly", remaining_pct: 90 })],
-      DOC_LUC,
-      { "5h": { warning: canhBao202, readAt: DOC_LUC + 5000 } },
+    const output = mergeReadings(
+      [quotaWindow({ remaining_pct: 40 }), quotaWindow({ limit_type: "weekly", remaining_pct: 90 })],
+      READ_AT,
+      { "5h": { warning: warning202, readAt: READ_AT + 5000 } },
     );
 
-    expect(ra.map((r) => r.window.remaining_pct)).toEqual([16, 90]);
-    expect(ra[0].readAt).toBe(DOC_LUC + 5000);
+    expect(output.map((r) => r.window.remaining_pct)).toEqual([16, 90]);
+    expect(output[0].readAt).toBe(READ_AT + 5000);
     // `202` = da qua cua chan ⇒ khong co gi de cho.
-    expect(ra[0].window.retry_after).toBeNull();
+    expect(output[0].window.retry_after).toBeNull();
   });
 
   it("10. `202` CU hon lan doc `/auth/me` ⇒ bi bo qua", () => {
-    const ra = mergeReadings([cuaSo({ remaining_pct: 12 })], DOC_LUC, {
-      "5h": { warning: canhBao202, readAt: DOC_LUC - 1 },
+    const output = mergeReadings([quotaWindow({ remaining_pct: 12 })], READ_AT, {
+      "5h": { warning: warning202, readAt: READ_AT - 1 },
     });
 
-    expect(ra.map((r) => r.window.remaining_pct)).toEqual([12]);
+    expect(output.map((r) => r.window.remaining_pct)).toEqual([12]);
   });
 
   it("11. man hinh hien MOT con so moi cua so, kem gio doc", async () => {
-    await ve(docTai(cuaSo({ remaining_pct: 16, remaining_usd: "0.0800" })));
+    await renderView(readingsAt(quotaWindow({ remaining_pct: 16, remaining_usd: "0.0800" })));
 
     expect(screen.getAllByRole("meter")).toHaveLength(1);
     expect(screen.getAllByText("16%")).toHaveLength(1);
@@ -273,7 +273,7 @@ describe("hai nguon", () => {
 
   it("12. `quota: null` (Redis chop) ⇒ AN thanh, khong ve mot thanh rong", () => {
     const { container } = render(
-      <QuotaBar readings={mergeReadings(null, DOC_LUC, {})} warnPct={NGUONG} block={null} byokCovered={false} />,
+      <QuotaBar readings={mergeReadings(null, READ_AT, {})} warnPct={THRESHOLD} block={null} byokCovered={false} />,
     );
 
     expect(container).toBeEmptyDOMElement();
@@ -282,9 +282,9 @@ describe("hai nguon", () => {
 
 /* ── Nhip lam tuoi: `done`/`error`/`429`, khong bo dem thoi gian ───────────── */
 
-const ID_HOI_THOAI = "11111111-1111-4111-8111-111111111111";
-const HOI_THOAI: HoiThoaiChiTiet = {
-  id: ID_HOI_THOAI,
+const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
+const CONVERSATION: ConversationDetail = {
+  id: CONVERSATION_ID,
   title: null,
   default_model: null,
   system_prompt_override: null,
@@ -295,7 +295,7 @@ const HOI_THOAI: HoiThoaiChiTiet = {
   path: [],
 };
 
-function hoSo(quota: CuaSoQuota[]): HoSoRa {
+function profile(quota: QuotaWindow[]): ProfileOut {
   return {
     id: "u1",
     email: "a@scarlet.example",
@@ -306,42 +306,42 @@ function hoSo(quota: CuaSoQuota[]): HoSoRa {
     default_model: null,
     quota,
     message_max_chars: 24000,
-    quota_warn_remaining_pct: NGUONG,
+    quota_warn_remaining_pct: THRESHOLD,
   };
 }
 
 /**
  * Ban thu nho cua `ChatScreen`: `useQuota` + `useChat` + hai component, noi
- * dung nhu ban that. `refreshProfile` doc ho so tiep theo tu `hangDoi`.
+ * dung nhu ban that. `refreshProfile` doc ho so tiep theo tu `queue`.
  */
-const hangDoi: HoSoRa[] = [];
+const queue: ProfileOut[] = [];
 const refreshSpy = vi.fn();
 
-function ManChatCoQuota({ dau }: { dau: HoSoRa }) {
-  const [ho, setHo] = useState(dau);
-  const [docLuc, setDocLuc] = useState(Date.now());
+function ChatWithQuota({ initial }: { initial: ProfileOut }) {
+  const [currentProfile, setCurrentProfile] = useState(initial);
+  const [loadedAt, setLoadedAt] = useState(Date.now());
   const refreshProfile = async () => {
     refreshSpy();
-    const ke = hangDoi.shift();
-    if (ke !== undefined) {
-      setHo(ke);
-      setDocLuc(Date.now());
+    const next = queue.shift();
+    if (next !== undefined) {
+      setCurrentProfile(next);
+      setLoadedAt(Date.now());
     }
   };
-  const quota = useQuota({ hoSo: ho, profileReadAt: docLuc, refreshProfile });
+  const quota = useQuota({ profile: currentProfile, profileReadAt: loadedAt, refreshProfile });
   const chat = useChat({
     models: [],
-    modelMacDinhTaiKhoan: null,
+    accountDefaultModel: null,
     onQuotaWarning: quota.noteWarning,
     onQuotaStale: () => void refreshProfile(),
   });
   return (
     <Composer
-      dangChay={chat.dangChay !== null}
-      moDuoc={chat.cay.conversationId !== null && !chat.dangBan}
-      tranKyTu={null}
-      onGui={chat.gui}
-      onDung={() => void chat.dung()}
+      running={chat.running !== null}
+      enabled={chat.tree.conversationId !== null && !chat.busy}
+      maxChars={null}
+      onSend={chat.send}
+      onStop={() => void chat.stop()}
       quotaBlocked={isSendBlocked(quota.block, quota.byokProviders, null)}
       quotaBar={
         <QuotaBar readings={quota.readings} warnPct={quota.warnPct} block={quota.block} byokCovered={false} />
@@ -352,46 +352,46 @@ function ManChatCoQuota({ dau }: { dau: HoSoRa }) {
 
 describe("nhip lam tuoi", () => {
   beforeEach(async () => {
-    stream.phat = null;
-    hangDoi.length = 0;
+    stream.emit = null;
+    queue.length = 0;
     refreshSpy.mockClear();
-    window.history.replaceState(null, "", `/?c=${ID_HOI_THOAI}`);
-    vi.mocked(api.docHoiThoai).mockResolvedValue(HOI_THOAI);
+    window.history.replaceState(null, "", `/?c=${CONVERSATION_ID}`);
+    vi.mocked(api.getConversation).mockResolvedValue(CONVERSATION);
     vi.mocked(api.listProviderKeys).mockResolvedValue({ keys: [], byok_providers: [] });
-    vi.mocked(api.guiTinNhan).mockReset();
-    render(<ManChatCoQuota dau={hoSo([cuaSo({ remaining_pct: 60 })])} />);
+    vi.mocked(api.sendMessage).mockReset();
+    render(<ChatWithQuota initial={profile([quotaWindow({ remaining_pct: 60 })])} />);
     await waitFor(() => {
       expect(screen.getByRole("textbox")).toBeEnabled();
     });
   });
 
   it("13. `done` ⇒ doc lai `/auth/me` ⇒ nut gui tu khoa, KHONG can F5 (DoD dong 1)", async () => {
-    vi.mocked(api.guiTinNhan).mockResolvedValueOnce({
+    vi.mocked(api.sendMessage).mockResolvedValueOnce({
       user_message_id: "m1",
       assistant_message_id: "m2",
       stream_url: "/api/v1/messages/m2/stream",
       branched: false,
       quota_warning: null,
     });
-    hangDoi.push(hoSo([cuaSo({ remaining_pct: 0, retry_after: 300 })]));
+    queue.push(profile([quotaWindow({ remaining_pct: 0, retry_after: 300 })]));
 
     await userEvent.type(screen.getByRole("textbox"), "cau hoi");
-    await userEvent.click(nutGui());
-    await waitFor(() => expect(stream.phat).not.toBeNull());
+    await userEvent.click(sendButton());
+    await waitFor(() => expect(stream.emit).not.toBeNull());
     expect(refreshSpy).not.toHaveBeenCalled();
 
     act(() => {
-      stream.phat?.({ event: "done", data: { finish_reason: "stop", usage: null } });
+      stream.emit?.({ event: "done", data: { finish_reason: "stop", usage: null } });
     });
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Đã dùng hết"));
     expect(refreshSpy).toHaveBeenCalledTimes(1);
     await userEvent.type(screen.getByRole("textbox"), "cau nua");
-    expect(nutGui()).toBeDisabled();
+    expect(sendButton()).toBeDisabled();
   });
 
   it("14. `202` mang `quota_warning` ⇒ canh bao hien ngay, truoc ca `done`", async () => {
-    vi.mocked(api.guiTinNhan).mockResolvedValueOnce({
+    vi.mocked(api.sendMessage).mockResolvedValueOnce({
       user_message_id: "m1",
       assistant_message_id: "m2",
       stream_url: "/api/v1/messages/m2/stream",
@@ -406,33 +406,33 @@ describe("nhip lam tuoi", () => {
     });
 
     await userEvent.type(screen.getByRole("textbox"), "cau hoi");
-    await userEvent.click(nutGui());
+    await userEvent.click(sendButton());
 
-    await waitFor(() => expect(canhBao()).not.toBeNull());
+    await waitFor(() => expect(warning()).not.toBeNull());
     expect(screen.getAllByText("16%")).toHaveLength(1);
     expect(screen.queryByText("60%")).toBeNull();
   });
 
   it("15. `429 QUOTA_EXCEEDED` khi gui ⇒ doc lai `/auth/me` ngay", async () => {
-    vi.mocked(api.guiTinNhan).mockRejectedValueOnce(
+    vi.mocked(api.sendMessage).mockRejectedValueOnce(
       new ApiError(429, "QUOTA_EXCEEDED", "het quota", { limit_type: "5h", retry_after: 300 }),
     );
-    hangDoi.push(hoSo([cuaSo({ remaining_pct: 0, retry_after: 300 })]));
+    queue.push(profile([quotaWindow({ remaining_pct: 0, retry_after: 300 })]));
 
     await userEvent.type(screen.getByRole("textbox"), "cau hoi");
-    await userEvent.click(nutGui());
+    await userEvent.click(sendButton());
 
-    await waitFor(() => expect(nutGui()).toBeDisabled());
+    await waitFor(() => expect(sendButton()).toBeDisabled());
     expect(refreshSpy).toHaveBeenCalledTimes(1);
   });
 
   it("16. loi KHAC quota (500) ⇒ KHONG doc lai — nhip lam tuoi khong phai moi loi", async () => {
-    vi.mocked(api.guiTinNhan).mockRejectedValueOnce(new ApiError(500, "INTERNAL", "loi"));
+    vi.mocked(api.sendMessage).mockRejectedValueOnce(new ApiError(500, "INTERNAL", "loi"));
 
     await userEvent.type(screen.getByRole("textbox"), "cau hoi");
-    await userEvent.click(nutGui());
+    await userEvent.click(sendButton());
 
-    await waitFor(() => expect(api.guiTinNhan).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
     expect(refreshSpy).not.toHaveBeenCalled();
   });
 });

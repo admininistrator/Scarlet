@@ -17,7 +17,7 @@ NQ-36, NQ-43, NQ-44, NQ-78, NQ-79, NQ-81.
 `register` vì vậy cố ý KHÔNG có hai nhánh response khác nhau:
 
 1. Cả hai đường (email mới / email đã tồn tại) đều trả về đúng MỘT hằng số
-   `_PHAN_HOI_DANG_KY` — cùng status code, cùng body, byte-for-byte (DoD).
+   `_REGISTER_RESPONSE` — cùng status code, cùng body, byte-for-byte (DoD).
 2. Mật khẩu vẫn được băm bằng Argon2 (~50–200 ms) DÙ email đã tồn tại, để
    thời gian phản hồi không trở thành một kênh ngầm (đường "đã tồn tại" mà
    nhanh hơn hẳn đường "mới" là một cách dò khác, tinh vi hơn status code).
@@ -62,7 +62,7 @@ dạng của chúng (lý do đầy đủ ở docstring của module đó):
    nó sau bất cứ việc gì là trả tiền cho request mà mình sắp từ chối.
 3. **Không đổi một chữ nào trong hợp đồng chống dò của §11.5.** Phép kiểm
    captcha không đọc `email`, nên nó không thêm được nhánh nào rẽ theo "email
-   này có tồn tại không" — `_PHAN_HOI_DANG_KY` và `_PHAN_HOI_QUEN_MAT_KHAU`
+   này có tồn tại không" — `_REGISTER_RESPONSE` và `_FORGOT_PASSWORD_RESPONSE`
    vẫn là một hằng số cho mọi đường.
 
 Hệ quả UX đã biết: mật khẩu quá yếu → `422`, và token Turnstile vừa gửi kèm
@@ -83,7 +83,7 @@ tất cả khác NULL sau lần dùng lại thứ hai).
 
 `login` áp lại đúng kỹ thuật chống dò-qua-thời-gian của `register` (điểm 2 ở
 trên): sai mật khẩu và email không tồn tại phải tốn THỜI GIAN như nhau, nên
-nhánh "không có user" vẫn băm `_MAT_KHAU_GIA` thay vì trả lỗi ngay — nếu không,
+nhánh "không có user" vẫn băm `_DUMMY_PASSWORD` thay vì trả lỗi ngay — nếu không,
 đo độ trễ response là một cách dò danh sách email đã đăng ký (khác hẳn nhánh
 "sai mật khẩu" vốn luôn băm thật).
 
@@ -197,7 +197,7 @@ from app.core.access_token import (
     decode_access_token,
     encode_access_token,
 )
-from app.core.blacklist import chan_jti, thu_hoi_moi_phien
+from app.core.blacklist import block_jti, revoke_all_sessions
 from app.core.deps import (
     SESSION_COOKIE_NAME,
     STATUSES_CAN_LOGIN,
@@ -213,13 +213,13 @@ from app.core.ratelimit import (
     ROUTE_REGISTER,
     ROUTE_RESEND_VERIFICATION,
     ROUTE_RESET_PASSWORD,
-    dia_chi_ip,
-    gioi_han_auth,
-    gioi_han_gui_email,
+    auth_limit,
+    client_ip,
+    email_send_limit,
 )
 from app.core.redis import get_redis
-from app.core.security import hash_password, mat_khau_qua_pho_bien, verify_password
-from app.core.turnstile import kiem_turnstile
+from app.core.security import hash_password, is_common_password, verify_password
+from app.core.turnstile import verify_turnstile
 from app.db.models import EmailTokenPurpose, UserRole, UserStatus
 from app.db.repositories.email_tokens import ConsumeResult, EmailTokenRepository
 from app.db.repositories.refresh_tokens import RefreshTokenRepository, RotateResult
@@ -247,10 +247,10 @@ REFRESH_COOKIE_PATH = "/api/v1/auth"
 #: Mật khẩu giả — KHÔNG dùng để so khớp, chỉ để `hash_password` tốn đúng
 #: ngần ấy mili-giây khi email không tồn tại (chống dò qua thời gian, xem
 #: docstring module).
-_MAT_KHAU_GIA = "mat-khau-gia-chi-de-giu-thoi-gian-phan-hoi-dong-deu-000"
+_DUMMY_PASSWORD = "mat-khau-gia-chi-de-giu-thoi-gian-phan-hoi-dong-deu-000"
 
 
-class DangKyRequest(BaseModel):
+class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     #: `cf-turnstile-response` của widget (T-2.6). Tuỳ chọn ở tầng schema chứ
@@ -258,14 +258,14 @@ class DangKyRequest(BaseModel):
     turnstile_token: str | None = None
 
 
-class DangKyResponse(BaseModel):
+class RegisterResponse(BaseModel):
     message: str
 
 
 #: Response CỐ ĐỊNH cho cả hai nhánh (email mới / email đã tồn tại) — DoD đòi
 #: byte-for-byte giống nhau, nên đây là MỘT hằng số duy nhất, không phải hai
 #: chỗ gõ tay cùng một câu (dễ lệch một khoảng trắng).
-_PHAN_HOI_DANG_KY = DangKyResponse(
+_REGISTER_RESPONSE = RegisterResponse(
     message=(
         "neu email hop le va chua duoc dang ky truoc do, "
         "tai khoan da duoc tao va dang cho xac thuc email"
@@ -281,9 +281,9 @@ class ResendVerificationResponse(BaseModel):
     message: str
 
 
-#: Cùng lối với `_PHAN_HOI_DANG_KY`: một hằng số, không rẽ nhánh theo email có
+#: Cùng lối với `_REGISTER_RESPONSE`: một hằng số, không rẽ nhánh theo email có
 #: tồn tại / đã verify hay chưa (§11.5).
-_PHAN_HOI_RESEND = ResendVerificationResponse(
+_RESEND_RESPONSE = ResendVerificationResponse(
     message=("neu email nay ton tai va chua duoc xac thuc, mot email xac thuc moi da duoc gui")
 )
 
@@ -310,7 +310,7 @@ class VerifyEmailResponse(BaseModel):
     status: Literal["verified", "already_verified", "expired"]
 
 
-async def _gui_email_xac_thuc(email: str, raw_token: str) -> None:
+async def _send_verification_email(email: str, raw_token: str) -> None:
     """Best-effort: lỗi gửi mail KHÔNG được làm hỏng response của caller.
 
     Xem docstring `core/mailer.py` phần "vì sao send lỗi không làm register
@@ -332,7 +332,7 @@ async def _gui_email_xac_thuc(email: str, raw_token: str) -> None:
 @router.post(
     "/register",
     status_code=status.HTTP_200_OK,
-    response_model=DangKyResponse,
+    response_model=RegisterResponse,
     # §10.6 hàng "theo IP cho route chưa đăng nhập": **đăng ký 3/giờ** (B-133,
     # T-2.9). Cùng chính sách với `forgot-password`/`resend-verification` và
     # cùng lý do: mỗi lượt gọi gửi một lá thư tới một hộp thư người gọi tự
@@ -345,7 +345,7 @@ async def _gui_email_xac_thuc(email: str, raw_token: str) -> None:
     # KHÔNG thay được Turnstile và không bị Turnstile thay: `TURNSTILE_SECRET`
     # rỗng ở dev thì captcha bị bỏ qua hoàn toàn (§11.6), còn captcha bật thì
     # nó chặn trình duyệt chứ không chặn một script gọi thẳng API.
-    dependencies=[Depends(gioi_han_gui_email(ROUTE_REGISTER))],
+    dependencies=[Depends(email_send_limit(ROUTE_REGISTER))],
     responses={
         400: {
             "model": ErrorEnvelope,
@@ -363,14 +363,14 @@ async def _gui_email_xac_thuc(email: str, raw_token: str) -> None:
         },
     },
 )
-async def register(body: DangKyRequest, request: Request) -> DangKyResponse:
+async def register(body: RegisterRequest, request: Request) -> RegisterResponse:
     """Đăng ký (UC-01): tạo user `status='pending_email'`, tier mặc định,
     phát hành token verify và gửi email xác thực (T-2.2).
 
     Turnstile (§11.6, RR-1) chạy TRƯỚC mọi việc khác — xem điểm 2 của
     docstring module. `TURNSTILE_SECRET` rỗng ⇒ bỏ qua (chỉ dev).
     """
-    await kiem_turnstile(body.turnstile_token, remote_ip=dia_chi_ip(request))
+    await verify_turnstile(body.turnstile_token, remote_ip=client_ip(request))
 
     if len(body.password) < settings.PASSWORD_MIN_LENGTH:
         raise ApiError(
@@ -378,7 +378,7 @@ async def register(body: DangKyRequest, request: Request) -> DangKyResponse:
             ApiErrorCode.PASSWORD_TOO_SHORT,
             f"mat khau phai co it nhat {settings.PASSWORD_MIN_LENGTH} ky tu",
         )
-    if mat_khau_qua_pho_bien(body.password):
+    if is_common_password(body.password):
         raise ApiError(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             ApiErrorCode.PASSWORD_TOO_WEAK,
@@ -406,11 +406,11 @@ async def register(body: DangKyRequest, request: Request) -> DangKyResponse:
         # được phép rò tới response (§11.5).
 
     # Gửi mail NGOÀI transaction, sau khi user+token đã commit — xem docstring
-    # `_gui_email_xac_thuc`.
+    # `_send_verification_email`.
     if raw_token is not None:
-        await _gui_email_xac_thuc(body.email, raw_token)
+        await _send_verification_email(body.email, raw_token)
 
-    return _PHAN_HOI_DANG_KY
+    return _REGISTER_RESPONSE
 
 
 @router.post(
@@ -419,7 +419,7 @@ async def register(body: DangKyRequest, request: Request) -> DangKyResponse:
     response_model=ResendVerificationResponse,
     # §18.1 ghi "Rate limit 3/giờ" cho đúng route này ngay từ đầu; T-2.2 làm
     # theo "Việc cần làm" của task nên chưa có, B-127 ghi lại thiếu sót đó.
-    dependencies=[Depends(gioi_han_gui_email(ROUTE_RESEND_VERIFICATION))],
+    dependencies=[Depends(email_send_limit(ROUTE_RESEND_VERIFICATION))],
     responses={
         429: {"model": ErrorEnvelope, "description": "qua 3 lan/gio tu mot IP (RATE_LIMITED)"}
     },
@@ -427,7 +427,7 @@ async def register(body: DangKyRequest, request: Request) -> DangKyResponse:
 async def resend_verification(body: ResendVerificationRequest) -> ResendVerificationResponse:
     """Gửi lại email verify (UC-01). Chống dò (§11.5): response cố định."""
     raw_token: str | None = None
-    email_de_gui: str | None = None
+    email_to_send: str | None = None
     async with session_scope() as session:
         user = await UserRepository(session).get_by_email(body.email)
         if user is not None and user.status == UserStatus.PENDING_EMAIL:
@@ -436,15 +436,15 @@ async def resend_verification(body: ResendVerificationRequest) -> ResendVerifica
                 purpose=EmailTokenPurpose.VERIFY,
                 ttl_minutes=settings.EMAIL_TOKEN_TTL_MIN,
             )
-            email_de_gui = user.email
+            email_to_send = user.email
             await session.commit()
         # else: email không tồn tại, hoặc đã qua khỏi pending_email — không
         # phát hành token, không gửi mail, không đọc/ghi gì thêm (§11.5).
 
-    if raw_token is not None and email_de_gui is not None:
-        await _gui_email_xac_thuc(email_de_gui, raw_token)
+    if raw_token is not None and email_to_send is not None:
+        await _send_verification_email(email_to_send, raw_token)
 
-    return _PHAN_HOI_RESEND
+    return _RESEND_RESPONSE
 
 
 @router.post(
@@ -492,12 +492,12 @@ async def verify_email(body: VerifyEmailRequest) -> VerifyEmailResponse:
 # ═══════════════════ POST /auth/login, /refresh, GET /auth/me (T-2.3) ═══════
 
 
-class DangNhapRequest(BaseModel):
+class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
 
-class NguoiDungRa(BaseModel):
+class UserOut(BaseModel):
     """Thông tin công khai của user hiện tại — dùng chung cho `/login`,
     `/refresh`, `/me` (một hình dạng, một chỗ để đúng)."""
 
@@ -513,14 +513,14 @@ class NguoiDungRa(BaseModel):
     #: về `default: true` của catalog. Nằm ở **lớp chung** chứ không riêng
     #: `/me` vì nó là một cột của chính hàng `users`, tức miễn phí ở cả ba
     #: endpoint; và biết nó ngay sau `login` là bớt một vòng gọi trước khi vẽ
-    #: Model Picker. Xem `HoSoRa` cho hai trường chỉ `/me` mới trả.
+    #: Model Picker. Xem `ProfileOut` cho hai trường chỉ `/me` mới trả.
     default_model: str | None = None
 
 
-class HoSoRa(NguoiDungRa):
+class ProfileOut(UserOut):
     """`GET /auth/me` — *"User + tier + quota còn lại + trạng thái"* (§18.1).
 
-    Rộng hơn `NguoiDungRa` đúng ba trường (hai của T-3.0, `quota_warn_remaining_pct`
+    Rộng hơn `UserOut` đúng ba trường (hai của T-3.0, `quota_warn_remaining_pct`
     của T-3.11), và đứng riêng vì chúng thuộc về thanh quota và ô nhập — còn
     `quota` thì **không** miễn phí: `quota` là hai lượt đọc Redis (và có thể một lượt dựng
     lại từ Postgres, RR-7). `login`/`refresh` không có việc gì phải trả giá đó
@@ -545,13 +545,13 @@ class HoSoRa(NguoiDungRa):
     quota_warn_remaining_pct: int
 
 
-def _dat_cookie_phien(response: Response, nguoi_dung: NguoiDungRa) -> None:
+def _set_session_cookie(response: Response, user: UserOut) -> None:
     """Set cookie phiên mang access JWT (§11.2, NQ-36) — KHÔNG trả JWT trong body."""
     access_token = encode_access_token(
-        user_id=nguoi_dung.id,
-        role=nguoi_dung.role,
-        tier=nguoi_dung.tier_name,
-        status=nguoi_dung.status,
+        user_id=user.id,
+        role=user.role,
+        tier=user.tier_name,
+        status=user.status,
         ttl_minutes=settings.ACCESS_TOKEN_TTL_MIN,
     )
     response.set_cookie(
@@ -565,7 +565,7 @@ def _dat_cookie_phien(response: Response, nguoi_dung: NguoiDungRa) -> None:
     )
 
 
-def _dat_cookie_refresh(response: Response, raw_refresh_token: str) -> None:
+def _set_refresh_cookie(response: Response, raw_refresh_token: str) -> None:
     """Set cookie refresh — `Path=/api/v1/auth`, hẹp hơn cookie phiên (§11.2)."""
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
@@ -581,7 +581,7 @@ def _dat_cookie_refresh(response: Response, raw_refresh_token: str) -> None:
 @router.post(
     "/login",
     status_code=status.HTTP_200_OK,
-    response_model=NguoiDungRa,
+    response_model=UserOut,
     responses={
         401: {
             "model": ErrorEnvelope,
@@ -593,7 +593,7 @@ def _dat_cookie_refresh(response: Response, raw_refresh_token: str) -> None:
         },
     },
 )
-async def login(body: DangNhapRequest, request: Request, response: Response) -> NguoiDungRa:
+async def login(body: LoginRequest, request: Request, response: Response) -> UserOut:
     """Đăng nhập (§11.2, ADR-07): kiểm mật khẩu, kiểm trạng thái, phát hành
     family refresh MỚI + set cookie phiên.
 
@@ -604,14 +604,14 @@ async def login(body: DangNhapRequest, request: Request, response: Response) -> 
     async with session_scope() as session:
         user = await UserRepository(session).get_by_email(body.email)
         if user is not None:
-            hop_le = await verify_password(user.password_hash, body.password)
+            valid = await verify_password(user.password_hash, body.password)
         else:
             # Chống dò qua thời gian (xem docstring module) — vẫn trả giá
             # Argon2 dù không có user để so.
-            await hash_password(_MAT_KHAU_GIA)
-            hop_le = False
+            await hash_password(_DUMMY_PASSWORD)
+            valid = False
 
-        if user is None or not hop_le:
+        if user is None or not valid:
             raise ApiError(
                 status.HTTP_401_UNAUTHORIZED,
                 ApiErrorCode.INVALID_CREDENTIALS,
@@ -625,7 +625,7 @@ async def login(body: DangNhapRequest, request: Request, response: Response) -> 
         # tài khoản bị khoá không có việc gì phải cầm một credential 30 ngày.
         ensure_status_allowed(user.status, STATUSES_CAN_LOGIN)
 
-        ra = NguoiDungRa.model_validate(user)
+        out = UserOut.model_validate(user)
         raw_refresh_token, _family_id = await RefreshTokenRepository(session).issue_new_family(
             user_id=user.id,
             ttl_days=settings.REFRESH_TOKEN_TTL_DAYS,
@@ -633,15 +633,15 @@ async def login(body: DangNhapRequest, request: Request, response: Response) -> 
         )
         await session.commit()
 
-    _dat_cookie_phien(response, ra)
-    _dat_cookie_refresh(response, raw_refresh_token)
-    return ra
+    _set_session_cookie(response, out)
+    _set_refresh_cookie(response, raw_refresh_token)
+    return out
 
 
 @router.post(
     "/refresh",
     status_code=status.HTTP_200_OK,
-    response_model=NguoiDungRa,
+    response_model=UserOut,
     responses={
         401: {
             "model": ErrorEnvelope,
@@ -654,7 +654,7 @@ async def refresh(
     request: Request,
     response: Response,
     raw_refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE_NAME)] = None,
-) -> NguoiDungRa:
+) -> UserOut:
     """Xoay vòng refresh token + phát hành access JWT mới (§11.2, ADR-07).
 
     Phát hiện tái sử dụng (Cạm bẫy T-2.3): token đã `used_at` bị trình ra lần
@@ -701,18 +701,18 @@ async def refresh(
                 status.HTTP_401_UNAUTHORIZED, ApiErrorCode.UNAUTHENTICATED, "user khong con ton tai"
             )
 
-        ra = NguoiDungRa.model_validate(user)
+        out = UserOut.model_validate(user)
         await session.commit()
 
-    _dat_cookie_phien(response, ra)
-    _dat_cookie_refresh(response, outcome.raw_token)
-    return ra
+    _set_session_cookie(response, out)
+    _set_refresh_cookie(response, outcome.raw_token)
+    return out
 
 
 # ═══════════════════════ POST /auth/logout (T-2.4, §11.3, C21) ══════════════
 
 
-class DangXuatResponse(BaseModel):
+class LogoutResponse(BaseModel):
     #: Một giá trị duy nhất, luôn luôn. Logout không có kết cục thứ hai để
     #: báo: "không có gì để đóng" và "đã đóng xong" là cùng một trạng thái
     #: cuối đối với người dùng (xem docstring module), và phân biệt chúng chỉ
@@ -721,21 +721,21 @@ class DangXuatResponse(BaseModel):
     status: Literal["logged_out"]
 
 
-_PHAN_HOI_DANG_XUAT = DangXuatResponse(status="logged_out")
+_LOGOUT_RESPONSE = LogoutResponse(status="logged_out")
 
 
 #: Path rộng hơn `SESSION_COOKIE_PATH` mà logout cũng quét (2026-09-22).
 #:
 #: Scarlet chỉ **đặt** cookie phiên ở `Path=/api/v1`, nhưng một cookie cùng tên
-#: ở path rộng hơn vẫn được trình duyệt gửi kèm, và `_moi_cookie_phien`
+#: ở path rộng hơn vẫn được trình duyệt gửi kèm, và `_all_session_cookies`
 #: (`app/core/deps.py`) chỉ làm nó vô hại chứ không xoá được nó — `Set-Cookie`
 #: là đường duy nhất xoá một cookie `HttpOnly`, và nó phải trúng ĐÚNG `Path`.
 #: Không quét hai path này thì một cookie rác sống tới khi người dùng tự đi
 #: dọn trong cài đặt trình duyệt, và logout không thật sự dọn sạch phiên.
-_SESSION_PATH_QUET_THEM = ("/", "/api")
+_EXTRA_SESSION_PATHS = ("/", "/api")
 
 
-def _xoa_hai_cookie(response: Response) -> None:
+def _clear_both_cookies(response: Response) -> None:
     """Xoá cookie phiên + cookie refresh, đúng `Path` đã đặt chúng."""
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
@@ -744,7 +744,7 @@ def _xoa_hai_cookie(response: Response) -> None:
         secure=True,
         samesite="lax",
     )
-    for path in _SESSION_PATH_QUET_THEM:
+    for path in _EXTRA_SESSION_PATHS:
         response.delete_cookie(
             key=SESSION_COOKIE_NAME,
             path=path,
@@ -764,13 +764,13 @@ def _xoa_hai_cookie(response: Response) -> None:
 @router.post(
     "/logout",
     status_code=status.HTTP_200_OK,
-    response_model=DangXuatResponse,
+    response_model=LogoutResponse,
     # B-131: endpoint cố ý không đòi xác thực (NQ-42) nên bất kỳ ai gọi được nó
     # cũng tạo được một lượt ghi Redis + một `UPDATE` trên `refresh_tokens`.
     # Không có `user_id` để đếm theo ⇒ đếm theo IP, hạn mức của nhóm `auth`
     # (§10.6). Hạn mức này KHÔNG phá NQ-42: nó không đòi thêm gì ở client, chỉ
     # chặn gọi dồn dập — một người đăng xuất thật vẫn chỉ gọi một lần.
-    dependencies=[Depends(gioi_han_auth(ROUTE_LOGOUT))],
+    dependencies=[Depends(auth_limit(ROUTE_LOGOUT))],
     responses={
         429: {"model": ErrorEnvelope, "description": "qua 5 lan/phut tu mot IP (RATE_LIMITED)"},
         503: {
@@ -783,7 +783,7 @@ async def logout(
     response: Response,
     session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE_NAME)] = None,
     raw_refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE_NAME)] = None,
-) -> DangXuatResponse:
+) -> LogoutResponse:
     """Đăng xuất (§11.3, C21): blacklist `jti` + thu hồi family + xoá cookie.
 
     KHÔNG đứng sau `Depends(get_current_user_id)` và KHÔNG từ chối token hết
@@ -795,16 +795,16 @@ async def logout(
             trong khi access token của họ còn chạy thêm 15 phút.
     """
     # ── nửa Postgres: thu hồi family của phiên này (thứ tự, xem docstring) ──
-    so_family_da_thu_hoi = 0
+    revoked_families = 0
     if raw_refresh_token is not None:
         async with session_scope() as session:
-            so_family_da_thu_hoi = await RefreshTokenRepository(session).thu_hoi_family_theo_token(
+            revoked_families = await RefreshTokenRepository(session).revoke_family_by_token(
                 raw_refresh_token
             )
             await session.commit()
 
     # ── nửa Redis: chặn đúng access token đang cầm ──
-    ttl_da_dat: int | None = None
+    ttl_set: int | None = None
     if session_cookie is not None:
         try:
             claims = decode_access_token(session_cookie)
@@ -814,64 +814,64 @@ async def logout(
             claims = None
         if claims is not None:
             try:
-                ttl_da_dat = await chan_jti(get_redis(), claims)
-            except Exception as loi:
+                ttl_set = await block_jti(get_redis(), claims)
+            except Exception as exc:
                 logger.exception("khong ghi duoc bl:jti cho user %s", claims.user_id)
                 raise ApiError(
                     status.HTTP_503_SERVICE_UNAVAILABLE,
                     ApiErrorCode.SERVICE_UNAVAILABLE,
                     "khong dang xuat duoc, hay thu lai",
-                ) from loi
+                ) from exc
 
-    _xoa_hai_cookie(response)
+    _clear_both_cookies(response)
     logger.info(
         "logout: da thu hoi %d refresh token, bl:jti TTL=%s",
-        so_family_da_thu_hoi,
-        ttl_da_dat,
+        revoked_families,
+        ttl_set,
     )
-    return _PHAN_HOI_DANG_XUAT
+    return _LOGOUT_RESPONSE
 
 
 # ═════════ POST /auth/forgot-password + /reset-password (T-2.5, §11.5) ══════
 
 
-class QuenMatKhauRequest(BaseModel):
+class ForgotPasswordRequest(BaseModel):
     email: EmailStr
-    #: Cùng lối `DangKyRequest.turnstile_token` — §11.6 chỉ định captcha cho cả
+    #: Cùng lối `RegisterRequest.turnstile_token` — §11.6 chỉ định captcha cho cả
     #: hai form: đăng ký **và** quên mật khẩu.
     turnstile_token: str | None = None
 
 
-class QuenMatKhauResponse(BaseModel):
+class ForgotPasswordResponse(BaseModel):
     message: str
 
 
-#: Một hằng số, cùng lối `_PHAN_HOI_DANG_KY`/`_PHAN_HOI_RESEND`: DoD đòi
+#: Một hằng số, cùng lối `_REGISTER_RESPONSE`/`_RESEND_RESPONSE`: DoD đòi
 #: response của email không tồn tại giống HỆT response của email có thật.
-_PHAN_HOI_QUEN_MAT_KHAU = QuenMatKhauResponse(
+_FORGOT_PASSWORD_RESPONSE = ForgotPasswordResponse(
     message="neu email nay ton tai, mot lien ket dat lai mat khau da duoc gui"
 )
 
 
-class DatLaiMatKhauRequest(BaseModel):
+class ResetPasswordRequest(BaseModel):
     token: str
     password: str
 
 
-class DatLaiMatKhauResponse(BaseModel):
+class ResetPasswordResponse(BaseModel):
     #: Một giá trị duy nhất. Không trả thông tin user: endpoint này KHÔNG đăng
     #: nhập ai cả (NQ-44), nên nó không có danh tính nào để nói.
     status: Literal["reset"]
 
 
-_PHAN_HOI_DAT_LAI = DatLaiMatKhauResponse(status="reset")
+_RESET_RESPONSE = ResetPasswordResponse(status="reset")
 
 #: Câu trả lời CHUNG cho cả ba kiểu token hỏng — xem docstring module.
-_LOI_TOKEN_RESET = "lien ket dat lai mat khau khong hop le hoac da het han"
+_RESET_TOKEN_MSG = "lien ket dat lai mat khau khong hop le hoac da het han"
 
 
-async def _gui_email_dat_lai(email: str, raw_token: str) -> None:
-    """Best-effort, cùng lối `_gui_email_xac_thuc`: SMTP hỏng không được làm
+async def _send_reset_email(email: str, raw_token: str) -> None:
+    """Best-effort, cùng lối `_send_verification_email`: SMTP hỏng không được làm
     `forgot-password` trả 500 — làm vậy là nói cho người gọi biết email đó có
     thật (§11.5), và token thì đã commit rồi."""
     # Đường dẫn của FE, không của API — nó đi vào một lá thư cho người thật
@@ -895,8 +895,8 @@ async def _gui_email_dat_lai(email: str, raw_token: str) -> None:
 @router.post(
     "/forgot-password",
     status_code=status.HTTP_200_OK,
-    response_model=QuenMatKhauResponse,
-    dependencies=[Depends(gioi_han_gui_email(ROUTE_FORGOT_PASSWORD))],
+    response_model=ForgotPasswordResponse,
+    dependencies=[Depends(email_send_limit(ROUTE_FORGOT_PASSWORD))],
     responses={
         400: {
             "model": ErrorEnvelope,
@@ -909,7 +909,7 @@ async def _gui_email_dat_lai(email: str, raw_token: str) -> None:
         },
     },
 )
-async def forgot_password(body: QuenMatKhauRequest, request: Request) -> QuenMatKhauResponse:
+async def forgot_password(body: ForgotPasswordRequest, request: Request) -> ForgotPasswordResponse:
     """Xin link đặt lại mật khẩu (§11.5). **Luôn** 200, luôn cùng một body.
 
     Không kiểm `status` tài khoản: bảng §11.1 là việc của T-2.7, và rẽ nhánh
@@ -920,10 +920,10 @@ async def forgot_password(body: QuenMatKhauRequest, request: Request) -> QuenMat
     docstring module. Hạn mức 3/giờ (NQ-43) vẫn chạy trước nó: dependency đếm
     lượt *thử*, và một lượt thử bị captcha chặn cũng là một lượt thử.
     """
-    await kiem_turnstile(body.turnstile_token, remote_ip=dia_chi_ip(request))
+    await verify_turnstile(body.turnstile_token, remote_ip=client_ip(request))
 
     raw_token: str | None = None
-    email_de_gui: str | None = None
+    email_to_send: str | None = None
     async with session_scope() as session:
         user = await UserRepository(session).get_by_email(body.email)
         if user is not None:
@@ -932,22 +932,22 @@ async def forgot_password(body: QuenMatKhauRequest, request: Request) -> QuenMat
                 purpose=EmailTokenPurpose.RESET,
                 ttl_minutes=settings.EMAIL_TOKEN_TTL_MIN,
             )
-            email_de_gui = user.email
+            email_to_send = user.email
             await session.commit()
         # else: không có user — không phát hành token, không gửi thư, không
         # đọc/ghi gì thêm (§11.5).
 
-    if raw_token is not None and email_de_gui is not None:
-        await _gui_email_dat_lai(email_de_gui, raw_token)
+    if raw_token is not None and email_to_send is not None:
+        await _send_reset_email(email_to_send, raw_token)
 
-    return _PHAN_HOI_QUEN_MAT_KHAU
+    return _FORGOT_PASSWORD_RESPONSE
 
 
 @router.post(
     "/reset-password",
     status_code=status.HTTP_200_OK,
-    response_model=DatLaiMatKhauResponse,
-    dependencies=[Depends(gioi_han_auth(ROUTE_RESET_PASSWORD))],
+    response_model=ResetPasswordResponse,
+    dependencies=[Depends(auth_limit(ROUTE_RESET_PASSWORD))],
     responses={
         400: {
             "model": ErrorEnvelope,
@@ -965,7 +965,7 @@ async def forgot_password(body: QuenMatKhauRequest, request: Request) -> QuenMat
         },
     },
 )
-async def reset_password(body: DatLaiMatKhauRequest, response: Response) -> DatLaiMatKhauResponse:
+async def reset_password(body: ResetPasswordRequest, response: Response) -> ResetPasswordResponse:
     """Đặt mật khẩu mới bằng token trong email (§11.5, §11.6) + thu hồi **mọi**
     phiên (§11.3, Cạm bẫy T-2.5).
 
@@ -979,7 +979,7 @@ async def reset_password(body: DatLaiMatKhauRequest, response: Response) -> DatL
             ApiErrorCode.PASSWORD_TOO_SHORT,
             f"mat khau phai co it nhat {settings.PASSWORD_MIN_LENGTH} ky tu",
         )
-    if mat_khau_qua_pho_bien(body.password):
+    if is_common_password(body.password):
         raise ApiError(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             ApiErrorCode.PASSWORD_TOO_WEAK,
@@ -995,15 +995,15 @@ async def reset_password(body: DatLaiMatKhauRequest, response: Response) -> DatL
         if outcome.result is not ConsumeResult.OK or outcome.user_id is None:
             # NOT_FOUND / ALREADY_USED / EXPIRED — một câu trả lời cho cả ba.
             raise ApiError(
-                status.HTTP_400_BAD_REQUEST, ApiErrorCode.TOKEN_INVALID, _LOI_TOKEN_RESET
+                status.HTTP_400_BAD_REQUEST, ApiErrorCode.TOKEN_INVALID, _RESET_TOKEN_MSG
             )
 
         user_id = outcome.user_id
-        if not await UserRepository(session).dat_mat_khau_moi(user_id, password_hash):
+        if not await UserRepository(session).set_new_password(user_id, password_hash):
             # Token còn hạn của một tài khoản đã xoá mềm. Cùng câu trả lời với
             # token hỏng: sự tồn tại của tài khoản không phải thứ để rò ra.
             raise ApiError(
-                status.HTTP_400_BAD_REQUEST, ApiErrorCode.TOKEN_INVALID, _LOI_TOKEN_RESET
+                status.HTTP_400_BAD_REQUEST, ApiErrorCode.TOKEN_INVALID, _RESET_TOKEN_MSG
             )
 
         try:
@@ -1011,28 +1011,28 @@ async def reset_password(body: DatLaiMatKhauRequest, response: Response) -> DatL
             # này, trước `commit`. Nửa Redis trượt ⇒ ngoại lệ ⇒ `session_scope`
             # rollback ⇒ mật khẩu KHÔNG đổi: thà người dùng bấm lại link còn hơn
             # đổi xong mật khẩu mà phiên của kẻ tấn công vẫn sống thêm 15 phút.
-            await thu_hoi_moi_phien(session, get_redis(), user_id)
-        except Exception as loi:
+            await revoke_all_sessions(session, get_redis(), user_id)
+        except Exception as exc:
             logger.exception("khong thu hoi duoc phien khi dat lai mat khau cho %s", user_id)
             raise ApiError(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 ApiErrorCode.SERVICE_UNAVAILABLE,
                 "khong dat lai duoc mat khau, hay thu lai",
-            ) from loi
+            ) from exc
 
         await session.commit()
 
     # Phiên cũ vừa bị thu hồi; giữ lại cookie chỉ khiến tab này nhận `401` ở
     # request kế tiếp mà không ai hiểu vì sao (NQ-44).
-    _xoa_hai_cookie(response)
+    _clear_both_cookies(response)
     logger.info("dat lai mat khau xong cho user %s, da thu hoi moi phien", user_id)
-    return _PHAN_HOI_DAT_LAI
+    return _RESET_RESPONSE
 
 
 @router.get(
     "/me",
     status_code=status.HTTP_200_OK,
-    response_model=HoSoRa,
+    response_model=ProfileOut,
     # §11.1 (T-2.7) — cột "Xem UI". Route duy nhất của router `auth` đòi tài
     # khoản dùng được; `logout` cố ý KHÔNG (NQ-42), phần còn lại là công khai.
     # Xem `api/v1/__init__.py` cho danh sách router được gắn cả cụm.
@@ -1044,7 +1044,7 @@ async def reset_password(body: DatLaiMatKhauRequest, response: Response) -> DatL
         }
     },
 )
-async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> HoSoRa:
+async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> ProfileOut:
     """Thông tin user hiện tại — đi qua `get_current_user_id` như mọi route
     khác (§20), không tự đọc cookie.
 
@@ -1057,7 +1057,7 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> HoSoRa:
     trạng thái"*, B-158/NQ-81): hồ sơ + trạng thái, `quota` hai cửa sổ,
     `message_max_chars`, `default_model`. Ba task FE của P3 (T-3.4, T-3.6,
     T-3.11) đọc ba nhóm khác nhau của **cùng** một response chứ không sửa
-    `NguoiDungRa` ở ba commit — đó là toàn bộ lý do gộp chúng vào đây.
+    `UserOut` ở ba commit — đó là toàn bộ lý do gộp chúng vào đây.
 
     `read_snapshot` đứng **trong** `session_scope` vì `refill_if_empty` (RR-7)
     cần một session Postgres để phân biệt "chưa tiêu gì" với "Redis vừa mất
@@ -1072,11 +1072,11 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> HoSoRa:
         # Đọc ra schema TRƯỚC khi làm bất cứ việc gì khác với session: sau đó
         # `user` vẫn còn sống, nhưng thói quen ở cả `conversations.py` là chốt
         # hình dạng ngay khi còn cầm hàng trong tay.
-        ho_so = NguoiDungRa.model_validate(user)
+        profile = UserOut.model_validate(user)
         quota = await read_snapshot(session, user_id=user_id)
 
-    return HoSoRa(
-        **ho_so.model_dump(),
+    return ProfileOut(
+        **profile.model_dump(),
         quota=quota,
         message_max_chars=settings.MESSAGE_MAX_CHARS,
         quota_warn_remaining_pct=settings.QUOTA_WARN_REMAINING_PCT,

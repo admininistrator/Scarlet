@@ -218,15 +218,15 @@ async def _claim_key(key: str) -> dict[str, Any] | None:
             claimed = await redis.set(
                 key, RECORD_IN_PROGRESS, nx=True, ex=settings.IDEMPOTENCY_TTL_S
             )
-        except Exception as loi:
-            raise _redis_unavailable(key) from loi
+        except Exception as exc:
+            raise _redis_unavailable(key) from exc
         if claimed:
             return None
 
         try:
             raw = await redis.get(key)
-        except Exception as loi:
-            raise _redis_unavailable(key) from loi
+        except Exception as exc:
+            raise _redis_unavailable(key) from exc
         if raw is None:
             # Khoá vừa hết hạn (hoặc vừa bị nhả vì lần trước lỗi) giữa SET và
             # GET. Không có gì để đọc ⇒ thử giành lại, đừng đoán.

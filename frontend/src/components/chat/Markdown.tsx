@@ -30,7 +30,7 @@ import { splitStreamingTail } from "./streamingTail";
  *
  * `memo` o day khong de tranh phan tich lai chu dang doi — chu doi that nen
  * khong tranh duoc. No de chan nhung lan dung lai KHONG phai vi chu: mot
- * message da xong nam phia tren trong `path` bi dung lai moi khi `dangBay`
+ * message da xong nam phia tren trong `path` bi dung lai moi khi `inFlight`
  * cua message dang chay doi.
  *
  * Con tro nhap nhay la `::after` cua phan tu CUOI (tien ich `caret-tail`),

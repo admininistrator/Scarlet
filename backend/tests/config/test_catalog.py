@@ -73,12 +73,12 @@ VALID: dict[str, Any] = {
 }
 
 
-def test_catalog_hop_le_load_duoc() -> None:
+def test_valid_catalog_loads() -> None:
     cat = Catalog.model_validate(VALID)
     assert len(cat.models) == 2
 
 
-def test_provider_khong_ton_tai_raise() -> None:
+def test_missing_provider_raises() -> None:
     bad = deepcopy(VALID)
     bad["models"][0]["provider"] = "khong-ton-tai"
     with pytest.raises(ValidationError) as exc:
@@ -88,7 +88,7 @@ def test_provider_khong_ton_tai_raise() -> None:
     assert "deepseek-flash" in message
 
 
-def test_hai_model_cung_default_raise() -> None:
+def test_two_default_models_raise() -> None:
     bad = deepcopy(VALID)
     bad["models"][1]["default"] = True
     with pytest.raises(ValidationError) as exc:
@@ -96,7 +96,7 @@ def test_hai_model_cung_default_raise() -> None:
     assert "default" in str(exc.value)
 
 
-def test_khong_model_nao_default_raise() -> None:
+def test_no_default_model_raises() -> None:
     bad = deepcopy(VALID)
     bad["models"][0]["default"] = False
     with pytest.raises(ValidationError) as exc:
@@ -104,7 +104,7 @@ def test_khong_model_nao_default_raise() -> None:
     assert "default" in str(exc.value)
 
 
-def test_metered_thieu_pricing_raise() -> None:
+def test_metered_without_pricing_raises() -> None:
     bad = deepcopy(VALID)
     bad["models"][0]["pricing"] = None
     with pytest.raises(ValidationError) as exc:
@@ -114,7 +114,7 @@ def test_metered_thieu_pricing_raise() -> None:
     assert "deepseek-flash" in message
 
 
-def test_unmetered_khong_can_pricing() -> None:
+def test_unmetered_needs_no_pricing() -> None:
     ok = deepcopy(VALID)
     ok["models"][1]["pricing_mode"] = "unmetered"
     ok["models"][1]["pricing"] = None
@@ -122,14 +122,14 @@ def test_unmetered_khong_can_pricing() -> None:
     assert cat.models[1].pricing is None
 
 
-def test_base_url_co_dau_gach_cheo_cuoi_duoc_chuan_hoa() -> None:
+def test_base_url_trailing_slash_is_normalized() -> None:
     ok = deepcopy(VALID)
     ok["providers"]["deepseek"]["base_url"] = "https://api.deepseek.com/v1/"
     cat = Catalog.model_validate(ok)
     assert cat.providers["deepseek"].base_url == "https://api.deepseek.com/v1"
 
 
-def test_base_url_thieu_phien_ban_bi_tu_choi() -> None:
+def test_base_url_without_version_is_rejected() -> None:
     """C43 — `https://api.deepseek.com` (thiếu `/v1`) phải chết lúc nạp catalog."""
     bad = deepcopy(VALID)
     bad["providers"]["deepseek"]["base_url"] = "https://api.deepseek.com"
@@ -140,7 +140,7 @@ def test_base_url_thieu_phien_ban_bi_tu_choi() -> None:
     assert "C43" in message
 
 
-def test_base_url_ket_thuc_bang_duong_dan_khac_bi_tu_choi() -> None:
+def test_base_url_ending_in_other_path_is_rejected() -> None:
     """C43 — `/v1/chat/completions` cũng sai: base_url là GỐC API, không phải endpoint."""
     bad = deepcopy(VALID)
     bad["providers"]["deepseek"]["base_url"] = "https://api.deepseek.com/v1/chat/completions"
@@ -150,18 +150,18 @@ def test_base_url_ket_thuc_bang_duong_dan_khac_bi_tu_choi() -> None:
 
 
 @pytest.mark.parametrize("base_url", ["http://ollama:11434/v1", "https://x.test/api/v1beta"])
-def test_base_url_co_phien_ban_duoc_chap_nhan(base_url: str) -> None:
+def test_base_url_with_version_is_accepted(base_url: str) -> None:
     ok = deepcopy(VALID)
     ok["providers"]["deepseek"]["base_url"] = base_url
     assert Catalog.model_validate(ok).providers["deepseek"].base_url == base_url
 
 
-def test_auth_style_thieu_mac_dinh_bearer() -> None:
+def test_missing_auth_style_defaults_to_bearer() -> None:
     cat = Catalog.model_validate(VALID)
     assert cat.providers["anthropic"].auth_style == "bearer"
 
 
-def test_verify_path_thieu_mac_dinh_none_va_canh_bao(
+def test_missing_verify_path_defaults_to_none_and_warns(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level("WARNING", logger="app.config.catalog"):
@@ -171,7 +171,7 @@ def test_verify_path_thieu_mac_dinh_none_va_canh_bao(
     assert "C42" in caplog.text
 
 
-def test_file_catalog_that_hop_le_va_co_dung_mot_default() -> None:
+def test_real_catalog_file_valid_with_exactly_one_default() -> None:
     cat = catalog._read_and_validate(catalog.CATALOG_PATH)
     defaults = [m for m in cat.models if m.default]
     assert len(defaults) == 1
@@ -179,7 +179,7 @@ def test_file_catalog_that_hop_le_va_co_dung_mot_default() -> None:
     assert defaults[0].provider == "deepseek"
 
 
-def test_reload_doc_lai_tu_dia_va_thay_cache(tmp_path: Path) -> None:
+def test_reload_rereads_disk_and_replaces_cache(tmp_path: Path) -> None:
     fixture = tmp_path / "model_catalog.json"
     fixture.write_text(json.dumps(VALID), encoding="utf-8")
 
@@ -201,7 +201,7 @@ def test_reload_doc_lai_tu_dia_va_thay_cache(tmp_path: Path) -> None:
         assert original.version == catalog.get_catalog().version
 
 
-def test_get_catalog_khong_doc_dia(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_catalog_does_not_read_disk(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(path: Path) -> Catalog:
         raise AssertionError("get_catalog() không được đọc đĩa")
 
@@ -227,7 +227,7 @@ PEAK_SCHEDULE: dict[str, Any] = {
 }
 
 
-def _voi_khung_gio() -> dict[str, Any]:
+def _with_time_windows() -> dict[str, Any]:
     """`VALID` + một model bán theo hai khung giờ (giống `deepseek-flash` thật)."""
     data = deepcopy(VALID)
     data["pricing_schedules"] = {"peak-vn": deepcopy(PEAK_SCHEDULE)}
@@ -245,18 +245,18 @@ def _voi_khung_gio() -> dict[str, Any]:
     return data
 
 
-def _luc(iso: str) -> datetime:
+def _at(iso: str) -> datetime:
     """Một thời điểm viết theo giờ Việt Nam — đúng cách bảng giá được phát biểu."""
     return datetime.fromisoformat(iso).replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
 
 
-def test_catalog_khong_co_pricing_schedules_van_nap_duoc() -> None:
+def test_catalog_without_pricing_schedules_still_loads() -> None:
     cat = Catalog.model_validate(VALID)
     assert cat.pricing_schedules == {}
 
 
-def test_schedule_khong_ton_tai_raise() -> None:
-    bad = _voi_khung_gio()
+def test_missing_schedule_raises() -> None:
+    bad = _with_time_windows()
     bad["models"][0]["pricing"]["off_peak"]["schedule"] = "khong-ton-tai"
     with pytest.raises(ValidationError) as exc:
         Catalog.model_validate(bad)
@@ -265,16 +265,16 @@ def test_schedule_khong_ton_tai_raise() -> None:
     assert "deepseek-flash" in message
 
 
-def test_timezone_sai_raise() -> None:
-    bad = _voi_khung_gio()
+def test_bad_timezone_raises() -> None:
+    bad = _with_time_windows()
     bad["pricing_schedules"]["peak-vn"]["timezone"] = "Asia/Khong_Co_That"
     with pytest.raises(ValidationError) as exc:
         Catalog.model_validate(bad)
     assert "Asia/Khong_Co_That" in str(exc.value)
 
 
-def test_khung_gio_qua_nua_dem_bi_tu_choi() -> None:
-    bad = _voi_khung_gio()
+def test_window_crossing_midnight_is_rejected() -> None:
+    bad = _with_time_windows()
     bad["pricing_schedules"]["peak-vn"]["windows"] = [{"start": "22:00", "end": "02:00"}]
     with pytest.raises(ValidationError) as exc:
         Catalog.model_validate(bad)
@@ -282,7 +282,7 @@ def test_khung_gio_qua_nua_dem_bi_tu_choi() -> None:
 
 
 @pytest.mark.parametrize(
-    ("moment", "mo_ta"),
+    ("moment", "description"),
     [
         ("2026-09-14T08:00:00", "thứ Hai, đúng lúc mở khung sáng"),
         ("2026-09-14T10:59:59", "thứ Hai, sát cuối khung sáng"),
@@ -290,17 +290,17 @@ def test_khung_gio_qua_nua_dem_bi_tu_choi() -> None:
         ("2026-09-18T16:59:59", "thứ Sáu, sát cuối khung chiều"),
     ],
 )
-def test_trong_gio_cao_diem_tra_gia_dat(moment: str, mo_ta: str) -> None:
-    cat = Catalog.model_validate(_voi_khung_gio())
-    gia = cat.effective_pricing("deepseek-flash", _luc(moment))
-    assert gia is not None
-    assert gia.input_per_1m == 0.30, mo_ta
-    assert gia.output_per_1m == 1.20
-    assert gia.cached_input_per_1m == 0.006
+def test_peak_returns_expensive_price(moment: str, description: str) -> None:
+    cat = Catalog.model_validate(_with_time_windows())
+    pricing = cat.effective_pricing("deepseek-flash", _at(moment))
+    assert pricing is not None
+    assert pricing.input_per_1m == 0.30, description
+    assert pricing.output_per_1m == 1.20
+    assert pricing.cached_input_per_1m == 0.006
 
 
 @pytest.mark.parametrize(
-    ("moment", "mo_ta"),
+    ("moment", "description"),
     [
         ("2026-09-14T07:59:59", "thứ Hai, trước giờ làm"),
         ("2026-09-14T11:00:00", "thứ Hai, đúng lúc nghỉ trưa — biên [start, end)"),
@@ -310,33 +310,33 @@ def test_trong_gio_cao_diem_tra_gia_dat(moment: str, mo_ta: str) -> None:
         ("2026-09-20T14:00:00", "Chủ nhật"),
     ],
 )
-def test_ngoai_gio_cao_diem_tra_gia_re(moment: str, mo_ta: str) -> None:
-    cat = Catalog.model_validate(_voi_khung_gio())
-    gia = cat.effective_pricing("deepseek-flash", _luc(moment))
-    assert gia is not None
-    assert gia.input_per_1m == 0.15, mo_ta
-    assert gia.output_per_1m == 0.60
-    assert gia.cached_input_per_1m == 0.003
+def test_off_peak_returns_cheap_price(moment: str, description: str) -> None:
+    cat = Catalog.model_validate(_with_time_windows())
+    pricing = cat.effective_pricing("deepseek-flash", _at(moment))
+    assert pricing is not None
+    assert pricing.input_per_1m == 0.15, description
+    assert pricing.output_per_1m == 0.60
+    assert pricing.cached_input_per_1m == 0.003
 
 
-def test_moc_gio_doi_theo_mui_gio_chu_khong_theo_gio_may_chu() -> None:
+def test_hour_boundary_follows_timezone_not_server_clock() -> None:
     """09:00 giờ Việt Nam = 02:00 UTC. Container chạy UTC, bảng giá viết giờ VN."""
-    cat = Catalog.model_validate(_voi_khung_gio())
-    sang_thu_hai_utc = datetime(2026, 9, 14, 2, 0, tzinfo=UTC)
-    gia = cat.effective_pricing("deepseek-flash", sang_thu_hai_utc)
-    assert gia is not None
-    assert gia.input_per_1m == 0.30
+    cat = Catalog.model_validate(_with_time_windows())
+    monday_morning_utc = datetime(2026, 9, 14, 2, 0, tzinfo=UTC)
+    pricing = cat.effective_pricing("deepseek-flash", monday_morning_utc)
+    assert pricing is not None
+    assert pricing.input_per_1m == 0.30
 
 
-def test_datetime_tran_bi_tu_choi() -> None:
-    cat = Catalog.model_validate(_voi_khung_gio())
+def test_naive_datetime_is_rejected() -> None:
+    cat = Catalog.model_validate(_with_time_windows())
     with pytest.raises(ValueError, match="múi giờ"):
         cat.effective_pricing("deepseek-flash", datetime(2026, 9, 14, 9, 0))  # noqa: DTZ001
 
 
-def test_model_khong_co_khung_gio_tra_dung_mot_gia() -> None:
+def test_model_without_windows_returns_single_price() -> None:
     """`claude-haiku` không bán theo giờ — mọi thời điểm cho cùng một bảng giá."""
-    data = _voi_khung_gio()
+    data = _with_time_windows()
     data["models"][1]["pricing"] = {
         "input_per_1m": 1.00,
         "output_per_1m": 5.00,
@@ -345,14 +345,14 @@ def test_model_khong_co_khung_gio_tra_dung_mot_gia() -> None:
     }
     cat = Catalog.model_validate(data)
     for moment in ("2026-09-14T09:00:00", "2026-09-20T03:00:00"):
-        gia = cat.effective_pricing("claude-haiku", _luc(moment))
-        assert gia is not None
-        assert gia.input_per_1m == 1.00
-        assert gia.cache_write_per_1m == 1.25
+        pricing = cat.effective_pricing("claude-haiku", _at(moment))
+        assert pricing is not None
+        assert pricing.input_per_1m == 1.00
+        assert pricing.cache_write_per_1m == 1.25
 
 
-def test_model_unmetered_hoac_khong_ton_tai_khong_co_gia() -> None:
-    data = _voi_khung_gio()
+def test_unmetered_or_missing_model_has_no_price() -> None:
+    data = _with_time_windows()
     data["models"][1]["pricing_mode"] = "unmetered"
     data["models"][1]["pricing"] = None
     cat = Catalog.model_validate(data)
@@ -360,46 +360,46 @@ def test_model_unmetered_hoac_khong_ton_tai_khong_co_gia() -> None:
     assert cat.effective_pricing("model-khong-ton-tai") is None
 
 
-def test_model_da_tat_van_con_gia() -> None:
+def test_disabled_model_still_has_price() -> None:
     """A7: tắt một model không được xoá giá của những lượt sinh nó đã chạy."""
-    data = _voi_khung_gio()
+    data = _with_time_windows()
     data["models"][0]["enabled"] = False
     cat = Catalog.model_validate(data)
-    assert cat.effective_pricing("deepseek-flash", _luc("2026-09-14T09:00:00")) is not None
+    assert cat.effective_pricing("deepseek-flash", _at("2026-09-14T09:00:00")) is not None
 
 
-def test_cache_write_thieu_la_none_chu_khong_phai_0() -> None:
+def test_missing_cache_write_is_none_not_0() -> None:
     """DeepSeek không thu tiền ghi cache; Anthropic thu. Hai ca khác nhau."""
-    cat = Catalog.model_validate(_voi_khung_gio())
-    gia = cat.effective_pricing("deepseek-flash", _luc("2026-09-14T09:00:00"))
-    assert gia is not None
-    assert gia.cache_write_per_1m is None
+    cat = Catalog.model_validate(_with_time_windows())
+    pricing = cat.effective_pricing("deepseek-flash", _at("2026-09-14T09:00:00"))
+    assert pricing is not None
+    assert pricing.cache_write_per_1m is None
 
 
 # ─────────────── Catalog THẬT: giá do người dùng chốt (B-35) ───────────────
 
 
-def test_catalog_that_deepseek_hai_khung_gia() -> None:
+def test_real_catalog_deepseek_two_price_windows() -> None:
     cat = catalog.get_catalog()
-    peak = cat.effective_pricing("deepseek-flash", _luc("2026-09-14T09:00:00"))
-    off = cat.effective_pricing("deepseek-flash", _luc("2026-09-14T22:00:00"))
+    peak = cat.effective_pricing("deepseek-flash", _at("2026-09-14T09:00:00"))
+    off = cat.effective_pricing("deepseek-flash", _at("2026-09-14T22:00:00"))
     assert peak is not None
     assert off is not None
     assert (peak.input_per_1m, peak.output_per_1m, peak.cached_input_per_1m) == (0.30, 1.20, 0.006)
     assert (off.input_per_1m, off.output_per_1m, off.cached_input_per_1m) == (0.15, 0.60, 0.003)
 
 
-def test_catalog_that_claude_haiku_co_gia_ghi_cache() -> None:
-    gia = catalog.get_catalog().effective_pricing("claude-haiku")
-    assert gia is not None
-    assert (gia.input_per_1m, gia.output_per_1m) == (1.00, 5.00)
-    assert (gia.cached_input_per_1m, gia.cache_write_per_1m) == (0.10, 1.25)
+def test_real_catalog_claude_haiku_has_cache_write_price() -> None:
+    pricing = catalog.get_catalog().effective_pricing("claude-haiku")
+    assert pricing is not None
+    assert (pricing.input_per_1m, pricing.output_per_1m) == (1.00, 5.00)
+    assert (pricing.cached_input_per_1m, pricing.cache_write_per_1m) == (0.10, 1.25)
 
 
 # ─────────────── Giá tự điền cho provider không báo giá (B-65) ───────────────
 
 
-def _voi_manual_pricing(entry: dict[str, Any] | None = None) -> dict[str, Any]:
+def _with_manual_pricing(entry: dict[str, Any] | None = None) -> dict[str, Any]:
     """`VALID` cộng một model `unmetered` (`nr-gemini-flash`) và khối giá tự điền."""
     data = deepcopy(VALID)
     data["providers"]["ninerouter"] = {
@@ -431,58 +431,62 @@ def _voi_manual_pricing(entry: dict[str, Any] | None = None) -> dict[str, Any]:
     return data
 
 
-def test_manual_pricing_vang_mat_van_nap_duoc() -> None:
-    cat = Catalog.model_validate(_voi_manual_pricing())
+def test_missing_manual_pricing_still_loads() -> None:
+    cat = Catalog.model_validate(_with_manual_pricing())
     assert cat.manual_pricing == {}
     assert cat.effective_pricing("nr-gemini-flash") is None
 
 
-def test_manual_pricing_da_dien_thanh_gia_cua_model() -> None:
-    cat = Catalog.model_validate(_voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40}))
-    gia = cat.effective_pricing("nr-gemini-flash")
-    assert gia is not None
-    assert (gia.input_per_1m, gia.output_per_1m) == (0.10, 0.40)
+def test_filled_manual_pricing_becomes_model_price() -> None:
+    cat = Catalog.model_validate(
+        _with_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
+    )
+    pricing = cat.effective_pricing("nr-gemini-flash")
+    assert pricing is not None
+    assert (pricing.input_per_1m, pricing.output_per_1m) == (0.10, 0.40)
 
 
-def test_manual_pricing_de_trong_van_la_khong_co_gia() -> None:
+def test_blank_manual_pricing_still_means_no_price() -> None:
     """Ô còn `null` = chưa điền, KHÔNG phải 0 USD đã xác nhận."""
-    cat = Catalog.model_validate(_voi_manual_pricing({"input_per_1m": None, "output_per_1m": None}))
+    cat = Catalog.model_validate(
+        _with_manual_pricing({"input_per_1m": None, "output_per_1m": None})
+    )
     assert cat.effective_pricing("nr-gemini-flash") is None
 
 
-def test_manual_pricing_dien_mot_nua_bi_tu_choi() -> None:
+def test_half_filled_manual_pricing_is_rejected() -> None:
     """Nửa còn thiếu sẽ lặng lẽ thành 0 — đó là lý do nó phải nổ lúc nạp."""
     with pytest.raises(ValidationError) as exc:
-        Catalog.model_validate(_voi_manual_pricing({"input_per_1m": 0.10}))
+        Catalog.model_validate(_with_manual_pricing({"input_per_1m": 0.10}))
     assert "CẢ HAI" in str(exc.value)
 
 
-def test_manual_pricing_khoa_khong_khop_model_nao_bi_tu_choi() -> None:
-    data = _voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
+def test_manual_pricing_key_matching_no_model_is_rejected() -> None:
+    data = _with_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
     data["manual_pricing"] = {"go-nham-ten": {"input_per_1m": 0.10, "output_per_1m": 0.40}}
     with pytest.raises(ValidationError) as exc:
         Catalog.model_validate(data)
     assert "go-nham-ten" in str(exc.value)
 
 
-def test_model_khong_duoc_co_hai_nguon_gia() -> None:
-    data = _voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
+def test_model_cannot_have_two_price_sources() -> None:
+    data = _with_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
     data["manual_pricing"] = {"deepseek-flash": {"input_per_1m": 9.0, "output_per_1m": 9.0}}
     with pytest.raises(ValidationError) as exc:
         Catalog.model_validate(data)
     assert "hai nguồn giá" in str(exc.value)
 
 
-def test_khoa_bat_dau_bang_gach_duoi_la_chu_thich() -> None:
-    data = _voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
+def test_keys_starting_with_underscore_are_comments() -> None:
+    data = _with_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40})
     data["manual_pricing"]["_huong_dan"] = "day la chu thich, khong phai mot model"
     cat = Catalog.model_validate(data)
     assert list(cat.manual_pricing) == ["nr-gemini-flash"]
 
 
-def test_prompt_overhead_doc_duoc_va_mac_dinh_0() -> None:
+def test_prompt_overhead_parsed_and_defaults_to_0() -> None:
     cat = Catalog.model_validate(
-        _voi_manual_pricing(
+        _with_manual_pricing(
             {"input_per_1m": 0.10, "output_per_1m": 0.40, "prompt_overhead_tokens": 2100}
         )
     )
@@ -491,23 +495,23 @@ def test_prompt_overhead_doc_duoc_va_mac_dinh_0() -> None:
     assert cat.prompt_overhead_tokens("khong-ton-tai") == 0
 
 
-def test_canh_bao_khi_model_khong_co_gia(caplog: pytest.LogCaptureFixture) -> None:
+def test_warns_when_model_has_no_price(caplog: pytest.LogCaptureFixture) -> None:
     """Lỗ hổng "quota không trừ" phải TỰ KHAI lúc nạp, không đợi cuối tháng."""
     with caplog.at_level("WARNING", logger="app.config.catalog"):
-        Catalog.model_validate(_voi_manual_pricing())
+        Catalog.model_validate(_with_manual_pricing())
     assert "nr-gemini-flash" in caplog.text
     assert "cost_reporting=unreliable" in caplog.text
 
 
-def test_canh_bao_khi_da_co_gia_ma_pricing_mode_chua_doi(
+def test_warns_when_priced_but_pricing_mode_unchanged(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level("WARNING", logger="app.config.catalog"):
-        Catalog.model_validate(_voi_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40}))
+        Catalog.model_validate(_with_manual_pricing({"input_per_1m": 0.10, "output_per_1m": 0.40}))
     assert "flat" in caplog.text
 
 
-def test_catalog_that_co_o_dien_gia_cho_9router() -> None:
+def test_real_catalog_has_price_slot_for_9router() -> None:
     """File thật phải có sẵn ô trống cho 9Router — đó là sản phẩm của B-65."""
     cat = catalog.get_catalog()
     assert "nr-gemini-flash" in cat.manual_pricing
@@ -516,20 +520,20 @@ def test_catalog_that_co_o_dien_gia_cho_9router() -> None:
 # ══════════ T-2.15 — `extra_headers` (B-166) và `provider_model` (§9.1) ══════════
 
 
-def test_extra_headers_vang_mat_la_dict_rong() -> None:
+def test_missing_extra_headers_is_empty_dict() -> None:
     """Trường mới không được bắt mọi provider cũ phải khai lại (§9.2)."""
     cat = Catalog.model_validate(VALID)
     assert cat.providers["deepseek"].extra_headers == {}
 
 
-def test_extra_headers_doc_duoc_tu_json() -> None:
+def test_extra_headers_read_from_json() -> None:
     raw = deepcopy(VALID)
     raw["providers"]["anthropic"]["extra_headers"] = {"anthropic-version": "2023-06-01"}
     cat = Catalog.model_validate(raw)
     assert cat.providers["anthropic"].extra_headers == {"anthropic-version": "2023-06-01"}
 
 
-def test_extra_headers_sai_kieu_thi_app_khong_boot() -> None:
+def test_extra_headers_wrong_type_app_does_not_boot() -> None:
     """Một header không phải chuỗi là một request hỏng lúc chạy — L2 bắt ở đây."""
     raw = deepcopy(VALID)
     raw["providers"]["anthropic"]["extra_headers"] = {"anthropic-version": 20230601}
@@ -537,7 +541,7 @@ def test_extra_headers_sai_kieu_thi_app_khong_boot() -> None:
         Catalog.model_validate(raw)
 
 
-def test_catalog_that_anthropic_khai_du_de_dung_byok() -> None:
+def test_real_catalog_anthropic_declares_enough_for_byok() -> None:
     """**B-166 đóng ở T-2.15.** Đo được, không phải một lời hứa trong docstring.
 
     `GET /v1/models` của Anthropic đòi `anthropic-version` và chỉ nhận
@@ -551,7 +555,7 @@ def test_catalog_that_anthropic_khai_du_de_dung_byok() -> None:
 
 
 @pytest.mark.parametrize(
-    ("upstream", "mong_doi"),
+    ("upstream", "expected"),
     [
         ("deepseek/deepseek-flash", "deepseek-flash"),
         ("anthropic/claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001"),
@@ -562,14 +566,14 @@ def test_catalog_that_anthropic_khai_du_de_dung_byok() -> None:
         ("qwen2.5:0.5b", "qwen2.5:0.5b"),
     ],
 )
-def test_provider_model_cat_dung_tien_to_cua_litellm(upstream: str, mong_doi: str) -> None:
+def test_provider_model_strips_litellm_prefix(upstream: str, expected: str) -> None:
     raw = deepcopy(VALID)
     raw["models"][0]["upstream_model"] = upstream
     cat = Catalog.model_validate(raw)
-    assert cat.models[0].provider_model == mong_doi
+    assert cat.models[0].provider_model == expected
 
 
-def test_provider_model_khac_id_o_it_nhat_mot_model_that() -> None:
+def test_provider_model_differs_from_id_for_at_least_one_real_model() -> None:
     """Hai tên trùng nhau ở MỌI model thì `Credential.model_name` không đo được."""
     cat = catalog.get_catalog()
     assert any(m.id != m.provider_model for m in cat.models)

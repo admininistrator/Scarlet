@@ -123,7 +123,7 @@ from app.core.access_token import (
     TokenInvalidError,
     decode_access_token,
 )
-from app.core.blacklist import bi_chan
+from app.core.blacklist import is_blocked
 from app.core.errors import ApiError, ApiErrorCode
 from app.core.redis import get_redis
 from app.db.models import UserRole, UserStatus
@@ -138,7 +138,7 @@ logger = logging.getLogger(__name__)
 SESSION_COOKIE_NAME = "scarlet_session"
 
 
-def _moi_cookie_phien(request: Request) -> list[str]:
+def _all_session_cookies(request: Request) -> list[str]:
     """MỌI giá trị `scarlet_session` trong header `Cookie`, đúng thứ tự gửi.
 
     **Vì sao không dùng `Cookie(alias=...)` của FastAPI** — đây là một lỗi đã
@@ -155,7 +155,7 @@ def _moi_cookie_phien(request: Request) -> list[str]:
         cookie_parser('scarlet_session=MOI; scarlet_session=CU')  → 'CU'
 
     RFC 6265 §5.4 bắt trình duyệt xếp cookie có `Path` DÀI hơn lên trước, nên
-    cookie mới (`Path=/api/v1`, xem `_dat_cookie_phien`) đi **trước** và một
+    cookie mới (`Path=/api/v1`, xem `_set_session_cookie`) đi **trước** và một
     cookie cũ cùng tên ở path rộng hơn đi **sau** — đúng cái Starlette giữ lại.
     Hệ quả: người dùng đăng nhập lại bao nhiêu lần cũng vô ích, vì cookie vừa
     cấp luôn bị cái cũ che, và màn hình báo "access token đã hết hạn" ngay sau
@@ -174,12 +174,12 @@ def _moi_cookie_phien(request: Request) -> list[str]:
     raw = request.headers.get("cookie")
     if not raw:
         return []
-    gia_tri: list[str] = []
-    for phan in raw.split(";"):
-        ten, dau_bang, val = phan.partition("=")
-        if dau_bang and ten.strip() == SESSION_COOKIE_NAME:
-            gia_tri.append(val.strip().strip('"'))
-    return gia_tri
+    value: list[str] = []
+    for part in raw.split(";"):
+        name, eq_sign, val = part.partition("=")
+        if eq_sign and name.strip() == SESSION_COOKIE_NAME:
+            value.append(val.strip().strip('"'))
+    return value
 
 
 async def get_access_claims(request: Request) -> AccessTokenClaims | None:
@@ -199,20 +199,20 @@ async def get_access_claims(request: Request) -> AccessTokenClaims | None:
         ApiError 503 `SERVICE_UNAVAILABLE`: không hỏi được Redis nên KHÔNG
             biết token có bị thu hồi hay không (xem docstring module).
     """
-    cookies = _moi_cookie_phien(request)
+    cookies = _all_session_cookies(request)
     if not cookies:
         return None
 
     # Nhận cái ĐẦU TIÊN giải mã được. Khi chỉ có một cookie — đường đi thường —
     # vòng lặp này chạy đúng một lần và hành vi y hệt bản cũ.
     claims = None
-    co_het_han = False
+    has_expired = False
     for raw_token in cookies:
         try:
             claims = decode_access_token(raw_token)
             break
         except TokenExpiredError:
-            co_het_han = True
+            has_expired = True
         except TokenInvalidError:
             pass
 
@@ -221,7 +221,7 @@ async def get_access_claims(request: Request) -> AccessTokenClaims | None:
         # cookie hết hạn: nó là mã FE đọc để đi `/auth/refresh` thay vì đẩy
         # thẳng người dùng ra màn đăng nhập. Một cookie rác đi kèm không được
         # phép hạ cấp chẩn đoán ấy.
-        if co_het_han:
+        if has_expired:
             raise ApiError(
                 status.HTTP_401_UNAUTHORIZED,
                 ApiErrorCode.TOKEN_EXPIRED,
@@ -234,16 +234,16 @@ async def get_access_claims(request: Request) -> AccessTokenClaims | None:
         )
 
     try:
-        da_bi_thu_hoi = await bi_chan(get_redis(), claims)
-    except Exception as loi:
+        revoked = await is_blocked(get_redis(), claims)
+    except Exception as exc:
         logger.exception("khong kiem duoc blacklist cho user %s", claims.user_id)
         raise ApiError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             ApiErrorCode.SERVICE_UNAVAILABLE,
             "khong kiem duoc trang thai phien dang nhap",
-        ) from loi
+        ) from exc
 
-    if da_bi_thu_hoi:
+    if revoked:
         raise ApiError(
             status.HTTP_401_UNAUTHORIZED,
             ApiErrorCode.TOKEN_REVOKED,
@@ -378,7 +378,7 @@ async def get_current_user_status(
     nổi: nó chạy trước khi handler đọc body nên nó không biết `model_id`, tức
     không biết provider, tức chỉ hỏi được "có khoá **nào đó** không" thay vì
     "có khoá cho provider này không" (**B-140**). Ba route sinh chữ vì vậy xin
-    thêm trạng thái để hỏi lại câu đúng ở `_mo_luot_sinh`, nơi model đã chốt.
+    thêm trạng thái để hỏi lại câu đúng ở `_open_generation`, nơi model đã chốt.
 
     Hằng `STATUSES_CAN_*` vẫn là nguồn sự thật duy nhất của bảng §11.1 — hàm
     này chỉ chở một giá trị, nó không phán xét gì; phép so sánh vẫn là

@@ -69,7 +69,7 @@ class TierRepository:
         Tồn tại để câu trả lời cho *"tier này có thật không"* là một `404`/`400`
         nói đúng chuyện, thay vì một `IntegrityError` của khoá ngoại
         `users.tier_name → tiers.name` nổi lên thành `500`. Cùng lý lẽ với
-        `_tim_provider` của `api/v1/settings.py`: phép kiểm nằm ở chỗ có thể
+        `_find_provider` của `api/v1/settings.py`: phép kiểm nằm ở chỗ có thể
         nói câu tử tế, không ở chỗ chỉ biết gào lên.
         """
         return await self._session.get(Tier, name)

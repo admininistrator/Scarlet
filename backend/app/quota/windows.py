@@ -106,7 +106,7 @@ class Window:
 
     limit_type: LimitType
     #: Hằng `.env` được đọc ở **lúc gọi** chứ không lúc import — cùng lý do đã
-    #: ghi ở `gioi_han_theo_user`: một test hạ nó xuống phải thấy hiệu lực ngay.
+    #: ghi ở `per_user_limit`: một test hạ nó xuống phải thấy hiệu lực ngay.
     seconds: int
 
     def key(self, user_id: uuid.UUID) -> str:
@@ -215,10 +215,10 @@ class WindowState:
         """
         if need_to_free <= 0:
             return None
-        da_nha = Decimal(0)
+        released = Decimal(0)
         for score, cost in self.entries:
-            da_nha += cost
-            if da_nha >= need_to_free:
+            released += cost
+            if released >= need_to_free:
                 return max(1, math.ceil(score + self.window.seconds - now))
         return None
 
@@ -228,7 +228,7 @@ async def read_window(
 ) -> WindowState:
     """Dọn phần quá hạn rồi đọc phần còn trong cửa sổ. Ngoại lệ Redis KHÔNG bị nuốt.
 
-    Cùng lối `take_token`/`dem_va_kiem` của `core/ratelimit.py`: chỗ gọi mới
+    Cùng lối `take_token`/`count_and_check` của `core/ratelimit.py`: chỗ gọi mới
     biết phải trả lời người dùng thế nào, nên module này không tự dựng
     `ApiError`.
 
@@ -244,21 +244,21 @@ async def read_window(
     raw = await redis.zrangebyscore(key, cutoff, "+inf", withscores=True)
 
     entries: list[tuple[float, Decimal]] = []
-    hong = 0
+    broken = 0
     for member, score in raw:
         cost = parse_member(member if isinstance(member, str) else member.decode())
         if cost is None:
-            hong += 1
+            broken += 1
             continue
         entries.append((float(score), cost))
 
-    if hong:
+    if broken:
         logger.warning(
             "cua so %s cua user %s co %d member khong doc duoc — bo qua, "
             "chi phi cua chung KHONG duoc tinh",
             window.limit_type.value,
             user_id,
-            hong,
+            broken,
         )
 
     return WindowState(

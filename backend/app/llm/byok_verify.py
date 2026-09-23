@@ -121,11 +121,11 @@ def _headers_for(provider: Provider, key: str) -> dict[str, str] | None:
     T-2.15): thứ tự ấy làm cho một `Authorization` gõ nhầm vào `extra_headers`
     không bao giờ ghi đè được credential thật — xem `Provider.extra_headers`.
     """
-    ten_header = _AUTH_HEADER.get(provider.auth_style)
-    if ten_header is None:
+    header_name = _AUTH_HEADER.get(provider.auth_style)
+    if header_name is None:
         return None
-    gia_tri = f"{_BEARER_PREFIX}{key}" if provider.auth_style == "bearer" else key
-    return {**provider.extra_headers, ten_header: gia_tri}
+    value = f"{_BEARER_PREFIX}{key}" if provider.auth_style == "bearer" else key
+    return {**provider.extra_headers, header_name: value}
 
 
 def _client() -> httpx.AsyncClient:
@@ -152,7 +152,7 @@ async def verify_key(provider_name: str, provider: Provider, key: str) -> Verify
         VerifyUnavailable: không hỏi được provider — xem docstring module.
     """
     if provider.verify_path is None:
-        # C42. Cảnh báo lúc nạp catalog đã có (`_canh_bao_verify_path_thieu`);
+        # C42. Cảnh báo lúc nạp catalog đã có (`_warn_verify_path_missing`);
         # dòng này nói ra ca **đã xảy ra thật**, tức có một hàng trong DB mang
         # `verified_at IS NULL` vì lý do đó.
         logger.warning(
@@ -175,12 +175,12 @@ async def verify_key(provider_name: str, provider: Provider, key: str) -> Verify
     try:
         async with _client() as client:
             resp = await client.get(url, headers=headers)
-    except Exception as loi:
+    except Exception as exc:
         # KHÔNG log `headers` — nó mang khoá (C20). `logger.exception` in
         # traceback của `httpx`, và traceback ấy đi qua bộ che của
         # `core/log_redact.py` trước khi tới handler.
         logger.exception("khong hoi duoc provider '%s' de kiem khoa BYOK", provider_name)
-        raise VerifyUnavailable(provider_name) from loi
+        raise VerifyUnavailable(provider_name) from exc
 
     if resp.is_success:
         return VerifyOutcome.ALIVE

@@ -13,14 +13,14 @@ từ app thì ngược lại — endpoint mới tự động rơi vào ma trận
 đó gắn nó bằng một `APIRouter` riêng không có `require_admin` thì file này đỏ
 ngay ở lần chạy kế tiếp.
 
-Hai nguồn hợp lại (`_tu_openapi` + `_tu_router`) vì mỗi nguồn có một điểm mù,
+Hai nguồn hợp lại (`_from_openapi` + `_from_router`) vì mỗi nguồn có một điểm mù,
 và hai điểm mù ấy không giao nhau — xem docstring của từng hàm. Cố ý **không**
 duyệt `app.routes`: phiên bản FastAPI đang dùng gắn router con dưới dạng một
 object nội bộ (`_IncludedRouter`) không phơi ra `.routes`, nên một vòng lặp
 trên `app.routes` trả về **danh sách rỗng** — tức xanh mà không kiểm gì. Đó
-chính là ca mà `_TOI_THIEU` ngay dưới đây đã bắt được lần đầu chạy file này.
+chính là ca mà `_MINIMUM` ngay dưới đây đã bắt được lần đầu chạy file này.
 
-`_TOI_THIEU` là lưới đỡ cho chính cách đọc đó: một bộ lọc gõ sai (`/admin` đổi
+`_MINIMUM` là lưới đỡ cho chính cách đọc đó: một bộ lọc gõ sai (`/admin` đổi
 prefix, `include_router` bị xoá) sẽ cho ra **danh sách rỗng**, và một
 `parametrize` rỗng thì pytest báo **xanh**. Khẳng định số lượng tối thiểu biến
 ca ấy thành một test đỏ.
@@ -71,10 +71,10 @@ API_PREFIX = "/api/v1"
 #: (`tiers` GET/PATCH, `system`, `audit-logs`) và cố ý **không** nâng con số
 #: này — nâng nó mỗi lần có endpoint mới là biến một lưới đỡ thành một danh
 #: sách chép tay, đúng thứ file này tồn tại để không phải có.
-_TOI_THIEU = 5
+_MINIMUM = 5
 
 
-class _ThamSo(dict[str, str]):
+class _Params(dict[str, str]):
     """Giá trị điền vào tham số đường dẫn, **có mặc định cho tên chưa biết**.
 
     `hanh_dong` phải khớp `pattern` của route (`^(approve|reject|suspend)$`),
@@ -96,14 +96,14 @@ class _ThamSo(dict[str, str]):
         return "x"
 
 
-_THAM_SO = _ThamSo({"user_id": str(uuid.uuid4()), "hanh_dong": "approve"})
+_PARAMS = _Params({"user_id": str(uuid.uuid4()), "hanh_dong": "approve"})
 
 
 #: Tiền tố mà mọi endpoint của §16.3 nằm dưới.
 _PREFIX = "/api/v1/admin"
 
 
-def _tu_openapi() -> set[tuple[str, str]]:
+def _from_openapi() -> set[tuple[str, str]]:
     """Đọc từ schema OpenAPI — nguồn thấy được **mọi** router, kể cả router khác.
 
     Đây là nguồn quan trọng hơn trong hai nguồn: nó bắt được cả trường hợp một
@@ -112,14 +112,14 @@ def _tu_openapi() -> set[tuple[str, str]]:
     sẽ không bao giờ thấy.
     """
     return {
-        (method.upper(), duong_dan)
-        for duong_dan, ops in app.openapi()["paths"].items()
-        if duong_dan.startswith(_PREFIX)
+        (method.upper(), path)
+        for path, ops in app.openapi()["paths"].items()
+        if path.startswith(_PREFIX)
         for method in ops
     }
 
 
-def _tu_router() -> set[tuple[str, str]]:
+def _from_router() -> set[tuple[str, str]]:
     """Đọc thẳng `admin.router` — nguồn thấy được cả route `include_in_schema=False`.
 
     OpenAPI bỏ qua route ẩn, nên một endpoint gắn cờ ấy sẽ **biến mất** khỏi ma
@@ -134,32 +134,31 @@ def _tu_router() -> set[tuple[str, str]]:
     }
 
 
-def _duong_dan_admin() -> list[tuple[str, str]]:
+def _admin_paths() -> list[tuple[str, str]]:
     """Mọi `(method, path)` dưới `/api/v1/admin`, từ HAI nguồn hợp lại.
 
     `format_map` chứ không `format(**...)`: `**` dựng một `dict` phẳng từ
-    `_THAM_SO` và ném luôn `__missing__` đi cùng, nên một tham số đường dẫn mới
-    lại thành `KeyError` lúc thu thập test — đúng cái mà `_ThamSo` vừa dựng ra
+    `_PARAMS` và ném luôn `__missing__` đi cùng, nên một tham số đường dẫn mới
+    lại thành `KeyError` lúc thu thập test — đúng cái mà `_Params` vừa dựng ra
     để không xảy ra.
     """
     return sorted(
-        (method, duong_dan.format_map(_THAM_SO))
-        for method, duong_dan in _tu_openapi() | _tu_router()
+        (method, path.format_map(_PARAMS)) for method, path in _from_openapi() | _from_router()
     )
 
 
-DUONG_DAN_ADMIN = _duong_dan_admin()
+ADMIN_PATHS = _admin_paths()
 
 
-def test_co_it_nhat_nam_endpoint_admin() -> None:
+def test_at_least_five_admin_endpoints() -> None:
     """Lưới đỡ của chính cách đọc route — xem docstring module."""
-    assert len(DUONG_DAN_ADMIN) >= _TOI_THIEU, DUONG_DAN_ADMIN
+    assert len(ADMIN_PATHS) >= _MINIMUM, ADMIN_PATHS
 
 
-class _RedisGia:
+class _FakeRedis:
     """Blacklist rỗng — mọi token đều "chưa bị thu hồi" (§11.3).
 
-    Cùng lý do với `_RedisGia` của `test_account_states.py`: bộ test này đo
+    Cùng lý do với `_FakeRedis` của `test_account_states.py`: bộ test này đo
     phép kiểm **quyền**, nên Redis phải im lặng để mọi ca dừng đúng ở lớp cần
     đo chứ không ở một `401 TOKEN_REVOKED`.
     """
@@ -169,10 +168,10 @@ class _RedisGia:
 
 
 @pytest.fixture(autouse=True)
-def redis_gia(monkeypatch: pytest.MonkeyPatch) -> _RedisGia:
-    gia = _RedisGia()
-    monkeypatch.setattr("app.core.deps.get_redis", lambda: gia)
-    return gia
+def fake_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
+    fake = _FakeRedis()
+    monkeypatch.setattr("app.core.deps.get_redis", lambda: fake)
+    return fake
 
 
 @pytest_asyncio.fixture
@@ -196,7 +195,7 @@ def _cookie(client: AsyncClient, role: UserRole) -> None:
     )
 
 
-async def _goi(client: AsyncClient, method: str, duong_dan: str) -> Any:
+async def _call(client: AsyncClient, method: str, path: str) -> Any:
     """Gửi request tới một ô của ma trận. Body `{}` cho method có body.
 
     `json={}` chứ không để trống: nếu một ngày `require_admin` biến mất, PATCH
@@ -205,57 +204,57 @@ async def _goi(client: AsyncClient, method: str, duong_dan: str) -> Any:
     cho ca hỏng ấy lộ ra đúng hình dạng của nó (`200`).
     """
     if method in {"POST", "PATCH", "PUT"}:
-        return await client.request(method, duong_dan, json={})
-    return await client.request(method, duong_dan)
+        return await client.request(method, path, json={})
+    return await client.request(method, path)
 
 
-@pytest.mark.parametrize(("method", "duong_dan"), DUONG_DAN_ADMIN)
-async def test_user_thuong_bi_chan_o_moi_endpoint(
-    client: AsyncClient, method: str, duong_dan: str
+@pytest.mark.parametrize(("method", "path"), ADMIN_PATHS)
+async def test_regular_user_blocked_on_every_endpoint(
+    client: AsyncClient, method: str, path: str
 ) -> None:
     """DoD dòng 1 + dòng 4: *"user thường gọi `/admin/users` → 403"*, mọi endpoint."""
     _cookie(client, UserRole.USER)
 
-    resp = await _goi(client, method, duong_dan)
+    resp = await _call(client, method, path)
 
-    assert resp.status_code == 403, f"{method} {duong_dan} -> {resp.status_code} {resp.text}"
+    assert resp.status_code == 403, f"{method} {path} -> {resp.status_code} {resp.text}"
     body = resp.json()["error"]
     assert body["code"] == ApiErrorCode.ADMIN_REQUIRED
     assert body["details"]["role"] == UserRole.USER.value
 
 
-@pytest.mark.parametrize(("method", "duong_dan"), DUONG_DAN_ADMIN)
-async def test_khong_token_thi_401_o_moi_endpoint(
-    client: AsyncClient, method: str, duong_dan: str
+@pytest.mark.parametrize(("method", "path"), ADMIN_PATHS)
+async def test_no_token_is_401_on_every_endpoint(
+    client: AsyncClient, method: str, path: str
 ) -> None:
     """DoD dòng 1: *"`curl` không token → `401`"*, và cho **mọi** endpoint."""
-    resp = await _goi(client, method, duong_dan)
+    resp = await _call(client, method, path)
 
-    assert resp.status_code == 401, f"{method} {duong_dan} -> {resp.status_code} {resp.text}"
+    assert resp.status_code == 401, f"{method} {path} -> {resp.status_code} {resp.text}"
     assert resp.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
 
 
-@pytest.mark.parametrize(("method", "duong_dan"), DUONG_DAN_ADMIN)
-async def test_cookie_la_va_debug_bat_khong_mo_duoc_cua_admin(
-    client: AsyncClient, method: str, duong_dan: str, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(("method", "path"), ADMIN_PATHS)
+async def test_foreign_cookie_and_debug_on_cannot_open_admin(
+    client: AsyncClient, method: str, path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Cột ba của ma trận — xem docstring module."""
     monkeypatch.setattr(settings, "DEBUG", True)
 
     resp = await client.request(
         method,
-        duong_dan,
+        path,
         headers={"Cookie": f"scarlet_cookie_la={uuid.uuid4()}"},
         **({"json": {}} if method in {"POST", "PATCH", "PUT"} else {}),
     )
 
-    assert resp.status_code == 401, f"{method} {duong_dan} -> {resp.status_code} {resp.text}"
+    assert resp.status_code == 401, f"{method} {path} -> {resp.status_code} {resp.text}"
     assert resp.json()["error"]["code"] == ApiErrorCode.UNAUTHENTICATED
 
 
-@pytest.mark.parametrize(("method", "duong_dan"), DUONG_DAN_ADMIN)
-async def test_tai_khoan_bi_khoa_khong_vao_duoc_du_la_admin(
-    client: AsyncClient, method: str, duong_dan: str
+@pytest.mark.parametrize(("method", "path"), ADMIN_PATHS)
+async def test_disabled_account_cannot_enter_even_as_admin(
+    client: AsyncClient, method: str, path: str
 ) -> None:
     """`require_app_access` chạy TRƯỚC `require_admin` — §11.1 vẫn áp cho admin.
 
@@ -275,9 +274,9 @@ async def test_tai_khoan_bi_khoa_khong_vao_duoc_du_la_admin(
         ),
     )
 
-    resp = await _goi(client, method, duong_dan)
+    resp = await _call(client, method, path)
 
-    assert resp.status_code == 403, f"{method} {duong_dan} -> {resp.status_code} {resp.text}"
+    assert resp.status_code == 403, f"{method} {path} -> {resp.status_code} {resp.text}"
     body = resp.json()["error"]
     assert body["code"] == ApiErrorCode.ACCOUNT_DISABLED
     assert body["details"]["status"] == UserStatus.SUSPENDED.value

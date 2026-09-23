@@ -1,12 +1,12 @@
 import { useNavigate } from "react-router";
 
-import { FormDangNhap } from "../components/auth/FormDangNhap";
+import { LoginForm } from "../components/auth/LoginForm";
 import { pathForStatus } from "../components/auth/statusRoute";
 import { useSession } from "./Layout";
 import { PATHS } from "./paths";
 
 /**
- * Noi `FormDangNhap` (T-2.19) vao bang route — T-3.1a, dinh tuyen o T-3.1b.
+ * Noi `LoginForm` (T-2.19) vao bang route — T-3.1a, dinh tuyen o T-3.1b.
  *
  * KH tham chieu: §11.1, §11.2 · tasks.md T-2.19, T-3.1a, T-3.1b.
  *
@@ -20,12 +20,12 @@ import { PATHS } from "./paths";
  * hinh khong noi truoc mot chu nao. `pathForStatus` tra loi "nguoi nay thuoc
  * ve dau", va `StatusGate` doc dung bang ay — mot bang, hai nguoi hoi.
  *
- * `FormDangNhap` giu nguyen chu ky `Promise<boolean>`: no khong can biet ket
+ * `LoginForm` giu nguyen chu ky `Promise<boolean>`: no khong can biet ket
  * qua dieu huong, no chi can biet "co nen dong o nhap lai khong".
  *
  * `taiKhoanBiKhoa` (`rejected`/`suspended`) KHONG di qua day: `POST
  * /auth/login` tra `403 ACCOUNT_DISABLED` truoc khi co `NguoiDungRa` nao, nen
- * `FormDangNhap` hien cau giai thich ngay tai cho — dung man giai thich cua
+ * `LoginForm` hien cau giai thich ngay tai cho — dung man giai thich cua
  * "Viec can lam", chi la no o canh o nhap chu khong o mot dia chi khac.
  */
 export function LoginRoute() {
@@ -33,14 +33,14 @@ export function LoginRoute() {
   const navigate = useNavigate();
 
   return (
-    <FormDangNhap
-      loi={session.loi}
-      onGui={async (email, matKhau) => {
-        const nguoiDung = await session.dangNhap(email, matKhau);
-        if (nguoiDung === null) {
+    <LoginForm
+      error={session.error}
+      onSend={async (email, password) => {
+        const user = await session.login(email, password);
+        if (user === null) {
           return false;
         }
-        void navigate(pathForStatus(nguoiDung.status) ?? PATHS.home);
+        void navigate(pathForStatus(user.status) ?? PATHS.home);
         return true;
       }}
     />

@@ -24,7 +24,7 @@ import { t } from "../../lib/i18n";
  * Doan script trong `index.html` VAN o lai va VAN doc dung hai nguon do. No
  * khong phai ban sao thua: no chay truoc khi React mount, tuc no la thu chan
  * mot nhay trang trang (FOUC) o lan tai dau tien. Hai cho, mot cong thuc —
- * `themeBanDau()` duoi day la ban chuan, doan script la ban rut gon khong
+ * `initialTheme()` duoi day la ban chuan, doan script la ban rut gon khong
  * import duoc vi no phai chay truoc ca bundle.
  *
  * ── Vi sao moi phep doc deu boc `try/catch` hoac `?.` ────────────────────
@@ -36,7 +36,7 @@ import { t } from "../../lib/i18n";
 
 export type Theme = "light" | "dark";
 
-const KHOA_LUU = "scarlet-theme";
+const STORAGE_KEY = "scarlet-theme";
 /**
  * T-3.12 — trang Cai dat co o chon theme THU HAI canh nut o header. Hai noi
  * giu hai `useState` thi bam mot ben xong ben kia noi sai ("Toi" trong luc
@@ -44,50 +44,50 @@ const KHOA_LUU = "scarlet-theme";
  * song nghe no va theo. Khong doc `data-theme` — xem khoi ngay tren.
  */
 const THEME_EVENT = "scarlet:theme";
-const TRUY_VAN_TOI = "(prefers-color-scheme: dark)";
+const DARK_QUERY = "(prefers-color-scheme: dark)";
 
-function themeDaLuu(): Theme | null {
+function storedTheme(): Theme | null {
   try {
-    const luu = localStorage.getItem(KHOA_LUU);
-    return luu === "light" || luu === "dark" ? luu : null;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved === "light" || saved === "dark" ? saved : null;
   } catch {
     // che do rieng tu co the chan localStorage — coi nhu chua ai bam gi
     return null;
   }
 }
 
-function themeHeDieuHanh(): Theme {
+function systemTheme(): Theme {
   // `window.matchMedia` vang mat trong jsdom va trong vai WebView cu.
-  return window.matchMedia?.(TRUY_VAN_TOI).matches ? "dark" : "light";
+  return window.matchMedia?.(DARK_QUERY).matches ? "dark" : "light";
 }
 
 /** Lua chon da luu thang he dieu hanh; khong co ca hai thi sang. */
-export function themeBanDau(): Theme {
-  return themeDaLuu() ?? themeHeDieuHanh();
+export function initialTheme(): Theme {
+  return storedTheme() ?? systemTheme();
 }
 
 /** Theme hien tai + ham doi — dung chung cho nut header va trang Cai dat. */
 export function useTheme(): [Theme, (next: Theme) => void] {
-  const [theme, setThemeState] = useState<Theme>(themeBanDau);
+  const [theme, setThemeState] = useState<Theme>(initialTheme);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     try {
-      localStorage.setItem(KHOA_LUU, theme);
+      localStorage.setItem(STORAGE_KEY, theme);
     } catch {
       // che do rieng tu co the chan localStorage — bo qua, khong lam vo app
     }
   }, [theme]);
 
   useEffect(() => {
-    const theo = (e: Event) => {
+    const follow = (e: Event) => {
       const next = (e as CustomEvent<Theme>).detail;
       if (next === "light" || next === "dark") {
         setThemeState(next);
       }
     };
-    window.addEventListener(THEME_EVENT, theo);
-    return () => window.removeEventListener(THEME_EVENT, theo);
+    window.addEventListener(THEME_EVENT, follow);
+    return () => window.removeEventListener(THEME_EVENT, follow);
   }, []);
 
   const setTheme = useCallback((next: Theme) => {

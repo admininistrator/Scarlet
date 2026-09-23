@@ -43,7 +43,7 @@ T-0.7 vì lúc đó chưa có hệ thống auth nào để gắn vào.
 ║  §11.1 LÀ MỘT BẢNG, NÊN BA NÚT BẤM CŨNG LÀ MỘT BẢNG                      ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 
-`_PHEP_CHUYEN` dưới đây là máy trạng thái của §11.1 đọc theo chiều của admin:
+`_TRANSITIONS` dưới đây là máy trạng thái của §11.1 đọc theo chiều của admin:
 mỗi nút bấm là một đích đến cộng với tập trạng thái **đi từ đó tới được**. Ba
 `if` rải trong ba handler sẽ là ba luật mà không ai đọc cùng lúc được — đúng
 cạm bẫy mà T-2.7 đã đóng cho chiều ngược lại (`STATUSES_CAN_*` trong
@@ -67,17 +67,17 @@ có thật.
 
 `require_status` đọc `status` từ **claim** của access token (T-2.7), nên một
 người vừa được duyệt vẫn mang token `pending_approval` tới hết
-`ACCESS_TOKEN_TTL_MIN`. `approve` vì vậy gọi `blacklist.dat_moc_user()` — đúng
+`ACCESS_TOKEN_TTL_MIN`. `approve` vì vậy gọi `blacklist.set_user_cutoff()` — đúng
 **nửa Redis** của §11.3, không phải cả hai nửa:
 
 * mốc `bl:user:{uid}` giết mọi access token phát **trước** thời điểm duyệt
-  (`bi_chan` so `iat < mốc`), nên cửa sổ cũ đóng ngay ở request kế tiếp;
+  (`is_blocked` so `iat < mốc`), nên cửa sổ cũ đóng ngay ở request kế tiếp;
 * refresh family trong Postgres **không** bị đụng tới, nên cookie refresh 30
   ngày còn sống và `POST /auth/refresh` (nó `get_by_id` rồi đọc `status` mới
   từ DB) phát ra cookie phiên mang `status='active'`.
 
 Kết quả: người dùng không phải gõ lại mật khẩu cho một tin vui. `suspend` thì
-gọi **cả hai** nửa (`thu_hoi_moi_phien`) vì §11.3 nói thẳng *"Admin suspend →
+gọi **cả hai** nửa (`revoke_all_sessions`) vì §11.3 nói thẳng *"Admin suspend →
 như đổi mật khẩu"* — ở đó mục đích là cắt đường quay lại, không phải làm mới
 một claim.
 
@@ -163,12 +163,12 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from app.config import catalog
 from app.config.settings import settings
 from app.config.version import APP_VERSION
-from app.core.blacklist import dat_moc_user, thu_hoi_moi_phien
+from app.core.blacklist import revoke_all_sessions, set_user_cutoff
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.health_checks import CachedChecks, CheckResult, run_checks
 from app.core.queue import queue_depth
-from app.core.ratelimit import dia_chi_ip
+from app.core.ratelimit import client_ip
 from app.core.redis import get_redis
 from app.db.models import (
     TARGET_CATALOG,
@@ -201,31 +201,33 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @dataclass(frozen=True, slots=True)
-class PhepChuyen:
+class Transition:
     """Một nút bấm của màn "Duyệt user": đích đến + tập nguồn đi tới được."""
 
     action: AuditAction
-    sang: UserStatus
-    tu: frozenset[UserStatus]
+    to_status: UserStatus
+    from_statuses: frozenset[UserStatus]
 
 
 #: Ba mũi tên của sơ đồ §11.1 cộng hai đường ra khỏi trạng thái cuối — xem
 #: docstring module cho lý do của từng dòng.
-_PHEP_CHUYEN: dict[str, PhepChuyen] = {
-    "approve": PhepChuyen(
+_TRANSITIONS: dict[str, Transition] = {
+    "approve": Transition(
         action=AuditAction.USER_APPROVE,
-        sang=UserStatus.ACTIVE,
-        tu=frozenset({UserStatus.PENDING_APPROVAL, UserStatus.REJECTED, UserStatus.SUSPENDED}),
+        to_status=UserStatus.ACTIVE,
+        from_statuses=frozenset(
+            {UserStatus.PENDING_APPROVAL, UserStatus.REJECTED, UserStatus.SUSPENDED}
+        ),
     ),
-    "reject": PhepChuyen(
+    "reject": Transition(
         action=AuditAction.USER_REJECT,
-        sang=UserStatus.REJECTED,
-        tu=frozenset({UserStatus.PENDING_APPROVAL}),
+        to_status=UserStatus.REJECTED,
+        from_statuses=frozenset({UserStatus.PENDING_APPROVAL}),
     ),
-    "suspend": PhepChuyen(
+    "suspend": Transition(
         action=AuditAction.USER_SUSPEND,
-        sang=UserStatus.SUSPENDED,
-        tu=frozenset({UserStatus.ACTIVE}),
+        to_status=UserStatus.SUSPENDED,
+        from_statuses=frozenset({UserStatus.ACTIVE}),
     ),
 }
 
@@ -289,7 +291,7 @@ class AdminUserListOut(BaseModel):
     users: list[AdminUserRowOut]
 
 
-class SuaUserRequest(BaseModel):
+class UpdateUserRequest(BaseModel):
     """Body của `PATCH /admin/users/{id}` — §16.3, §10.4.
 
     **Hai trường, không ba.** §16.3 liệt kê ba hành động (*"đổi tier, override
@@ -319,7 +321,7 @@ class UsageAmount(BaseModel):
     events: int
 
 
-class HaiCot(BaseModel):
+class MeteredSplit(BaseModel):
     """**Hai cột tách riêng** của C16 — không bao giờ có trường `tong`.
 
     C16: *"bảng chi phí không khớp hoá đơn provider vì trộn chung model
@@ -332,7 +334,7 @@ class HaiCot(BaseModel):
     unmetered: UsageAmount
 
 
-class UsageRow(HaiCot):
+class UsageRow(MeteredSplit):
     """Một hàng của bảng chi phí: một khoá × hai cột."""
 
     key: str
@@ -353,7 +355,7 @@ class AdminUsageOut(BaseModel):
     #: `None` = mọi nguồn. **`by_key_source` không bao giờ bị lọc** — xem
     #: `admin_usage` và `UsageEventRepository.admin_by_key_source`.
     key_source: KeySource | None
-    totals: HaiCot
+    totals: MeteredSplit
     by_day: list[UsageRow]
     by_user: list[UsageRow]
     by_model: list[UsageRow]
@@ -528,54 +530,54 @@ class AuditLogListOut(BaseModel):
 
 # ═══════════════════════════════ phần dùng chung ════════════════════════════
 
-_KHONG = UsageAmount(cost_usd=Decimal(0), prompt_tokens=0, completion_tokens=0, events=0)
+_ZERO = UsageAmount(cost_usd=Decimal(0), prompt_tokens=0, completion_tokens=0, events=0)
 
 #: B-192 — một lượt `run_checks()` dùng lại trong `ADMIN_HEALTH_CACHE_TTL_S`
 #: giây cho màn "Hệ thống". Xem `CachedChecks` cho lý do nhớ ở server.
 _system_health = CachedChecks()
 
 
-def _gop(buckets: list[UsageBucket]) -> list[UsageRow]:
+def _merge_buckets(buckets: list[UsageBucket]) -> list[UsageRow]:
     """Hai dòng SQL của cùng một khoá (một `exact`, một `low`) → một hàng hai cột.
 
     `OrderedDict` giữ nguyên thứ tự Postgres đã sắp (`ORDER BY` của
-    `_tong_hop`), nên biểu đồ theo ngày ra đúng thứ tự ngày mà không cần sắp
+    `_aggregate`), nên biểu đồ theo ngày ra đúng thứ tự ngày mà không cần sắp
     lại lần thứ hai ở FE.
     """
-    hang: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    row: OrderedDict[str, dict[str, Any]] = OrderedDict()
     for b in buckets:
-        vao = hang.setdefault(
+        entry = row.setdefault(
             b.key,
-            {"key": b.key, "label": b.label, "metered": _KHONG, "unmetered": _KHONG},
+            {"key": b.key, "label": b.label, "metered": _ZERO, "unmetered": _ZERO},
         )
         if b.label is not None:
-            vao["label"] = b.label
-        cot = "metered" if b.confidence is CostConfidence.EXACT else "unmetered"
-        vao[cot] = UsageAmount(
+            entry["label"] = b.label
+        column = "metered" if b.confidence is CostConfidence.EXACT else "unmetered"
+        entry[column] = UsageAmount(
             cost_usd=b.cost_usd,
             prompt_tokens=b.prompt_tokens,
             completion_tokens=b.completion_tokens,
             events=b.events,
         )
-    return [UsageRow(**v) for v in hang.values()]
+    return [UsageRow(**v) for v in row.values()]
 
 
-def _tong(rows: list[UsageRow]) -> HaiCot:
+def _total(rows: list[UsageRow]) -> MeteredSplit:
     """Tổng của một trục. Cộng **trong từng cột**, không bao giờ qua cột kia."""
 
-    def cong(lay: str) -> UsageAmount:
-        phan = [getattr(r, lay) for r in rows]
+    def sum_field(field: str) -> UsageAmount:
+        parts = [getattr(r, field) for r in rows]
         return UsageAmount(
-            cost_usd=sum((p.cost_usd for p in phan), Decimal(0)),
-            prompt_tokens=sum(p.prompt_tokens for p in phan),
-            completion_tokens=sum(p.completion_tokens for p in phan),
-            events=sum(p.events for p in phan),
+            cost_usd=sum((p.cost_usd for p in parts), Decimal(0)),
+            prompt_tokens=sum(p.prompt_tokens for p in parts),
+            completion_tokens=sum(p.completion_tokens for p in parts),
+            events=sum(p.events for p in parts),
         )
 
-    return HaiCot(metered=cong("metered"), unmetered=cong("unmetered"))
+    return MeteredSplit(metered=sum_field("metered"), unmetered=sum_field("unmetered"))
 
 
-async def _lay_user(users: UserRepository, user_id: uuid.UUID) -> User:
+async def _get_user(users: UserRepository, user_id: uuid.UUID) -> User:
     """Hàng `users` của `{id}` trong đường dẫn, hoặc `404 USER_NOT_FOUND`."""
     user = await users.get_by_id(user_id)
     if user is None:
@@ -588,31 +590,31 @@ async def _lay_user(users: UserRepository, user_id: uuid.UUID) -> User:
     return user
 
 
-def _kiem_ghi_de(ghi_de: dict[str, Any]) -> None:
+def _check_overrides(overrides: dict[str, Any]) -> None:
     """`limit_override` có đúng khoá và đúng kiểu không — xem `update_user`.
 
     Raises:
         ApiError 400 `BAD_REQUEST`: khoá không ghi đè được, hoặc giá trị sai
             kiểu so với trường cùng tên của `EffectiveLimits`.
     """
-    la = sorted(set(ghi_de) - OVERRIDABLE_FIELDS)
-    if la:
+    unknown = sorted(set(overrides) - OVERRIDABLE_FIELDS)
+    if unknown:
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
             ApiErrorCode.BAD_REQUEST,
             "limit_override co khoa khong ghi de duoc",
-            details={"unknown": la, "allowed": sorted(OVERRIDABLE_FIELDS)},
+            details={"unknown": unknown, "allowed": sorted(OVERRIDABLE_FIELDS)},
         )
-    for ten, gia_tri in ghi_de.items():
+    for name, value in overrides.items():
         try:
-            TypeAdapter(EffectiveLimits.model_fields[ten].annotation).validate_python(gia_tri)
-        except ValidationError as loi:
+            TypeAdapter(EffectiveLimits.model_fields[name].annotation).validate_python(value)
+        except ValidationError as exc:
             raise ApiError(
                 status.HTTP_400_BAD_REQUEST,
                 ApiErrorCode.BAD_REQUEST,
                 "limit_override co gia tri sai kieu",
-                details={"field": ten},
-            ) from loi
+                details={"field": name},
+            ) from exc
 
 
 def _json_safe(value: Any) -> Any:
@@ -634,7 +636,7 @@ def _json_safe(value: Any) -> Any:
 
 @router.get("/users", status_code=status.HTTP_200_OK, response_model=AdminUserListOut)
 async def list_users(
-    trang_thai: Annotated[UserStatus | None, Query(alias="status")] = None,
+    status: Annotated[UserStatus | None, Query(alias="status")] = None,
 ) -> AdminUserListOut:
     """Danh sách tài khoản, lọc theo trạng thái — §16.3 màn "Duyệt user".
 
@@ -652,10 +654,8 @@ async def list_users(
     """
     spend_since = datetime.now(UTC) - timedelta(seconds=settings.QUOTA_WINDOW_LONG_S)
     async with session_scope() as session:
-        hang = await UserRepository(session).list_for_admin(
-            spend_since=spend_since, trang_thai=trang_thai
-        )
-        return AdminUserListOut(users=[AdminUserRowOut.from_row(h) for h in hang])
+        row = await UserRepository(session).list_for_admin(spend_since=spend_since, status=status)
+        return AdminUserListOut(users=[AdminUserRowOut.from_row(h) for h in row])
 
 
 @router.post(
@@ -681,7 +681,7 @@ async def change_user_status(
     **Một route cho ba đường dẫn, không phải ba route chép ba lần.** §18.5 liệt
     kê chúng như ba endpoint và chúng *là* ba endpoint với người gọi (ba đường
     dẫn, ba nút trên màn hình); thứ dùng chung là phần thân, vì ba nút chỉ khác
-    nhau đúng một dòng trong `_PHEP_CHUYEN`. Chép thân này ba lần là chép luôn
+    nhau đúng một dòng trong `_TRANSITIONS`. Chép thân này ba lần là chép luôn
     ba thứ không ai sẽ nhớ đồng bộ: thứ tự "đổi trạng thái → ghi sổ → thu hồi
     phiên → commit", nhánh no-op không ghi sổ, và phép kiểm `409`.
 
@@ -696,37 +696,37 @@ async def change_user_status(
             trạng thái hiện tại tới đích — hoặc có ai đó vừa đổi nó xong
             (`WHERE status = :tu` của `set_status` trượt).
     """
-    phep = _PHEP_CHUYEN[hanh_dong]
+    transition = _TRANSITIONS[hanh_dong]
     redis = get_redis()
 
     async with session_scope() as session:
         users = UserRepository(session)
-        user = await _lay_user(users, user_id)
-        truoc = user.status
+        user = await _get_user(users, user_id)
+        before = user.status
 
         # Đích đã đạt ⇒ không có việc gì xảy ra, nên không có dòng sổ nào.
-        if truoc is phep.sang:
+        if before is transition.to_status:
             return AdminUserOut.model_validate(user)
 
-        if truoc not in phep.tu:
+        if before not in transition.from_statuses:
             raise ApiError(
                 status.HTTP_409_CONFLICT,
                 ApiErrorCode.INVALID_STATUS_TRANSITION,
                 "trang thai hien tai khong di toi trang thai dich duoc",
                 details={
-                    "status": truoc.value,
-                    "target_status": phep.sang.value,
-                    "allowed_from": sorted(s.value for s in phep.tu),
+                    "status": before.value,
+                    "target_status": transition.to_status.value,
+                    "allowed_from": sorted(s.value for s in transition.from_statuses),
                 },
             )
 
-        moi = await users.set_status(
+        updated = await users.set_status(
             user_id,
-            tu=truoc,
-            sang=phep.sang,
-            approved_by=actor_id if phep.sang is UserStatus.ACTIVE else None,
+            from_status=before,
+            to_status=transition.to_status,
+            approved_by=actor_id if transition.to_status is UserStatus.ACTIVE else None,
         )
-        if moi is None:
+        if updated is None:
             # `WHERE status = :tu` trượt: một admin khác vừa đổi trạng thái
             # giữa lúc đọc và lúc ghi. Cùng mã lỗi vì với người bấm thì đó là
             # cùng một câu chuyện — "màn hình của bạn đã cũ, tải lại đi".
@@ -734,27 +734,27 @@ async def change_user_status(
                 status.HTTP_409_CONFLICT,
                 ApiErrorCode.INVALID_STATUS_TRANSITION,
                 "trang thai vua bi nguoi khac doi, hay tai lai danh sach",
-                details={"status": truoc.value, "target_status": phep.sang.value},
+                details={"status": before.value, "target_status": transition.to_status.value},
             )
 
         await AuditLogRepository(session).record(
             actor_id=actor_id,
-            action=phep.action,
+            action=transition.action,
             target_type=TARGET_USER,
             target_id=str(user_id),
-            details={"from": truoc.value, "to": phep.sang.value},
-            ip=dia_chi_ip(request),
+            details={"from": before.value, "to": transition.to_status.value},
+            ip=client_ip(request),
         )
 
-        if phep.sang is UserStatus.SUSPENDED:
+        if transition.to_status is UserStatus.SUSPENDED:
             # §11.3: "Admin suspend → như đổi mật khẩu" — CẢ HAI nửa.
-            await thu_hoi_moi_phien(session, redis, user_id)
-        elif phep.sang is UserStatus.ACTIVE:
+            await revoke_all_sessions(session, redis, user_id)
+        elif transition.to_status is UserStatus.ACTIVE:
             # B-141/NQ-61: chỉ nửa Redis — xem docstring module.
-            await dat_moc_user(redis, user_id)
+            await set_user_cutoff(redis, user_id)
 
         await session.commit()
-        return AdminUserOut.model_validate(moi)
+        return AdminUserOut.model_validate(updated)
 
 
 @router.patch(
@@ -771,7 +771,7 @@ async def change_user_status(
 )
 async def update_user(
     request: Request,
-    body: SuaUserRequest,
+    body: UpdateUserRequest,
     actor_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     user_id: Annotated[uuid.UUID, Path()],
 ) -> AdminUserOut:
@@ -806,45 +806,45 @@ async def update_user(
             trong bảng `tiers`, hoặc `limit_override` sai khoá/sai kiểu.
         ApiError 404 `USER_NOT_FOUND`: id không có hàng nào.
     """
-    thay_doi: dict[str, Any] = {}
-    dat = body.model_fields_set
+    changes: dict[str, Any] = {}
+    fields_set = body.model_fields_set
 
-    if "tier_name" in dat:
+    if "tier_name" in fields_set:
         if body.tier_name is None:
             raise ApiError(
                 status.HTTP_400_BAD_REQUEST,
                 ApiErrorCode.BAD_REQUEST,
                 "tier_name khong nhan null; gui ten mot tier co that",
             )
-        thay_doi["tier_name"] = body.tier_name
+        changes["tier_name"] = body.tier_name
 
-    if "limit_override" in dat:
+    if "limit_override" in fields_set:
         if body.limit_override is not None:
-            _kiem_ghi_de(body.limit_override)
-        thay_doi["limit_override_json"] = body.limit_override
+            _check_overrides(body.limit_override)
+        changes["limit_override_json"] = body.limit_override
 
     async with session_scope() as session:
         users = UserRepository(session)
-        user = await _lay_user(users, user_id)
+        user = await _get_user(users, user_id)
 
-        ten_tier = thay_doi.get("tier_name")
-        if ten_tier is not None and await TierRepository(session).get(ten_tier) is None:
+        new_tier = changes.get("tier_name")
+        if new_tier is not None and await TierRepository(session).get(new_tier) is None:
             raise ApiError(
                 status.HTTP_400_BAD_REQUEST,
                 ApiErrorCode.BAD_REQUEST,
                 "tier khong co trong bang tiers",
-                details={"tier_name": ten_tier},
+                details={"tier_name": new_tier},
             )
 
-        truoc = {ten: getattr(user, ten) for ten in thay_doi}
+        before = {name: getattr(user, name) for name in changes}
         # Chỉ giữ những trường THỰC SỰ đổi — cùng luật "không đổi gì thì không
         # ghi sổ" mà `change_user_status` áp cho nhánh no-op ở trên. Gửi lại
         # đúng giá trị đang có (màn hình admin lưu cả form) không được phép để
         # lại một dòng `{"from": "trusted", "to": "trusted"}`, thứ làm sổ dài ra
         # mà không nói thêm điều gì.
-        thay_doi = {ten: gia_tri for ten, gia_tri in thay_doi.items() if truoc[ten] != gia_tri}
-        moi = await users.update_by_admin(user_id, thay_doi=thay_doi)
-        if moi is None:  # pragma: no cover - `_lay_user` vừa đọc xong ở trên
+        changes = {name: value for name, value in changes.items() if before[name] != value}
+        updated = await users.update_by_admin(user_id, changes=changes)
+        if updated is None:  # pragma: no cover - `_get_user` vừa đọc xong ở trên
             raise ApiError(
                 status.HTTP_404_NOT_FOUND,
                 ApiErrorCode.USER_NOT_FOUND,
@@ -852,7 +852,7 @@ async def update_user(
                 details={"user_id": str(user_id)},
             )
 
-        if thay_doi:
+        if changes:
             await AuditLogRepository(session).record(
                 actor_id=actor_id,
                 action=AuditAction.USER_UPDATE,
@@ -860,14 +860,13 @@ async def update_user(
                 target_id=str(user_id),
                 details={
                     "changed": {
-                        ten: {"from": truoc[ten], "to": gia_tri}
-                        for ten, gia_tri in thay_doi.items()
+                        name: {"from": before[name], "to": value} for name, value in changes.items()
                     }
                 },
-                ip=dia_chi_ip(request),
+                ip=client_ip(request),
             )
             await session.commit()
-        return AdminUserOut.model_validate(moi)
+        return AdminUserOut.model_validate(updated)
 
 
 @router.get("/usage", status_code=status.HTTP_200_OK, response_model=AdminUsageOut)
@@ -923,51 +922,51 @@ async def admin_usage(
     Raises:
         ApiError 400 `BAD_REQUEST`: `since >= until`, hoặc cửa sổ dài quá trần.
     """
-    bay_gio = datetime.now(UTC)
-    tu = since or bay_gio - timedelta(seconds=settings.QUOTA_WINDOW_LONG_S)
-    den = until or bay_gio
-    if tu >= den:
+    now = datetime.now(UTC)
+    start = since or now - timedelta(seconds=settings.QUOTA_WINDOW_LONG_S)
+    end = until or now
+    if start >= end:
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
             ApiErrorCode.BAD_REQUEST,
             "since phai truoc until",
-            details={"since": tu.isoformat(), "until": den.isoformat()},
+            details={"since": start.isoformat(), "until": end.isoformat()},
         )
-    tran = timedelta(days=settings.ADMIN_USAGE_MAX_WINDOW_DAYS)
-    if den - tu > tran:
+    max_window = timedelta(days=settings.ADMIN_USAGE_MAX_WINDOW_DAYS)
+    if end - start > max_window:
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
             ApiErrorCode.BAD_REQUEST,
             "cua so dai qua tran ADMIN_USAGE_MAX_WINDOW_DAYS",
             details={
-                "since": tu.isoformat(),
-                "until": den.isoformat(),
+                "since": start.isoformat(),
+                "until": end.isoformat(),
                 "max_days": settings.ADMIN_USAGE_MAX_WINDOW_DAYS,
             },
         )
 
     async with session_scope() as session:
         events = UsageEventRepository(session)
-        theo_ngay = _gop(
-            list(await events.admin_by_day(since=tu, until=den, key_source=key_source))
+        by_day = _merge_buckets(
+            list(await events.admin_by_day(since=start, until=end, key_source=key_source))
         )
-        theo_user = _gop(
-            list(await events.admin_by_user(since=tu, until=den, key_source=key_source))
+        by_user = _merge_buckets(
+            list(await events.admin_by_user(since=start, until=end, key_source=key_source))
         )
-        theo_model = _gop(
-            list(await events.admin_by_model(since=tu, until=den, key_source=key_source))
+        by_model = _merge_buckets(
+            list(await events.admin_by_model(since=start, until=end, key_source=key_source))
         )
-        theo_nguon = _gop(list(await events.admin_by_key_source(since=tu, until=den)))
+        by_source = _merge_buckets(list(await events.admin_by_key_source(since=start, until=end)))
 
     return AdminUsageOut(
-        since=tu,
-        until=den,
+        since=start,
+        until=end,
         key_source=key_source,
-        totals=_tong(theo_ngay),
-        by_day=theo_ngay,
-        by_user=theo_user,
-        by_model=theo_model,
-        by_key_source=theo_nguon,
+        totals=_total(by_day),
+        by_day=by_day,
+        by_user=by_user,
+        by_model=by_model,
+        by_key_source=by_source,
     )
 
 
@@ -995,7 +994,7 @@ async def reload_catalog(
             action=AuditAction.CATALOG_RELOAD,
             target_type=TARGET_CATALOG,
             details={"models": len(cat.models), "version": cat.version},
-            ip=dia_chi_ip(request),
+            ip=client_ip(request),
         )
         await session.commit()
     return ReloadCatalogOut(models=len(cat.models), version=cat.version)
@@ -1107,7 +1106,7 @@ async def update_tier(
                         for field, value in changes.items()
                     }
                 },
-                ip=dia_chi_ip(request),
+                ip=client_ip(request),
             )
             await session.commit()
         return TierOut.model_validate(updated)

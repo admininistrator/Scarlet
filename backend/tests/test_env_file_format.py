@@ -55,53 +55,53 @@ import pytest
 
 from app.config.settings import Settings
 
-GOC_REPO = Path(__file__).resolve().parents[2]
-ENV_EXAMPLE = GOC_REPO / ".env.example"
-ENV_THAT = GOC_REPO / ".env"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ENV_EXAMPLE = REPO_ROOT / ".env.example"
+REAL_ENV = REPO_ROOT / ".env"
 
 #: Luật 1 — giá trị chỉ gồm khoảng trắng rồi `#` (hoặc `#` ngay sau `=`).
-CHI_CO_CHU_THICH = re.compile(r"^([A-Z][A-Z0-9_]*)=[ \t]*#")
+ONLY_COMMENT = re.compile(r"^([A-Z][A-Z0-9_]*)=[ \t]*#")
 
 #: Luật 2 — có chú thích ở cuối dòng, sau một giá trị khác rỗng.
-CHU_THICH_CUOI_DONG = re.compile(r"^([A-Z][A-Z0-9_]*)=[^#]*[ \t]+#")
+TRAILING_COMMENT = re.compile(r"^([A-Z][A-Z0-9_]*)=[^#]*[ \t]+#")
 
 
-def _vi_pham(path: Path, mau: re.Pattern[str]) -> list[str]:
+def _violations(path: Path, pattern: re.Pattern[str]) -> list[str]:
     """Danh sách `tên file:dòng — TÊN_BIẾN`. Không bao giờ kèm giá trị."""
-    vi_pham = []
-    for so_dong, dong in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        khop = mau.match(dong.strip())
-        if khop is not None:
-            vi_pham.append(f"{path.name}:{so_dong} — {khop.group(1)}")
-    return vi_pham
+    violations = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        match = pattern.match(line.strip())
+        if match is not None:
+            violations.append(f"{path.name}:{line_no} — {match.group(1)}")
+    return violations
 
 
-def test_env_example_khong_co_gan_chi_gom_chu_thich() -> None:
+def test_env_example_has_no_comment_only_assignment() -> None:
     """Luật 1 trên `.env.example` — hình dạng đã tạo ra B-44/B-118."""
-    assert not _vi_pham(ENV_EXAMPLE, CHI_CO_CHU_THICH), (
+    assert not _violations(ENV_EXAMPLE, ONLY_COMMENT), (
         "giá trị của biến sẽ là chính câu chú thích (đo được: docker compose "
         "chỉ bóc `#` khi phía trước đã có giá trị) — dời chú thích lên dòng riêng"
     )
 
 
-def test_env_example_khong_co_chu_thich_cuoi_dong() -> None:
+def test_env_example_has_no_trailing_comments() -> None:
     """Luật 2 — xem docstring module cho lý do chặt hơn ở file mẫu."""
-    assert not _vi_pham(ENV_EXAMPLE, CHU_THICH_CUOI_DONG), (
+    assert not _violations(ENV_EXAMPLE, TRAILING_COMMENT), (
         "chú thích phải nằm ở dòng RIÊNG phía trên phép gán: dòng này thành "
         "dòng hỏng ngay khi ai đó xoá giá trị đi để điền giá trị của mình"
     )
 
 
-def test_env_that_khong_co_gan_chi_gom_chu_thich() -> None:
+def test_real_env_has_no_comment_only_assignment() -> None:
     """Luật 1 trên `.env` THẬT của máy này — file mà B-118 đã cắn.
 
     `.env` không được commit, nên trên một bản clone sạch nó không tồn tại và
     phép kiểm này không có gì để đo. `skip` kèm lý do (không phải `pass` im
     lặng): một phép kiểm luôn xanh vì không có dữ liệu là một phép kiểm nói dối.
     """
-    if not ENV_THAT.is_file():
-        pytest.skip(f"không có {ENV_THAT} trên máy này — chỉ .env.example được canh")
-    assert not _vi_pham(ENV_THAT, CHI_CO_CHU_THICH), (
+    if not REAL_ENV.is_file():
+        pytest.skip(f"không có {REAL_ENV} trên máy này — chỉ .env.example được canh")
+    assert not _violations(REAL_ENV, ONLY_COMMENT), (
         "biến này đang mang giá trị là một câu chú thích — app sẽ chạy với "
         "cấu hình rác mà không báo gì (B-118)"
     )
@@ -112,41 +112,41 @@ def test_env_that_khong_co_gan_chi_gom_chu_thich() -> None:
 #: Hai chuỗi THẬT đã đo được trong container `api` ngày 2026-09-17, không phải
 #: ví dụ bịa. Cái thứ hai dài 37 ký tự — **qua** ngưỡng `MIN_SECRET_CHARS = 32`
 #: của `_long_enough`, tức nó đi lọt mọi phép kiểm đang có trước NQ-45.
-CHU_THICH_TURNSTILE = "# rỗng = bỏ qua (chỉ dev), log cảnh báo mỗi lần boot"
-CHU_THICH_MASTER_KEY = "# openssl rand -hex 32  — mã hoá BYOK"
+TURNSTILE_COMMENT = "# rỗng = bỏ qua (chỉ dev), log cảnh báo mỗi lần boot"
+MASTER_KEY_COMMENT = "# openssl rand -hex 32  — mã hoá BYOK"
 
 
 @pytest.mark.parametrize(
-    ("ten", "gia_tri"),
+    ("name", "value"),
     [
-        ("TURNSTILE_SECRET", CHU_THICH_TURNSTILE),
-        ("MASTER_ENCRYPTION_KEY", CHU_THICH_MASTER_KEY),
+        ("TURNSTILE_SECRET", TURNSTILE_COMMENT),
+        ("MASTER_ENCRYPTION_KEY", MASTER_KEY_COMMENT),
         ("SMTP_HOST", "# mailpit khi dev"),
     ],
 )
-def test_gia_tri_la_chu_thich_thi_app_khong_boot(
-    monkeypatch: pytest.MonkeyPatch, ten: str, gia_tri: str
+def test_comment_value_app_does_not_boot(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
 ) -> None:
-    monkeypatch.setenv(ten, gia_tri)
+    monkeypatch.setenv(name, value)
     with pytest.raises(RuntimeError) as exc:
         Settings()
-    assert ten in str(exc.value)
+    assert name in str(exc.value)
 
 
-def test_thong_bao_khong_in_ra_gia_tri_bi_tu_choi(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_message_does_not_print_rejected_value(monkeypatch: pytest.MonkeyPatch) -> None:
     """B-18 ở một chỗ mới: `ValidationError` in kèm `input_value=`.
 
-    Đây là lý do `_khong_nhan_gia_tri_la_chu_thich` raise `RuntimeError` chứ
+    Đây là lý do `_reject_comment_values` raise `RuntimeError` chứ
     không `ValueError` — pydantic chỉ bọc loại thứ hai, và bản bọc mang theo
     giá trị vào log đúng lúc app đang từ chối boot.
     """
-    monkeypatch.setenv("MASTER_ENCRYPTION_KEY", CHU_THICH_MASTER_KEY)
+    monkeypatch.setenv("MASTER_ENCRYPTION_KEY", MASTER_KEY_COMMENT)
     with pytest.raises(RuntimeError) as exc:
         Settings()
-    assert CHU_THICH_MASTER_KEY not in str(exc.value)
+    assert MASTER_KEY_COMMENT not in str(exc.value)
 
 
-def test_gia_tri_binh_thuong_van_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_normal_value_still_boots(monkeypatch: pytest.MonkeyPatch) -> None:
     """Phép kiểm ngược của chính luật trên: không chặn nhầm giá trị hợp lệ."""
     monkeypatch.setenv("MASTER_ENCRYPTION_KEY", "m" * 32)
     monkeypatch.setenv("TURNSTILE_SECRET", "0xKHONG-PHAI-CHU-THICH")

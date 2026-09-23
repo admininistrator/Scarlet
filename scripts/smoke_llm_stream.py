@@ -47,7 +47,7 @@ PROMPT = (
 REPLACEMENT_CHAR = "�"
 
 
-def co_dau_tieng_viet(text: str) -> bool:
+def has_vietnamese_diacritics(text: str) -> bool:
     """Có ít nhất một chữ cái Latin mang dấu phụ — tức là tiếng Việt có dấu."""
     return any(
         "LATIN" in unicodedata.name(ch, "") and len(unicodedata.decomposition(ch)) > 0
@@ -55,7 +55,7 @@ def co_dau_tieng_viet(text: str) -> bool:
     )
 
 
-async def chay_mot_model(adapter: SystemAdapter, model: ModelEntry, max_tokens: int) -> bool:
+async def run_one_model(adapter: SystemAdapter, model: ModelEntry, max_tokens: int) -> bool:
     chunks: list[Chunk] = []
     stream = await adapter.stream(
         model=model.id,
@@ -71,12 +71,12 @@ async def chay_mot_model(adapter: SystemAdapter, model: ModelEntry, max_tokens: 
     text = "".join(c.text or "" for c in chunks if c.kind == "delta")
     reasoning = "".join(c.text or "" for c in chunks if c.kind == "reasoning")
     done = chunks[-1] if chunks else None
-    khai_reasoning = "reasoning" in model.capabilities
+    declares_reasoning = "reasoning" in model.capabilities
 
-    ket_qua: list[tuple[str, bool, str]] = [
+    results: list[tuple[str, bool, str]] = [
         (
             "C9: không có U+FFFD và có dấu tiếng Việt",
-            bool(text) and REPLACEMENT_CHAR not in text and co_dau_tieng_viet(text),
+            bool(text) and REPLACEMENT_CHAR not in text and has_vietnamese_diacritics(text),
             f"{len(text)} ký tự",
         ),
         (
@@ -89,31 +89,31 @@ async def chay_mot_model(adapter: SystemAdapter, model: ModelEntry, max_tokens: 
             "" if done is None or done.usage is None else str(done.usage),
         ),
         (
-            f"B-33: capabilities khai reasoning={khai_reasoning}",
-            bool(reasoning) == khai_reasoning,
+            f"B-33: capabilities khai reasoning={declares_reasoning}",
+            bool(reasoning) == declares_reasoning,
             f"{len(reasoning)} ký tự reasoning",
         ),
     ]
 
     print(f"\n=== {model.id} ({model.provider}) — {len(chunks)} chunk ===")
-    for ten, dat, chi_tiet in ket_qua:
-        print(f"  [{'OK  ' if dat else 'FAIL'}] {ten} — {chi_tiet}")
+    for name, passed, details in results:
+        print(f"  [{'OK  ' if passed else 'FAIL'}] {name} — {details}")
     print(f"  finish_reason={done.finish_reason if done else None}")
     print(f"  --- chữ model trả về ---\n  {text.strip()[:400]}")
 
-    return all(dat for _, dat, _ in ket_qua)
+    return all(passed for _, passed, _ in results)
 
 
 async def main_async(model_ids: list[str], max_tokens: int) -> int:
     catalog = get_catalog()
-    chon = [m for m in catalog.models if m.id in model_ids]
+    chosen = [m for m in catalog.models if m.id in model_ids]
     adapter = SystemAdapter.from_settings()
     try:
-        ket_qua = [await chay_mot_model(adapter, m, max_tokens) for m in chon]
+        results = [await run_one_model(adapter, m, max_tokens) for m in chosen]
     finally:
         await adapter.close()
-    print(f"\n{sum(ket_qua)}/{len(ket_qua)} model đạt cả ba phép kiểm")
-    return 0 if all(ket_qua) else 1
+    print(f"\n{sum(results)}/{len(results)} model đạt cả ba phép kiểm")
+    return 0 if all(results) else 1
 
 
 def main() -> int:
@@ -124,19 +124,19 @@ def main() -> int:
     args = parser.parse_args()
 
     catalog = get_catalog()
-    bat = [m for m in catalog.models if m.enabled]
+    enabled = [m for m in catalog.models if m.enabled]
     if args.all:
-        chon = [m.id for m in bat]
+        chosen = [m.id for m in enabled]
     elif args.model:
-        chon = args.model
-        khong_co = set(chon) - {m.id for m in bat}
-        if khong_co:
-            print(f"model không có trong catalog hoặc đang tắt: {sorted(khong_co)}", file=sys.stderr)
+        chosen = args.model
+        missing = set(chosen) - {m.id for m in enabled}
+        if missing:
+            print(f"model không có trong catalog hoặc đang tắt: {sorted(missing)}", file=sys.stderr)
             return 2
     else:
-        chon = [m.id for m in bat if m.default]
+        chosen = [m.id for m in enabled if m.default]
 
-    return asyncio.run(main_async(chon, args.max_tokens))
+    return asyncio.run(main_async(chosen, args.max_tokens))
 
 
 if __name__ == "__main__":

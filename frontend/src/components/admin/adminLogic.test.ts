@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AdminUserRa, AuditEntry, ModelRa, TierRow } from "../../lib/api";
+import type { AdminUserOut, AuditEntry, ModelOut, TierRow } from "../../lib/api";
 import { describeActor, describeChanges, describeTarget, describeValue } from "./auditView";
 import { formatDateTime, formatDayKey, formatShortDateTime, padMoney, shortId } from "./format";
 import { providerCards } from "./ModelsScreen";
@@ -41,7 +41,7 @@ const FREE: TierRow = {
   is_default: true,
 };
 
-function user(p: Partial<AdminUserRa> = {}): AdminUserRa {
+function user(p: Partial<AdminUserOut> = {}): AdminUserOut {
   return {
     id: UUID,
     email: "a@scarlet.test",
@@ -85,13 +85,13 @@ describe("padMoney — tien la CHUOI", () => {
     ["12.074410", "12.074410"],
     // Dai hon sau chu so: giu nguyen, KHONG cat (cat la lam tron).
     ["0.1234567", "0.1234567"],
-  ])("%s ⇒ %s", (vao, ra) => {
-    expect(padMoney(vao)).toBe(ra);
+  ])("%s ⇒ %s", (input, output) => {
+    expect(padMoney(input)).toBe(output);
   });
 
   it("thang cot dau cham: moi o tien cung so chu so sau dau cham", () => {
-    const cot = ["0", "18.60554", "0.3"].map((s) => padMoney(s).split(".")[1].length);
-    expect(new Set(cot)).toEqual(new Set([6]));
+    const columns = ["0", "18.60554", "0.3"].map((s) => padMoney(s).split(".")[1].length);
+    expect(new Set(columns)).toEqual(new Set([6]));
   });
 });
 
@@ -106,9 +106,9 @@ describe("format", () => {
     // thuoc mui gio, chi khang dinh THU TU va DAU PHAN CACH.
     const iso = "2026-09-22T07:32:00Z";
     const d = new Date(iso);
-    const hai = (n: number) => String(n).padStart(2, "0");
+    const pad2 = (n: number) => String(n).padStart(2, "0");
     expect(formatShortDateTime(iso)).toBe(
-      `${hai(d.getDate())}/${hai(d.getMonth() + 1)} ${hai(d.getHours())}:${hai(d.getMinutes())}`,
+      `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
     );
     expect(formatDateTime(iso)).toMatch(/^\d{2}\/\d{2}\/2026 \d{2}:\d{2}$/);
   });
@@ -126,8 +126,8 @@ describe("usersView — ban ghi de han muc", () => {
   });
 
   it("bat skill KHAC tier ⇒ ghi khoa, GIU cac khoa khac", () => {
-    const moi = overrideWithSkills({ limit_5h_usd: "1" }, true, false);
-    expect(moi).toEqual({ limit_5h_usd: "1", can_execute_skills: true });
+    const next = overrideWithSkills({ limit_5h_usd: "1" }, true, false);
+    expect(next).toEqual({ limit_5h_usd: "1", can_execute_skills: true });
   });
 
   it("tat ve DUNG gia tri tier ⇒ go khoa; ban ghi de rong ⇒ null", () => {
@@ -142,21 +142,21 @@ describe("usersView — ban ghi de han muc", () => {
   });
 
   it("dialog han muc: o trong ⇒ go khoa; go gi luu nguyen CHUOI; giu khoa skill", () => {
-    const moi = overrideWithLimits(
+    const next = overrideWithLimits(
       { limit_5h_usd: "1", can_execute_skills: true },
       { limit_5h_usd: "  ", limit_7d_usd: "20" },
     );
-    expect(moi).toEqual({ can_execute_skills: true, limit_7d_usd: "20" });
+    expect(next).toEqual({ can_execute_skills: true, limit_7d_usd: "20" });
     expect(overrideWithLimits({ limit_5h_usd: "1" }, { limit_5h_usd: "", limit_7d_usd: "" })).toBeNull();
     expect(overrideLimit({ limit_5h_usd: "1.5" }, "limit_5h_usd")).toBe("1.5");
     expect(overrideLimit(null, "limit_7d_usd")).toBe("");
   });
 
   it("cho hieu luc: dung TTL cua server, hai ben bien; chua biet TTL ⇒ van cho", () => {
-    const luu = 1_000_000;
-    expect(isPending(luu, luu + 44_999, 45)).toBe(true);
-    expect(isPending(luu, luu + 45_000, 45)).toBe(false);
-    expect(isPending(luu, luu + 999_999, null)).toBe(true);
+    const saved = 1_000_000;
+    expect(isPending(saved, saved + 44_999, 45)).toBe(true);
+    expect(isPending(saved, saved + 45_000, 45)).toBe(false);
+    expect(isPending(saved, saved + 999_999, null)).toBe(true);
   });
 });
 
@@ -266,7 +266,7 @@ describe("tierPatch — chi gui truong THAT SU doi", () => {
 });
 
 describe("providerCards — health tung provider tu `GET /models`", () => {
-  function model(p: Partial<ModelRa>): ModelRa {
+  function model(p: Partial<ModelOut>): ModelOut {
     return {
       id: "m",
       display_name: "M",

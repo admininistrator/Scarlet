@@ -21,7 +21,7 @@ import { PATHS } from "../paths";
  *
  * `<Link>` chu khong `<a href>`: DoD doi bam Back tra ve dung trang truoc ma
  * KHONG nap lai ca app. Mot the `<a>` thuong la mot lan tai trang day du —
- * man hinh se dung, nhung `usePhien` phai hoi lai `GET /auth/me` va moi
+ * man hinh se dung, nhung `useSessionState` phai hoi lai `GET /auth/me` va moi
  * state trong bo nho bien mat.
  */
 export function NotFoundPage() {

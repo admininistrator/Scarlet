@@ -34,7 +34,7 @@ from app.streaming.events import (
 )
 
 #: Đúng chín dòng của bảng §7.4.
-TEN_EVENT_CUA_KE_HOACH = {
+PLANNED_EVENT_NAMES = {
     "start",
     "delta",
     "reasoning",
@@ -47,7 +47,7 @@ TEN_EVENT_CUA_KE_HOACH = {
 }
 
 
-def _mot_cai_moi_loai() -> list[object]:
+def _one_of_each_kind() -> list[object]:
     usage = Usage(prompt_tokens=12, completion_tokens=34, total_tokens=46)
     return [
         StartEvent(message_id="m1", model_id="model-x"),
@@ -62,22 +62,22 @@ def _mot_cai_moi_loai() -> list[object]:
     ]
 
 
-def test_du_chin_loai_va_khong_trung_ten() -> None:
+def test_all_nine_kinds_with_unique_names() -> None:
     """DoD gián tiếp: tasks.md đòi "dataclass cho 9 loại event ở §7.4"."""
-    ten = [cls.TYPE for cls in ALL_EVENT_TYPES]  # type: ignore[attr-defined]
+    name = [cls.TYPE for cls in ALL_EVENT_TYPES]  # type: ignore[attr-defined]
     assert len(ALL_EVENT_TYPES) == 9
-    assert set(ten) == TEN_EVENT_CUA_KE_HOACH
-    assert len(set(ten)) == len(ten), f"có hai loại trùng `type`: {ten}"
+    assert set(name) == PLANNED_EVENT_NAMES
+    assert len(set(name)) == len(name), f"có hai loại trùng `type`: {name}"
 
 
-def test_moi_event_json_hoa_duoc() -> None:
+def test_every_event_serializes_to_json() -> None:
     """C10: payload nào cũng phải qua `json.dumps` được, không có object lạ."""
-    for event in _mot_cai_moi_loai():
-        lai = json.loads(json.dumps(event.data(), ensure_ascii=False))  # type: ignore[attr-defined]
-        assert lai == event.data()  # type: ignore[attr-defined]
+    for event in _one_of_each_kind():
+        reloaded = json.loads(json.dumps(event.data(), ensure_ascii=False))  # type: ignore[attr-defined]
+        assert reloaded == event.data()  # type: ignore[attr-defined]
 
 
-def test_khoa_payload_dung_chu_cua_ke_hoach() -> None:
+def test_payload_keys_match_the_plan() -> None:
     assert DeltaEvent(text="a").data() == {"t": "a"}
     assert ReasoningEvent(text="a").data() == {"t": "a"}
     assert StartEvent(message_id="m1", model_id="mx").data() == {
@@ -93,27 +93,27 @@ def test_khoa_payload_dung_chu_cua_ke_hoach() -> None:
 
 
 @pytest.mark.parametrize("arguments", ["khong-phai-json", "[1,2]", '"chuoi"'])
-def test_args_hong_van_giu_nguyen_ban_tho(arguments: str) -> None:
+def test_broken_args_keep_raw_text(arguments: str) -> None:
     """Không bỏ im lặng: `args` rỗng nhưng chuỗi gốc đi kèm ở `args_raw`."""
     data = ToolCallEvent(call_id="c", name="n", arguments=arguments).data()
     assert data["args"] == {}
     assert data["args_raw"] == arguments
 
 
-def test_args_rong_la_object_rong_khong_phai_loi() -> None:
+def test_empty_args_are_empty_object_not_error() -> None:
     """Tool không có tham số là chuyện bình thường, không phải JSON hỏng."""
     data = ToolCallEvent(call_id="c", name="n", arguments="").data()
     assert data["args"] == {}
     assert "args_raw" not in data
 
 
-def test_usage_bo_khoa_khi_provider_khong_bao() -> None:
+def test_usage_drops_keys_provider_did_not_report() -> None:
     """NQ-23/C40: `None` ≠ `0`. Không báo thì khoá **vắng mặt**."""
     data = UsageEvent(usage=Usage(prompt_tokens=100, completion_tokens=7, total_tokens=107)).data()
     assert data == {"in": 100, "out": 7}
 
 
-def test_usage_mang_reasoning_va_cached_khi_co() -> None:
+def test_usage_carries_reasoning_and_cached_when_present() -> None:
     data = UsageEvent(
         usage=Usage(
             prompt_tokens=100,
@@ -127,7 +127,7 @@ def test_usage_mang_reasoning_va_cached_khi_co() -> None:
     assert data == {"in": 100, "out": 7, "reasoning": 0, "cached": 64}
 
 
-def test_done_mang_finish_reason_va_usage() -> None:
+def test_done_carries_finish_reason_and_usage() -> None:
     """NQ-23: §7.4 viết `{"finish_reason":"stop","usage":{...}}`."""
     data = DoneEvent(
         finish_reason="stop",
@@ -136,14 +136,14 @@ def test_done_mang_finish_reason_va_usage() -> None:
     assert data == {"finish_reason": "stop", "usage": {"in": 1204, "out": 389}}
 
 
-def test_done_khong_dung_usage_gia_khi_provider_im_lang() -> None:
+def test_done_uses_no_fake_usage_when_provider_silent() -> None:
     assert DoneEvent().data() == {"finish_reason": None, "usage": None}
 
 
 # ─────────────── `cost_usd` trên event `done` — B-78, §7.4 (T-2.12) ───────────
 
 
-def test_cost_usd_nam_TRONG_khoi_usage_chu_khong_canh_no() -> None:
+def test_cost_usd_lives_INSIDE_usage_block_not_beside_it() -> None:
     """§7.4 viết thẳng hình dạng ấy:
 
         data: {"finish_reason":"stop","usage":{"in":1204,"out":389,"cost_usd":0.00231}}
@@ -162,7 +162,7 @@ def test_cost_usd_nam_TRONG_khoi_usage_chu_khong_canh_no() -> None:
     }
 
 
-def test_provider_im_lang_ma_meter_van_dem_duoc_thi_usage_chi_co_cost_usd() -> None:
+def test_silent_provider_but_metered_count_gives_usage_with_only_cost_usd() -> None:
     """Ca huỷ giữa chừng (B-94): không có token nào của provider, nhưng có tiền.
 
     Hai khoá token **vắng mặt** chứ không bằng 0 — cùng luật với `UsageEvent`
@@ -172,7 +172,7 @@ def test_provider_im_lang_ma_meter_van_dem_duoc_thi_usage_chi_co_cost_usd() -> N
     assert data == {"finish_reason": "cancelled", "usage": {"cost_usd": 7.9e-05}}
 
 
-def test_ghi_so_hong_thi_khoa_cost_usd_VANG_MAT_chu_khong_bang_0() -> None:
+def test_failed_ledger_write_cost_usd_key_ABSENT_not_0() -> None:
     """`0` nghĩa là "lượt chat này miễn phí" — một câu khác hẳn "chưa ghi sổ được"."""
     data = DoneEvent(
         finish_reason="stop",
@@ -181,7 +181,7 @@ def test_ghi_so_hong_thi_khoa_cost_usd_VANG_MAT_chu_khong_bang_0() -> None:
     assert "cost_usd" not in data["usage"]
 
 
-def test_usage_giua_chung_KHONG_bao_gio_mang_cost_usd() -> None:
+def test_midway_usage_NEVER_carries_cost_usd() -> None:
     """Khác biệt duy nhất giữa `usage` và `done` — xem docstring `UsageEvent`.
 
     Giá chỉ chốt được khi lượt sinh đã khép (A7); một con số tiền tạm ở giữa
@@ -192,21 +192,21 @@ def test_usage_giua_chung_KHONG_bao_gio_mang_cost_usd() -> None:
     assert "cost_usd" not in data
 
 
-def test_error_luon_co_ma() -> None:
+def test_error_always_has_code() -> None:
     """DoD dòng 3: bản ghi cuối là `error` **có mã lỗi**, không phải im lặng."""
     data = ErrorEvent(code=ErrorCode.UPSTREAM_ERROR, message="connection reset").data()
     assert data["code"] == "UPSTREAM_ERROR"
     assert data["message"] == "connection reset"
 
 
-def test_ma_loi_khong_trung_gia_tri() -> None:
-    gia_tri = [c.value for c in ErrorCode]
-    assert len(set(gia_tri)) == len(gia_tri)
+def test_error_codes_have_unique_values() -> None:
+    value = [c.value for c in ErrorCode]
+    assert len(set(value)) == len(value)
 
 
-def test_emoji_va_xuong_dong_qua_duoc_json() -> None:
+def test_emoji_and_newlines_survive_json() -> None:
     """DoD dòng 6, nửa thuần tuý: `json.dumps` → `json.loads` giữ nguyên chuỗi."""
-    chu = "Dòng một 🎉\nDòng hai 😀\r\nkết thúc"
-    day = json.dumps(DeltaEvent(text=chu).data(), ensure_ascii=False)
+    text = "Dòng một 🎉\nDòng hai 😀\r\nkết thúc"
+    day = json.dumps(DeltaEvent(text=text).data(), ensure_ascii=False)
     assert "\n" not in day, "xuống dòng thật lọt vào `data:` sẽ cắt đôi khung SSE (C10)"
-    assert json.loads(day)["t"] == chu
+    assert json.loads(day)["t"] == text

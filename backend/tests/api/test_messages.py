@@ -27,8 +27,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.v1 import ROUTE_BAT_BUOC_IDEMPOTENCY
-from app.api.v1.messages import TEN_ROUTE_TAO_MESSAGE, TEN_ROUTE_THU_LAI
+from app.api.v1 import IDEMPOTENCY_REQUIRED_ROUTES
+from app.api.v1.messages import CREATE_MESSAGE_ROUTE_NAME, RETRY_ROUTE_NAME
 from app.config import catalog
 from app.config.settings import settings
 from app.core.access_token import encode_access_token
@@ -37,37 +37,37 @@ from app.db.models import Conversation, Message, MessageRole, MessageStatus, Use
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.main import app
 
-DUONG_DAN = "/api/v1/conversations/{}/messages"
+PATH = "/api/v1/conversations/{}/messages"
 
 
-class ArqGia:
+class FakeArq:
     """Pool arq giả: ghi lại mọi lần enqueue, có công tắc để ép nó ném.
 
-    `no_ra` mô phỏng Redis chết giữa bước ④ của §7.2 ①; `tra_none` mô phỏng
+    `raises` mô phỏng Redis chết giữa bước ④ của §7.2 ①; `returns_none` mô phỏng
     arq từ chối job (trùng `_job_id`) — hai ngả khác nhau nhưng cùng phải dẫn
     tới "không có message mồ côi".
     """
 
     def __init__(self) -> None:
-        self.da_day: list[tuple[str, tuple[Any, ...]]] = []
-        #: `_job_id` của từng lần enqueue, theo đúng thứ tự `da_day` (B-92).
-        #: Tách khỏi `da_day` chứ không nhét thêm vào tuple: bốn file test khác
-        #: so `da_day` bằng `==` với một tuple hai phần tử, và đổi hình dạng của
+        self.pushed: list[tuple[str, tuple[Any, ...]]] = []
+        #: `_job_id` của từng lần enqueue, theo đúng thứ tự `pushed` (B-92).
+        #: Tách khỏi `pushed` chứ không nhét thêm vào tuple: bốn file test khác
+        #: so `pushed` bằng `==` với một tuple hai phần tử, và đổi hình dạng của
         #: nó là sửa những test không liên quan gì tới B-92.
-        self.job_id_da_dung: list[str | None] = []
-        self.no_ra = False
-        self.tra_none = False
+        self.used_job_ids: list[str | None] = []
+        self.raises = False
+        self.returns_none = False
 
-    async def enqueue_job(self, ten: str, *args: Any, **kwargs: Any) -> object | None:
-        if self.no_ra:
+    async def enqueue_job(self, name: str, *args: Any, **kwargs: Any) -> object | None:
+        if self.raises:
             raise ConnectionError("redis chet giua chung (gia lap)")
-        self.da_day.append((ten, args))
-        self.job_id_da_dung.append(kwargs.get("_job_id"))
-        return None if self.tra_none else object()
+        self.pushed.append((name, args))
+        self.used_job_ids.append(kwargs.get("_job_id"))
+        return None if self.returns_none else object()
 
 
 @pytest.fixture
-def _db_cua_test(
+def _db_for_tests(
     monkeypatch: pytest.MonkeyPatch, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """`session_scope()` trong handler trỏ vào ĐÚNG kết nối của test (NQ-17)."""
@@ -75,14 +75,14 @@ def _db_cua_test(
 
 
 @pytest_asyncio.fixture
-async def arq_gia(monkeypatch: pytest.MonkeyPatch) -> ArqGia:
-    gia = ArqGia()
+async def fake_arq(monkeypatch: pytest.MonkeyPatch) -> FakeArq:
+    fake = FakeArq()
 
-    async def _pool() -> ArqGia:
-        return gia
+    async def _pool() -> FakeArq:
+        return fake
 
     monkeypatch.setattr("app.api.v1.messages.get_arq_pool", _pool)
-    return gia
+    return fake
 
 
 @pytest_asyncio.fixture
@@ -96,7 +96,7 @@ async def client(event_hooks: dict[str, Any]) -> AsyncIterator[AsyncClient]:
         yield http
 
 
-def _phien(user_id: uuid.UUID) -> dict[str, str]:
+def _session(user_id: uuid.UUID) -> dict[str, str]:
     """Header `Cookie` mang phiên thật (§11.2) của `user_id` — T-3.1c.
 
     Trả một `dict` để truyền vào `headers=` của **từng request**, đúng chỗ mà
@@ -124,20 +124,20 @@ def _phien(user_id: uuid.UUID) -> dict[str, str]:
     return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
-async def _tao_hoi_thoai(
+async def _create_conversation(
     session_factory: async_sessionmaker[AsyncSession],
     user_id: uuid.UUID,
-    **cot: Any,
+    **columns: Any,
 ) -> Conversation:
     async with session_factory() as session:
         conversation = await ConversationRepository(session).create_conversation(
-            user_id=user_id, **cot
+            user_id=user_id, **columns
         )
         await session.commit()
         return conversation
 
 
-async def _dem_message(
+async def _count_messages(
     session_factory: async_sessionmaker[AsyncSession], conversation_id: uuid.UUID
 ) -> int:
     async with session_factory() as session:
@@ -149,7 +149,7 @@ async def _dem_message(
         return int((await session.execute(stmt)).scalar_one())
 
 
-async def _doc_message(
+async def _read_message(
     session_factory: async_sessionmaker[AsyncSession], message_id: uuid.UUID
 ) -> Message:
     async with session_factory() as session:
@@ -166,31 +166,31 @@ async def _active_leaf(
         return (await session.execute(stmt)).scalar_one()
 
 
-def _mot_model_khac_mac_dinh() -> str:
+def _non_default_model() -> str:
     """Một `model_id` đang bật, KHÁC model `default`. A3: không gõ tên vào đây."""
-    mac_dinh = catalog.get_default_model()
-    assert mac_dinh is not None
-    khac = [m.id for m in catalog.get_catalog().models if m.enabled and m.id != mac_dinh.id]
-    assert khac, "catalog phải có ít nhất hai model bật thì test này mới có nghĩa"
-    return khac[0]
+    default = catalog.get_default_model()
+    assert default is not None
+    others = [m.id for m in catalog.get_catalog().models if m.enabled and m.id != default.id]
+    assert others, "catalog phải có ít nhất hai model bật thì test này mới có nghĩa"
+    return others[0]
 
 
 # ════════════════════════ đường chạy đúng (§7.2 ①) ════════════════════════
 
 
-async def test_tao_hai_message_va_day_job(
+async def test_creates_two_messages_and_enqueues_job(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Một POST ⇒ 202, hai message, một job, `active_leaf_id` dời sang assistant."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
 
@@ -199,26 +199,26 @@ async def test_tao_hai_message_va_day_job(
     uid = uuid.UUID(body["user_message_id"])
     amid = uuid.UUID(body["assistant_message_id"])
 
-    user_message = await _doc_message(session_factory, uid)
+    user_message = await _read_message(session_factory, uid)
     assert user_message.role is MessageRole.USER
     assert user_message.content == "xin chao"
     assert user_message.parent_id is None, "hội thoại rỗng ⇒ message đầu là gốc (§8.2)"
 
-    assistant = await _doc_message(session_factory, amid)
+    assistant = await _read_message(session_factory, amid)
     assert assistant.role is MessageRole.ASSISTANT
     assert assistant.parent_id == uid
     assert assistant.content == ""
 
     assert await _active_leaf(session_factory, conversation.id) == amid
-    assert arq_gia.da_day == [("generate", (str(amid),))]
+    assert fake_arq.pushed == [("generate", (str(amid),))]
 
 
-async def test_assistant_o_trang_thai_queued(
+async def test_assistant_is_queued(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """`queued` chứ không phải DEFAULT `completed` của cột.
 
@@ -226,31 +226,31 @@ async def test_assistant_o_trang_thai_queued(
     job xong bỏ lượt, và message rỗng ấy lại **vào ngữ cảnh** của lượt sau vì
     `USABLE_STATUSES` nhận `completed`.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "hoi mot cau"},
     )
 
-    assistant = await _doc_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
+    assistant = await _read_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
     assert assistant.status is MessageStatus.QUEUED
 
 
-async def test_stream_url_tro_dung_route_cua_t17(
+async def test_stream_url_points_to_t17_route(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """`stream_url` phải gọi được thật, không chỉ "trông giống đường dẫn"."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "xin chao"},
     )
     amid = resp.json()["assistant_message_id"]
@@ -259,34 +259,34 @@ async def test_stream_url_tro_dung_route_cua_t17(
     assert stream_url == f"/api/v1/messages/{amid}/stream"
     # Gọi thẳng vào nó: 404 (message của user khác) sẽ lộ ra nếu đường dẫn sai
     # tiền tố, 200/500 nếu đúng. Chỉ cần nó KHÔNG phải 404-không-có-route.
-    lan_hai = await client.get(stream_url, headers=_phien(uuid.uuid4()))
-    assert lan_hai.json()["error"]["code"] == "MESSAGE_NOT_FOUND"
+    second_time = await client.get(stream_url, headers=_session(uuid.uuid4()))
+    assert second_time.json()["error"]["code"] == "MESSAGE_NOT_FOUND"
 
 
 # ═══════════════════════ A1 — không gọi model ở đây ═══════════════════════
 
 
-async def test_khong_cho_model_sinh_chu(
+async def test_does_not_wait_for_model_output(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD/A1: response về khi `content` của assistant vẫn còn rỗng.
 
     Đây là phát biểu kiểm được của "endpoint trả về < 200 ms": nếu handler
     chờ model thì lúc nó trả lời, `messages.content` đã có chữ.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "viet cho toi 800 tu"},
     )
 
-    assistant = await _doc_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
+    assistant = await _read_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
     assert assistant.content == ""
     assert assistant.status is MessageStatus.QUEUED
     assert assistant.finish_reason is None
@@ -296,76 +296,80 @@ async def test_khong_cho_model_sinh_chu(
 # ═════════════════════════ nhánh (C14, §8.2) ══════════════════════════════
 
 
-async def test_parent_id_cu_tra_branched_va_cay_co_them_nhanh(
+async def test_old_parent_id_returns_branched_and_tree_gains_branch(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD: gửi với `parent_id` cũ → `branched: true`, và cây có thêm nhánh."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    phien = _phien(user_a)
+    conversation = await _create_conversation(session_factory, user_a)
+    auth_headers = _session(user_a)
 
-    mot = await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "a"})
-    assert mot.json()["branched"] is False
-    goc_user = uuid.UUID(mot.json()["user_message_id"])
+    first = await client.post(
+        PATH.format(conversation.id), headers=auth_headers, json={"content": "a"}
+    )
+    assert first.json()["branched"] is False
+    root_user = uuid.UUID(first.json()["user_message_id"])
 
-    hai = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=phien,
-        json={"content": "b", "parent_id": str(goc_user)},
+    second = await client.post(
+        PATH.format(conversation.id),
+        headers=auth_headers,
+        json={"content": "b", "parent_id": str(root_user)},
     )
 
-    assert hai.status_code == 202
-    assert hai.json()["branched"] is True
+    assert second.status_code == 202
+    assert second.json()["branched"] is True
 
     # Message user của lượt 1 nay có HAI con: assistant của lượt 1, và message
     # user của lượt 2. Đó đúng là "cây có thêm nhánh".
     async with session_factory() as session:
-        con = await MessageRepository(session).get_siblings(
-            conversation.id, goc_user, user_id=user_a
+        child = await MessageRepository(session).get_siblings(
+            conversation.id, root_user, user_id=user_a
         )
-    assert len(con) == 2
-    assert {m.id for m in con} == {
-        uuid.UUID(mot.json()["assistant_message_id"]),
-        uuid.UUID(hai.json()["user_message_id"]),
+    assert len(child) == 2
+    assert {m.id for m in child} == {
+        uuid.UUID(first.json()["assistant_message_id"]),
+        uuid.UUID(second.json()["user_message_id"]),
     }
 
 
-async def test_parent_id_bang_leaf_hien_tai_khong_phai_nhanh(
+async def test_parent_id_equal_to_current_leaf_is_not_a_branch(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Gửi kèm `parent_id` ĐÚNG lá đang xem ⇒ `branched: false` (C14).
 
     C14 nói FE **luôn** gửi lá nó đang thấy; nếu mọi lần gửi đều bị gắn cờ
     `branched` thì cờ đó vô nghĩa và FE sẽ tắt nó đi.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    phien = _phien(user_a)
+    conversation = await _create_conversation(session_factory, user_a)
+    auth_headers = _session(user_a)
 
-    mot = await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "a"})
-    leaf = mot.json()["assistant_message_id"]
+    first = await client.post(
+        PATH.format(conversation.id), headers=auth_headers, json={"content": "a"}
+    )
+    leaf = first.json()["assistant_message_id"]
 
-    hai = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=phien,
+    second = await client.post(
+        PATH.format(conversation.id),
+        headers=auth_headers,
         json={"content": "b", "parent_id": leaf},
     )
 
-    assert hai.json()["branched"] is False
+    assert second.json()["branched"] is False
 
 
-async def test_parent_id_vang_thi_noi_vao_leaf_dang_xem(
+async def test_missing_parent_id_appends_to_viewed_leaf(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Không gửi `parent_id` ⇒ dùng `active_leaf_id`, không phải `NULL`.
 
@@ -374,107 +378,117 @@ async def test_parent_id_vang_thi_noi_vao_leaf_dang_xem(
     hẳn" biến thành cùng một chuyện, và mọi lượt chat thứ hai sẽ thành một GỐC
     mới — hội thoại rơi thành N cây rời, model không thấy câu hỏi trước đó.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    phien = _phien(user_a)
+    conversation = await _create_conversation(session_factory, user_a)
+    auth_headers = _session(user_a)
 
-    mot = await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "a"})
-    leaf = uuid.UUID(mot.json()["assistant_message_id"])
+    first = await client.post(
+        PATH.format(conversation.id), headers=auth_headers, json={"content": "a"}
+    )
+    leaf = uuid.UUID(first.json()["assistant_message_id"])
 
-    hai = await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "b"})
+    second = await client.post(
+        PATH.format(conversation.id), headers=auth_headers, json={"content": "b"}
+    )
 
-    user_hai = await _doc_message(session_factory, uuid.UUID(hai.json()["user_message_id"]))
-    assert user_hai.parent_id == leaf
-    assert hai.json()["branched"] is False
+    second_user_msg = await _read_message(
+        session_factory, uuid.UUID(second.json()["user_message_id"])
+    )
+    assert second_user_msg.parent_id == leaf
+    assert second.json()["branched"] is False
 
 
-async def test_parent_id_null_tuong_minh_tao_goc_moi(
+async def test_explicit_null_parent_id_creates_new_root(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """`parent_id: null` gửi tường minh ⇒ gốc thứ hai của hội thoại (§8.2)."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    phien = _phien(user_a)
+    conversation = await _create_conversation(session_factory, user_a)
+    auth_headers = _session(user_a)
 
-    await client.post(DUONG_DAN.format(conversation.id), headers=phien, json={"content": "a"})
-    hai = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=phien,
+    await client.post(PATH.format(conversation.id), headers=auth_headers, json={"content": "a"})
+    second = await client.post(
+        PATH.format(conversation.id),
+        headers=auth_headers,
         json={"content": "b", "parent_id": None},
     )
 
-    assert hai.json()["branched"] is True
-    user_hai = await _doc_message(session_factory, uuid.UUID(hai.json()["user_message_id"]))
-    assert user_hai.parent_id is None
+    assert second.json()["branched"] is True
+    second_user_msg = await _read_message(
+        session_factory, uuid.UUID(second.json()["user_message_id"])
+    )
+    assert second_user_msg.parent_id is None
 
     async with session_factory() as session:
-        goc = await MessageRepository(session).get_siblings(conversation.id, None, user_id=user_a)
-    assert len(goc) == 2, "hai gốc trong một hội thoại — §8.2 cho phép"
+        roots = await MessageRepository(session).get_siblings(conversation.id, None, user_id=user_a)
+    assert len(roots) == 2, "hai gốc trong một hội thoại — §8.2 cho phép"
 
 
-async def test_parent_id_cua_hoi_thoai_khac_tra_404(
+async def test_parent_id_from_other_conversation_is_404(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Nối hai cây của hai hội thoại làm một là đúng thứ `create_message` chặn."""
-    mot = await _tao_hoi_thoai(session_factory, user_a)
-    hai = await _tao_hoi_thoai(session_factory, user_a)
-    phien = _phien(user_a)
+    first = await _create_conversation(session_factory, user_a)
+    second = await _create_conversation(session_factory, user_a)
+    auth_headers = _session(user_a)
 
-    trong_mot = await client.post(DUONG_DAN.format(mot.id), headers=phien, json={"content": "a"})
-    la_cua_mot = trong_mot.json()["assistant_message_id"]
+    within_one = await client.post(
+        PATH.format(first.id), headers=auth_headers, json={"content": "a"}
+    )
+    leaf_of_one = within_one.json()["assistant_message_id"]
 
     resp = await client.post(
-        DUONG_DAN.format(hai.id),
-        headers=phien,
-        json={"content": "b", "parent_id": la_cua_mot},
+        PATH.format(second.id),
+        headers=auth_headers,
+        json={"content": "b", "parent_id": leaf_of_one},
     )
 
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "PARENT_NOT_FOUND"
-    assert await _dem_message(session_factory, hai.id) == 0
+    assert await _count_messages(session_factory, second.id) == 0
 
 
 # ═══════════════════ quyền sở hữu và danh tính (§20) ══════════════════════
 
 
-async def test_hoi_thoai_cua_user_khac_tra_404_va_khong_ghi_gi(
+async def test_other_users_conversation_404_and_writes_nothing(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     user_b: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """404 chứ không 403, và tuyệt đối không có hàng nào được ghi."""
-    cua_a = await _tao_hoi_thoai(session_factory, user_a)
+    of_a = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(cua_a.id),
-        headers=_phien(user_b),
+        PATH.format(of_a.id),
+        headers=_session(user_b),
         json={"content": "toi khong so huu hoi thoai nay"},
     )
 
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
-    assert await _dem_message(session_factory, cua_a.id) == 0
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, of_a.id) == 0
+    assert fake_arq.pushed == []
 
 
-async def test_hoi_thoai_khong_ton_tai_tra_404(
+async def test_missing_conversation_is_404(
     client: AsyncClient,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     resp = await client.post(
-        DUONG_DAN.format(uuid.uuid4()),
-        headers=_phien(user_a),
+        PATH.format(uuid.uuid4()),
+        headers=_session(user_a),
         json={"content": "a"},
     )
 
@@ -482,28 +496,28 @@ async def test_hoi_thoai_khong_ton_tai_tra_404(
     assert resp.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
 
 
-async def test_thieu_cookie_phien_tra_401(
+async def test_missing_session_cookie_is_401(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
-    resp = await client.post(DUONG_DAN.format(conversation.id), json={"content": "a"})
+    resp = await client.post(PATH.format(conversation.id), json={"content": "a"})
 
     assert resp.status_code == 401
-    assert await _dem_message(session_factory, conversation.id) == 0
+    assert await _count_messages(session_factory, conversation.id) == 0
 
 
-async def test_debug_bat_cung_khong_mo_cua_nao(
+async def test_debug_on_opens_no_door(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     monkeypatch: pytest.MonkeyPatch,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """`DEBUG=true` không còn mua được gì — T-3.1c.
 
@@ -514,157 +528,157 @@ async def test_debug_bat_cung_khong_mo_cua_nao(
     và nó chính là thứ sẽ đỏ nếu ai đó dựng lại một cửa sau thứ hai.
     """
     monkeypatch.setattr(settings, "DEBUG", True)
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
-    resp = await client.post(DUONG_DAN.format(conversation.id), json={"content": "a"})
+    resp = await client.post(PATH.format(conversation.id), json={"content": "a"})
 
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "UNAUTHENTICATED"
-    assert await _dem_message(session_factory, conversation.id) == 0
+    assert await _count_messages(session_factory, conversation.id) == 0
 
 
 # ════════════════════════ chọn model (§9.2, A3) ═══════════════════════════
 
 
-async def test_khong_noi_model_thi_dung_default_cua_catalog(
+async def test_no_model_given_uses_catalog_default(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    mac_dinh = catalog.get_default_model()
-    assert mac_dinh is not None
+    conversation = await _create_conversation(session_factory, user_a)
+    default = catalog.get_default_model()
+    assert default is not None
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "a"},
     )
 
-    assistant = await _doc_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
-    assert assistant.model_id == mac_dinh.id
+    assistant = await _read_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
+    assert assistant.model_id == default.id
 
 
-async def test_default_model_cua_hoi_thoai_thang_default_cua_catalog(
+async def test_conversation_default_model_beats_catalog_default(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
-    khac = _mot_model_khac_mac_dinh()
-    conversation = await _tao_hoi_thoai(session_factory, user_a, default_model=khac)
+    others = _non_default_model()
+    conversation = await _create_conversation(session_factory, user_a, default_model=others)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "a"},
     )
 
-    assistant = await _doc_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
-    assert assistant.model_id == khac
+    assistant = await _read_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
+    assert assistant.model_id == others
 
 
-async def test_model_id_cua_request_thang_tat_ca(
+async def test_request_model_id_beats_everything(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
-    mac_dinh = catalog.get_default_model()
-    assert mac_dinh is not None
-    conversation = await _tao_hoi_thoai(session_factory, user_a, default_model=mac_dinh.id)
-    khac = _mot_model_khac_mac_dinh()
+    default = catalog.get_default_model()
+    assert default is not None
+    conversation = await _create_conversation(session_factory, user_a, default_model=default.id)
+    others = _non_default_model()
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
-        json={"content": "a", "model_id": khac},
+        PATH.format(conversation.id),
+        headers=_session(user_a),
+        json={"content": "a", "model_id": others},
     )
 
-    assistant = await _doc_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
-    assert assistant.model_id == khac
+    assistant = await _read_message(session_factory, uuid.UUID(resp.json()["assistant_message_id"]))
+    assert assistant.model_id == others
 
 
-async def test_model_khong_co_trong_catalog_tra_400_va_khong_ghi_gi(
+async def test_model_not_in_catalog_400_and_writes_nothing(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "a", "model_id": "khong-ton-tai"},
     )
 
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "MODEL_UNKNOWN"
     assert resp.json()["error"]["details"] == {"model_id": "khong-ton-tai"}
-    assert await _dem_message(session_factory, conversation.id) == 0
+    assert await _count_messages(session_factory, conversation.id) == 0
 
 
-async def test_model_da_tat_cung_tra_400(
+async def test_disabled_model_is_also_400(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """`enabled: false` phải chặn cả đường gọi, không chỉ ẩn khỏi Model Picker."""
-    khac = _mot_model_khac_mac_dinh()
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    others = _non_default_model()
+    conversation = await _create_conversation(session_factory, user_a)
     monkeypatch.setattr(catalog, "get_model", lambda _: None)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
-        json={"content": "a", "model_id": khac},
+        PATH.format(conversation.id),
+        headers=_session(user_a),
+        json={"content": "a", "model_id": others},
     )
 
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "MODEL_UNKNOWN"
 
 
-async def test_khong_con_model_nao_bat_tra_503(
+async def test_no_enabled_model_left_is_503(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Sự cố cấu hình phía server ⇒ 5xx, không phải 4xx của người gọi."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
     monkeypatch.setattr(catalog, "get_default_model", lambda: None)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "a"},
     )
 
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "NO_MODEL_AVAILABLE"
-    assert await _dem_message(session_factory, conversation.id) == 0
+    assert await _count_messages(session_factory, conversation.id) == 0
 
 
 # ════════════ DoD: lỗi giữa transaction ⇒ KHÔNG có message mồ côi ═════════
 
 
-async def test_enqueue_no_thi_khong_con_message_mo_coi(
+async def test_enqueue_failure_leaves_no_orphan_message(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD: ép enqueue thất bại → 0 message, `active_leaf_id` không nhúc nhích.
 
@@ -672,50 +686,50 @@ async def test_enqueue_no_thi_khong_con_message_mo_coi(
     enqueue sau) thì ca này để lại hai message `queued` **vĩnh viễn**: reaper
     §7.6 chỉ dọn `status='streaming'`.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    arq_gia.no_ra = True
+    conversation = await _create_conversation(session_factory, user_a)
+    fake_arq.raises = True
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "a"},
     )
 
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "ENQUEUE_FAILED"
-    assert await _dem_message(session_factory, conversation.id) == 0
+    assert await _count_messages(session_factory, conversation.id) == 0
     assert await _active_leaf(session_factory, conversation.id) is None
 
 
-async def test_arq_tu_choi_job_thi_cung_khong_con_message_mo_coi(
+async def test_arq_rejecting_job_also_leaves_no_orphan_message(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Ngả thứ hai: `enqueue_job` trả `None` thay vì ném — cũng phải rollback."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    arq_gia.tra_none = True
+    conversation = await _create_conversation(session_factory, user_a)
+    fake_arq.returns_none = True
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "a"},
     )
 
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "ENQUEUE_FAILED"
-    assert await _dem_message(session_factory, conversation.id) == 0
+    assert await _count_messages(session_factory, conversation.id) == 0
     assert await _active_leaf(session_factory, conversation.id) is None
 
 
-async def test_job_id_bang_assistant_message_id(
+async def test_job_id_equals_assistant_message_id(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """B-92: `_job_id` phải là chính `assistant_message_id`, không phải gì khác.
 
@@ -724,17 +738,17 @@ async def test_job_id_bang_assistant_message_id(
     một id ngẫu nhiên mỗi lần và lớp này biến mất **trong im lặng** — không
     lỗi, không log, chỉ là một phép chống trùng không bao giờ chặn ai.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "a"},
     )
 
     assert resp.status_code == 202
     amid = resp.json()["assistant_message_id"]
-    assert arq_gia.job_id_da_dung == [amid]
+    assert fake_arq.used_job_ids == [amid]
 
 
 # ═════════════════════ body và Idempotency-Key (§11.4) ════════════════════
@@ -743,12 +757,12 @@ async def test_job_id_bang_assistant_message_id(
 # ══════════════ MESSAGE_MAX_CHARS — cửa chặn đầu tiên (T-3.0, B-205) ═══════
 
 
-async def test_content_dai_hon_tran_mot_ky_tu_tra_422_va_khong_ghi_gi(
+async def test_content_one_char_over_cap_422_and_writes_nothing(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Đúng ca âm của DoD T-3.0: `MESSAGE_MAX_CHARS + 1` ký tự.
 
@@ -757,66 +771,66 @@ async def test_content_dai_hon_tran_mot_ky_tu_tra_422_va_khong_ghi_gi(
     sau khi đã tiêu một lượt `Idempotency-Key`. `_dem_message == 0` là phép đo
     nói rằng trần nay đứng **trước** Postgres, không sau.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "a" * (settings.MESSAGE_MAX_CHARS + 1)},
     )
 
     assert resp.status_code == 422
-    assert await _dem_message(session_factory, conversation.id) == 0
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation.id) == 0
+    assert fake_arq.pushed == []
 
 
-async def test_content_dung_bang_tran_van_di_qua(
+async def test_content_exactly_at_cap_passes(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Biên là `<=`, không phải `<` — một trần lệch một ký tự là một trần sai.
 
     Cặp với test trên: không có nó thì `max_length=0` cũng làm test kia xanh.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a),
+        PATH.format(conversation.id),
+        headers=_session(user_a),
         json={"content": "a" * settings.MESSAGE_MAX_CHARS},
     )
 
     assert resp.status_code == 202
-    assert await _dem_message(session_factory, conversation.id) == 2
+    assert await _count_messages(session_factory, conversation.id) == 2
 
 
 @pytest.mark.parametrize("body", [{}, {"content": ""}, {"content": "a", "parent_id": "khong-uuid"}])
-async def test_body_sai_tra_422(
+async def test_bad_body_is_422(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     body: dict[str, Any],
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
-    resp = await client.post(DUONG_DAN.format(conversation.id), headers=_phien(user_a), json=body)
+    resp = await client.post(PATH.format(conversation.id), headers=_session(user_a), json=body)
 
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
-    assert await _dem_message(session_factory, conversation.id) == 0
+    assert await _count_messages(session_factory, conversation.id) == 0
 
 
-async def test_hai_lan_gui_cung_key_chi_tao_mot_luot(
+async def test_two_sends_same_key_create_one_turn(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """§11.4 nhìn từ phía endpoint: hai POST cùng key ⇒ **một** lượt sinh.
 
@@ -828,29 +842,29 @@ async def test_hai_lan_gui_cung_key_chi_tao_mot_luot(
     Luật ở đây được kiểm đầy đủ trong `tests/api/test_idempotency.py`; ca này
     ở lại `test_messages.py` vì nó nói về hợp đồng của chính endpoint này.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    phien = _phien(user_a)
+    conversation = await _create_conversation(session_factory, user_a)
+    auth_headers = _session(user_a)
     headers = {"Idempotency-Key": "khoa-cua-mot-lan-soan-thao"}
 
-    mot = await client.post(
-        DUONG_DAN.format(conversation.id), headers=phien | headers, json={"content": "a"}
+    first = await client.post(
+        PATH.format(conversation.id), headers=auth_headers | headers, json={"content": "a"}
     )
-    hai = await client.post(
-        DUONG_DAN.format(conversation.id), headers=phien | headers, json={"content": "a"}
+    second = await client.post(
+        PATH.format(conversation.id), headers=auth_headers | headers, json={"content": "a"}
     )
 
-    assert mot.status_code == hai.status_code == 202
-    assert mot.json() == hai.json()
-    assert hai.headers["Idempotent-Replay"] == "true"
-    assert await _dem_message(session_factory, conversation.id) == 2
-    assert len(arq_gia.da_day) == 1
+    assert first.status_code == second.status_code == 202
+    assert first.json() == second.json()
+    assert second.headers["Idempotent-Replay"] == "true"
+    assert await _count_messages(session_factory, conversation.id) == 2
+    assert len(fake_arq.pushed) == 1
 
 
-async def test_thieu_idempotency_key_tra_400(
+async def test_missing_idempotency_key_is_400(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD T-2.8 dòng 3 + A8: header là **bắt buộc** với đúng endpoint này.
 
@@ -858,23 +872,23 @@ async def test_thieu_idempotency_key_tra_400(
     này cần một request thật sự vắng header, còn fixture `client` cố ý gắn một
     key mới cho mọi POST (xem docstring conftest).
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="https://localhost"
-    ) as khong_hook:
-        resp = await khong_hook.post(
-            DUONG_DAN.format(conversation.id),
-            headers=_phien(user_a),
+    ) as no_hook:
+        resp = await no_hook.post(
+            PATH.format(conversation.id),
+            headers=_session(user_a),
             json={"content": "a"},
         )
 
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "IDEMPOTENCY_KEY_REQUIRED"
-    assert await _dem_message(session_factory, conversation.id) == 0
+    assert await _count_messages(session_factory, conversation.id) == 0
 
 
-def test_ten_route_khop_ham() -> None:
+def test_route_name_matches_function() -> None:
     """Hai hằng tên route phải là tên FastAPI thực sự đặt cho hai route ấy.
 
     FastAPI lấy tên route từ **tên hàm**, nên đổi tên `create_message` (hoặc
@@ -884,25 +898,25 @@ def test_ten_route_khop_ham() -> None:
     "tuỳ chọn" mà không một dòng log nào kêu.
 
     Đẳng thức kiểm **cả hai chiều** (NQ-93/B-231): thêm một tên vào
-    `ROUTE_BAT_BUOC_IDEMPOTENCY` mà không có route nào mang nó cũng đỏ ở đây,
+    `IDEMPOTENCY_REQUIRED_ROUTES` mà không có route nào mang nó cũng đỏ ở đây,
     không đợi tới lúc người dùng bấm nút.
     """
-    assert frozenset({TEN_ROUTE_TAO_MESSAGE, TEN_ROUTE_THU_LAI}) == ROUTE_BAT_BUOC_IDEMPOTENCY
+    assert frozenset({CREATE_MESSAGE_ROUTE_NAME, RETRY_ROUTE_NAME}) == IDEMPOTENCY_REQUIRED_ROUTES
     # `url_path_for` ném `NoMatchFound` nếu không route nào mang tên ấy — đó
     # chính là phép kiểm. Đi đường này chứ không duyệt `app.routes` vì từ
     # FastAPI 0.141 `include_router` giữ router lồng nhau (`_IncludedRouter`)
     # thay vì trải phẳng, nên `app.routes` không còn là danh sách route nữa.
-    duong_dan = app.url_path_for(TEN_ROUTE_TAO_MESSAGE, conversation_id=str(uuid.uuid4()))
-    duong_dan_retry = app.url_path_for(TEN_ROUTE_THU_LAI, message_id=str(uuid.uuid4()))
+    path = app.url_path_for(CREATE_MESSAGE_ROUTE_NAME, conversation_id=str(uuid.uuid4()))
+    retry_path = app.url_path_for(RETRY_ROUTE_NAME, message_id=str(uuid.uuid4()))
 
-    assert str(duong_dan).endswith("/messages")
-    assert str(duong_dan_retry).endswith("/retry")
+    assert str(path).endswith("/messages")
+    assert str(retry_path).endswith("/retry")
 
 
 # ═══════════════ A1 dạng kiểm được bằng grep (§5.3, DoD) ══════════════════
 
 
-def test_tang_api_khong_import_gi_cua_provider() -> None:
+def test_api_layer_imports_nothing_from_providers() -> None:
     """DoD: `grep -rnE "litellm|openai|AsyncOpenAI" backend/app/api/` phải rỗng.
 
     Chạy lại phép grep đó trong bộ test chứ không chỉ trong
@@ -917,12 +931,12 @@ def test_tang_api_khong_import_gi_cua_provider() -> None:
     import re
     from pathlib import Path
 
-    mau = re.compile(r"litellm|openai|AsyncOpenAI")
-    thu_muc = Path(__file__).resolve().parents[2] / "app" / "api"
-    pham = [
+    pattern = re.compile(r"litellm|openai|AsyncOpenAI")
+    directory = Path(__file__).resolve().parents[2] / "app" / "api"
+    violations = [
         f"{f}:{so}"
-        for f in sorted(thu_muc.rglob("*.py"))
-        for so, dong in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
-        if mau.search(dong)
+        for f in sorted(directory.rglob("*.py"))
+        for so, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1)
+        if pattern.search(line)
     ]
-    assert pham == []
+    assert violations == []

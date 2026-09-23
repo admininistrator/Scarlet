@@ -100,13 +100,13 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 #: Đặt một lần cho mỗi tiến trình. Gọi lại là không làm gì — nếu không, mỗi
 #: lần gọi sẽ bọc thêm một lớp factory quanh lớp trước và `_scrub` chạy n lần
 #: trên cùng một record.
-_da_cai_dat = False
+_installed = False
 
 
 def redact(text: str) -> str:
     """Che mọi bí mật nhận ra được trong một chuỗi. Xem docstring module."""
-    for pattern, thay_bang in _PATTERNS:
-        text = pattern.sub(thay_bang, text)
+    for pattern, replacement in _PATTERNS:
+        text = pattern.sub(replacement, text)
     return text
 
 
@@ -155,15 +155,15 @@ def install_log_redaction() -> None:
     `app/workers/main.py` (worker), `app/cli.py` (lệnh vận hành) — vì mỗi cái
     là một tiến trình riêng với một record factory riêng.
     """
-    global _da_cai_dat
-    if _da_cai_dat:
+    global _installed
+    if _installed:
         return
-    truoc: Callable[..., logging.LogRecord] = logging.getLogRecordFactory()
+    previous: Callable[..., logging.LogRecord] = logging.getLogRecordFactory()
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
-        record = truoc(*args, **kwargs)
+        record = previous(*args, **kwargs)
         _scrub(record)
         return record
 
     logging.setLogRecordFactory(factory)
-    _da_cai_dat = True
+    _installed = True

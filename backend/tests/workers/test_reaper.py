@@ -36,16 +36,16 @@ from app.db.repositories import ConversationRepository, MessageRepository
 from app.streaming.events import ErrorCode
 from app.streaming.producer import FIELD_DATA, FIELD_TYPE, stream_key
 from app.workers.main import CRON_JOBS
-from app.workers.reaper import REAPER_GIAY_TRONG_PHUT, REAPER_JOB_NAME, reaper
+from app.workers.reaper import REAPER_JOB_NAME, REAPER_SECONDS_IN_MINUTE, reaper
 
 MODEL_ID = "deepseek-flash"
 
 
-class RedisGia:
+class FakeRedis:
     """Đủ `xadd`/`expire`. `key_no` làm hỏng đúng một khoá để kiểm cách ly."""
 
     def __init__(self) -> None:
-        self.ban_ghi: list[dict[str, str]] = []
+        self.records: list[dict[str, str]] = []
         self.expire_calls: list[tuple[str, int]] = []
         self.key_no: str | None = None
         self._seq = 0
@@ -54,24 +54,24 @@ class RedisGia:
         if name == self.key_no:
             raise ConnectionError("redis chet giua chung (gia lap)")
         self._seq += 1
-        self.ban_ghi.append({"__key__": name, **fields})
+        self.records.append({"__key__": name, **fields})
         return f"1725984000{self._seq:03d}-0".encode()
 
     async def expire(self, name: str, ttl: int) -> int:
         self.expire_calls.append((name, ttl))
         return 1
 
-    def ban_ghi_cua(self, mid: uuid.UUID) -> list[dict[str, str]]:
-        return [b for b in self.ban_ghi if b["__key__"] == stream_key(mid)]
+    def entries_of(self, mid: uuid.UUID) -> list[dict[str, str]]:
+        return [b for b in self.records if b["__key__"] == stream_key(mid)]
 
 
 @pytest.fixture
-def redis_gia() -> RedisGia:
-    return RedisGia()
+def fake_redis() -> FakeRedis:
+    return FakeRedis()
 
 
 @pytest.fixture(autouse=True)
-def _noi_session_vao_db_test(
+def _bind_session_to_test_db(
     monkeypatch: pytest.MonkeyPatch,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -79,8 +79,8 @@ def _noi_session_vao_db_test(
     monkeypatch.setattr(db_session, "get_sessionmaker", lambda: session_factory)
 
 
-def _ctx(redis_gia: RedisGia) -> dict[str, Any]:
-    return {"redis": redis_gia, "job_id": "test-cron"}
+def _ctx(fake_redis: FakeRedis) -> dict[str, Any]:
+    return {"redis": fake_redis, "job_id": "test-cron"}
 
 
 async def _message(
@@ -88,8 +88,8 @@ async def _message(
     user_id: uuid.UUID,
     *,
     status: MessageStatus,
-    heartbeat_tuoi_s: float | None,
-    created_tuoi_s: float | None = None,
+    heartbeat_age_s: float | None,
+    created_age_s: float | None = None,
 ) -> Message:
     """Một message assistant với `heartbeat_at` đặt tay ở quá khứ.
 
@@ -101,64 +101,64 @@ async def _message(
     conversation: Conversation = await ConversationRepository(session).create_conversation(
         user_id=user_id
     )
-    hoi = await repo.create_message(
+    question_msg = await repo.create_message(
         conversation_id=conversation.id,
         user_id=user_id,
         role=MessageRole.USER,
         content="Mùa thu Hà Nội thế nào?",
         status=MessageStatus.COMPLETED,
     )
-    tra_loi = await repo.create_message(
+    answer = await repo.create_message(
         conversation_id=conversation.id,
         user_id=user_id,
         role=MessageRole.ASSISTANT,
-        parent_id=hoi.id,
+        parent_id=question_msg.id,
         status=status,
         model_id=MODEL_ID,
     )
-    if heartbeat_tuoi_s is not None:
+    if heartbeat_age_s is not None:
         await session.execute(
             update(Message)
-            .where(Message.id == tra_loi.id)
-            .values(heartbeat_at=datetime.now(UTC) - timedelta(seconds=heartbeat_tuoi_s))
+            .where(Message.id == answer.id)
+            .values(heartbeat_at=datetime.now(UTC) - timedelta(seconds=heartbeat_age_s))
         )
-    if created_tuoi_s is not None:
+    if created_age_s is not None:
         # Nhánh `queued` của §7.6 đo trên `created_at` chứ không `heartbeat_at`
         # (B-123), nên test của nó phải dời được đúng cột ấy.
         await session.execute(
             update(Message)
-            .where(Message.id == tra_loi.id)
-            .values(created_at=datetime.now(UTC) - timedelta(seconds=created_tuoi_s))
+            .where(Message.id == answer.id)
+            .values(created_at=datetime.now(UTC) - timedelta(seconds=created_age_s))
         )
     await session.commit()
-    return tra_loi
+    return answer
 
 
-async def _doc_lai(session_factory: async_sessionmaker[AsyncSession], mid: uuid.UUID) -> Message:
+async def _reload(session_factory: async_sessionmaker[AsyncSession], mid: uuid.UUID) -> Message:
     async with session_factory() as s:
         return (await s.execute(select(Message).where(Message.id == mid))).scalar_one()
 
 
-def _qua_han() -> float:
+def _overdue() -> float:
     return settings.REAPER_STALE_S + 10
 
 
-def _con_moi() -> float:
+def _still_fresh() -> float:
     return settings.REAPER_STALE_S / 2
 
 
-def _queued_qua_han() -> float:
+def _queued_overdue() -> float:
     return settings.REAPER_QUEUED_STALE_S + 10
 
 
 # ────────────────────── nhánh `queued` của §7.6 (B-123) ──────────────────────
 
 
-async def test_queued_qua_han_thanh_failed_voi_ma_job_lost(
+async def test_overdue_queued_becomes_failed_job_lost(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """B-123: worker chết TRƯỚC `mark_streaming` để lại một tập reaper cũ mù.
 
@@ -171,51 +171,51 @@ async def test_queued_qua_han_thanh_failed_voi_ma_job_lost(
             session,
             user_a,
             status=MessageStatus.QUEUED,
-            heartbeat_tuoi_s=None,
-            created_tuoi_s=_queued_qua_han(),
+            heartbeat_age_s=None,
+            created_age_s=_queued_overdue(),
         )
     ).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    sau = await _doc_lai(session_factory, mid)
-    assert sau.status is MessageStatus.FAILED
-    assert sau.error_code == "JOB_LOST"
+    after = await _reload(session_factory, mid)
+    assert after.status is MessageStatus.FAILED
+    assert after.error_code == "JOB_LOST"
 
     # `stream:{id}` CHƯA hề tồn tại trước lượt quét này — `generate` chưa chạy
     # tới `XADD start` bao giờ. `XADD` tự tạo khoá, nên client đang mở SSE vẫn
     # nhận được `error` thay vì chờ mãi.
-    ban_ghi = redis_gia.ban_ghi_cua(mid)
-    assert len(ban_ghi) == 1
-    assert ban_ghi[0][FIELD_TYPE] == "error"
-    assert json.loads(ban_ghi[0][FIELD_DATA])["code"] == "JOB_LOST"
+    records = fake_redis.entries_of(mid)
+    assert len(records) == 1
+    assert records[0][FIELD_TYPE] == "error"
+    assert json.loads(records[0][FIELD_DATA])["code"] == "JOB_LOST"
 
 
-async def test_queued_con_moi_khong_bi_don(
+async def test_fresh_queued_not_swept(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """Đường chạy thường ngày: mọi message vừa gửi đều `queued` trong ~0.1 s."""
     mid = (
         await _message(
-            session, user_a, status=MessageStatus.QUEUED, heartbeat_tuoi_s=None, created_tuoi_s=None
+            session, user_a, status=MessageStatus.QUEUED, heartbeat_age_s=None, created_age_s=None
         )
     ).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    sau = await _doc_lai(session_factory, mid)
-    assert sau.status is MessageStatus.QUEUED
-    assert redis_gia.ban_ghi == []
+    after = await _reload(session_factory, mid)
+    assert after.status is MessageStatus.QUEUED
+    assert fake_redis.records == []
 
 
-async def test_hai_nhanh_dung_HAI_nguong_rieng_khong_dung_chung(
+async def test_two_branches_use_TWO_separate_thresholds(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """Ngưỡng `queued` phải LỚN HƠN ngưỡng `streaming`, và là biến khác.
 
@@ -234,137 +234,139 @@ async def test_hai_nhanh_dung_HAI_nguong_rieng_khong_dung_chung(
             session,
             user_a,
             status=MessageStatus.QUEUED,
-            heartbeat_tuoi_s=None,
-            created_tuoi_s=settings.REAPER_STALE_S + 10,
+            heartbeat_age_s=None,
+            created_age_s=settings.REAPER_STALE_S + 10,
         )
     ).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    sau = await _doc_lai(session_factory, mid)
-    assert sau.status is MessageStatus.QUEUED, (
+    after = await _reload(session_factory, mid)
+    assert after.status is MessageStatus.QUEUED, (
         "message queued bị dọn theo ngưỡng của nhánh streaming — hai nhánh đang "
         "dùng chung một biến (B-123)"
     )
-    assert redis_gia.ban_ghi == []
+    assert fake_redis.records == []
 
 
-async def test_don_ca_hai_nhanh_trong_mot_luot_quet(
+async def test_sweeps_both_branches_in_one_pass(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """Một tick phải dọn cả hai tập, và mỗi tập mang MÃ của chính nó."""
-    mat_nhip = (
-        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_qua_han())
+    stale = (
+        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=_overdue())
     ).id
-    mo_coi = (
+    orphan = (
         await _message(
             session,
             user_a,
             status=MessageStatus.QUEUED,
-            heartbeat_tuoi_s=None,
-            created_tuoi_s=_queued_qua_han(),
+            heartbeat_age_s=None,
+            created_age_s=_queued_overdue(),
         )
     ).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    assert (await _doc_lai(session_factory, mat_nhip)).error_code == "WORKER_LOST"
-    assert (await _doc_lai(session_factory, mo_coi)).error_code == "JOB_LOST"
+    assert (await _reload(session_factory, stale)).error_code == "WORKER_LOST"
+    assert (await _reload(session_factory, orphan)).error_code == "JOB_LOST"
 
     # Mỗi message nhận ĐÚNG mã của nhánh mình, không phải mã của lượt quét.
-    assert json.loads(redis_gia.ban_ghi_cua(mat_nhip)[0][FIELD_DATA])["code"] == "WORKER_LOST"
-    assert json.loads(redis_gia.ban_ghi_cua(mo_coi)[0][FIELD_DATA])["code"] == "JOB_LOST"
+    assert json.loads(fake_redis.entries_of(stale)[0][FIELD_DATA])["code"] == "WORKER_LOST"
+    assert json.loads(fake_redis.entries_of(orphan)[0][FIELD_DATA])["code"] == "JOB_LOST"
 
 
 # ─────────────────────────── DoD 1 và DoD 2 ───────────────────────────
 
 
-async def test_message_qua_han_thanh_failed_voi_ma_worker_lost(
+async def test_overdue_message_becomes_failed_worker_lost(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """§7.6: `status='failed'`, `error_code='WORKER_LOST'`. DoD dòng 1."""
     mid = (
-        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_qua_han())
+        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=_overdue())
     ).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    sau = await _doc_lai(session_factory, mid)
-    assert sau.status is MessageStatus.FAILED
-    assert sau.error_code == ErrorCode.WORKER_LOST.value
+    after = await _reload(session_factory, mid)
+    assert after.status is MessageStatus.FAILED
+    assert after.error_code == ErrorCode.WORKER_LOST.value
 
 
-async def test_phat_event_error_ma_worker_lost_len_dung_stream(
+async def test_emits_worker_lost_error_event_on_right_stream(
     session: AsyncSession,
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """DoD dòng 2 — client đang mở SSE thấy `error`, không treo vô hạn.
 
     `error` là một trong hai loại kết thúc mà `streaming/consumer.py` nhận ra
-    (`LOAI_KET_THUC`), nên phát đúng loại này là điều kiện để SSE đóng.
+    (`TERMINAL_EVENTS`), nên phát đúng loại này là điều kiện để SSE đóng.
     """
     mid = (
-        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_qua_han())
+        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=_overdue())
     ).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    ban_ghi = redis_gia.ban_ghi_cua(mid)
-    assert len(ban_ghi) == 1, "đúng một event kết thúc cho một message"
-    assert ban_ghi[0][FIELD_TYPE] == "error"
-    assert json.loads(ban_ghi[0][FIELD_DATA])["code"] == "WORKER_LOST"
+    records = fake_redis.entries_of(mid)
+    assert len(records) == 1, "đúng một event kết thúc cho một message"
+    assert records[0][FIELD_TYPE] == "error"
+    assert json.loads(records[0][FIELD_DATA])["code"] == "WORKER_LOST"
 
 
-async def test_xadd_kem_expire_vi_khong_ai_khac_dat_ttl_duoc(
+async def test_xadd_with_expire_since_no_one_else_can_set_ttl(
     session: AsyncSession,
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
-    """C8: `_dong_so` của worker là chỗ đặt TTL, mà nó đã không chạy."""
+    """C8: `_close_ledger` của worker là chỗ đặt TTL, mà nó đã không chạy."""
     mid = (
-        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_qua_han())
+        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=_overdue())
     ).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    assert redis_gia.expire_calls == [(stream_key(mid), settings.STREAM_TTL_S)]
+    assert fake_redis.expire_calls == [(stream_key(mid), settings.STREAM_TTL_S)]
 
 
 # ─────────────────────────── ai KHÔNG bị dọn ───────────────────────────
 
 
-async def test_khong_co_gi_qua_han_thi_khong_doi_gi_va_khong_loi(
+async def test_nothing_overdue_changes_nothing_no_error(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """DoD dòng 4 — đường chạy thường ngày, 2880 lần mỗi ngày."""
     mid = (
-        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_con_moi())
+        await _message(
+            session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=_still_fresh()
+        )
     ).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    sau = await _doc_lai(session_factory, mid)
-    assert sau.status is MessageStatus.STREAMING
-    assert sau.error_code is None
-    assert redis_gia.ban_ghi == []
-    assert redis_gia.expire_calls == []
+    after = await _reload(session_factory, mid)
+    assert after.status is MessageStatus.STREAMING
+    assert after.error_code is None
+    assert fake_redis.records == []
+    assert fake_redis.expire_calls == []
 
 
-async def test_reaper_chay_tren_bang_rong_khong_no(redis_gia: RedisGia) -> None:
+async def test_reaper_on_empty_table_does_not_raise(fake_redis: FakeRedis) -> None:
     """DoD dòng 4, ca không có message nào — `RETURNING` trả danh sách rỗng."""
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    assert redis_gia.ban_ghi == []
+    assert fake_redis.records == []
 
 
 @pytest.mark.parametrize(
@@ -376,11 +378,11 @@ async def test_reaper_chay_tren_bang_rong_khong_no(redis_gia: RedisGia) -> None:
         MessageStatus.CANCELLED,
     ],
 )
-async def test_chi_dung_toi_streaming_du_nhip_tim_cu_hang_gio(
+async def test_only_touches_streaming_even_with_hours_old_heartbeat(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
     status: MessageStatus,
 ) -> None:
     """§17.2: `heartbeat_at` chỉ có nghĩa khi `status='streaming'`.
@@ -389,88 +391,86 @@ async def test_chi_dung_toi_streaming_du_nhip_tim_cu_hang_gio(
     lúc nào"), nên mọi message đã khép đều mang một nhịp tim cũ. Bỏ vế
     `status` khỏi câu UPDATE là đánh `failed` toàn bộ lịch sử hội thoại.
     """
-    mid = (await _message(session, user_a, status=status, heartbeat_tuoi_s=3600)).id
+    mid = (await _message(session, user_a, status=status, heartbeat_age_s=3600)).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    sau = await _doc_lai(session_factory, mid)
-    assert sau.status is status
-    assert redis_gia.ban_ghi == []
+    after = await _reload(session_factory, mid)
+    assert after.status is status
+    assert fake_redis.records == []
 
 
-async def test_heartbeat_null_khong_bi_don(
+async def test_null_heartbeat_not_swept(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """`NULL < now() - interval` ra `NULL`, tức không khớp — và đó là lý do
     `mark_streaming` đặt `heartbeat_at` ngay lúc đổi trạng thái chứ không đợi
     nhịp đầu tiên. Test này canh chiều còn lại của giao kèo đó."""
-    mid = (
-        await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=None)
-    ).id
+    mid = (await _message(session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=None)).id
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    sau = await _doc_lai(session_factory, mid)
-    assert sau.heartbeat_at is None
-    assert sau.status is MessageStatus.STREAMING
+    after = await _reload(session_factory, mid)
+    assert after.heartbeat_at is None
+    assert after.status is MessageStatus.STREAMING
 
 
 # ─────────────────────────── cách ly và thứ tự ───────────────────────────
 
 
-async def test_mot_message_hong_redis_khong_chan_nhung_message_con_lai(
+async def test_one_message_redis_failure_does_not_block_others(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """Hai message cùng mồ côi; `XADD` của cái đầu nổ."""
-    mot = await _message(
-        session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_qua_han()
+    first = await _message(
+        session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=_overdue()
     )
-    hai = await _message(
-        session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_qua_han()
+    second = await _message(
+        session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=_overdue()
     )
-    redis_gia.key_no = stream_key(mot.id)
+    fake_redis.key_no = stream_key(first.id)
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
     # Postgres ghi TRƯỚC Redis, nên cả hai đều đã `failed` dù một cái không
     # ra được dây — đảo thứ tự là để FE hiện Retry trong khi DB nói "đang sinh".
-    for mid in (mot.id, hai.id):
-        assert (await _doc_lai(session_factory, mid)).status is MessageStatus.FAILED
-    assert redis_gia.ban_ghi_cua(mot.id) == []
-    assert len(redis_gia.ban_ghi_cua(hai.id)) == 1
+    for mid in (first.id, second.id):
+        assert (await _reload(session_factory, mid)).status is MessageStatus.FAILED
+    assert fake_redis.entries_of(first.id) == []
+    assert len(fake_redis.entries_of(second.id)) == 1
 
 
-async def test_khong_dung_toi_message_cua_luot_sinh_dang_chay(
+async def test_does_not_touch_running_generation_message(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    redis_gia: RedisGia,
+    fake_redis: FakeRedis,
 ) -> None:
     """Một lượt mồ côi và một lượt còn nhịp, cùng một lượt quét."""
-    chet = await _message(
-        session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_qua_han()
+    dead = await _message(
+        session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=_overdue()
     )
-    song = await _message(
-        session, user_a, status=MessageStatus.STREAMING, heartbeat_tuoi_s=_con_moi()
+    alive_msg = await _message(
+        session, user_a, status=MessageStatus.STREAMING, heartbeat_age_s=_still_fresh()
     )
 
-    await reaper(_ctx(redis_gia))
+    await reaper(_ctx(fake_redis))
 
-    assert (await _doc_lai(session_factory, chet.id)).status is MessageStatus.FAILED
-    assert (await _doc_lai(session_factory, song.id)).status is MessageStatus.STREAMING
-    assert [b["__key__"] for b in redis_gia.ban_ghi] == [stream_key(chet.id)]
+    assert (await _reload(session_factory, dead.id)).status is MessageStatus.FAILED
+    assert (await _reload(session_factory, alive_msg.id)).status is MessageStatus.STREAMING
+    assert [b["__key__"] for b in fake_redis.records] == [stream_key(dead.id)]
 
 
 # ─────────────────────── partial index và lịch cron ───────────────────────
 
 
-async def test_cau_update_noi_suy_streaming_thanh_HANG_chu_khong_tham_so(
+async def test_update_inlines_streaming_as_CONSTANT_not_param(
     session: AsyncSession,
     connection: AsyncConnection,
 ) -> None:
@@ -487,53 +487,53 @@ async def test_cau_update_noi_suy_streaming_thanh_HANG_chu_khong_tham_so(
     Bắt chuỗi ở `before_cursor_execute` chứ không `compile()` lại: cái sau kiểm
     ý định của mình, cái này kiểm thứ thật sự chạy.
     """
-    cau_lenh: list[str] = []
+    statements: list[str] = []
 
-    def ghi_lai(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
-        cau_lenh.append(statement)
+    def record(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+        statements.append(statement)
 
-    event.listen(connection.sync_engine, "before_cursor_execute", ghi_lai)
+    event.listen(connection.sync_engine, "before_cursor_execute", record)
     try:
         await MessageRepository(session).reap_stale_streaming(
             stale_after_s=90, error_code=ErrorCode.WORKER_LOST.value
         )
     finally:
-        event.remove(connection.sync_engine, "before_cursor_execute", ghi_lai)
+        event.remove(connection.sync_engine, "before_cursor_execute", record)
 
-    sql = next(c for c in cau_lenh if "RETURNING" in c and "UPDATE messages" in c)
+    sql = next(c for c in statements if "RETURNING" in c and "UPDATE messages" in c)
     assert "messages.status = 'streaming'" in sql, sql
     assert "make_interval(secs=>90" in sql, sql
 
 
-async def test_partial_index_khop_dung_vi_tu_cua_cau_update(session: AsyncSession) -> None:
+async def test_partial_index_matches_update_predicate(session: AsyncSession) -> None:
     """Vị từ của `ix_msg_streaming` phải đúng chữ mà câu UPDATE viết ra.
 
     Đọc từ `pg_indexes` của database test (schema do migration 0001 dựng), nên
     đổi migration mà quên câu UPDATE — hoặc ngược lại — thì test này đỏ.
     """
-    dinh_nghia = await session.scalar(
+    definition = await session.scalar(
         text("SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_msg_streaming'")
     )
-    assert dinh_nghia is not None, "migration 0001 phải tạo ix_msg_streaming (§17.4)"
-    assert "heartbeat_at" in dinh_nghia
-    assert "WHERE (status = 'streaming'::message_status)" in dinh_nghia
+    assert definition is not None, "migration 0001 phải tạo ix_msg_streaming (§17.4)"
+    assert "heartbeat_at" in definition
+    assert "WHERE (status = 'streaming'::message_status)" in definition
 
 
-def test_cron_dang_ky_dung_nhip_30_giay() -> None:
+def test_cron_registered_every_30_seconds() -> None:
     """§7.6 viết "Cron arq mỗi 30 s". arq nhận tập giây trong phút."""
-    assert set(REAPER_GIAY_TRONG_PHUT) == {0, 30}
+    assert set(REAPER_SECONDS_IN_MINUTE) == {0, 30}
 
-    lich = [c for c in CRON_JOBS if c.name == REAPER_JOB_NAME]
-    assert len(lich) == 1, "đúng một cron reaper"
-    assert lich[0].second == {0, 30}
-    assert lich[0].minute is None, "mỗi phút, không phải mỗi giờ"
+    schedule = [c for c in CRON_JOBS if c.name == REAPER_JOB_NAME]
+    assert len(schedule) == 1, "đúng một cron reaper"
+    assert schedule[0].second == {0, 30}
+    assert schedule[0].minute is None, "mỗi phút, không phải mỗi giờ"
 
 
-def test_cron_khong_thu_lai_va_khong_chay_hai_ban_cung_luc() -> None:
+def test_cron_no_retry_and_no_two_concurrent_runs() -> None:
     """`max_tries=1`: tick sau vẫn thấy đúng những dòng ấy, thử lại vô nghĩa.
     `unique=True`: hai replica worker không cùng quét một tick."""
-    lich = next(c for c in CRON_JOBS if c.name == REAPER_JOB_NAME)
+    schedule = next(c for c in CRON_JOBS if c.name == REAPER_JOB_NAME)
 
-    assert lich.max_tries == 1
-    assert lich.unique is True
-    assert lich.run_at_startup is False
+    assert schedule.max_tries == 1
+    assert schedule.unique is True
+    assert schedule.run_at_startup is False

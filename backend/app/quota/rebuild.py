@@ -180,16 +180,16 @@ async def rebuild_quota(
         có được phép làm hỏng cả request hay không.
     """
     repo = UsageEventRepository(session)
-    ket_qua: list[WindowRebuild] = []
+    result: list[WindowRebuild] = []
 
     for window in windows():
         entries = await repo.list_since(user_id=user_id, since=cutoff_at(window, now))
-        spent = await _nap_lai(redis, window, user_id=user_id, entries=entries)
-        ket_qua.append(
+        spent = await _reload(redis, window, user_id=user_id, entries=entries)
+        result.append(
             WindowRebuild(limit_type=window.limit_type, members=len(entries), spent=spent)
         )
 
-    report = RebuildReport(user_id=user_id, windows=tuple(ket_qua))
+    report = RebuildReport(user_id=user_id, windows=tuple(result))
     logger.info(
         "da dung lai quota cua user %s tu usage_events: %s",
         user_id,
@@ -245,9 +245,9 @@ async def rebuild_all(session: AsyncSession, redis: Redis, *, now: float) -> lis
     song chỉ thêm một pool kết nối để tiết kiệm vài chục mili giây, mà thứ
     đáng giá ở một lệnh vận hành chạy tay là log đọc được theo thứ tự.
     """
-    _, cua_so_dai = windows()
+    _, long_window = windows()
     repo = UsageEventRepository(session)
-    user_ids = await repo.user_ids_since(since=cutoff_at(cua_so_dai, now))
+    user_ids = await repo.user_ids_since(since=cutoff_at(long_window, now))
     logger.info("rebuild-quota --all: %d nguoi co chi tieu trong cua so dai", len(user_ids))
     return [await rebuild_quota(session, redis, user_id=user_id, now=now) for user_id in user_ids]
 
@@ -255,7 +255,7 @@ async def rebuild_all(session: AsyncSession, redis: Redis, *, now: float) -> lis
 # ─────────────────────────── phần trong của file ───────────────────────────
 
 
-async def _nap_lai(
+async def _reload(
     redis: Redis,
     window: Window,
     *,
@@ -277,17 +277,17 @@ async def _nap_lai(
         return Decimal(0)
 
     key = window.key(user_id)
-    tong = Decimal(0)
+    total = Decimal(0)
     for i in range(0, len(entries), ZADD_BATCH):
-        lo: dict[str, float] = {}
+        batch_members: dict[str, float] = {}
         for entry in entries[i : i + ZADD_BATCH]:
             cost = quantize_cost(entry.cost_usd)
-            tong += cost
-            lo[encode_member(entry.id, cost)] = entry.created_at.timestamp()
-        await redis.zadd(key, lo)
+            total += cost
+            batch_members[encode_member(entry.id, cost)] = entry.created_at.timestamp()
+        await redis.zadd(key, batch_members)
 
     # Cùng TTL với `add_to_windows` (nửa (b) của B-156), vì cùng một lý lẽ:
     # mọi member đều có `score <= now`, nên sau đúng một độ dài cửa sổ kể từ
     # lần ghi cuối thì không member nào còn nằm trong cửa sổ.
     await redis.expire(key, window.seconds)
-    return tong
+    return total

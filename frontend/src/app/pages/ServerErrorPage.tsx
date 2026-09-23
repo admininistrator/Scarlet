@@ -36,7 +36,7 @@ import { t } from "../../lib/i18n";
  * dung triet chung ma B-187 vua chung minh la dat: mot man hinh khong noi gi
  * doc ra thanh mot man hinh khong hong.
  */
-function thongDiep(error: unknown): string | null {
+function messageOf(error: unknown): string | null {
   if (error instanceof Error) {
     return error.message;
   }
@@ -47,7 +47,7 @@ function thongDiep(error: unknown): string | null {
 }
 
 export function ServerErrorPage({ error }: { error: unknown }) {
-  const chiTiet = thongDiep(error);
+  const detail = messageOf(error);
 
   return (
     <main className="mx-auto w-full max-w-md px-6 py-16 text-center">
@@ -55,9 +55,9 @@ export function ServerErrorPage({ error }: { error: unknown }) {
       <h2 className="mt-4 text-lg font-semibold">{t("loi.500.tieuDe")}</h2>
       <p className="mt-2 text-sm text-muted">{t("loi.500.moTa")}</p>
 
-      {chiTiet !== null && (
+      {detail !== null && (
         <pre className="mt-4 overflow-x-auto rounded-sm border border-border px-3 py-2 text-left text-xs text-danger-text">
-          {chiTiet}
+          {detail}
         </pre>
       )}
 

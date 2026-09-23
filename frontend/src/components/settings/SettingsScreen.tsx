@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode
 import { useSession } from "../../app/Layout";
 import { toApiError, useResource } from "../../features/admin/useResource";
 import { ApiError, api, type ByokProvider, type ProviderKey } from "../../lib/api";
-import { t, type KhoaChu } from "../../lib/i18n";
+import { t, type TextKey } from "../../lib/i18n";
 import { formatDateTime } from "../admin/format";
 import { useTheme, type Theme } from "../ui/ThemeToggle";
 
@@ -18,7 +18,7 @@ import { useTheme, type Theme } from "../ui/ThemeToggle";
  *
  *   - **Giao dien** — `localStorage` (T-0.10), cung `useTheme()` voi nut o
  *     header: doi o day thi nut kia doi theo.
- *   - **Model mac dinh** — `PUT /settings` qua `usePhien.datModelMacDinh`,
+ *   - **Model mac dinh** — `PUT /settings` qua `useSessionState.changeDefaultModel`,
  *     tuc `GET /auth/me` noi cung mot cau sau F5 (UC-05 dong 4).
  *   - **Khoa rieng (BYOK)** — `/settings/keys*` (§10.5, T-2.14).
  *
@@ -66,7 +66,7 @@ export function SettingsScreen() {
 }
 
 const THEMES: readonly Theme[] = ["light", "dark"];
-const THEME_LABEL: Record<Theme, KhoaChu> = { light: "theme.light", dark: "theme.dark" };
+const THEME_LABEL: Record<Theme, TextKey> = { light: "theme.light", dark: "theme.dark" };
 
 function ThemeSection() {
   const [theme, setTheme] = useTheme();
@@ -101,8 +101,8 @@ function ThemeSection() {
 
 function DefaultModelSection() {
   const session = useSession();
-  const models = useResource(api.danhSachModel);
-  const current = session.hoSo?.default_model ?? null;
+  const models = useResource(api.listModels);
+  const current = session.profile?.default_model ?? null;
   const [value, setValue] = useState<string>(current ?? "");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -118,16 +118,16 @@ function DefaultModelSection() {
     setSaving(true);
     setMessage(null);
     try {
-      await session.datModelMacDinh(value === "" ? null : value);
+      await session.changeDefaultModel(value === "" ? null : value);
       setMessage({ ok: true, text: t("settings.model.saved") });
     } catch (err) {
-      const loi = toApiError(err);
+      const error = toApiError(err);
       setMessage({
         ok: false,
         text:
-          loi.code === "MODEL_UNKNOWN"
+          error.code === "MODEL_UNKNOWN"
             ? t("settings.model.unknown")
-            : `${t("settings.error")}: ${loi.code}`,
+            : `${t("settings.error")}: ${error.code}`,
       });
     } finally {
       setSaving(false);
@@ -206,13 +206,13 @@ function ByokSection() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const banRo = secret;
+    const plaintext = secret;
     // Xoa o nhap TRUOC khi cho server — ban ro khong song qua lan gui nay.
     setSecret("");
     setBusy(true);
     setMessage(null);
     try {
-      await api.putProviderKey(provider, banRo);
+      await api.putProviderKey(provider, plaintext);
       setMessage({ ok: true, text: t("settings.byok.saved") });
       await keys.reload();
     } catch (err) {

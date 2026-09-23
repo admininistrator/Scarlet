@@ -29,19 +29,19 @@ from httpx import ASGITransport, AsyncClient
 from app.core import errors
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
-from app.core.errors import LOI_500, ApiError, ApiErrorCode
+from app.core.errors import INTERNAL_ERROR_MSG, ApiError, ApiErrorCode
 from app.db.models import UserRole, UserStatus
 from app.main import app
 
 
-def _kiem_khung(body: dict[str, Any], code: str) -> None:
+def _check_envelope(body: dict[str, Any], code: str) -> None:
     """Đúng ba trường của §18, không thừa không thiếu, `details` luôn có mặt."""
     assert set(body) == {"error"}, "body lỗi chỉ được có khoá `error`"
-    loi = body["error"]
-    assert set(loi) == {"code", "message", "details"}
-    assert loi["code"] == code
-    assert isinstance(loi["message"], str) and loi["message"]
-    assert isinstance(loi["details"], dict)
+    error = body["error"]
+    assert set(error) == {"code", "message", "details"}
+    assert error["code"] == code
+    assert isinstance(error["message"], str) and error["message"]
+    assert isinstance(error["details"], dict)
 
 
 @pytest_asyncio.fixture
@@ -50,7 +50,7 @@ async def client() -> AsyncIterator[AsyncClient]:
         yield http
 
 
-def _phien() -> dict[str, str]:
+def _session() -> dict[str, str]:
     """Một phiên hợp lệ — điều kiện để chạm được tới lớp validate của FastAPI.
 
     Hai ca `422` dưới đây trước T-3.1c gửi một header danh tính sai kiểu: nhánh
@@ -75,61 +75,61 @@ def _phien() -> dict[str, str]:
 # ═══════════ ba nguồn lỗi KHÔNG đi qua code của mình (§18, B-86) ═══════════
 
 
-async def test_route_khong_ton_tai_van_ra_khung_18(client: AsyncClient) -> None:
+async def test_missing_route_still_gets_18_envelope(client: AsyncClient) -> None:
     """404 do Starlette sinh — không router nào được hỏi tới."""
     resp = await client.get("/api/v1/khong-co-duong-nay")
 
     assert resp.status_code == 404
-    _kiem_khung(resp.json(), ApiErrorCode.NOT_FOUND)
+    _check_envelope(resp.json(), ApiErrorCode.NOT_FOUND)
 
 
-async def test_method_sai_van_ra_khung_18(client: AsyncClient) -> None:
+async def test_wrong_method_still_gets_18_envelope(client: AsyncClient) -> None:
     """405: đường dẫn khớp, method không. Cũng của Starlette."""
     resp = await client.post("/api/v1/models")
 
     assert resp.status_code == 405
-    _kiem_khung(resp.json(), ApiErrorCode.METHOD_NOT_ALLOWED)
+    _check_envelope(resp.json(), ApiErrorCode.METHOD_NOT_ALLOWED)
 
 
-async def test_path_param_sai_kieu_ra_422_co_danh_sach_field(client: AsyncClient) -> None:
+async def test_wrong_type_path_param_422_with_field_list(client: AsyncClient) -> None:
     """`RequestValidationError` → 422 `VALIDATION_ERROR`, `details.fields` có `loc`."""
-    resp = await client.get("/api/v1/messages/khong-phai-uuid/stream", headers=_phien())
+    resp = await client.get("/api/v1/messages/khong-phai-uuid/stream", headers=_session())
 
     assert resp.status_code == 422
-    _kiem_khung(resp.json(), ApiErrorCode.VALIDATION_ERROR)
+    _check_envelope(resp.json(), ApiErrorCode.VALIDATION_ERROR)
     fields = resp.json()["error"]["details"]["fields"]
     assert fields and all(set(f) == {"loc", "msg", "type"} for f in fields)
 
 
-async def test_422_khong_vong_lai_gia_tri_nguoi_dung_gui(client: AsyncClient) -> None:
+async def test_422_does_not_echo_user_value(client: AsyncClient) -> None:
     """§20: `input` của pydantic là chữ người dùng vừa gõ — không được vọng lại.
 
     Ở endpoint này `input` chỉ là một mẩu đường dẫn bịa ra, nhưng cùng handler
     ấy phục vụ `POST /conversations/{id}/messages`, nơi `input` là nội dung
     câu hỏi. Kiểm ở đây vì đây là chỗ kiểm được mà không cần dựng cả một cây.
     """
-    bi_mat = "khong-duoc-vong-lai-chuoi-nay"
+    secret = "khong-duoc-vong-lai-chuoi-nay"
 
-    resp = await client.get(f"/api/v1/messages/{bi_mat}/stream", headers=_phien())
+    resp = await client.get(f"/api/v1/messages/{secret}/stream", headers=_session())
 
     assert resp.status_code == 422
-    assert bi_mat not in resp.text
+    assert secret not in resp.text
 
 
 # ═══════════════════════ hai nguồn lỗi của chính mình ══════════════════════
 
 
-async def test_api_error_giu_ma_rieng_chu_khong_suy_tu_status() -> None:
+async def test_api_error_keeps_own_code_not_derived_from_status() -> None:
     """Hai `ApiError` cùng 404 phải ra HAI mã khác nhau — đó là điểm của B-86."""
-    phu = FastAPI()
-    errors.register(phu)
+    sub_app = FastAPI()
+    errors.register(sub_app)
 
-    @phu.get("/mot")
-    async def _mot() -> None:
+    @sub_app.get("/mot")
+    async def _one() -> None:
         raise ApiError(status.HTTP_404_NOT_FOUND, ApiErrorCode.MESSAGE_NOT_FOUND, "khong co")
 
-    @phu.get("/hai")
-    async def _hai() -> None:
+    @sub_app.get("/hai")
+    async def _two() -> None:
         raise ApiError(
             status.HTTP_404_NOT_FOUND,
             ApiErrorCode.NOT_FOUND,
@@ -137,22 +137,22 @@ async def test_api_error_giu_ma_rieng_chu_khong_suy_tu_status() -> None:
             details={"vi_sao": "kiem details di duoc ra ngoai"},
         )
 
-    async with AsyncClient(transport=ASGITransport(app=phu), base_url="http://t") as http:
-        mot = await http.get("/mot")
-        hai = await http.get("/hai")
+    async with AsyncClient(transport=ASGITransport(app=sub_app), base_url="http://t") as http:
+        first = await http.get("/mot")
+        second = await http.get("/hai")
 
-    _kiem_khung(mot.json(), ApiErrorCode.MESSAGE_NOT_FOUND)
-    _kiem_khung(hai.json(), ApiErrorCode.NOT_FOUND)
-    assert hai.json()["error"]["details"] == {"vi_sao": "kiem details di duoc ra ngoai"}
+    _check_envelope(first.json(), ApiErrorCode.MESSAGE_NOT_FOUND)
+    _check_envelope(second.json(), ApiErrorCode.NOT_FOUND)
+    assert second.json()["error"]["details"] == {"vi_sao": "kiem details di duoc ra ngoai"}
 
 
-async def test_api_error_giu_nguyen_header(client: AsyncClient) -> None:
+async def test_api_error_keeps_headers(client: AsyncClient) -> None:
     """401 kèm `WWW-Authenticate`, 429 kèm `Retry-After` — handler không được nuốt."""
-    phu = FastAPI()
-    errors.register(phu)
+    sub_app = FastAPI()
+    errors.register(sub_app)
 
-    @phu.get("/can-dang-nhap")
-    async def _can_dang_nhap() -> None:
+    @sub_app.get("/can-dang-nhap")
+    async def _needs_login() -> None:
         raise ApiError(
             status.HTTP_401_UNAUTHORIZED,
             ApiErrorCode.UNAUTHENTICATED,
@@ -160,42 +160,42 @@ async def test_api_error_giu_nguyen_header(client: AsyncClient) -> None:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    async with AsyncClient(transport=ASGITransport(app=phu), base_url="http://t") as http:
+    async with AsyncClient(transport=ASGITransport(app=sub_app), base_url="http://t") as http:
         resp = await http.get("/can-dang-nhap")
 
     assert resp.status_code == 401
     assert resp.headers["WWW-Authenticate"] == "Bearer"
-    _kiem_khung(resp.json(), ApiErrorCode.UNAUTHENTICATED)
+    _check_envelope(resp.json(), ApiErrorCode.UNAUTHENTICATED)
 
 
-async def test_ngoai_le_khong_ai_bat_ra_500_dung_khung_va_khong_lo_traceback() -> None:
+async def test_uncaught_exception_500_right_envelope_no_traceback_leak() -> None:
     """§20: `message` là câu cố định, KHÔNG phải `str(exc)`.
 
     `ServerErrorMiddleware` gửi response rồi **ném tiếp** ngoại lệ, nên
     `raise_app_exceptions=False` là bắt buộc để đọc được chính response đó —
     đúng như uvicorn làm ở production (gửi 500 cho client, log traceback).
     """
-    phu = FastAPI()
-    errors.register(phu)
+    sub_app = FastAPI()
+    errors.register(sub_app)
 
-    @phu.get("/no")
+    @sub_app.get("/no")
     async def _no() -> None:
         raise RuntimeError("chi-tiet-noi-that-cua-server")
 
-    transport = ASGITransport(app=phu, raise_app_exceptions=False)
+    transport = ASGITransport(app=sub_app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://t") as http:
         resp = await http.get("/no")
 
     assert resp.status_code == 500
-    _kiem_khung(resp.json(), ApiErrorCode.INTERNAL_ERROR)
-    assert resp.json()["error"]["message"] == LOI_500
+    _check_envelope(resp.json(), ApiErrorCode.INTERNAL_ERROR)
+    assert resp.json()["error"]["message"] == INTERNAL_ERROR_MSG
     assert "chi-tiet-noi-that-cua-server" not in resp.text
 
 
 # ═════════════════ hai bảng mã, hai vai trò (xem docstring errors.py) ══════
 
 
-def test_ma_trung_ten_giua_hai_bang_phai_trung_ca_chuoi() -> None:
+def test_codes_shared_by_name_must_share_string() -> None:
     """`MESSAGE_NOT_FOUND` của HTTP và của SSE nói cùng một chuyện ⇒ cùng chuỗi.
 
     Hai bảng tách nhau là cố ý, nhưng chỗ chúng giao nhau mà lệch chữ thì FE
@@ -203,15 +203,15 @@ def test_ma_trung_ten_giua_hai_bang_phai_trung_ca_chuoi() -> None:
     """
     from app.streaming.events import ErrorCode
 
-    chung = {m.name for m in ApiErrorCode} & {m.name for m in ErrorCode}
-    assert chung, "hai bảng phải còn ít nhất một mã chung, nếu không test này vô nghĩa"
-    for ten in chung:
-        assert ApiErrorCode[ten].value == ErrorCode[ten].value
+    common = {m.name for m in ApiErrorCode} & {m.name for m in ErrorCode}
+    assert common, "hai bảng phải còn ít nhất một mã chung, nếu không test này vô nghĩa"
+    for name in common:
+        assert ApiErrorCode[name].value == ErrorCode[name].value
 
 
-@pytest.mark.parametrize("ma", list(ApiErrorCode))
-def test_moi_ma_la_chu_hoa_gach_duoi(ma: ApiErrorCode) -> None:
+@pytest.mark.parametrize("code", list(ApiErrorCode))
+def test_every_code_is_upper_snake_case(code: ApiErrorCode) -> None:
     """Mã là hằng của protocol, không phải câu tiếng Việt (§7.4 áp cùng luật)."""
-    assert ma.value == ma.name
-    assert ma.value.replace("_", "").isalnum()
-    assert ma.value.isupper()
+    assert code.value == code.name
+    assert code.value.replace("_", "").isalnum()
+    assert code.value.isupper()

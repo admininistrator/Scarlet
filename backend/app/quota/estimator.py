@@ -122,7 +122,7 @@ class Estimate:
     est_max_usd: Decimal
     #: `False` khi model không có giá ở cả hai nguồn của catalog. Không phải
     #: "miễn phí đã xác nhận", mà là "chưa ai điền giá" — `est_max_usd` khi đó
-    #: bằng 0 và quota không trừ. Xem `_canh_bao_model_khong_co_gia`.
+    #: bằng 0 và quota không trừ. Xem `_warn_model_without_price`.
     priced: bool
 
 
@@ -166,7 +166,7 @@ def estimate_from_tokens(model: catalog.ModelEntry, context_tokens: int) -> Esti
     """`est_max` khi đã có sẵn số token của ngữ cảnh.
 
     Là hàm mà `estimate` gọi, và cũng là đường đi của ca lùi trong
-    `_du_toan` — nơi ngữ cảnh dựng không nổi nên con số duy nhất dùng được là
+    `_estimate` — nơi ngữ cảnh dựng không nổi nên con số duy nhất dùng được là
     trần ngân sách §9.6. Hai đường vào, **một** phép nhân tiền.
 
     Giá lấy qua `catalog.effective_pricing()`, hàm duy nhất trả lời câu "model
@@ -176,9 +176,9 @@ def estimate_from_tokens(model: catalog.ModelEntry, context_tokens: int) -> Esti
     """
     cat = catalog.get_catalog()
     est_in = context_tokens + cat.prompt_overhead_tokens(model.id)
-    gia = cat.effective_pricing(model.id)
+    pricing = cat.effective_pricing(model.id)
 
-    if gia is None:
+    if pricing is None:
         return Estimate(
             model_id=model.id,
             est_in_tokens=est_in,
@@ -188,8 +188,8 @@ def estimate_from_tokens(model: catalog.ModelEntry, context_tokens: int) -> Esti
         )
 
     est_max = (
-        Decimal(est_in) * Decimal(str(gia.input_per_1m))
-        + Decimal(model.max_output) * Decimal(str(gia.output_per_1m))
+        Decimal(est_in) * Decimal(str(pricing.input_per_1m))
+        + Decimal(model.max_output) * Decimal(str(pricing.output_per_1m))
     ) / TOKENS_PER_PRICE_UNIT
 
     return Estimate(
@@ -222,12 +222,12 @@ async def check_quota(
         ApiError 503 `SERVICE_UNAVAILABLE`: không hỏi được Redis — xem
             docstring module.
     """
-    du_toan = await _du_toan(session, leaf_id=leaf_id, model=model, user_id=user_id)
+    estimate = await _estimate(session, leaf_id=leaf_id, model=model, user_id=user_id)
     limits = await get_effective_limits(user_id)
 
     now = time.time()
     redis = get_redis()
-    trang_thai: list[WindowState] = []
+    states: list[WindowState] = []
 
     for window in windows():
         try:
@@ -239,7 +239,7 @@ async def check_quota(
             # được Postgres nghĩa là vẫn không biết người này còn bao nhiêu
             # tiền, tức cùng một câu trả lời `503`.
             state = await refill_if_empty(session, redis, state, user_id=user_id, now=now)
-        except Exception as loi:
+        except Exception as exc:
             logger.exception(
                 "khong doc duoc cua so quota %s cua user %s", window.limit_type, user_id
             )
@@ -247,20 +247,20 @@ async def check_quota(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 ApiErrorCode.SERVICE_UNAVAILABLE,
                 "khong kiem duoc han muc chi tieu, hay thu lai",
-            ) from loi
+            ) from exc
 
-        han_muc = limits.for_window(window)
-        if state.spent + du_toan.est_max_usd > han_muc:
-            raise _qua_han_muc(state, du_toan, han_muc=han_muc, now=now)
-        trang_thai.append(state)
+        limit_usd = limits.for_window(window)
+        if state.spent + estimate.est_max_usd > limit_usd:
+            raise _over_limit(state, estimate, limit_usd=limit_usd, now=now)
+        states.append(state)
 
-    return _warning(trang_thai, limits)
+    return _warning(states, limits)
 
 
 # ─────────────────────────── phần trong của file ───────────────────────────
 
 
-async def _du_toan(
+async def _estimate(
     session: AsyncSession,
     *,
     leaf_id: uuid.UUID,
@@ -281,30 +281,30 @@ async def _du_toan(
     try:
         messages = await context.build(session, leaf_id, model, user_id=user_id)
     except context.ContextError:
-        tran = context.token_budget(model)
+        cap = context.token_budget(model)
         logger.warning(
             "khong dung duoc ngu canh cua leaf %s de uoc tinh — dung tran ngan sach "
             "%d token (§9.6) cho du toan",
             leaf_id,
-            tran,
+            cap,
         )
-        return estimate_from_tokens(model, tran)
+        return estimate_from_tokens(model, cap)
     return estimate(model, messages)
 
 
-def _qua_han_muc(
-    state: WindowState, du_toan: Estimate, *, han_muc: Decimal, now: float
+def _over_limit(
+    state: WindowState, estimate: Estimate, *, limit_usd: Decimal, now: float
 ) -> ApiError:
     """`429` của UC-07 dòng 3, kèm `retry_after` tính theo §10.3."""
-    can_nha = state.spent + du_toan.est_max_usd - han_muc
-    retry_after = state.retry_after_s(need_to_free=can_nha, now=now)
+    to_release = state.spent + estimate.est_max_usd - limit_usd
+    retry_after = state.retry_after_s(need_to_free=to_release, now=now)
 
     logger.warning(
         "quota %s cua user het: da tieu %s + du toan %s > han muc %s (retry_after=%s)",
         state.window.limit_type.value,
         state.spent,
-        du_toan.est_max_usd,
-        han_muc,
+        estimate.est_max_usd,
+        limit_usd,
         retry_after,
     )
     return ApiError(
@@ -314,9 +314,9 @@ def _qua_han_muc(
         details={
             "limit_type": state.window.limit_type.value,
             "retry_after": retry_after,
-            "limit_usd": str(han_muc),
+            "limit_usd": str(limit_usd),
             "spent_usd": str(state.spent),
-            "estimate_usd": str(du_toan.est_max_usd),
+            "estimate_usd": str(estimate.est_max_usd),
         },
         # `Retry-After` chỉ đặt khi có một con số THẬT — xem
         # `WindowState.retry_after_s`.
@@ -324,7 +324,7 @@ def _qua_han_muc(
     )
 
 
-def _warning(trang_thai: list[WindowState], limits: EffectiveLimits) -> QuotaWarning | None:
+def _warning(states: list[WindowState], limits: EffectiveLimits) -> QuotaWarning | None:
     """Cửa sổ **chặt nhất** còn dưới ngưỡng cảnh báo, hoặc `None`.
 
     Một cảnh báo chứ không phải hai: người dùng cần biết "sắp hết" và cần một
@@ -334,24 +334,24 @@ def _warning(trang_thai: list[WindowState], limits: EffectiveLimits) -> QuotaWar
     Tier có hạn mức `0` thì bỏ qua — không có phép chia nào, và người đó vốn
     đã bị chặn ở vòng trên trừ khi model không có giá.
     """
-    ung_vien: list[QuotaWarning] = []
-    for state in trang_thai:
-        han_muc = limits.for_window(state.window)
-        if han_muc <= 0:
+    candidates: list[QuotaWarning] = []
+    for state in states:
+        limit_usd = limits.for_window(state.window)
+        if limit_usd <= 0:
             continue
-        con_lai = max(Decimal(0), han_muc - state.spent)
-        phan_tram = int(con_lai * 100 / han_muc)
-        if phan_tram > settings.QUOTA_WARN_REMAINING_PCT:
+        remaining = max(Decimal(0), limit_usd - state.spent)
+        percent = int(remaining * 100 / limit_usd)
+        if percent > settings.QUOTA_WARN_REMAINING_PCT:
             continue
-        ung_vien.append(
+        candidates.append(
             QuotaWarning(
                 limit_type=state.window.limit_type,
-                limit_usd=han_muc,
+                limit_usd=limit_usd,
                 spent_usd=state.spent,
-                remaining_usd=con_lai,
-                remaining_pct=phan_tram,
+                remaining_usd=remaining,
+                remaining_pct=percent,
             )
         )
-    if not ung_vien:
+    if not candidates:
         return None
-    return min(ung_vien, key=lambda w: w.remaining_pct)
+    return min(candidates, key=lambda w: w.remaining_pct)

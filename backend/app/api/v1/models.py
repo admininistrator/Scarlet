@@ -29,7 +29,7 @@ router = APIRouter(tags=["models"])
 #: `Catalog` validate quan hệ ấy lúc nạp (T-0.7). Giá trị này chỉ để `.get()`
 #: có một đường lui không ném — hỏng về phía "chọn được", vì chặn thật nằm ở
 #: lượt gọi model chứ không ở picker.
-_KHA_DUNG = ProviderStatus(available=True, reason=None)
+_AVAILABLE = ProviderStatus(available=True, reason=None)
 
 
 class PublicModel(BaseModel):
@@ -59,7 +59,7 @@ class PublicModel(BaseModel):
 @router.get("/models", response_model=list[PublicModel])
 async def list_models() -> list[PublicModel]:
     cat = catalog.get_catalog()
-    trang_thai = await provider_statuses()
+    statuses = await provider_statuses()
     enabled = sorted((m for m in cat.models if m.enabled), key=lambda m: m.order)
     return [
         PublicModel(
@@ -72,8 +72,8 @@ async def list_models() -> list[PublicModel]:
             max_output=m.max_output,
             default=m.default,
             badge=m.badge,
-            available=trang_thai.get(m.provider, _KHA_DUNG).available,
-            unavailable_reason=trang_thai.get(m.provider, _KHA_DUNG).reason,
+            available=statuses.get(m.provider, _AVAILABLE).available,
+            unavailable_reason=statuses.get(m.provider, _AVAILABLE).reason,
         )
         for m in enabled
     ]

@@ -1,6 +1,6 @@
-import type { MessageRa } from "../../lib/api";
+import type { MessageOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
-import { chiSoHienThi, coTheLui, coTheToi } from "../../lib/tree";
+import { displayIndex, canGoBack, canGoForward } from "../../lib/tree";
 import { IconButton } from "./IconButton";
 
 /**
@@ -34,7 +34,7 @@ import { IconButton } from "./IconButton";
  * `sibling_index`/`sibling_count` do SQL tinh (`get_path`, §8.3) va di theo
  * tung node. Bon cau hoi ma component nay phai tra loi — hien so may, con
  * lui duoc khong, con toi duoc khong, co nhanh khong — deu goi ham cua
- * `tree.ts`, va `chiSoHienThi()` la CHO DUY NHAT cong 1 (B-60, NQ-33). Viet
+ * `tree.ts`, va `displayIndex()` la CHO DUY NHAT cong 1 (B-60, NQ-33). Viet
  * `node.sibling_index + 1` o day la mo duong cho mot cho quen, va mot cho
  * quen thi man hinh hien `‹ 1/2 ›` cho ca hai nhanh ma khong test nao do.
  *
@@ -44,40 +44,40 @@ import { IconButton } from "./IconButton";
  */
 export function BranchNav({
   node,
-  nhan,
-  onChuyenNhanh,
+  label,
+  onSwitchBranch,
 }: {
-  node: MessageRa;
-  nhan: string;
-  /** `-1` lui mot anh em, `+1` toi mot anh em. Xem `useChat.chuyenNhanh`. */
-  onChuyenNhanh: (huong: -1 | 1) => void;
+  node: MessageOut;
+  label: string;
+  /** `-1` lui mot anh em, `+1` toi mot anh em. Xem `useChat.switchBranch`. */
+  onSwitchBranch: (direction: -1 | 1) => void;
 }) {
   return (
-    <div role="group" aria-label={nhan} className="flex items-center">
+    <div role="group" aria-label={label} className="flex items-center">
       <IconButton
         label={t("chat.branchPrev")}
         glyph="‹"
-        disabled={!coTheLui(node)}
-        onClick={() => onChuyenNhanh(-1)}
+        disabled={!canGoBack(node)}
+        onClick={() => onSwitchBranch(-1)}
       />
       {/*
         Ban T-HD3: `tabular` nen be rong khong nhay khi qua 10 nhanh, va
         `min-w-10` (40 px) la con so cua chinh ban ve.
       */}
       <span className="tabular min-w-10 text-center text-sm text-muted">
-        {chiSoHienThi(node)} / {node.sibling_count}
+        {displayIndex(node)} / {node.sibling_count}
       </span>
       <IconButton
         label={t("chat.branchNext")}
         glyph="›"
-        disabled={!coTheToi(node)}
-        onClick={() => onChuyenNhanh(1)}
+        disabled={!canGoForward(node)}
+        onClick={() => onSwitchBranch(1)}
       />
     </div>
   );
 }
 
 /** Vach ngan hai nhom cua ban T-HD3: dieu huong nhanh | hanh dong. */
-export function VachNgan() {
+export function Divider() {
   return <span aria-hidden="true" className="mx-1 h-6 w-px bg-border" />;
 }

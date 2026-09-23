@@ -14,12 +14,12 @@
  *
  * T-3.2 chuyen "mac dinh theo he dieu hanh" tu doan script trong `index.html`
  * vao chinh component. Trong jsdom KHONG co `index.html`, nen bon ca duoi day
- * do dung phan vua chuyen — va neu ai do go `themeBanDau()` ve lai kieu doc
+ * do dung phan vua chuyen — va neu ai do go `initialTheme()` ve lai kieu doc
  * thuoc tinh `data-theme`, chung do het mot luot.
  *
  * `window.matchMedia` khong ton tai trong jsdom, nen moi ca phai tu dung no
  * len bang `vi.stubGlobal`. Ca cuoi cung KHONG dung — do chinh la phep do cho
- * `?.` trong `themeHeDieuHanh()`.
+ * `?.` trong `systemTheme()`.
  */
 
 import { render, screen } from "@testing-library/react";
@@ -29,11 +29,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeToggle } from "./ThemeToggle";
 
 /** Dung `window.matchMedia` gia tra `matches` cho dung truy van theme toi. */
-function gaHeDieuHanh(thichToi: boolean) {
+function fakeOsTheme(prefersDark: boolean) {
   vi.stubGlobal(
     "matchMedia",
     vi.fn((query: string) => ({
-      matches: thichToi && query === "(prefers-color-scheme: dark)",
+      matches: prefersDark && query === "(prefers-color-scheme: dark)",
       media: query,
       onchange: null,
       addEventListener: vi.fn(),
@@ -56,7 +56,7 @@ afterEach(() => {
 
 describe("ThemeToggle", () => {
   it("mac dinh la sang, va nut moi sang che do toi", () => {
-    gaHeDieuHanh(false);
+    fakeOsTheme(false);
 
     render(<ThemeToggle />);
 
@@ -65,37 +65,37 @@ describe("ThemeToggle", () => {
   });
 
   it("bam mot lan thi doi sang toi va ghi localStorage", async () => {
-    gaHeDieuHanh(false);
-    const nguoiDung = userEvent.setup();
+    fakeOsTheme(false);
+    const user = userEvent.setup();
     render(<ThemeToggle />);
 
-    await nguoiDung.click(screen.getByRole("button"));
+    await user.click(screen.getByRole("button"));
 
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(localStorage.getItem("scarlet-theme")).toBe("dark");
   });
 
   it("bam hai lan thi ve cho cu", async () => {
-    gaHeDieuHanh(false);
-    const nguoiDung = userEvent.setup();
+    fakeOsTheme(false);
+    const user = userEvent.setup();
     render(<ThemeToggle />);
 
-    await nguoiDung.click(screen.getByRole("button"));
-    await nguoiDung.click(screen.getByRole("button"));
+    await user.click(screen.getByRole("button"));
+    await user.click(screen.getByRole("button"));
 
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
     expect(localStorage.getItem("scarlet-theme")).toBe("light");
   });
 
   it("localStorage bi chan (che do rieng tu) thi van doi duoc giao dien", async () => {
-    gaHeDieuHanh(false);
+    fakeOsTheme(false);
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("bi chan", "SecurityError");
     });
-    const nguoiDung = userEvent.setup();
+    const user = userEvent.setup();
     render(<ThemeToggle />);
 
-    await nguoiDung.click(screen.getByRole("button"));
+    await user.click(screen.getByRole("button"));
 
     // Giao dien van doi — day la toan bo y nghia cua `try/catch` trong component.
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
@@ -104,7 +104,7 @@ describe("ThemeToggle", () => {
   // ── T-3.2: mac dinh lan dau doc `prefers-color-scheme` ───────────────────
 
   it("chua ai bam gi + he dieu hanh dang toi => toi", () => {
-    gaHeDieuHanh(true);
+    fakeOsTheme(true);
 
     render(<ThemeToggle />);
 
@@ -112,7 +112,7 @@ describe("ThemeToggle", () => {
   });
 
   it("chua ai bam gi + he dieu hanh dang sang => sang", () => {
-    gaHeDieuHanh(false);
+    fakeOsTheme(false);
 
     render(<ThemeToggle />);
 
@@ -121,7 +121,7 @@ describe("ThemeToggle", () => {
 
   it("lua chon da luu THANG he dieu hanh", () => {
     localStorage.setItem("scarlet-theme", "light");
-    gaHeDieuHanh(true);
+    fakeOsTheme(true);
 
     render(<ThemeToggle />);
 
@@ -134,7 +134,7 @@ describe("ThemeToggle", () => {
     // tinh lai tu localStorage + he dieu hanh, nen mot thuoc tinh mau thuan
     // voi ca hai nguon do bi ghi de chu khong duoc tin.
     document.documentElement.setAttribute("data-theme", "dark");
-    gaHeDieuHanh(false);
+    fakeOsTheme(false);
 
     render(<ThemeToggle />);
 

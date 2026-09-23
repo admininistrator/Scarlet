@@ -42,7 +42,7 @@ Lõi trả `None` (⇒ system key) ở **bốn** ca, và cả bốn đều là c
 lượt này sẽ đi bằng tiền của người vận hành, nên nó phải qua cửa quota.
 
 * provider không có trong catalog — không thể xảy ra hôm nay
-  (`_provider_phai_ton_tai` chặn lúc nạp), giữ vì nó là điều kiện tiên quyết
+  (`_provider_must_exist` chặn lúc nạp), giữ vì nó là điều kiện tiên quyết
   của ba dòng dưới;
 * `byok_supported: false` — người vận hành đã nói provider này không dùng
   khoá riêng; một hàng còn sót lại từ trước khi cờ bị tắt **không** được
@@ -70,7 +70,7 @@ không có chỗ nào để bản rõ chui qua — nó trả về một `KeySour
 
 Bản rõ vẫn tồn tại trong khung của lõi khi `api` gọi, và **phải** vậy: câu hỏi
 "khoá này có dùng được không" chỉ trả lời được bằng cách giải mã thử. Đó đúng
-là điều `GET /settings/keys` đã làm từ T-2.14 (`_doc_duoc`), cùng một lý lẽ và
+là điều `GET /settings/keys` đã làm từ T-2.14 (`_is_readable`), cùng một lý lẽ và
 cùng một cái giá: một phép AES-GCM cho mỗi lần hỏi.
 """
 

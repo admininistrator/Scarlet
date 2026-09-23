@@ -36,7 +36,7 @@ from app.db.models import UserRole, UserStatus
 _ALGORITHM = "HS256"
 
 
-def _token_voi_moc(*, iat: datetime, exp: datetime, user_id: uuid.UUID) -> str:
+def _token_with_times(*, iat: datetime, exp: datetime, user_id: uuid.UUID) -> str:
     """Ký thẳng bằng PyJWT để đặt `iat`/`exp` vào đúng chỗ muốn đo.
 
     `encode_access_token` cố tình không nhận `iat` — nó luôn dùng `now()`, và
@@ -55,8 +55,8 @@ def _token_voi_moc(*, iat: datetime, exp: datetime, user_id: uuid.UUID) -> str:
     return jwt.encode(payload, settings.JWT_SECRET.get_secret_value(), algorithm=_ALGORITHM)
 
 
-@pytest.mark.parametrize("lui_giay", [1, 5, 60, 3600])
-def test_iat_o_tuong_lai_van_doc_duoc(lui_giay: int) -> None:
+@pytest.mark.parametrize("back_seconds", [1, 5, 60, 3600])
+def test_future_iat_is_still_readable(back_seconds: int) -> None:
     """Đồng hồ lùi `lui_giay` giây giữa lúc ký và lúc đọc → token VẪN hợp lệ.
 
     Đây là ca đã làm bộ test đỏ ngẫu nhiên trước B-194. Bốn mốc chứ không một:
@@ -65,8 +65,8 @@ def test_iat_o_tuong_lai_van_doc_duoc(lui_giay: int) -> None:
     """
     now = datetime.now(UTC)
     user_id = uuid.uuid4()
-    token = _token_voi_moc(
-        iat=now + timedelta(seconds=lui_giay),
+    token = _token_with_times(
+        iat=now + timedelta(seconds=back_seconds),
         exp=now + timedelta(minutes=15),
         user_id=user_id,
     )
@@ -79,15 +79,15 @@ def test_iat_o_tuong_lai_van_doc_duoc(lui_giay: int) -> None:
     assert claims.issued_at > now
 
 
-def test_exp_da_qua_van_bi_tu_choi() -> None:
+def test_past_exp_is_still_rejected() -> None:
     """Vế thứ hai, và là vế dễ mất nhất: tắt `verify_iat` KHÔNG được đụng `exp`.
 
     Nếu ai đó đổi cách sửa sang `leeway=N` thì test này vẫn xanh với `N` nhỏ —
-    nên nó đi cùng `test_exp_vua_qua_mot_giay_da_bi_tu_choi` ngay dưới, nơi
+    nên nó đi cùng `test_exp_one_second_past_is_rejected` ngay dưới, nơi
     biên được siết tới một giây.
     """
     now = datetime.now(UTC)
-    token = _token_voi_moc(
+    token = _token_with_times(
         iat=now - timedelta(minutes=30),
         exp=now - timedelta(minutes=15),
         user_id=uuid.uuid4(),
@@ -97,14 +97,14 @@ def test_exp_da_qua_van_bi_tu_choi() -> None:
         decode_access_token(token)
 
 
-def test_exp_vua_qua_mot_giay_da_bi_tu_choi() -> None:
+def test_exp_one_second_past_is_rejected() -> None:
     """`exp` giữ nghĩa TUYỆT ĐỐI: quá một giây là hết, không có vùng đệm nào.
 
     Đây là phép kiểm ngược của chính B-194: bản sửa bằng `leeway=5` sẽ làm test
     này **đỏ**, và đó đúng là lý do nó không được chọn.
     """
     now = datetime.now(UTC)
-    token = _token_voi_moc(
+    token = _token_with_times(
         iat=now - timedelta(minutes=1),
         exp=now - timedelta(seconds=1),
         user_id=uuid.uuid4(),
@@ -114,7 +114,7 @@ def test_exp_vua_qua_mot_giay_da_bi_tu_choi() -> None:
         decode_access_token(token)
 
 
-def test_chu_ky_sai_van_bi_tu_choi() -> None:
+def test_bad_signature_is_still_rejected() -> None:
     """Tắt một phép kiểm không được làm hở phép kiểm nào khác."""
     now = datetime.now(UTC)
     payload = {
@@ -134,7 +134,7 @@ def test_chu_ky_sai_van_bi_tu_choi() -> None:
         decode_access_token(token)
 
 
-def test_token_that_vua_ky_xong_doc_duoc_ngay() -> None:
+def test_freshly_signed_token_is_readable_immediately() -> None:
     """Đường đi bình thường không đổi — `encode` rồi `decode` ngay."""
     user_id = uuid.uuid4()
 

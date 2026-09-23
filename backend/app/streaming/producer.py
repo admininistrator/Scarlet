@@ -102,8 +102,8 @@ class StreamProducer:
         day: consumer cua T-1.7 co mot duong dung lai event tu Postgres va
         phai ra dung chuoi ay.
         """
-        loai, data = encode_event(event)
-        raw = await self._redis.xadd(self._key, {FIELD_TYPE: loai, FIELD_DATA: data})
+        kind, data = encode_event(event)
+        raw = await self._redis.xadd(self._key, {FIELD_TYPE: kind, FIELD_DATA: data})
         return raw.decode() if isinstance(raw, bytes) else str(raw)
 
     async def expire(self) -> bool:

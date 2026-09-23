@@ -1,4 +1,4 @@
-import type { AdminUserRa } from "../../lib/api";
+import type { AdminUserOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { ScreenTitle } from "./adminUi";
 import { formatDateTime } from "./format";
@@ -20,7 +20,7 @@ export function ApprovalsScreen({
   busyId,
   onDecide,
 }: {
-  signups: AdminUserRa[];
+  signups: AdminUserOut[];
   busyId: string | null;
   onDecide: (userId: string, decision: "approve" | "reject") => void;
 }) {

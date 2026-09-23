@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router";
 import { useSession } from "../../app/Layout";
 import { toApiError, useResource } from "../../features/admin/useResource";
 import { ApiError, api } from "../../lib/api";
-import { t, type KhoaChu } from "../../lib/i18n";
+import { t, type TextKey } from "../../lib/i18n";
 import { ApprovalsScreen } from "./ApprovalsScreen";
 import { AuditScreen } from "./AuditScreen";
 import { CostScreen } from "./CostScreen";
@@ -45,7 +45,7 @@ import { UsersScreen } from "./UsersScreen";
 
 export type AdminScreenName = "approvals" | "users" | "cost" | "models" | "system" | "audit";
 const SCREENS: readonly AdminScreenName[] = ["approvals", "users", "cost", "models", "system", "audit"];
-const NAV_LABEL: Record<AdminScreenName, KhoaChu> = {
+const NAV_LABEL: Record<AdminScreenName, TextKey> = {
   approvals: "admin.nav.approvals",
   users: "admin.nav.users",
   cost: "admin.nav.cost",
@@ -65,7 +65,7 @@ export function AdminScreen() {
   const screen = screenFrom(params.get(SCREEN_PARAM));
 
   const loadPending = useCallback(
-    async () => (await api.quanTriDanhSachUser("pending_approval")).users,
+    async () => (await api.adminListUsers("pending_approval")).users,
     [],
   );
   const pending = useResource(loadPending);
@@ -76,7 +76,7 @@ export function AdminScreen() {
     setDeciding(userId);
     setDecideError(null);
     try {
-      await api.quanTriDoiTrangThai(userId, decision);
+      await api.adminChangeStatus(userId, decision);
     } catch (e) {
       setDecideError(toApiError(e));
     } finally {
@@ -145,7 +145,7 @@ export function AdminScreen() {
             )}
           </>
         )}
-        {screen === "users" && <UsersScreen currentUserId={session.nguoiDung?.id ?? null} />}
+        {screen === "users" && <UsersScreen currentUserId={session.user?.id ?? null} />}
         {screen === "cost" && <CostScreen />}
         {screen === "models" && <ModelsScreen />}
         {screen === "system" && <SystemScreen />}

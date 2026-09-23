@@ -1,4 +1,4 @@
-.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme
+.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme check-identifiers
 
 COMPOSE := docker compose --profile core --profile tools
 
@@ -50,7 +50,7 @@ bench:
 audit:
 	docker compose --profile core --profile dev run --rm -T -e DUONG="$(DUONG)" audit
 
-lint: check-theme
+lint: check-theme check-identifiers
 	cd backend && .venv/bin/ruff check .
 	cd backend && .venv/bin/mypy app
 	$(COMPOSE) exec -T web pnpm typecheck
@@ -68,6 +68,13 @@ sync-theme:
 check-theme:
 	@cmp -s $(THEME_SRC) $(THEME_DST) || { echo "check-theme: $(THEME_DST) lech $(THEME_SRC) — sua o design/ roi chay 'make sync-theme'"; exit 1; }
 	@echo "check-theme: OK"
+
+# T-S.1 / NQ-109 — dinh danh tieng Viet khong dau (bien, ham, lop, prop, ten
+# file) khong duoc quay lai `backend/`, `frontend/src/`, `scripts/`. Ten nao
+# la hop dong (khoa JSON, co CLI, khoa config) thi vao `_ALLOWED` cua chinh
+# script, kem ly do. Bang doi ten cu -> moi: `scripts/renames-T-S.1.tsv`.
+check-identifiers:
+	backend/.venv/bin/python scripts/check_identifiers.py
 
 fmt:
 	cd backend && .venv/bin/ruff format .

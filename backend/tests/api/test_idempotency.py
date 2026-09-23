@@ -30,7 +30,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.v1.messages import TEN_ROUTE_TAO_MESSAGE
+from app.api.v1.messages import CREATE_MESSAGE_ROUTE_NAME
 from app.config.settings import settings
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
@@ -49,47 +49,47 @@ from app.main import app
 #: Kiểu thật là `tests.api.conftest.FakeIdempotencyRedis`, nhưng `tests/` không
 #: phải package nên không import được tên đó ở đây (xem docstring conftest).
 #: `make lint` chỉ chạy mypy trên `app/`, nên bí danh này không giấu gì cả.
-RedisGia = Any
+FakeRedis = Any
 
-DUONG_DAN = "/api/v1/conversations/{}/messages"
-DUONG_DAN_HUY = "/api/v1/messages/{}/cancel"
-DUONG_DAN_RETRY = "/api/v1/messages/{}/retry"
+PATH = "/api/v1/conversations/{}/messages"
+CANCEL_PATH = "/api/v1/messages/{}/cancel"
+RETRY_PATH = "/api/v1/messages/{}/retry"
 
 
-class ArqGia:
+class FakeArq:
     """Pool arq giả — xem `tests/api/test_messages.py` cho lý do phải có."""
 
     def __init__(self) -> None:
-        self.da_day: list[tuple[str, tuple[Any, ...]]] = []
-        self.no_ra = False
+        self.pushed: list[tuple[str, tuple[Any, ...]]] = []
+        self.raises = False
 
-    async def enqueue_job(self, ten: str, *args: Any, **_: Any) -> object | None:
-        if self.no_ra:
+    async def enqueue_job(self, name: str, *args: Any, **_: Any) -> object | None:
+        if self.raises:
             raise ConnectionError("redis chet giua chung (gia lap)")
-        self.da_day.append((ten, args))
+        self.pushed.append((name, args))
         return object()
 
 
 @pytest.fixture
-def _db_cua_test(
+def _db_for_tests(
     monkeypatch: pytest.MonkeyPatch, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     monkeypatch.setattr("app.db.session.get_sessionmaker", lambda: session_factory)
 
 
 @pytest_asyncio.fixture
-async def arq_gia(monkeypatch: pytest.MonkeyPatch) -> ArqGia:
-    gia = ArqGia()
+async def fake_arq(monkeypatch: pytest.MonkeyPatch) -> FakeArq:
+    fake = FakeArq()
 
-    async def _pool() -> ArqGia:
-        return gia
+    async def _pool() -> FakeArq:
+        return fake
 
     monkeypatch.setattr("app.api.v1.messages.get_arq_pool", _pool)
-    return gia
+    return fake
 
 
 @pytest.fixture
-def _cancel_redis(monkeypatch: pytest.MonkeyPatch, idempotency_redis: RedisGia) -> None:
+def _cancel_redis(monkeypatch: pytest.MonkeyPatch, idempotency_redis: FakeRedis) -> None:
     """`POST /messages/{id}/cancel` đặt cờ `cancel:{id}` qua `messages.get_redis`.
 
     Đó là một client Redis **khác** với client của `core/idempotency.py` (xem
@@ -108,7 +108,7 @@ async def client() -> AsyncIterator[AsyncClient]:
         yield http
 
 
-async def _tao_hoi_thoai(
+async def _create_conversation(
     session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
 ) -> Conversation:
     async with session_factory() as session:
@@ -117,7 +117,7 @@ async def _tao_hoi_thoai(
         return conversation
 
 
-async def _dem_message(
+async def _count_messages(
     session_factory: async_sessionmaker[AsyncSession], conversation_id: uuid.UUID
 ) -> int:
     async with session_factory() as session:
@@ -129,7 +129,7 @@ async def _dem_message(
         return int((await session.execute(stmt)).scalar_one())
 
 
-def _phien(user_id: uuid.UUID) -> dict[str, str]:
+def _session(user_id: uuid.UUID) -> dict[str, str]:
     """Header `Cookie` mang phiên thật (§11.2) của `user_id` — T-3.1c.
 
     Trả một `dict` để truyền vào `headers=` của **từng request**, đúng chỗ mà
@@ -157,7 +157,7 @@ def _phien(user_id: uuid.UUID) -> dict[str, str]:
     return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
-def _khoa(key: str | None = None) -> dict[str, str]:
+def _idem_header(key: str | None = None) -> dict[str, str]:
     """Header `Idempotency-Key`, hoặc rỗng.
 
     Tách khỏi `_phien` từ T-3.1c: danh tính nay đi bằng **cookie**, còn khoá
@@ -170,23 +170,23 @@ def _khoa(key: str | None = None) -> dict[str, str]:
 # ══════════════════ định dạng khoá — §11.4 dòng đầu tiên ═══════════════════
 
 
-def test_khoa_dung_dinh_dang_cua_11_4() -> None:
+def test_key_follows_11_4_format() -> None:
     """`idem:{user_id}:{route}:{idempotency_key}`, không phải một biến thể."""
     user_id = uuid.uuid4()
 
-    key = build_key(user_id, TEN_ROUTE_TAO_MESSAGE, "abc")
+    key = build_key(user_id, CREATE_MESSAGE_ROUTE_NAME, "abc")
 
-    assert key == f"{IDEM_PREFIX}{user_id}:{TEN_ROUTE_TAO_MESSAGE}:abc"
+    assert key == f"{IDEM_PREFIX}{user_id}:{CREATE_MESSAGE_ROUTE_NAME}:abc"
 
 
-def test_hai_user_cung_key_client_la_hai_khoa() -> None:
+def test_two_users_same_client_key_are_two_keys() -> None:
     """`{user_id}` đứng đầu khoá vì đúng lý do này (§20: không rò sang nhau)."""
-    assert build_key(uuid.uuid4(), TEN_ROUTE_TAO_MESSAGE, "abc") != build_key(
-        uuid.uuid4(), TEN_ROUTE_TAO_MESSAGE, "abc"
+    assert build_key(uuid.uuid4(), CREATE_MESSAGE_ROUTE_NAME, "abc") != build_key(
+        uuid.uuid4(), CREATE_MESSAGE_ROUTE_NAME, "abc"
     )
 
 
-def test_hai_route_cung_key_client_la_hai_khoa() -> None:
+def test_two_routes_same_client_key_are_two_keys() -> None:
     assert build_key(uuid.uuid4(), "create_message", "abc") != build_key(
         uuid.uuid4(), "cancel_message", "abc"
     )
@@ -195,12 +195,12 @@ def test_hai_route_cung_key_client_la_hai_khoa() -> None:
 # ════════════════ DoD dòng 1 (S5) — hai request SONG SONG ══════════════════
 
 
-async def test_hai_request_song_song_cung_key_chi_tao_mot_message(
+async def test_two_parallel_requests_same_key_create_one_message(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD dòng 1 / S5: 2 request song song ⇒ 1 tạo mới, 1 là `409` hoặc bản
     phát lại; DB có **đúng 2** message (một cặp user+assistant của MỘT lượt).
@@ -209,36 +209,36 @@ async def test_hai_request_song_song_cung_key_chi_tao_mot_message(
     hai hàng (user + assistant `queued`), nên con số kiểm ở đây là 2. Không có
     idempotency thì nó là 4.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    phien = _phien(user_a)
-    khoa = _khoa("mot-lan-soan-thao")
-    duong_dan = DUONG_DAN.format(conversation.id)
+    conversation = await _create_conversation(session_factory, user_a)
+    session = _session(user_a)
+    idem_key = _idem_header("mot-lan-soan-thao")
+    path = PATH.format(conversation.id)
 
-    mot, hai = await asyncio.gather(
-        client.post(duong_dan, headers=phien | khoa, json={"content": "a"}),
-        client.post(duong_dan, headers=phien | khoa, json={"content": "a"}),
+    first, second = await asyncio.gather(
+        client.post(path, headers=session | idem_key, json={"content": "a"}),
+        client.post(path, headers=session | idem_key, json={"content": "a"}),
     )
 
-    ma = sorted([mot.status_code, hai.status_code])
-    assert ma in ([202, 202], [202, 409]), (mot.text, hai.text)
-    if ma == [202, 202]:
+    code = sorted([first.status_code, second.status_code])
+    assert code in ([202, 202], [202, 409]), (first.text, second.text)
+    if code == [202, 202]:
         # Request thứ hai tới sau khi thứ nhất đã xong ⇒ bản phát lại.
-        assert mot.json() == hai.json()
+        assert first.json() == second.json()
     else:
-        thua = mot if mot.status_code == 409 else hai
-        assert thua.json()["error"]["code"] == "IN_PROGRESS"
+        loser = first if first.status_code == 409 else second
+        assert loser.json()["error"]["code"] == "IN_PROGRESS"
 
-    assert await _dem_message(session_factory, conversation.id) == 2
-    assert len(arq_gia.da_day) == 1
+    assert await _count_messages(session_factory, conversation.id) == 2
+    assert len(fake_arq.pushed) == 1
 
 
-async def test_dang_chay_tra_409_in_progress(
+async def test_in_flight_is_409_in_progress(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    idempotency_redis: RedisGia,
+    idempotency_redis: FakeRedis,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """§11.4: `state == in_progress` ⇒ `409 {code:"IN_PROGRESS"}`.
 
@@ -246,31 +246,31 @@ async def test_dang_chay_tra_409_in_progress(
     ca "chồng lấn thật" đã có test trên, còn ca này phải **xác định** để mã lỗi
     được khẳng định chứ không phải "một trong hai khả năng".
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    key = build_key(user_a, TEN_ROUTE_TAO_MESSAGE, "dang-chay")
+    conversation = await _create_conversation(session_factory, user_a)
+    key = build_key(user_a, CREATE_MESSAGE_ROUTE_NAME, "dang-chay")
     idempotency_redis.store[key] = RECORD_IN_PROGRESS
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a) | _khoa("dang-chay"),
+        PATH.format(conversation.id),
+        headers=_session(user_a) | _idem_header("dang-chay"),
         json={"content": "a"},
     )
 
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "IN_PROGRESS"
-    assert await _dem_message(session_factory, conversation.id) == 0
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation.id) == 0
+    assert fake_arq.pushed == []
 
 
 # ═══════ DoD dòng 2 — gửi lại sau khi xong: cùng response, không thêm dòng ══
 
 
-async def test_gui_lai_sau_khi_xong_tra_cung_response(
+async def test_resend_after_completion_returns_same_response(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD dòng 2: cùng response, DB **không** thêm dòng, job **không** thêm.
 
@@ -278,30 +278,30 @@ async def test_gui_lai_sau_khi_xong_tra_cung_response(
     lưu" của §11.4 (xem docstring `app/core/idempotency.py`), và
     `Idempotent-Replay: true` là thứ phân biệt hai lần gọi.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    phien = _phien(user_a)
-    khoa = _khoa("khoa-xong-roi")
-    duong_dan = DUONG_DAN.format(conversation.id)
+    conversation = await _create_conversation(session_factory, user_a)
+    session = _session(user_a)
+    idem_key = _idem_header("khoa-xong-roi")
+    path = PATH.format(conversation.id)
 
-    mot = await client.post(duong_dan, headers=phien | khoa, json={"content": "a"})
-    hai = await client.post(duong_dan, headers=phien | khoa, json={"content": "a"})
+    first = await client.post(path, headers=session | idem_key, json={"content": "a"})
+    second = await client.post(path, headers=session | idem_key, json={"content": "a"})
 
-    assert mot.status_code == 202
-    assert hai.status_code == 202
-    assert mot.json() == hai.json()
-    assert mot.headers["content-type"] == hai.headers["content-type"]
-    assert HEADER_REPLAY not in mot.headers
-    assert hai.headers[HEADER_REPLAY] == "true"
-    assert await _dem_message(session_factory, conversation.id) == 2
-    assert len(arq_gia.da_day) == 1
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert first.json() == second.json()
+    assert first.headers["content-type"] == second.headers["content-type"]
+    assert HEADER_REPLAY not in first.headers
+    assert second.headers[HEADER_REPLAY] == "true"
+    assert await _count_messages(session_factory, conversation.id) == 2
+    assert len(fake_arq.pushed) == 1
 
 
-async def test_body_khac_cung_key_van_tra_response_cu(
+async def test_other_body_same_key_returns_old_response(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Khoá là `Idempotency-Key`, KHÔNG phải hash nội dung (ADR-15).
 
@@ -310,66 +310,66 @@ async def test_body_khac_cung_key_van_tra_response_cu(
     một key cho nội dung khác thì nhận lại response cũ — đó là lỗi của client,
     và C22 nói đúng cách sửa (đổi key sau mỗi lần gửi thành công).
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    phien = _phien(user_a)
-    khoa = _khoa("key-bi-dung-lai")
-    duong_dan = DUONG_DAN.format(conversation.id)
+    conversation = await _create_conversation(session_factory, user_a)
+    session = _session(user_a)
+    idem_key = _idem_header("key-bi-dung-lai")
+    path = PATH.format(conversation.id)
 
-    mot = await client.post(duong_dan, headers=phien | khoa, json={"content": "cau hoi mot"})
-    hai = await client.post(duong_dan, headers=phien | khoa, json={"content": "cau hoi HAI"})
+    first = await client.post(path, headers=session | idem_key, json={"content": "cau hoi mot"})
+    second = await client.post(path, headers=session | idem_key, json={"content": "cau hoi HAI"})
 
-    assert mot.json() == hai.json()
-    assert await _dem_message(session_factory, conversation.id) == 2
+    assert first.json() == second.json()
+    assert await _count_messages(session_factory, conversation.id) == 2
 
 
-async def test_key_khac_thi_tao_luot_moi(
+async def test_other_key_creates_new_turn(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Chiều ngược lại của test trên: key mới ⇒ lượt mới, không bị chặn nhầm."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    duong_dan = DUONG_DAN.format(conversation.id)
+    conversation = await _create_conversation(session_factory, user_a)
+    path = PATH.format(conversation.id)
 
-    mot = await client.post(
-        duong_dan, headers=_phien(user_a) | _khoa("key-1"), json={"content": "a"}
+    first = await client.post(
+        path, headers=_session(user_a) | _idem_header("key-1"), json={"content": "a"}
     )
-    hai = await client.post(
-        duong_dan, headers=_phien(user_a) | _khoa("key-2"), json={"content": "b"}
+    second = await client.post(
+        path, headers=_session(user_a) | _idem_header("key-2"), json={"content": "b"}
     )
 
-    assert mot.status_code == hai.status_code == 202
-    assert mot.json()["assistant_message_id"] != hai.json()["assistant_message_id"]
-    assert await _dem_message(session_factory, conversation.id) == 4
-    assert len(arq_gia.da_day) == 2
+    assert first.status_code == second.status_code == 202
+    assert first.json()["assistant_message_id"] != second.json()["assistant_message_id"]
+    assert await _count_messages(session_factory, conversation.id) == 4
+    assert len(fake_arq.pushed) == 2
 
 
-async def test_key_cua_user_khac_khong_dung_chung_duoc(
+async def test_other_users_key_cannot_be_shared(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     user_b: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """§20 — `{user_id}` trong khoá không phải trang trí.
 
     Hai người dùng chọn trùng một chuỗi key (rất dễ xảy ra nếu FE sinh key theo
     nội dung hoặc theo số thứ tự) không được nhìn thấy response của nhau.
     """
-    hoi_thoai_a = await _tao_hoi_thoai(session_factory, user_a)
-    hoi_thoai_b = await _tao_hoi_thoai(session_factory, user_b)
+    conversation_a = await _create_conversation(session_factory, user_a)
+    conversation_b = await _create_conversation(session_factory, user_b)
 
     a = await client.post(
-        DUONG_DAN.format(hoi_thoai_a.id),
-        headers=_phien(user_a) | _khoa("trung"),
+        PATH.format(conversation_a.id),
+        headers=_session(user_a) | _idem_header("trung"),
         json={"content": "a"},
     )
     b = await client.post(
-        DUONG_DAN.format(hoi_thoai_b.id),
-        headers=_phien(user_b) | _khoa("trung"),
+        PATH.format(conversation_b.id),
+        headers=_session(user_b) | _idem_header("trung"),
         json={"content": "b"},
     )
 
@@ -381,34 +381,34 @@ async def test_key_cua_user_khac_khong_dung_chung_duoc(
 # ════════════ DoD dòng 3 — thiếu header ở `POST .../messages` ═══════════════
 
 
-async def test_thieu_header_tra_400(
+async def test_missing_header_is_400(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD dòng 3 + A8: bắt buộc với `POST /conversations/{id}/messages`."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id), headers=_phien(user_a), json={"content": "a"}
+        PATH.format(conversation.id), headers=_session(user_a), json={"content": "a"}
     )
 
     assert resp.status_code == 400
     body = resp.json()["error"]
     assert body["code"] == "IDEMPOTENCY_KEY_REQUIRED"
     assert body["details"]["header"] == HEADER_IDEMPOTENCY
-    assert await _dem_message(session_factory, conversation.id) == 0
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation.id) == 0
+    assert fake_arq.pushed == []
 
 
-async def test_header_rong_cung_la_thieu(
+async def test_empty_header_counts_as_missing(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """`Idempotency-Key: "   "` không phải một key.
 
@@ -416,11 +416,11 @@ async def test_header_rong_cung_la_thieu(
     `idem:{uid}:create_message:` — tức người dùng tự khoá chính mình 24 giờ sau
     lượt chat đầu tiên.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a) | _khoa("   "),
+        PATH.format(conversation.id),
+        headers=_session(user_a) | _idem_header("   "),
         json={"content": "a"},
     )
 
@@ -428,60 +428,60 @@ async def test_header_rong_cung_la_thieu(
     assert resp.json()["error"]["code"] == "IDEMPOTENCY_KEY_REQUIRED"
 
 
-async def test_endpoint_khac_khong_bat_buoc_header(
+async def test_other_endpoints_do_not_require_header(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     _cancel_redis: None,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Nửa "tuỳ chọn với endpoint khác" — `POST /messages/{id}/cancel` không đòi.
 
     Bấm Dừng mà bị `400` vì thiếu một header là đúng thứ §7.5 không cho phép:
     lượt sinh vẫn chảy và người dùng vẫn trả tiền cho nó.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    tao = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a) | _khoa("de-co-message"),
+    conversation = await _create_conversation(session_factory, user_a)
+    created = await client.post(
+        PATH.format(conversation.id),
+        headers=_session(user_a) | _idem_header("de-co-message"),
         json={"content": "a"},
     )
-    amid = tao.json()["assistant_message_id"]
+    amid = created.json()["assistant_message_id"]
 
-    resp = await client.post(DUONG_DAN_HUY.format(amid), headers=_phien(user_a))
+    resp = await client.post(CANCEL_PATH.format(amid), headers=_session(user_a))
 
     assert resp.status_code == 200, resp.text
 
 
-async def test_endpoint_khac_van_ap_luat_khi_co_header(
+async def test_other_endpoints_apply_rule_when_header_present(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     _cancel_redis: None,
-    idempotency_redis: RedisGia,
+    idempotency_redis: FakeRedis,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Nửa còn lại của "tuỳ chọn": có gửi header thì luật §11.4 vẫn chạy."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    tao = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a) | _khoa("de-co-message"),
+    conversation = await _create_conversation(session_factory, user_a)
+    created = await client.post(
+        PATH.format(conversation.id),
+        headers=_session(user_a) | _idem_header("de-co-message"),
         json={"content": "a"},
     )
-    amid = tao.json()["assistant_message_id"]
+    amid = created.json()["assistant_message_id"]
 
-    mot = await client.post(
-        DUONG_DAN_HUY.format(amid), headers=_phien(user_a) | _khoa("huy-mot-lan")
+    first = await client.post(
+        CANCEL_PATH.format(amid), headers=_session(user_a) | _idem_header("huy-mot-lan")
     )
-    hai = await client.post(
-        DUONG_DAN_HUY.format(amid), headers=_phien(user_a) | _khoa("huy-mot-lan")
+    second = await client.post(
+        CANCEL_PATH.format(amid), headers=_session(user_a) | _idem_header("huy-mot-lan")
     )
 
-    assert mot.status_code == 200
-    assert hai.headers[HEADER_REPLAY] == "true"
-    assert mot.json() == hai.json()
+    assert first.status_code == 200
+    assert second.headers[HEADER_REPLAY] == "true"
+    assert first.json() == second.json()
     assert build_key(user_a, "cancel_message", "huy-mot-lan") in idempotency_redis.store
 
 
@@ -490,10 +490,10 @@ async def test_endpoint_khac_van_ap_luat_khi_co_header(
 # Hai ca dưới đây là toàn bộ phần đo được của B-231. Chúng cố ý *soi gương* hai
 # ca của `POST .../messages` ở trên (thiếu header ⇒ 400; cùng key ⇒ một lượt),
 # vì lý lẽ NQ-93 là "hai đường này cùng hạng rủi ro" — nếu một ngày ai đó gỡ
-# `TEN_ROUTE_THU_LAI` khỏi danh sách, hai ca này phải đỏ y như hai ca kia.
+# `RETRY_ROUTE_NAME` khỏi danh sách, hai ca này phải đỏ y như hai ca kia.
 
 
-async def _mot_cau_tra_loi_da_khep(
+async def _one_settled_answer(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     conversation_id: uuid.UUID,
@@ -503,16 +503,16 @@ async def _mot_cau_tra_loi_da_khep(
 
     Phải khép (`completed`) chứ không để `queued`: `retry` kiểm `status` trước
     khi kiểm bất cứ thứ gì khác và sẽ trả `409 GENERATION_IN_PROGRESS` — tức
-    hai ca dưới sẽ đo nhầm một phép kiểm khác. Cùng lối `_hoan_tat` của
+    hai ca dưới sẽ đo nhầm một phép kiểm khác. Cùng lối `_complete` của
     `tests/api/test_branching.py`.
     """
-    tao = await client.post(
-        DUONG_DAN.format(conversation_id),
-        headers=_phien(user_id) | _khoa(f"de-co-mot-cau-tra-loi-{uuid.uuid4().hex}"),
+    created = await client.post(
+        PATH.format(conversation_id),
+        headers=_session(user_id) | _idem_header(f"de-co-mot-cau-tra-loi-{uuid.uuid4().hex}"),
         json={"content": "a"},
     )
-    assert tao.status_code == 202, tao.text
-    amid = uuid.UUID(tao.json()["assistant_message_id"])
+    assert created.status_code == 202, created.text
+    amid = uuid.UUID(created.json()["assistant_message_id"])
     async with session_factory() as session:
         await MessageRepository(session).finish_generation(
             amid, status=MessageStatus.COMPLETED, content="tra loi", finish_reason="stop"
@@ -521,12 +521,12 @@ async def _mot_cau_tra_loi_da_khep(
     return amid
 
 
-async def test_retry_thieu_header_tra_400(
+async def test_retry_missing_header_is_400(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """B-231: `retry` không có `Idempotency-Key` ⇒ `400`, và KHÔNG thêm hàng nào.
 
@@ -534,26 +534,26 @@ async def test_retry_thieu_header_tra_400(
     làm nó thành 3 — tức một anh em mới và một hoá đơn mới cho một lần bấm mà
     §11.4 không đếm được.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    amid = await _mot_cau_tra_loi_da_khep(client, session_factory, conversation.id, user_a)
-    arq_gia.da_day.clear()
+    conversation = await _create_conversation(session_factory, user_a)
+    amid = await _one_settled_answer(client, session_factory, conversation.id, user_a)
+    fake_arq.pushed.clear()
 
-    resp = await client.post(DUONG_DAN_RETRY.format(amid), headers=_phien(user_a))
+    resp = await client.post(RETRY_PATH.format(amid), headers=_session(user_a))
 
     assert resp.status_code == 400, resp.text
     body = resp.json()["error"]
     assert body["code"] == "IDEMPOTENCY_KEY_REQUIRED"
     assert body["details"]["header"] == HEADER_IDEMPOTENCY
-    assert await _dem_message(session_factory, conversation.id) == 2
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation.id) == 2
+    assert fake_arq.pushed == []
 
 
-async def test_retry_cung_key_hai_lan_chi_mot_anh_em(
+async def test_retry_same_key_twice_one_sibling(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Cạm bẫy ① của T-3.7: bấm nhanh hai lần **không** được thành hai hoá đơn.
 
@@ -561,27 +561,27 @@ async def test_retry_cung_key_hai_lan_chi_mot_anh_em(
     `assistant_message_id` khác, nên hai job đều hợp lệ và đều tính tiền. Phép
     đo là `count(*)` **3** (không phải 4) cộng đúng một job.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    amid = await _mot_cau_tra_loi_da_khep(client, session_factory, conversation.id, user_a)
-    arq_gia.da_day.clear()
-    headers = _phien(user_a) | _khoa("mot-lan-bam-thu-lai")
+    conversation = await _create_conversation(session_factory, user_a)
+    amid = await _one_settled_answer(client, session_factory, conversation.id, user_a)
+    fake_arq.pushed.clear()
+    headers = _session(user_a) | _idem_header("mot-lan-bam-thu-lai")
 
-    mot = await client.post(DUONG_DAN_RETRY.format(amid), headers=headers)
-    hai = await client.post(DUONG_DAN_RETRY.format(amid), headers=headers)
+    first = await client.post(RETRY_PATH.format(amid), headers=headers)
+    second = await client.post(RETRY_PATH.format(amid), headers=headers)
 
-    assert mot.status_code == hai.status_code == 202, (mot.text, hai.text)
-    assert mot.json() == hai.json()
-    assert hai.headers[HEADER_REPLAY] == "true"
-    assert await _dem_message(session_factory, conversation.id) == 3
-    assert len(arq_gia.da_day) == 1
+    assert first.status_code == second.status_code == 202, (first.text, second.text)
+    assert first.json() == second.json()
+    assert second.headers[HEADER_REPLAY] == "true"
+    assert await _count_messages(session_factory, conversation.id) == 3
+    assert len(fake_arq.pushed) == 1
 
 
-async def test_retry_key_khac_thi_mo_nhanh_moi(
+async def test_retry_other_key_opens_new_branch(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Chiều ngược lại: khoá mới ⇒ một anh em THẬT, không phải bản phát lại.
 
@@ -589,34 +589,34 @@ async def test_retry_key_khac_thi_mo_nhanh_moi(
     retry theo `message_id` — và người dùng mất quyền retry lần thứ hai (§8.2
     cho phép nhiều anh em) mà không một phép đo nào kêu.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    amid = await _mot_cau_tra_loi_da_khep(client, session_factory, conversation.id, user_a)
-    arq_gia.da_day.clear()
+    conversation = await _create_conversation(session_factory, user_a)
+    amid = await _one_settled_answer(client, session_factory, conversation.id, user_a)
+    fake_arq.pushed.clear()
 
-    mot = await client.post(
-        DUONG_DAN_RETRY.format(amid), headers=_phien(user_a) | _khoa("lan-bam-thu-nhat")
+    first = await client.post(
+        RETRY_PATH.format(amid), headers=_session(user_a) | _idem_header("lan-bam-thu-nhat")
     )
-    hai = await client.post(
-        DUONG_DAN_RETRY.format(amid), headers=_phien(user_a) | _khoa("lan-bam-thu-hai")
+    second = await client.post(
+        RETRY_PATH.format(amid), headers=_session(user_a) | _idem_header("lan-bam-thu-hai")
     )
 
-    assert mot.status_code == hai.status_code == 202, (mot.text, hai.text)
-    assert mot.json()["assistant_message_id"] != hai.json()["assistant_message_id"]
-    assert HEADER_REPLAY not in hai.headers
-    assert await _dem_message(session_factory, conversation.id) == 4
-    assert len(arq_gia.da_day) == 2
+    assert first.status_code == second.status_code == 202, (first.text, second.text)
+    assert first.json()["assistant_message_id"] != second.json()["assistant_message_id"]
+    assert HEADER_REPLAY not in second.headers
+    assert await _count_messages(session_factory, conversation.id) == 4
+    assert len(fake_arq.pushed) == 2
 
 
 # ═══════════════════════ DoD dòng 4 — TTL ≈ 86400 ═══════════════════════════
 
 
-async def test_ttl_cua_khoa_bang_cau_hinh(
+async def test_key_ttl_equals_config(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    idempotency_redis: RedisGia,
+    idempotency_redis: FakeRedis,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """DoD dòng 4: `TTL idem:...` ≈ 86400 — và TTL được đặt lại lúc ghi `done`.
 
@@ -624,33 +624,33 @@ async def test_ttl_cua_khoa_bang_cau_hinh(
     A3 — đó là một *giới hạn*, và một test gõ số sẽ xanh cả khi `.env` đặt giá
     trị khác, tức đo một hệ thống không ai đang chạy.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    key = build_key(user_a, TEN_ROUTE_TAO_MESSAGE, "co-ttl")
+    conversation = await _create_conversation(session_factory, user_a)
+    key = build_key(user_a, CREATE_MESSAGE_ROUTE_NAME, "co-ttl")
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a) | _khoa("co-ttl"),
+        PATH.format(conversation.id),
+        headers=_session(user_a) | _idem_header("co-ttl"),
         json={"content": "a"},
     )
 
     assert resp.status_code == 202
     assert idempotency_redis.ttl[key] == settings.IDEMPOTENCY_TTL_S == 86400
-    ban_ghi = json.loads(idempotency_redis.store[key])
-    assert ban_ghi["state"] == STATE_DONE
-    assert ban_ghi["response"]["status"] == 202
-    assert json.loads(ban_ghi["response"]["body"]) == resp.json()
+    record = json.loads(idempotency_redis.store[key])
+    assert record["state"] == STATE_DONE
+    assert record["response"]["status"] == 202
+    assert json.loads(record["response"]["body"]) == resp.json()
 
 
 # ═══════════════ lỗi thì NHẢ khoá, không lưu (xem docstring module) ═════════
 
 
-async def test_loi_503_nha_khoa_de_gui_lai_duoc(
+async def test_503_releases_key_for_resend(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    idempotency_redis: RedisGia,
+    idempotency_redis: FakeRedis,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """C22: một `503 ENQUEUE_FAILED` **không** được khoá lần soạn thảo 24 giờ.
 
@@ -658,58 +658,58 @@ async def test_loi_503_nha_khoa_de_gui_lai_duoc(
     `done` thì người dùng nhận đúng câu 503 ấy mãi mãi — bấm Gửi bao nhiêu lần
     cũng vậy, và không có gì trong giao diện giải thích tại sao.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    duong_dan = DUONG_DAN.format(conversation.id)
-    phien = _phien(user_a)
-    khoa = _khoa("lan-dau-that-bai")
-    key = build_key(user_a, TEN_ROUTE_TAO_MESSAGE, "lan-dau-that-bai")
+    conversation = await _create_conversation(session_factory, user_a)
+    path = PATH.format(conversation.id)
+    session = _session(user_a)
+    idem_key = _idem_header("lan-dau-that-bai")
+    key = build_key(user_a, CREATE_MESSAGE_ROUTE_NAME, "lan-dau-that-bai")
 
-    arq_gia.no_ra = True
-    hong = await client.post(duong_dan, headers=phien | khoa, json={"content": "a"})
+    fake_arq.raises = True
+    broken = await client.post(path, headers=session | idem_key, json={"content": "a"})
 
-    assert hong.status_code == 503
+    assert broken.status_code == 503
     assert key not in idempotency_redis.store
 
-    arq_gia.no_ra = False
-    lai = await client.post(duong_dan, headers=phien | khoa, json={"content": "a"})
+    fake_arq.raises = False
+    again = await client.post(path, headers=session | idem_key, json={"content": "a"})
 
-    assert lai.status_code == 202
-    assert HEADER_REPLAY not in lai.headers
-    assert await _dem_message(session_factory, conversation.id) == 2
+    assert again.status_code == 202
+    assert HEADER_REPLAY not in again.headers
+    assert await _count_messages(session_factory, conversation.id) == 2
 
 
-async def test_body_sai_422_cung_nha_khoa(
+async def test_bad_body_422_also_releases_key(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    idempotency_redis: RedisGia,
+    idempotency_redis: FakeRedis,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Cùng luật cho `422`: gõ thiếu rồi gửi lại **không** phải bấm F5 trang."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    duong_dan = DUONG_DAN.format(conversation.id)
-    phien = _phien(user_a)
-    khoa = _khoa("body-sai")
-    key = build_key(user_a, TEN_ROUTE_TAO_MESSAGE, "body-sai")
+    conversation = await _create_conversation(session_factory, user_a)
+    path = PATH.format(conversation.id)
+    session = _session(user_a)
+    idem_key = _idem_header("body-sai")
+    key = build_key(user_a, CREATE_MESSAGE_ROUTE_NAME, "body-sai")
 
-    hong = await client.post(duong_dan, headers=phien | khoa, json={"content": ""})
+    broken = await client.post(path, headers=session | idem_key, json={"content": ""})
 
-    assert hong.status_code == 422
+    assert broken.status_code == 422
     assert key not in idempotency_redis.store
 
-    lai = await client.post(duong_dan, headers=phien | khoa, json={"content": "a"})
+    again = await client.post(path, headers=session | idem_key, json={"content": "a"})
 
-    assert lai.status_code == 202
+    assert again.status_code == 202
 
 
-async def test_redis_chet_tra_503_va_khong_ghi_gi(
+async def test_dead_redis_503_and_writes_nothing(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    idempotency_redis: RedisGia,
+    idempotency_redis: FakeRedis,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """Không hỏi được Redis ⇒ `503`, KHÔNG cho qua.
 
@@ -717,55 +717,55 @@ async def test_redis_chet_tra_503_va_khong_ghi_gi(
     lúc người dùng bấm Gửi lại nhiều nhất. Cùng lối `core/deps.py` (blacklist)
     và `core/ratelimit.py`.
     """
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
+    conversation = await _create_conversation(session_factory, user_a)
     idempotency_redis.fail = True
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a) | _khoa("redis-chet"),
+        PATH.format(conversation.id),
+        headers=_session(user_a) | _idem_header("redis-chet"),
         json={"content": "a"},
     )
 
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
-    assert await _dem_message(session_factory, conversation.id) == 0
-    assert arq_gia.da_day == []
+    assert await _count_messages(session_factory, conversation.id) == 0
+    assert fake_arq.pushed == []
 
 
-async def test_ban_ghi_hong_thi_tra_409_chu_khong_tao_them(
+async def test_corrupt_record_is_409_not_creating_more(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    idempotency_redis: RedisGia,
+    idempotency_redis: FakeRedis,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """JSON hỏng trong Redis ⇒ `409`, hỏng về phía **không tính tiền hai lần**."""
-    conversation = await _tao_hoi_thoai(session_factory, user_a)
-    key = build_key(user_a, TEN_ROUTE_TAO_MESSAGE, "ban-ghi-hong")
+    conversation = await _create_conversation(session_factory, user_a)
+    key = build_key(user_a, CREATE_MESSAGE_ROUTE_NAME, "ban-ghi-hong")
     idempotency_redis.store[key] = "{khong-phai-json"
 
     resp = await client.post(
-        DUONG_DAN.format(conversation.id),
-        headers=_phien(user_a) | _khoa("ban-ghi-hong"),
+        PATH.format(conversation.id),
+        headers=_session(user_a) | _idem_header("ban-ghi-hong"),
         json={"content": "a"},
     )
 
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "IN_PROGRESS"
-    assert await _dem_message(session_factory, conversation.id) == 0
+    assert await _count_messages(session_factory, conversation.id) == 0
 
 
 # ═════════════ middleware KHÔNG được đụng vào đường SSE (§7, C1) ═══════════
 
 
-async def test_get_khong_di_qua_lop_gom_body(
+async def test_get_skips_body_capture_layer(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
-    idempotency_redis: RedisGia,
+    idempotency_redis: FakeRedis,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    arq_gia: ArqGia,
+    _db_for_tests: None,
+    fake_arq: FakeArq,
 ) -> None:
     """`GET` mang cả header vẫn đi thẳng: không khoá, không bản ghi nào.
 
@@ -773,9 +773,11 @@ async def test_get_khong_di_qua_lop_gom_body(
     thể mở hàng giờ — gom thân response của nó là một rò rỉ bộ nhớ, và đệm nó
     là C1 quay lại.
     """
-    await _tao_hoi_thoai(session_factory, user_a)
+    await _create_conversation(session_factory, user_a)
 
-    resp = await client.get("/api/v1/conversations", headers=_phien(user_a) | _khoa("khoa-cho-get"))
+    resp = await client.get(
+        "/api/v1/conversations", headers=_session(user_a) | _idem_header("khoa-cho-get")
+    )
 
     assert resp.status_code == 200
     assert idempotency_redis.store == {}

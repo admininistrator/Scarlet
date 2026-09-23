@@ -42,7 +42,7 @@ CATALOG_PATH = Path(__file__).resolve().parents[3] / "config" / "model_catalog.j
 TOKENS_PER_PRICE_UNIT = Decimal(1_000_000)
 
 #: Giá trị `pricing_mode` nghĩa là "provider báo chi phí đáng tin" (§9.5). Có
-#: tên vì `ModelEntry.is_metered` và `_pricing_bat_buoc_khi_metered` cùng hỏi
+#: tên vì `ModelEntry.is_metered` và `_pricing_required_when_metered` cùng hỏi
 #: nó; chuỗi này KHÔNG được rời khỏi file catalog (xem `ModelEntry.is_metered`).
 PRICING_MODE_METERED = "metered"
 
@@ -71,7 +71,7 @@ _WEEKDAY_INDEX: dict[str, int] = {
 }
 
 #: Segment cuối của `base_url` phải là một phiên bản API (`/v1`, `/v2`,
-#: `/v1beta`). Xem `_base_url_co_phien_ban` bên dưới cho lý do (C43).
+#: `/v1beta`). Xem `_base_url_has_version` bên dưới cho lý do (C43).
 _VERSION_SEGMENT = re.compile(r"^v\d+[a-z]*$")
 
 
@@ -116,7 +116,7 @@ class PricingWindow(BaseModel):
     end: time
 
     @model_validator(mode="after")
-    def _start_truoc_end(self) -> PricingWindow:
+    def _start_before_end(self) -> PricingWindow:
         """Khung qua nửa đêm (`22:00`–`02:00`) bị từ chối, không bị hiểu sai.
 
         Bảng giá hôm nay không có khung nào như vậy. Chấp nhận nó nghĩa là
@@ -161,12 +161,12 @@ class PricingSchedule(BaseModel):
     windows: list[PricingWindow] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def _timezone_ton_tai(self) -> PricingSchedule:
+    def _timezone_must_exist(self) -> PricingSchedule:
         """Tên múi giờ sai → app KHÔNG boot (L2), không phải tính sai tiền lúc chạy."""
         try:
             ZoneInfo(self.timezone)
-        except (ZoneInfoNotFoundError, ValueError) as loi:
-            raise ValueError(f"timezone '{self.timezone}' không phải tên IANA hợp lệ") from loi
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"timezone '{self.timezone}' không phải tên IANA hợp lệ") from exc
         return self
 
     def contains(self, at: datetime) -> bool:
@@ -267,7 +267,7 @@ class ManualPricing(BaseModel):
     là **0 USD** và quota không trừ. Đó là ca đúng cho model chạy tại chỗ
     (Ollama, 0 USD thật) và là một lỗ hổng tạm cho model 9Router — nên lúc nạp
     catalog app in một dòng WARNING gọi đúng tên từng model chưa có giá
-    (`_canh_bao_model_khong_co_gia`).
+    (`_warn_model_without_price`).
 
     **`input_per_1m` và `output_per_1m` phải điền CẢ HAI hoặc để trống cả
     hai.** Điền một nửa là một lỗi gõ, không phải một trạng thái: nửa còn
@@ -292,7 +292,7 @@ class ManualPricing(BaseModel):
     note: str | None = None
 
     @model_validator(mode="after")
-    def _hai_muc_chinh_di_cung_nhau(self) -> ManualPricing:
+    def _main_fields_together(self) -> ManualPricing:
         if (self.input_per_1m is None) != (self.output_per_1m is None):
             raise ValueError(
                 "manual_pricing: input_per_1m và output_per_1m phải điền CẢ HAI "
@@ -379,7 +379,7 @@ class ModelEntry(BaseModel):
         return after_prefix if sep else self.upstream_model
 
     @model_validator(mode="after")
-    def _pricing_bat_buoc_khi_metered(self) -> ModelEntry:
+    def _pricing_required_when_metered(self) -> ModelEntry:
         if self.is_metered and self.pricing is None:
             raise ValueError(
                 f"model '{self.id}': pricing bắt buộc khi pricing_mode='{PRICING_MODE_METERED}'"
@@ -401,7 +401,7 @@ class Catalog(BaseModel):
 
     @field_validator("manual_pricing", mode="before")
     @classmethod
-    def _bo_khoa_chu_thich(cls, raw: object) -> object:
+    def _drop_comment_keys(cls, raw: object) -> object:
         """Khoá bắt đầu bằng `_` là chú thích cho người đọc, không phải dữ liệu.
 
         JSON không có cú pháp chú thích, mà khối này là khối **người** sửa
@@ -416,8 +416,8 @@ class Catalog(BaseModel):
         return raw
 
     @model_validator(mode="after")
-    def _manual_pricing_tro_dung_model(self) -> Catalog:
-        """Cùng luật với `_provider_phai_ton_tai`: một tên gõ sai phải chết lúc nạp.
+    def _manual_pricing_targets_model(self) -> Catalog:
+        """Cùng luật với `_provider_must_exist`: một tên gõ sai phải chết lúc nạp.
 
         Một khoá `manual_pricing` không khớp `id` nào là một bảng giá **không
         bao giờ được đọc** — nó không làm gì sai, nó chỉ không làm gì cả, và
@@ -429,13 +429,13 @@ class Catalog(BaseModel):
         giá bao nhiêu" có hai câu trả lời, tức A3 bị vi phạm ngay trong file
         cấu hình.
         """
-        theo_id = {m.id: m for m in self.models}
+        by_id = {m.id: m for m in self.models}
         for model_id in self.manual_pricing:
-            model = theo_id.get(model_id)
+            model = by_id.get(model_id)
             if model is None:
                 raise ValueError(
                     f"manual_pricing: '{model_id}' không khớp model nào trong catalog "
-                    f"({sorted(theo_id)})"
+                    f"({sorted(by_id)})"
                 )
             if model.pricing is not None:
                 raise ValueError(
@@ -445,7 +445,7 @@ class Catalog(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _provider_phai_ton_tai(self) -> Catalog:
+    def _provider_must_exist(self) -> Catalog:
         for m in self.models:
             if m.provider not in self.providers:
                 raise ValueError(
@@ -455,8 +455,8 @@ class Catalog(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _schedule_phai_ton_tai(self) -> Catalog:
-        """Cùng luật với `_provider_phai_ton_tai`: một tên gõ sai phải chết lúc nạp.
+    def _schedule_must_exist(self) -> Catalog:
+        """Cùng luật với `_provider_must_exist`: một tên gõ sai phải chết lúc nạp.
 
         Không có phép kiểm này thì `effective_pricing` gặp `KeyError` giữa lúc
         đang tính tiền cho một lượt sinh — tức lỗi rơi vào đúng đường đi tốn
@@ -474,7 +474,7 @@ class Catalog(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _dung_mot_default(self) -> Catalog:
+    def _exactly_one_default(self) -> Catalog:
         defaults = [m.id for m in self.models if m.default]
         if len(defaults) != 1:
             raise ValueError(
@@ -483,7 +483,7 @@ class Catalog(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _base_url_co_phien_ban(self) -> Catalog:
+    def _base_url_has_version(self) -> Catalog:
         """`base_url` phải là gốc API **đã bao gồm** phiên bản, ví dụ `/v1` (C43).
 
         SDK `openai` và LiteLLM đều nối thẳng `/chat/completions` vào
@@ -521,14 +521,14 @@ class Catalog(BaseModel):
         **Hai nguồn giá, một câu trả lời (B-65).** `models[].pricing` là giá
         **niêm yết** của provider; `manual_pricing[id]` là giá **ước lượng**
         người vận hành tự điền cho model mà provider không báo giá đáng tin
-        (§9.5). `_manual_pricing_tro_dung_model` đã cấm một model có cả hai,
+        (§9.5). `_manual_pricing_targets_model` đã cấm một model có cả hai,
         nên ở đây chúng không bao giờ tranh nhau — và tầng gọi không phải biết
         con số nó nhận được đến từ nguồn nào. Xuất xứ là chuyện của
         `cost_confidence` (T-2.12), không phải của phép nhân.
 
         Trả `None` khi model **không có giá ở cả hai nguồn**. Tầng gọi đọc nó
         là "0 USD, quota không trừ" — đúng cho model chạy tại chỗ, và là ca mà
-        `_canh_bao_model_khong_co_gia` gọi tên lúc nạp catalog.
+        `_warn_model_without_price` gọi tên lúc nạp catalog.
 
         **KHÔNG lọc `enabled`**, khác `get_model` ngay dưới, và khác có chủ ý:
         `get_model` trả lời "có được *dùng* model này không", còn hàm này trả
@@ -560,7 +560,7 @@ class Catalog(BaseModel):
         người vận hành đoán cho một model 9Router (B-65, §9.5). Không giữ khác
         biệt ấy thì C16 không tách được hai cột ở admin panel.
 
-        Ba giá trị, và `_manual_pricing_tro_dung_model` đã cấm một model có cả
+        Ba giá trị, và `_manual_pricing_targets_model` đã cấm một model có cả
         hai nguồn nên chúng loại trừ nhau:
 
         * `catalog` — `models[].pricing`, giá niêm yết của provider.
@@ -593,7 +593,7 @@ class Catalog(BaseModel):
         return manual.prompt_overhead_tokens
 
     @model_validator(mode="after")
-    def _canh_bao_pricing_mode_chua_doi(self) -> Catalog:
+    def _warn_pricing_mode_unchanged(self) -> Catalog:
         """§9.5: điền một giá ước lượng cố định ⇒ `pricing_mode` là `"flat"`.
 
         WARNING chứ không lỗi, và khác biệt ấy có lý do: không chỗ nào **đọc**
@@ -603,23 +603,23 @@ class Catalog(BaseModel):
         `cost_confidence`. Để app chết vì một cái nhãn lệch là chặn người vận
         hành ở đúng lúc họ vừa điền xong giá.
         """
-        lech = [
+        mismatched = [
             m.id
             for m in self.models
             if m.id in self.manual_pricing
             and self.manual_pricing[m.id].as_rates() is not None
             and m.pricing_mode != PRICING_MODE_FLAT
         ]
-        if lech:
+        if mismatched:
             logger.warning(
                 "model %s đã có giá trong manual_pricing nhưng pricing_mode vẫn là "
                 "'unmetered' — §9.5 gọi ca 'một giá ước lượng cố định' là 'flat'",
-                ", ".join(sorted(lech)),
+                ", ".join(sorted(mismatched)),
             )
         return self
 
     @model_validator(mode="after")
-    def _canh_bao_model_khong_co_gia(self) -> Catalog:
+    def _warn_model_without_price(self) -> Catalog:
         """Gọi đúng tên mọi model đang bật mà **không** có giá nào (B-65).
 
         Không có giá ⇒ cửa chặn §10.2 tính `est_max = 0` ⇒ quota **không trừ**
@@ -630,25 +630,24 @@ class Catalog(BaseModel):
         In một dòng cho cả danh sách chứ không mỗi model một dòng: một dòng thì
         đọc được "hôm nay có hai model chưa có giá", n dòng thì thành nhiễu.
         """
-        chua_co_gia = [
+        unpriced = [
             (m.id, m.provider, self.providers[m.provider].cost_reporting)
             for m in self.models
             if m.enabled and self.effective_pricing(m.id) is None
         ]
-        if chua_co_gia:
+        if unpriced:
             logger.warning(
                 "catalog: %d model đang bật KHÔNG có giá, quota sẽ không trừ cho "
                 "chúng: %s — điền ở `manual_pricing` nếu muốn trừ quota (B-65)",
-                len(chua_co_gia),
+                len(unpriced),
                 ", ".join(
-                    f"{mid} (provider {prov}, cost_reporting={rep})"
-                    for mid, prov, rep in chua_co_gia
+                    f"{mid} (provider {prov}, cost_reporting={rep})" for mid, prov, rep in unpriced
                 ),
             )
         return self
 
     @model_validator(mode="after")
-    def _canh_bao_verify_path_thieu(self) -> Catalog:
+    def _warn_verify_path_missing(self) -> Catalog:
         for name, provider in self.providers.items():
             if provider.byok_supported and provider.verify_path is None:
                 logger.warning(
@@ -690,7 +689,7 @@ def get_model(model_id: str) -> ModelEntry | None:
 def get_default_model() -> ModelEntry | None:
     """Model dùng khi request không nói dùng model nào (§9.2 `default: true`).
 
-    `Catalog._dung_mot_default` đã bắt phải có **đúng một** model `default`,
+    `Catalog._exactly_one_default` đã bắt phải có **đúng một** model `default`,
     nhưng nó **không** bắt model đó phải `enabled` — tắt một provider đang hỏng
     là chuyện của giờ phút, còn sửa cờ `default` là một quyết định khác. Vì
     vậy hàm vẫn lọc `enabled` và vẫn trả `None` được: ca "model mặc định vừa bị

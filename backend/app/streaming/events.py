@@ -147,7 +147,7 @@ class ReasoningEvent(Event):
         return {"t": self.text}
 
 
-def _doc_args(arguments: str) -> dict[str, Any] | None:
+def _parse_args(arguments: str) -> dict[str, Any] | None:
     """`arguments` (chuỗi JSON thô) → object, hoặc `None` nếu không đọc được."""
     if not arguments:
         return {}
@@ -180,7 +180,7 @@ class ToolCallEvent(Event):
     arguments: str
 
     def data(self) -> dict[str, Any]:
-        args = _doc_args(self.arguments)
+        args = _parse_args(self.arguments)
         payload: dict[str, Any] = {
             "call_id": self.call_id,
             "name": self.name,

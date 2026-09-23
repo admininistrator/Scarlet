@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
 import { PATHS } from "../../app/paths";
-import { ApiError, MA_LOI, api } from "../../lib/api";
+import { ApiError, ERROR_CODES, api } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { authErrorText } from "./authErrors";
 
@@ -51,40 +51,40 @@ import { authErrorText } from "./authErrors";
  * nguoi dung DOC mot dong chu, nen ngay ai do thay no qua nhanh thi cho sua
  * la mot cho. Du lau de doc mot cau, du ngan de khong ai tuong man hinh treo.
  */
-const CHUYEN_SAU_MS = 1200;
+const REDIRECT_AFTER_MS = 1200;
 
-type KetCuc = "dang-goi" | "verified" | "already_verified" | "expired" | "loi";
+type Outcome = "dang-goi" | "verified" | "already_verified" | "expired" | "loi";
 
 export function VerifyEmailScreen() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
   const navigate = useNavigate();
 
-  const [ketCuc, setKetCuc] = useState<KetCuc>(token === null ? "expired" : "dang-goi");
-  const [loi, setLoi] = useState<string | null>(null);
-  const daGoi = useRef<string | null>(null);
+  const [outcome, setOutcome] = useState<Outcome>(token === null ? "expired" : "dang-goi");
+  const [error, setError] = useState<string | null>(null);
+  const calledRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (token === null || daGoi.current === token) {
+    if (token === null || calledRef.current === token) {
       return;
     }
-    daGoi.current = token;
+    calledRef.current = token;
 
     void (async () => {
       try {
-        const ra = await api.xacThucEmail(token);
-        setKetCuc(ra.status);
+        const output = await api.verifyEmail(token);
+        setOutcome(output.status);
       } catch (e) {
-        setKetCuc("loi");
-        setLoi(
-          e instanceof ApiError && e.code === MA_LOI.TOKEN_HONG
+        setOutcome("loi");
+        setError(
+          e instanceof ApiError && e.code === ERROR_CODES.TOKEN_INVALID
             ? t("verify.tokenHong")
             : authErrorText(e),
         );
       }
     })();
     // KHONG co cleanup, va day khong phai mot cho quen — xem khoi "daGoi" o
-    // docstring dau file. Mot co `conGan` bi cleanup dat ve `false` (loi
+    // docstring dau file. Mot co `mounted` bi cleanup dat ve `false` (loi
     // quen thuoc cua moi effect goi mang) se hong CHINH XAC o day: lan chay
     // thu hai cua `StrictMode` bi `daGoi` chan lai TRUOC khi kip dung mot co
     // moi, nen ket qua cua loi goi duy nhat roi vao mot co da tat va man hinh
@@ -92,17 +92,17 @@ export function VerifyEmailScreen() {
   }, [token]);
 
   useEffect(() => {
-    if (ketCuc !== "verified" && ketCuc !== "already_verified") {
+    if (outcome !== "verified" && outcome !== "already_verified") {
       return;
     }
-    const dich = ketCuc === "verified" ? PATHS.pendingApproval : PATHS.login;
+    const target = outcome === "verified" ? PATHS.pendingApproval : PATHS.login;
     // `replace`: mot lan chuyen huong tu dong khong duoc de lai dau chan
     // trong lich su — bam Back se quay ve day va tieu them mot lan goi.
-    const hen = setTimeout(() => void navigate(dich, { replace: true }), CHUYEN_SAU_MS);
-    return () => clearTimeout(hen);
-  }, [ketCuc, navigate]);
+    const timer = setTimeout(() => void navigate(target, { replace: true }), REDIRECT_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [outcome, navigate]);
 
-  if (ketCuc === "dang-goi") {
+  if (outcome === "dang-goi") {
     return (
       <main className="mx-auto w-full max-w-sm px-6 py-12 text-center">
         <p className="text-sm text-muted">{t("verify.dangKiemTra")}</p>
@@ -110,7 +110,7 @@ export function VerifyEmailScreen() {
     );
   }
 
-  if (ketCuc === "verified") {
+  if (outcome === "verified") {
     return (
       <main className="mx-auto w-full max-w-sm px-6 py-12 text-center">
         <h2 className="text-lg font-semibold">{t("verify.xong.tieuDe")}</h2>
@@ -119,7 +119,7 @@ export function VerifyEmailScreen() {
     );
   }
 
-  if (ketCuc === "already_verified") {
+  if (outcome === "already_verified") {
     return (
       <main className="mx-auto w-full max-w-sm px-6 py-12 text-center">
         <h2 className="text-lg font-semibold">{t("verify.xong.tieuDe")}</h2>
@@ -133,9 +133,9 @@ export function VerifyEmailScreen() {
       <h2 className="text-lg font-semibold">
         {token === null ? t("verify.chuaXacThuc.tieuDe") : t("verify.hetHan.tieuDe")}
       </h2>
-      {loi !== null && (
+      {error !== null && (
         <p role="alert" className="mt-2 text-sm text-danger-text">
-          {loi}
+          {error}
         </p>
       )}
       <p className="mt-2 text-sm text-muted">{t("verify.hetHan.moTa")}</p>
@@ -161,28 +161,28 @@ export function VerifyEmailScreen() {
  */
 function ResendBlock() {
   const [email, setEmail] = useState("");
-  const [dangGui, setDangGui] = useState(false);
-  const [loi, setLoi] = useState<string | null>(null);
-  const [daGui, setDaGui] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
 
-  async function gui() {
-    setLoi(null);
-    setDangGui(true);
+  async function submit() {
+    setError(null);
+    setSending(true);
     try {
-      await api.guiLaiXacThuc(email);
-      setDaGui(true);
+      await api.resendVerification(email);
+      setSent(true);
     } catch (e) {
-      setLoi(
-        e instanceof ApiError && e.code === MA_LOI.QUA_NHIEU_LAN
+      setError(
+        e instanceof ApiError && e.code === ERROR_CODES.TOO_MANY_ATTEMPTS
           ? t("verify.guiLaiQuaNhieu")
           : authErrorText(e),
       );
     } finally {
-      setDangGui(false);
+      setSending(false);
     }
   }
 
-  if (daGui) {
+  if (sent) {
     return <p className="mt-6 text-sm text-muted">{t("verify.daGuiLai")}</p>;
   }
 
@@ -191,7 +191,7 @@ function ResendBlock() {
       className="mt-6 flex flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault();
-        void gui();
+        void submit();
       }}
     >
       <label className="flex flex-col gap-1 text-sm">
@@ -206,18 +206,18 @@ function ResendBlock() {
         />
       </label>
 
-      {loi !== null && (
+      {error !== null && (
         <p role="alert" className="text-sm text-danger-text">
-          {loi}
+          {error}
         </p>
       )}
 
       <button
         type="submit"
-        disabled={dangGui}
+        disabled={sending}
         className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
       >
-        {dangGui ? t("auth.dangXuLy") : t("verify.guiLai")}
+        {sending ? t("auth.dangXuLy") : t("verify.guiLai")}
       </button>
     </form>
   );

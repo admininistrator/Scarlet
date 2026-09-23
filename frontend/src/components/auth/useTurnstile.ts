@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { Ref } from "react";
 
-import { turnstileDaBat, type TurnstileHandle } from "./Turnstile";
+import { turnstileEnabled, type TurnstileHandle } from "./Turnstile";
 
 /**
  * Trang thai cua mot widget Turnstile trong mot form — T-3.1b.
@@ -37,7 +37,7 @@ export interface TurnstileForm {
    * khong co widget, va bat nguoi dung hoan tat mot o khong ton tai la khoa
    * ho ra khoi trang dang ky tren may dev.
    */
-  thieuToken: boolean;
+  missingToken: boolean;
   /** Xin mot token moi. Goi sau MOI response loi — xem docstring tren. */
   reset: () => void;
 }
@@ -55,7 +55,7 @@ export function useTurnstile(): TurnstileForm {
     token,
     ref,
     onToken: setToken,
-    thieuToken: turnstileDaBat() && token === null,
+    missingToken: turnstileEnabled() && token === null,
     reset,
   };
 }

@@ -27,7 +27,7 @@ tự trả. Hệ quả: `UsageEventRepository.sum_since` nhận `key_source` là
 (NQ-63). Một `GROUP BY user_id` mới sẽ nhanh hơn về lý thuyết, nhưng nó là câu
 thứ năm đọc `usage_events` với một mệnh đề `WHERE` chép tay — và một bảng chi
 phí trong đó cron nói khác `/admin/usage` là một bảng không ai còn tin (cùng
-lý lẽ đã viết cho `_tong_hop` ở T-2.16). Vòng lặp ở đây là **1 + N** truy vấn
+lý lẽ đã viết cho `_aggregate` ở T-2.16). Vòng lặp ở đây là **1 + N** truy vấn
 với N = số người có chi tiêu trong cửa sổ; R1 chốt 15–20 người dùng và job
 chạy mỗi giờ một lần, nên cái giá là vài chục mili-giây. Đổi lại: tổng của cả
 hệ thống và "ai tiêu nhiều nhất" ra từ **cùng một tập số**, nên chúng không
@@ -82,7 +82,7 @@ hoặc khi người ta đọc lại một ngày đã qua (§21.1).
 biến môi trường từ Q-05. `BUDGET_WINDOW_DAYS = 30` và nhịp chạy hằng giờ thì
 không: chúng là **định nghĩa** của phép đo chứ không phải nút vặn — S13 viết
 ra con số 30, và "cron hằng giờ" là chữ của chính task. Cùng lối với
-`REAPER_MOI_N_GIAY` của §7.6, và cùng lý do phụ: `cron` của arq nhận một tập
+`REAPER_EVERY_N_SECONDS` của §7.6, và cùng lý do phụ: `cron` của arq nhận một tập
 **phút trong giờ**, nên một biến `.env` nhận `SPEND_ALERT_MOI_N_PHUT=7` sẽ tạo
 một lịch lệch mà không ai báo.
 """
@@ -111,7 +111,7 @@ SPEND_ALERT_JOB_NAME = "spend_alert"
 
 #: "Cron hằng giờ" của "Việc cần làm" — arq nhận một tập **phút trong giờ**,
 #: nên "mỗi giờ" là `{0}` (arq mặc định `second=0`, xem `arq/cron.py`).
-SPEND_ALERT_PHUT_TRONG_GIO = frozenset({0})
+SPEND_ALERT_MINUTES_IN_HOUR = frozenset({0})
 
 #: Cửa sổ của `MONTHLY_BUDGET_USD`: **30 ngày trượt**, đúng chữ của S13
 #: (NQ-64). Xem khối cuối docstring module cho lý do đây không phải `Settings`.
@@ -190,7 +190,7 @@ async def spend_alert(ctx: dict[str, Any]) -> None:
     now = datetime.now(UTC)
     day_start = day_start_utc(now)
     budget_start = now - timedelta(days=BUDGET_WINDOW_DAYS)
-    hom_nay = now.date().isoformat()
+    today = now.date().isoformat()
 
     try:
         async with session_scope() as session:
@@ -208,7 +208,7 @@ async def spend_alert(ctx: dict[str, Any]) -> None:
         spend=daily,
         limit_usd=settings.DAILY_ALERT_USD,
         template=TEMPLATE_DAILY,
-        flag=f"alert:{TEMPLATE_DAILY}:{hom_nay}",
+        flag=f"alert:{TEMPLATE_DAILY}:{today}",
         window_label="hom nay",
         window_text="hôm nay",
         recipients=recipients,
@@ -220,7 +220,7 @@ async def spend_alert(ctx: dict[str, Any]) -> None:
         spend=budget,
         limit_usd=settings.MONTHLY_BUDGET_USD,
         template=TEMPLATE_BUDGET,
-        flag=f"alert:{TEMPLATE_BUDGET}:{hom_nay}",
+        flag=f"alert:{TEMPLATE_BUDGET}:{today}",
         window_label=f"{BUDGET_WINDOW_DAYS} ngay qua",
         window_text=f"{BUDGET_WINDOW_DAYS} ngày qua",
         recipients=recipients,
@@ -254,14 +254,14 @@ async def _window_spend(
         split = await usage.sum_since(user_id=user_id, since=since, key_source=KeySource.SYSTEM)
         exact += split.exact
         low += split.low
-        cua_nguoi_nay = _combined(split)
-        if top_id is None or cua_nguoi_nay > top_usd:
-            top_id, top_usd = user_id, cua_nguoi_nay
+        user_total = _combined(split)
+        if top_id is None or user_total > top_usd:
+            top_id, top_usd = user_id, user_total
 
     top_email: str | None = None
     if top_id is not None:
-        nguoi = await users.get_by_id(top_id)
-        top_email = nguoi.email if nguoi is not None else None
+        top_user = await users.get_by_id(top_id)
+        top_email = top_user.email if top_user is not None else None
 
     return WindowSpend(split=CostSplit(exact=exact, low=low), top_email=top_email, top_usd=top_usd)
 
@@ -373,7 +373,7 @@ async def _release(redis: Any, flag: str) -> None:
 async def _send(recipients: list[str], template: str, ctx: dict[str, Any]) -> int:
     """Gửi cho từng admin; một hộp thư hỏng KHÔNG chặn những hộp còn lại.
 
-    Cùng hình dạng với `_bao_cho_client` của reaper, và cùng lý do: vòng lặp
+    Cùng hình dạng với `_notify_client` của reaper, và cùng lý do: vòng lặp
     này chạy trong một job không có ai đứng chờ, nên một exception bay ra là
     mất nốt phần chưa làm mà không ai biết.
     """

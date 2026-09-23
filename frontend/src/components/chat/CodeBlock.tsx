@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 
-import { saoChep } from "../../lib/clipboard";
+import { copyText } from "../../lib/clipboard";
 import { t } from "../../lib/i18n";
 import { highlightLines, plainLines, type CodeLine } from "./highlight";
 
@@ -53,15 +53,15 @@ export function CodeBlock({
   );
 
   /*
-    `saoChep` chu khong `navigator.clipboard` truc tiep (T-3.7, Cam bay ③):
+    `copyText` chu khong `navigator.clipboard` truc tiep (T-3.7, Cam bay ③):
     nut Copy duoi cau tra loi dung chung dung ham nay, va duong lui cho ngoai
     secure context chi co MOT ban. "Da sao chep" chi hien khi that su chep
-    duoc — `saoChep` tra `false` chu khong nem.
+    duoc — `copyText` tra `false` chu khong nem.
   */
   const onCopy = useCallback(() => {
     const text = codeRef.current?.textContent ?? "";
-    void saoChep(text).then((xong) => {
-      if (!xong) {
+    void copyText(text).then((done) => {
+      if (!done) {
         return;
       }
       setCopied(true);

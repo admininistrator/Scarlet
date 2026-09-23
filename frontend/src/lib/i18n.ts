@@ -12,8 +12,8 @@ type Locale = keyof typeof locales;
  * khai duoc gia tri cua chung LA mot khoa — khong thi `t(BANG[x])` nhan mot
  * `string` va TypeScript khong con bat duoc mot khoa go sai.
  */
-export type KhoaChu = keyof (typeof locales)["vi"];
-type Key = KhoaChu;
+export type TextKey = keyof (typeof locales)["vi"];
+type Key = TextKey;
 
 const currentLocale: Locale = "vi";
 

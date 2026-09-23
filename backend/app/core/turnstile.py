@@ -78,7 +78,7 @@ from app.core.errors import ApiError, ApiErrorCode
 logger = logging.getLogger(__name__)
 
 #: Câu trả lời DUY NHẤT cho mọi kiểu hỏng của Turnstile — xem docstring module.
-_LOI_TURNSTILE = "xac minh captcha khong thanh cong, hay thu lai"
+_TURNSTILE_MSG = "xac minh captcha khong thanh cong, hay thu lai"
 
 #: Tên field trong body `siteverify` (hợp đồng của Cloudflare, không phải lựa
 #: chọn của mình — nên là hằng ở đây chứ không phải cấu hình, cùng lối
@@ -88,28 +88,28 @@ _FIELD_RESPONSE = "response"
 _FIELD_REMOTEIP = "remoteip"
 
 
-def da_bat() -> bool:
+def is_enabled() -> bool:
     """Turnstile có đang bật không — `TURNSTILE_SECRET` khác rỗng (§11.6).
 
-    Đọc `settings` lúc **gọi**, không lúc import: cùng lý do với `doc_gioi_han`
+    Đọc `settings` lúc **gọi**, không lúc import: cùng lý do với `read_limit`
     của `core/ratelimit.py` — một test bật/tắt Turnstile phải thấy hiệu lực mà
     không cần nạp lại module.
     """
     return bool(settings.TURNSTILE_SECRET.get_secret_value().strip())
 
 
-def _tao_client() -> httpx.AsyncClient:
+def _make_client() -> httpx.AsyncClient:
     """Client cho MỘT lần gọi `siteverify`.
 
     Tách thành hàm riêng để test bơm `httpx.MockTransport` vào mà vẫn chạy qua
     **toàn bộ** đường thật: dựng form, gửi, đọc JSON, xử lý mã trạng thái. Một
-    stub đặt ở tầng cao hơn (`_hoi_cloudflare` chẳng hạn) sẽ bỏ qua đúng phần
+    stub đặt ở tầng cao hơn (`_ask_cloudflare` chẳng hạn) sẽ bỏ qua đúng phần
     dễ sai nhất.
     """
     return httpx.AsyncClient(timeout=settings.TURNSTILE_TIMEOUT_S)
 
 
-async def _hoi_cloudflare(token: str, remote_ip: str | None) -> dict[str, Any]:
+async def _ask_cloudflare(token: str, remote_ip: str | None) -> dict[str, Any]:
     """Gọi `siteverify`, trả về JSON đã parse. Ném `ApiError` 503 nếu không hỏi được."""
     form = {
         _FIELD_SECRET: settings.TURNSTILE_SECRET.get_secret_value(),
@@ -122,33 +122,33 @@ async def _hoi_cloudflare(token: str, remote_ip: str | None) -> dict[str, Any]:
         form[_FIELD_REMOTEIP] = remote_ip
 
     try:
-        async with _tao_client() as client:
+        async with _make_client() as client:
             resp = await client.post(settings.TURNSTILE_VERIFY_URL, data=form)
             resp.raise_for_status()
-            ket_qua = resp.json()
-    except Exception as loi:
+            result = resp.json()
+    except Exception as exc:
         # KHÔNG log `form` — nó chứa `secret`.
         logger.exception("khong hoi duoc Turnstile siteverify")
         raise ApiError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             ApiErrorCode.SERVICE_UNAVAILABLE,
             "khong xac minh duoc captcha, hay thu lai",
-        ) from loi
+        ) from exc
 
-    if not isinstance(ket_qua, dict):
+    if not isinstance(result, dict):
         # `raise_for_status` đã qua nhưng body không phải object — với một
         # proxy chen giữa thì chuyện này xảy ra được, và `ket_qua["success"]`
         # bên dưới sẽ nổ thành 500 thay vì một câu nói đúng việc.
-        logger.error("Turnstile tra ve body khong phai JSON object: %s", type(ket_qua).__name__)
+        logger.error("Turnstile tra ve body khong phai JSON object: %s", type(result).__name__)
         raise ApiError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             ApiErrorCode.SERVICE_UNAVAILABLE,
             "khong xac minh duoc captcha, hay thu lai",
         )
-    return ket_qua
+    return result
 
 
-async def kiem_turnstile(token: str | None, *, remote_ip: str | None = None) -> None:
+async def verify_turnstile(token: str | None, *, remote_ip: str | None = None) -> None:
     """Chặn request nếu Turnstile không qua. Không qua ⇒ raise, qua ⇒ trả `None`.
 
     Args:
@@ -163,22 +163,22 @@ async def kiem_turnstile(token: str | None, *, remote_ip: str | None = None) -> 
         ApiError 503 `SERVICE_UNAVAILABLE`: không hỏi được Cloudflare — xem
             docstring module, mục vì sao không cho qua.
     """
-    if not da_bat():
+    if not is_enabled():
         # Cảnh báo đã kêu lúc boot (`Settings._warn_on_boot`), không lặp lại ở
         # mỗi request: một dòng log mỗi lần đăng ký sẽ làm chính nó thành nhiễu.
         return
 
     if token is None or not token.strip():
-        raise ApiError(status.HTTP_400_BAD_REQUEST, ApiErrorCode.TURNSTILE_FAILED, _LOI_TURNSTILE)
+        raise ApiError(status.HTTP_400_BAD_REQUEST, ApiErrorCode.TURNSTILE_FAILED, _TURNSTILE_MSG)
 
-    ket_qua = await _hoi_cloudflare(token.strip(), remote_ip)
-    if ket_qua.get("success") is True:
+    result = await _ask_cloudflare(token.strip(), remote_ip)
+    if result.get("success") is True:
         return
 
     # `error-codes` vào log, không vào response — xem docstring module.
     logger.warning(
         "Turnstile tu choi mot request tu %s: error-codes=%s",
         remote_ip or "khong ro",
-        ket_qua.get("error-codes"),
+        result.get("error-codes"),
     )
-    raise ApiError(status.HTTP_400_BAD_REQUEST, ApiErrorCode.TURNSTILE_FAILED, _LOI_TURNSTILE)
+    raise ApiError(status.HTTP_400_BAD_REQUEST, ApiErrorCode.TURNSTILE_FAILED, _TURNSTILE_MSG)

@@ -127,10 +127,10 @@ def decode_access_token(raw_token: str) -> AccessTokenClaims:
             algorithms=[_ALGORITHM],
             options=_DECODE_OPTIONS,
         )
-    except jwt.ExpiredSignatureError as loi:
-        raise TokenExpiredError from loi
-    except jwt.InvalidTokenError as loi:
-        raise TokenInvalidError from loi
+    except jwt.ExpiredSignatureError as exc:
+        raise TokenExpiredError from exc
+    except jwt.InvalidTokenError as exc:
+        raise TokenInvalidError from exc
 
     try:
         return AccessTokenClaims(
@@ -142,9 +142,9 @@ def decode_access_token(raw_token: str) -> AccessTokenClaims:
             issued_at=datetime.fromtimestamp(payload["iat"], UTC),
             expires_at=datetime.fromtimestamp(payload["exp"], UTC),
         )
-    except (KeyError, ValueError, TypeError, OverflowError, OSError) as loi:
+    except (KeyError, ValueError, TypeError, OverflowError, OSError) as exc:
         # `OverflowError`/`OSError`: `fromtimestamp` với một `iat`/`exp` nằm
         # ngoài tầm của hệ điều hành. PyJWT đã bảo đảm chúng là số, nhưng "là
         # số" và "là một mốc thời gian có thật" là hai chuyện khác nhau, và một
         # token bịa đặt không có quyền làm nổ handler thành 500.
-        raise TokenInvalidError from loi
+        raise TokenInvalidError from exc

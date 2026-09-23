@@ -81,33 +81,33 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-GOC_REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(GOC_REPO / "backend"))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 # ──────────────────────────── hằng số của phép đo ───────────────────────────
 
 #: Số lượt đo. DoD đòi in đúng `PASS 6/6`.
-SO_LUOT = 6
+RUNS = 6
 
 #: Lượt 1 ngắt ở đây — con số ghi thẳng trong "Việc cần làm" của T-1.11.
 #: Các lượt sau ngẫu nhiên trong `[KHOANG_NGAT_NGAU_NHIEN]`.
-DELTA_NGAT_LUOT_DAU = 50
-KHOANG_NGAT_NGAU_NHIEN = (15, 120)
+FIRST_RUN_CUT_DELTA = 50
+RANDOM_CUT_RANGE = (15, 120)
 
 #: §7.4: `EventSource` của trình duyệt đợi ~3 s trước khi tự nối lại. T-1.11
 #: chốt 2 s — đủ dài để worker sinh thêm một mảng chữ trong lúc đứt (nếu không
 #: thì C4 chẳng có gì để lộ ra), đủ ngắn để stream chưa hết `STREAM_TTL_S`.
-CHO_TRUOC_KHI_NOI_S = 2.0
+WAIT_BEFORE_RESUME_S = 2.0
 
 #: Trần cho MỘT lượt. Một lượt bình thường (~800 từ, `deepseek-flash`) đo được
 #: dưới 60 s; trần này là cái phanh cho ca treo, không phải phép đo hiệu năng
 #: (đó là T-1.12). Xem quyết định 3 ở đầu file.
-TRAN_MOT_LUOT_S = 150.0
+MAX_RUN_S = 150.0
 
 #: Trần ký tự nhận được trong một lượt. `[cursor` biến vòng ① thành vòng lặp
 #: nóng phát lại bản ghi cuối, nên không có trần này thì script nuốt hết RAM
 #: trước khi kịp in `FAIL`. Rộng gấp nhiều lần một câu trả lời 800 từ.
-TRAN_KY_TU = 200_000
+MAX_CHARS = 200_000
 
 #: Đặt vào `messages.content` của model. Xin dài để có đủ chỗ mà ngắt: một câu
 #: trả lời 20 chữ thì "ngắt ở delta thứ 50" không tồn tại.
@@ -120,14 +120,14 @@ PROMPT = (
 
 #: `.env` của repo — nguồn của `PUBLIC_BASE_URL` và `DEV_DATABASE_URL` khi
 #: chạy từ WSL host (compose nạp file này cho container, host thì không).
-ENV_FILE = GOC_REPO / ".env"
-BIEN_DB = "DEV_DATABASE_URL"
+ENV_FILE = REPO_ROOT / ".env"
+DB_VAR = "DEV_DATABASE_URL"
 
-_DONG_GAN = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
-_CHU_THICH_CUOI_DONG = re.compile(r"\s+#.*$")
+_ASSIGNMENT_LINE = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
+_TRAILING_COMMENT = re.compile(r"\s+#.*$")
 
 
-def nap_env() -> None:
+def load_env() -> None:
     """Nạp `.env` vào `os.environ` — **không đè** biến đã export sẵn.
 
     Cùng việc mà `scripts/llm_env.sh` làm cho hai script LLM, viết lại bằng
@@ -138,15 +138,15 @@ def nap_env() -> None:
     """
     if not ENV_FILE.is_file():
         return
-    for dong in ENV_FILE.read_text(encoding="utf-8").splitlines():
-        khop = _DONG_GAN.match(dong.strip().rstrip("\r"))
-        if khop is None:
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        match = _ASSIGNMENT_LINE.match(line.strip().rstrip("\r"))
+        if match is None:
             continue
-        ten, gia_tri = khop.group(1), _CHU_THICH_CUOI_DONG.sub("", khop.group(2)).strip()
-        os.environ.setdefault(ten, gia_tri)
+        name, value = match.group(1), _TRAILING_COMMENT.sub("", match.group(2)).strip()
+        os.environ.setdefault(name, value)
 
 
-nap_env()
+load_env()
 
 import asyncpg  # noqa: E402
 import httpx  # noqa: E402
@@ -169,10 +169,10 @@ def dev_database_url() -> str:
 
     Thiếu biến thì **nổ ngay kèm tên biến** (A4), không lùi về một giá trị đoán.
     """
-    url = os.environ.get(BIEN_DB)
+    url = os.environ.get(DB_VAR)
     if not url:
         raise SystemExit(
-            f"thiếu {BIEN_DB}. Đặt nó trong môi trường hoặc trong {ENV_FILE} "
+            f"thiếu {DB_VAR}. Đặt nó trong môi trường hoặc trong {ENV_FILE} "
             f"(mẫu ở .env.example), và bảo đảm `docker compose up -d postgres` "
             f"đã publish cổng 127.0.0.1:5432"
         )
@@ -184,15 +184,15 @@ def dev_database_url() -> str:
 
 
 @dataclass(slots=True)
-class SuKien:
+class SseEvent:
     """Một khung SSE **đã trọn vẹn** (đã thấy dòng trống kết thúc)."""
 
     id: str | None
-    loai: str
+    event: str
     data: str
 
 
-class BoDocSSE:
+class SseReader:
     """Gom byte thành event, đúng luật WHATWG ở phần mà script này cần.
 
     Chỉ phát ra event khi đã gặp dòng trống. Phần dở dang nằm lại trong `_dem`
@@ -200,69 +200,69 @@ class BoDocSSE:
     quyết định 1 ở đầu file.
     """
 
-    __slots__ = ("_dem", "_id", "_loai", "_data")
+    __slots__ = ("_buffer", "_id", "_event", "_data")
 
     def __init__(self) -> None:
-        self._dem = ""
+        self._buffer = ""
         self._reset()
 
     def _reset(self) -> None:
         self._id: str | None = None
-        self._loai = "message"
+        self._event = "message"
         self._data: list[str] = []
 
-    def nap(self, khuc: str) -> list[SuKien]:
-        self._dem += khuc
-        ra: list[SuKien] = []
-        while "\n" in self._dem:
-            dong, self._dem = self._dem.split("\n", 1)
-            dong = dong.rstrip("\r")
-            if dong == "":
-                if self._data or self._loai != "message":
-                    ra.append(SuKien(self._id, self._loai, "\n".join(self._data)))
+    def feed(self, chunk: str) -> list[SseEvent]:
+        self._buffer += chunk
+        out: list[SseEvent] = []
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            line = line.rstrip("\r")
+            if line == "":
+                if self._data or self._event != "message":
+                    out.append(SseEvent(self._id, self._event, "\n".join(self._data)))
                 self._reset()
                 continue
-            if dong.startswith(":"):
+            if line.startswith(":"):
                 continue  # comment `: ping` — không phải event, không đụng id
-            ten, _, gia_tri = dong.partition(":")
-            gia_tri = gia_tri[1:] if gia_tri.startswith(" ") else gia_tri
-            if ten == "id":
-                self._id = gia_tri
-            elif ten == "event":
-                self._loai = gia_tri
-            elif ten == "data":
-                self._data.append(gia_tri)
-        return ra
+            name, _, value = line.partition(":")
+            value = value[1:] if value.startswith(" ") else value
+            if name == "id":
+                self._id = value
+            elif name == "event":
+                self._event = value
+            elif name == "data":
+                self._data.append(value)
+        return out
 
 
 # ════════════════════════════ kết quả một lượt ═════════════════════════════
 
 
 @dataclass(slots=True)
-class KetQua:
-    ten: str
-    dat: bool
-    ly_do: str
-    so_lan_ngat: int
-    nhan_duoc: int = 0
-    trong_db: int = 0
-    lech_byte: int | None = None
-    giay: float = 0.0
-    diem_ngat: list[int] = field(default_factory=list)
+class RunResult:
+    name: str
+    passed: bool
+    reason: str
+    cuts: int
+    received: int = 0
+    in_db: int = 0
+    mismatch_byte: int | None = None
+    seconds: float = 0.0
+    cut_points: list[int] = field(default_factory=list)
 
 
-class NgatCung(Exception):  # noqa: N818 - tên theo nghiệp vụ, không phải lỗi
+class HardCut(Exception):  # noqa: N818 - tên theo nghiệp vụ, không phải lỗi
     """Đã đọc đủ số delta cần thiết — đóng socket ngay tại đây."""
 
 
-class QuaHan(Exception):  # noqa: N818
-    """Vượt `TRAN_MOT_LUOT_S` hoặc `TRAN_KY_TU` — treo cũng là đỏ."""
+class Timeout(Exception):  # noqa: N818
+    """Vượt `MAX_RUN_S` hoặc `MAX_CHARS` — treo cũng là đỏ."""
 
 
 # ═════════════════════════════ máy đo một lượt ═════════════════════════════
 
 
-class PhepDo:
+class Measurement:
     """Một vòng đo hoàn chỉnh: hỏi, ngắt, nối lại, so."""
 
     def __init__(
@@ -280,58 +280,58 @@ class PhepDo:
         self._uid = user_id
         self._on_am = on_am
 
-    def _log(self, *phan: object) -> None:
+    def _log(self, *parts: object) -> None:
         if self._on_am:
             return
-        print("   ", *phan, flush=True)
+        print("   ", *parts, flush=True)
 
-    async def chay(self, ten: str, diem_ngat: list[int]) -> KetQua:
-        bat_dau = time.monotonic()
-        han = bat_dau + TRAN_MOT_LUOT_S
+    async def run(self, name: str, cut_points: list[int]) -> RunResult:
+        started = time.monotonic()
+        deadline = started + MAX_RUN_S
         try:
-            amid, stream_url = await self._gui_cau_hoi()
-            chu, so_lan = await self._doc_ca_stream(stream_url, diem_ngat, han)
-        except QuaHan as loi:
-            return KetQua(
-                ten=ten,
-                dat=False,
-                ly_do=f"TREO — {loi}",
-                so_lan_ngat=len(diem_ngat),
-                giay=time.monotonic() - bat_dau,
-                diem_ngat=diem_ngat,
+            amid, stream_url = await self._send_question()
+            text, attempts = await self._read_whole_stream(stream_url, cut_points, deadline)
+        except Timeout as error:
+            return RunResult(
+                name=name,
+                passed=False,
+                reason=f"TREO — {error}",
+                cuts=len(cut_points),
+                seconds=time.monotonic() - started,
+                cut_points=cut_points,
             )
-        except httpx.HTTPError as loi:
-            return KetQua(
-                ten=ten,
-                dat=False,
-                ly_do=f"LỖI HTTP — {type(loi).__name__}: {loi}",
-                so_lan_ngat=len(diem_ngat),
-                giay=time.monotonic() - bat_dau,
-                diem_ngat=diem_ngat,
+        except httpx.HTTPError as error:
+            return RunResult(
+                name=name,
+                passed=False,
+                reason=f"LỖI HTTP — {type(error).__name__}: {error}",
+                cuts=len(cut_points),
+                seconds=time.monotonic() - started,
+                cut_points=cut_points,
             )
 
-        if so_lan < len(diem_ngat):
+        if attempts < len(cut_points):
             # Một lượt không ngắt được lần nào là một lượt KHÔNG đo gì cả, và
             # nó sẽ xanh — đúng cái "test luôn xanh là test vô dụng" mà cạm bẫy
             # của T-1.11 nói tới. Câu trả lời ngắn hơn điểm ngắt ⇒ đỏ, kèm số
             # thật để người đọc biết phải nới `PROMPT` hay hạ điểm ngắt.
-            return KetQua(
-                ten=ten,
-                dat=False,
-                ly_do=(
-                    f"CHUA NGAT DU — dinh {len(diem_ngat)} lan, ngat duoc {so_lan}: "
-                    f"cau tra loi khong du delta (diem ngat {diem_ngat})"
+            return RunResult(
+                name=name,
+                passed=False,
+                reason=(
+                    f"CHUA NGAT DU — dinh {len(cut_points)} lan, ngat duoc {attempts}: "
+                    f"cau tra loi khong du delta (diem ngat {cut_points})"
                 ),
-                so_lan_ngat=so_lan,
-                nhan_duoc=len(chu.encode("utf-8")),
-                giay=time.monotonic() - bat_dau,
-                diem_ngat=diem_ngat,
+                cuts=attempts,
+                received=len(text.encode("utf-8")),
+                seconds=time.monotonic() - started,
+                cut_points=cut_points,
             )
 
-        trong_db = await self._doc_content(amid)
-        return self._so_sanh(ten, chu, trong_db, so_lan, diem_ngat, time.monotonic() - bat_dau)
+        in_db = await self._read_content(amid)
+        return self._compare(name, text, in_db, attempts, cut_points, time.monotonic() - started)
 
-    async def _gui_cau_hoi(self) -> tuple[uuid.UUID, str]:
+    async def _send_question(self) -> tuple[uuid.UUID, str]:
         """§7.2 ① — `202` + `stream_url`, không một byte chữ nào ở đây."""
         res = await self._http.post(
             f"/api/v1/conversations/{self._cid}/messages",
@@ -342,135 +342,135 @@ class PhepDo:
         body = res.json()
         return uuid.UUID(body["assistant_message_id"]), body["stream_url"]
 
-    async def _doc_ca_stream(
-        self, stream_url: str, diem_ngat: list[int], han: float
+    async def _read_whole_stream(
+        self, stream_url: str, cut_points: list[int], deadline: float
     ) -> tuple[str, int]:
         """Đọc — ngắt — nối lại … cho tới `done`/`error`. Trả chữ đã nối và số lần ngắt."""
-        phan: list[str] = []
+        parts: list[str] = []
         cursor: str | None = None
         so_delta = 0
-        so_lan_ngat = 0
+        cuts = 0
 
-        for thu_tu, moc_ngat in enumerate([*diem_ngat, None]):
-            if thu_tu > 0:
-                self._log(f"ngắt ở delta #{so_delta}, cursor={cursor}, chờ {CHO_TRUOC_KHI_NOI_S}s")
-                await asyncio.sleep(CHO_TRUOC_KHI_NOI_S)
-            chu, cursor, so_delta, xong = await self._mot_ket_noi(
-                stream_url, cursor, so_delta, moc_ngat, han, len("".join(phan))
+        for index, cut_at in enumerate([*cut_points, None]):
+            if index > 0:
+                self._log(f"ngắt ở delta #{so_delta}, cursor={cursor}, chờ {WAIT_BEFORE_RESUME_S}s")
+                await asyncio.sleep(WAIT_BEFORE_RESUME_S)
+            text, cursor, so_delta, done = await self._one_connection(
+                stream_url, cursor, so_delta, cut_at, deadline, len("".join(parts))
             )
-            phan.append(chu)
-            if moc_ngat is not None:
-                so_lan_ngat += 1
-            if xong:
+            parts.append(text)
+            if cut_at is not None:
+                cuts += 1
+            if done:
                 break
-        return "".join(phan), so_lan_ngat
+        return "".join(parts), cuts
 
-    async def _mot_ket_noi(
+    async def _one_connection(
         self,
         stream_url: str,
         cursor: str | None,
         so_delta: int,
-        moc_ngat: int | None,
-        han: float,
-        da_co: int,
+        cut_at: int | None,
+        deadline: float,
+        received_so_far: int,
     ) -> tuple[str, str | None, int, bool]:
         """Một kết nối SSE. `moc_ngat=None` ⇒ đọc tới hết.
 
         Trả về `(chữ nhận được, Last-Event-ID, tổng số delta, đã thấy done/error)`.
         """
         headers = {"Last-Event-ID": cursor} if cursor is not None else {}
-        bo_doc = BoDocSSE()
-        chu: list[str] = []
-        xong = False
+        reader = SseReader()
+        text: list[str] = []
+        done = False
 
         try:
             async with self._http.stream("GET", stream_url, headers=headers) as res:
                 res.raise_for_status()
-                async for khuc in res.aiter_text():
-                    if time.monotonic() > han:
-                        raise QuaHan(
-                            f"quá {TRAN_MOT_LUOT_S:.0f}s, mới nhận "
-                            f"{da_co + len(''.join(chu))} ký tự"
+                async for chunk in res.aiter_text():
+                    if time.monotonic() > deadline:
+                        raise Timeout(
+                            f"quá {MAX_RUN_S:.0f}s, mới nhận "
+                            f"{received_so_far + len(''.join(text))} ký tự"
                         )
-                    for su_kien in bo_doc.nap(khuc):
+                    for event in reader.feed(chunk):
                         # Cursor tiến theo event ĐÃ TRỌN VẸN, kể cả event không
                         # mang chữ — đó là thứ trình duyệt gửi lại (§7.4).
-                        if su_kien.id is not None:
-                            cursor = su_kien.id
-                        if su_kien.loai == "delta":
-                            chu.append(json.loads(su_kien.data)["t"])
+                        if event.id is not None:
+                            cursor = event.id
+                        if event.event == "delta":
+                            text.append(json.loads(event.data)["t"])
                             so_delta += 1
-                        elif su_kien.loai in ("done", "error"):
-                            xong = True
-                            raise NgatCung
-                        if da_co + len("".join(chu)) > TRAN_KY_TU:
-                            raise QuaHan(f"nhận quá {TRAN_KY_TU} ký tự — gần như chắc chắn là LẶP")
-                        if moc_ngat is not None and so_delta >= moc_ngat:
-                            raise NgatCung
-        except NgatCung:
+                        elif event.event in ("done", "error"):
+                            done = True
+                            raise HardCut
+                        if received_so_far + len("".join(text)) > MAX_CHARS:
+                            raise Timeout(f"nhận quá {MAX_CHARS} ký tự — gần như chắc chắn là LẶP")
+                        if cut_at is not None and so_delta >= cut_at:
+                            raise HardCut
+        except HardCut:
             pass
-        return "".join(chu), cursor, so_delta, xong
+        return "".join(text), cursor, so_delta, done
 
-    async def _doc_content(self, message_id: uuid.UUID) -> str:
+    async def _read_content(self, message_id: uuid.UUID) -> str:
         """`messages.content` — nguồn sự thật (C5). Đọc SAU khi đã thấy `done`.
 
         Không có khe nào ở đây: `workers/generate.py` ghi Postgres **trước** rồi
         mới `XADD done`, nên thấy `done` nghĩa là hàng đã khép.
         """
         async with self._pool.acquire() as conn:
-            noi_dung = await conn.fetchval("SELECT content FROM messages WHERE id = $1", message_id)
-        return noi_dung or ""
+            content = await conn.fetchval("SELECT content FROM messages WHERE id = $1", message_id)
+        return content or ""
 
-    def _so_sanh(
+    def _compare(
         self,
-        ten: str,
-        nhan: str,
-        trong_db: str,
-        so_lan_ngat: int,
-        diem_ngat: list[int],
-        giay: float,
-    ) -> KetQua:
+        name: str,
+        received_text: str,
+        in_db: str,
+        cuts: int,
+        cut_points: list[int],
+        seconds: float,
+    ) -> RunResult:
         """So theo BYTE và nói rõ **thiếu** hay **lặp** — xem quyết định 2."""
-        b_nhan, b_db = nhan.encode("utf-8"), trong_db.encode("utf-8")
-        chung = min(len(b_nhan), len(b_db))
-        lech = next((i for i in range(chung) if b_nhan[i] != b_db[i]), None)
-        if lech is None and len(b_nhan) != len(b_db):
-            lech = chung
+        b_received, b_db = received_text.encode("utf-8"), in_db.encode("utf-8")
+        common = min(len(b_received), len(b_db))
+        mismatch = next((i for i in range(common) if b_received[i] != b_db[i]), None)
+        if mismatch is None and len(b_received) != len(b_db):
+            mismatch = common
 
-        if b_nhan == b_db and b_db:
-            ly_do = f"{len(b_db)} byte khớp"
-            dat = True
+        if b_received == b_db and b_db:
+            reason = f"{len(b_db)} byte khớp"
+            passed = True
         elif not b_db:
-            ly_do = "messages.content RỖNG — lượt sinh không ghi được gì"
-            dat = False
+            reason = "messages.content RỖNG — lượt sinh không ghi được gì"
+            passed = False
         else:
-            hieu = len(b_nhan) - len(b_db)
-            if hieu < 0:
-                nhan_xet = f"THIẾU {-hieu} byte"
-            elif hieu > 0:
-                nhan_xet = f"LẶP {hieu} byte"
+            diff = len(b_received) - len(b_db)
+            if diff < 0:
+                remark = f"THIẾU {-diff} byte"
+            elif diff > 0:
+                remark = f"LẶP {diff} byte"
             else:
-                nhan_xet = "KHÁC NỘI DUNG (cùng độ dài)"
-            ly_do = f"{nhan_xet}, lệch từ byte #{lech}"
-            dat = False
+                remark = "KHÁC NỘI DUNG (cùng độ dài)"
+            reason = f"{remark}, lệch từ byte #{mismatch}"
+            passed = False
 
-        return KetQua(
-            ten=ten,
-            dat=dat,
-            ly_do=ly_do,
-            so_lan_ngat=so_lan_ngat,
-            nhan_duoc=len(b_nhan),
-            trong_db=len(b_db),
-            lech_byte=lech,
-            giay=giay,
-            diem_ngat=diem_ngat,
+        return RunResult(
+            name=name,
+            passed=passed,
+            reason=reason,
+            cuts=cuts,
+            received=len(b_received),
+            in_db=len(b_db),
+            mismatch_byte=mismatch,
+            seconds=seconds,
+            cut_points=cut_points,
         )
 
 
 # ═══════════════════════════ dựng và dọn dữ liệu ═══════════════════════════
 
 
-def cookie_phien(user_id: uuid.UUID, tier: str) -> dict[str, str]:
+def session_cookie(user_id: uuid.UUID, tier: str) -> dict[str, str]:
     """Header `Cookie` mang một access JWT thật cho `user_id` (§11.2).
 
     T-3.1c xoá nhánh danh tính tạm của Phase 1, thứ script này mang danh tính
@@ -479,7 +479,7 @@ def cookie_phien(user_id: uuid.UUID, tier: str) -> dict[str, str]:
     — rẻ hơn hẳn đường `POST /auth/login` (cần một mật khẩu Argon2id thật, một
     lần Turnstile, và một suất trong hạn mức §10.6 cho mỗi lần chạy DoD).
 
-    `status=ACTIVE` khớp đúng hàng mà `tao_user` chèn vào Postgres, và `tier`
+    `status=ACTIVE` khớp đúng hàng mà `create_user` chèn vào Postgres, và `tier`
     đọc từ chính hàng ấy chứ không gõ tay (A3): một claim nói khác DB sẽ chạy
     được hôm nay — §11.1 đọc trạng thái từ claim — rồi hỏng vào đúng ngày ai
     đó đổi nó sang đọc DB.
@@ -494,27 +494,27 @@ def cookie_phien(user_id: uuid.UUID, tier: str) -> dict[str, str]:
     return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
-async def tao_user(pool: asyncpg.Pool, dau_vet: str) -> tuple[uuid.UUID, str]:
+async def create_user(pool: asyncpg.Pool, marker: str) -> tuple[uuid.UUID, str]:
     """`users` chưa có model ORM (Phase 2, T-2.1) nên chèn bằng SQL thô.
 
     `tier_name` để trống ⇒ DEFAULT `'free'`, tier do migration 0001 seed —
-    và trả nó ra để `cookie_phien` khỏi phải gõ lại tên tier (A3).
+    và trả nó ra để `session_cookie` khỏi phải gõ lại tên tier (A3).
     """
     async with pool.acquire() as conn:
-        hang = await conn.fetchrow(
+        row = await conn.fetchrow(
             # `status='active'` từ T-3.1c: cookie phiên mang claim `active`
-            # (xem `cookie_phien`), và hàng trong DB phải nói cùng một câu.
+            # (xem `session_cookie`), và hàng trong DB phải nói cùng một câu.
             "INSERT INTO users (email, password_hash, status) "
             "VALUES ($1, $2, 'active') RETURNING id, tier_name",
-            f"{dau_vet}@scarlet.test",
+            f"{marker}@scarlet.test",
             "khong-phai-hash-that",
         )
-    assert hang is not None
-    assert isinstance(hang["id"], uuid.UUID)
-    return hang["id"], str(hang["tier_name"])
+    assert row is not None
+    assert isinstance(row["id"], uuid.UUID)
+    return row["id"], str(row["tier_name"])
 
 
-async def don_dep(pool: asyncpg.Pool, user_id: uuid.UUID) -> tuple[int, int]:
+async def cleanup(pool: asyncpg.Pool, user_id: uuid.UUID) -> tuple[int, int]:
     """Xoá **cứng** mọi thứ script vừa tạo. Bài học B-81.
 
     Thứ tự bắt buộc: `conversations.active_leaf_id` trỏ vào `messages`, nên
@@ -542,87 +542,87 @@ async def don_dep(pool: asyncpg.Pool, user_id: uuid.UUID) -> tuple[int, int]:
 # ══════════════════════════════════ chạy ═══════════════════════════════════
 
 
-def diem_ngat_cua_luot(i: int, rng: random.Random) -> list[int]:
+def cut_points_for_run(i: int, rng: random.Random) -> list[int]:
     """Lượt 1: đúng delta thứ 50. Lượt 2–5: ngẫu nhiên. Lượt 6: ngắt HAI lần."""
     if i == 0:
-        return [DELTA_NGAT_LUOT_DAU]
-    if i == SO_LUOT - 1:
-        mot = rng.randint(*KHOANG_NGAT_NGAU_NHIEN)
-        return [mot, mot + rng.randint(*KHOANG_NGAT_NGAU_NHIEN)]
-    return [rng.randint(*KHOANG_NGAT_NGAU_NHIEN)]
+        return [FIRST_RUN_CUT_DELTA]
+    if i == RUNS - 1:
+        point = rng.randint(*RANDOM_CUT_RANGE)
+        return [point, point + rng.randint(*RANDOM_CUT_RANGE)]
+    return [rng.randint(*RANDOM_CUT_RANGE)]
 
 
-async def chay(args: argparse.Namespace) -> int:
+async def run(args: argparse.Namespace) -> int:
     rng = random.Random(args.seed)
-    model = args.model or _model_mac_dinh()
-    dau_vet = f"t111-{uuid.uuid4().hex[:8]}"
+    model = args.model or _default_model()
+    marker = f"t111-{uuid.uuid4().hex[:8]}"
 
-    print(f"seed={args.seed}  model={model}  base={settings.PUBLIC_BASE_URL}  dau_vet={dau_vet}")
+    print(f"seed={args.seed}  model={model}  base={settings.PUBLIC_BASE_URL}  dau_vet={marker}")
 
     pool = await asyncpg.create_pool(dev_database_url(), min_size=1, max_size=2)
     assert pool is not None
-    user_id, tier = await tao_user(pool, dau_vet)
-    ket_qua: list[KetQua] = []
+    user_id, tier = await create_user(pool, marker)
+    results: list[RunResult] = []
 
     try:
         async with httpx.AsyncClient(
             base_url=settings.PUBLIC_BASE_URL,
-            headers=cookie_phien(user_id, tier),
+            headers=session_cookie(user_id, tier),
             verify=args.cacert or False,
-            timeout=httpx.Timeout(TRAN_MOT_LUOT_S, read=TRAN_MOT_LUOT_S),
+            timeout=httpx.Timeout(MAX_RUN_S, read=MAX_RUN_S),
         ) as http:
             res = await http.post(
                 "/api/v1/conversations",
-                json={"title": f"S3 {dau_vet}", "default_model": model},
+                json={"title": f"S3 {marker}", "default_model": model},
             )
             res.raise_for_status()
             conversation_id = uuid.UUID(res.json()["id"])
 
-            do = PhepDo(http, pool, conversation_id, user_id, on_am=args.im_lang)
-            for i in range(SO_LUOT):
+            do = Measurement(http, pool, conversation_id, user_id, on_am=args.im_lang)
+            for i in range(RUNS):
                 # Access token sống `ACCESS_TOKEN_TTL_MIN` (15 phút, §11.2) còn
                 # cả lượt đo này dài hơn thế. Làm mới ở đầu mỗi lượt là việc mà
                 # một client thật làm bằng `POST /auth/refresh`; ở đây ký thẳng
                 # rẻ hơn và không tiêu một refresh token nào.
-                http.headers.update(cookie_phien(user_id, tier))
-                diem = diem_ngat_cua_luot(i, rng)
-                ten = f"luot {i + 1}/{SO_LUOT} (ngat {len(diem)} lan tai {diem})"
-                print(f"\n▶ {ten}", flush=True)
-                kq = await do.chay(ten, diem)
-                ket_qua.append(kq)
+                http.headers.update(session_cookie(user_id, tier))
+                scores = cut_points_for_run(i, rng)
+                name = f"luot {i + 1}/{RUNS} (ngat {len(scores)} lan tai {scores})"
+                print(f"\n▶ {name}", flush=True)
+                kq = await do.run(name, scores)
+                results.append(kq)
                 print(
-                    f"{'✓ PASS' if kq.dat else '✗ FAIL'}  {kq.ly_do}  "
-                    f"(nhan {kq.nhan_duoc} byte / db {kq.trong_db} byte, {kq.giay:.1f}s)",
+                    f"{'✓ PASS' if kq.passed else '✗ FAIL'}  {kq.reason}  "
+                    f"(nhan {kq.received} byte / db {kq.in_db} byte, {kq.seconds:.1f}s)",
                     flush=True,
                 )
     finally:
         if args.khong_don_dep:
             print(f"\n(giữ lại dữ liệu: user_id={user_id})")
         else:
-            so_msg, so_ht = await don_dep(pool, user_id)
+            so_msg, so_ht = await cleanup(pool, user_id)
             print(f"\nđã dọn: {so_msg} message, {so_ht} hội thoại, 1 user")
         await pool.close()
 
-    return in_tong_ket(ket_qua)
+    return print_summary(results)
 
 
-def _model_mac_dinh() -> str:
-    mac_dinh = next((m for m in get_catalog().models if m.default and m.enabled), None)
-    if mac_dinh is None:
+def _default_model() -> str:
+    default = next((m for m in get_catalog().models if m.default and m.enabled), None)
+    if default is None:
         raise SystemExit("catalog không có model `default` nào đang bật (§9.2)")
-    return mac_dinh.id
+    return default.id
 
 
-def in_tong_ket(ket_qua: list[KetQua]) -> int:
-    dat = sum(1 for k in ket_qua if k.dat)
+def print_summary(results: list[RunResult]) -> int:
+    passed = sum(1 for k in results if k.passed)
     print("\n" + "═" * 74)
-    for k in ket_qua:
-        dau = "PASS" if k.dat else "FAIL"
-        print(f"  {dau}  {k.ten}: {k.ly_do}")
+    for k in results:
+        verdict = "PASS" if k.passed else "FAIL"
+        print(f"  {verdict}  {k.name}: {k.reason}")
     print("═" * 74)
     # Dòng này là thứ DoD của T-1.11 đọc. `PASS 6/6` hay `FAIL 4/6`, một dòng.
-    print(f"{'PASS' if dat == len(ket_qua) else 'FAIL'} {dat}/{len(ket_qua)}")
-    return 0 if dat == len(ket_qua) else 1
+    print(f"{'PASS' if passed == len(results) else 'FAIL'} {passed}/{len(results)}")
+    return 0 if passed == len(results) else 1
 
 
 def main() -> int:
@@ -634,7 +634,7 @@ def main() -> int:
     parser.add_argument("--cacert", default=None, help="CA của mkcert; không có thì bỏ kiểm TLS")
     parser.add_argument("--khong-don-dep", action="store_true", help="giữ user/hội thoại lại")
     parser.add_argument("--im-lang", action="store_true", help="không in tiến trình từng lượt")
-    return asyncio.run(chay(parser.parse_args()))
+    return asyncio.run(run(parser.parse_args()))
 
 
 if __name__ == "__main__":

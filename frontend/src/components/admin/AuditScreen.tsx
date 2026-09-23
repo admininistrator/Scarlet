@@ -51,7 +51,7 @@ export function AuditScreen() {
     setMoreError(null);
     try {
       const page = await api.adminAuditLogs(cursor);
-      setMore((cu) => [...cu, ...page.items]);
+      setMore((prev) => [...prev, ...page.items]);
       setMoreCursor(page.next_cursor);
     } catch (e) {
       setMoreError(toApiError(e));

@@ -17,8 +17,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { Phien } from "../auth/usePhien";
-import { api, type LoaiHanMuc, type QuotaWarning } from "../../lib/api";
+import type { SessionState } from "../auth/useSessionState";
+import { api, type LimitType, type QuotaWarning } from "../../lib/api";
 import { mergeReadings, quotaBlock, type QuotaBlock, type QuotaReading } from "./quotaView";
 
 /**
@@ -40,60 +40,60 @@ export interface QuotaState {
   noteWarning: (warning: QuotaWarning) => void;
 }
 
-type Warnings = Partial<Record<LoaiHanMuc, { warning: QuotaWarning; readAt: number }>>;
+type Warnings = Partial<Record<LimitType, { warning: QuotaWarning; readAt: number }>>;
 
 export function useQuota(
-  session: Pick<Phien, "hoSo" | "profileReadAt" | "refreshProfile">,
+  session: Pick<SessionState, "profile" | "profileReadAt" | "refreshProfile">,
 ): QuotaState {
-  const { hoSo, profileReadAt, refreshProfile } = session;
+  const { profile, profileReadAt, refreshProfile } = session;
   const [warnings, setWarnings] = useState<Warnings>({});
   const [byokProviders, setByokProviders] = useState<ReadonlySet<string> | null>(null);
 
   useEffect(() => {
-    let conGan = true;
+    let mounted = true;
     api
       .listProviderKeys()
-      .then((ra) => {
-        if (conGan) {
+      .then((output) => {
+        if (mounted) {
           // `usable === false` = khoa khong giai ma duoc: backend roi ve
           // system key va TRU quota (`credentials._byok_key`), nen no khong
           // mo khoa nut gui.
-          setByokProviders(new Set(ra.keys.filter((k) => k.usable).map((k) => k.provider)));
+          setByokProviders(new Set(output.keys.filter((k) => k.usable).map((k) => k.provider)));
         }
       })
       .catch(() => {
         // De `null` — "chua biet" mo nut chu khong khoa nut (Cam bay ①).
       });
     return () => {
-      conGan = false;
+      mounted = false;
     };
   }, []);
 
   const noteWarning = useCallback((warning: QuotaWarning) => {
-    setWarnings((cu) => ({ ...cu, [warning.limit_type]: { warning, readAt: Date.now() } }));
+    setWarnings((prev) => ({ ...prev, [warning.limit_type]: { warning, readAt: Date.now() } }));
   }, []);
 
   const readings = useMemo(
-    () => mergeReadings(hoSo?.quota ?? null, profileReadAt, warnings),
-    [hoSo, profileReadAt, warnings],
+    () => mergeReadings(profile?.quota ?? null, profileReadAt, warnings),
+    [profile, profileReadAt, warnings],
   );
   const block = useMemo(() => quotaBlock(readings), [readings]);
-  const moc = block?.resetAt ?? null;
+  const resetTime = block?.resetAt ?? null;
 
   useEffect(() => {
-    if (moc === null) {
+    if (resetTime === null) {
       return;
     }
     const id = window.setTimeout(
       () => void refreshProfile(),
-      Math.max(moc - Date.now(), MIN_REFRESH_DELAY_MS),
+      Math.max(resetTime - Date.now(), MIN_REFRESH_DELAY_MS),
     );
     return () => window.clearTimeout(id);
-  }, [moc, refreshProfile]);
+  }, [resetTime, refreshProfile]);
 
   return {
     readings,
-    warnPct: hoSo?.quota_warn_remaining_pct ?? null,
+    warnPct: profile?.quota_warn_remaining_pct ?? null,
     block,
     byokProviders,
     noteWarning,

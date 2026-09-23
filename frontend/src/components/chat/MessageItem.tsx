@@ -1,11 +1,11 @@
 import { useState } from "react";
 
-import type { DanhGia, MessageRa } from "../../lib/api";
+import type { Feedback, MessageOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
-import { coAnhEm, noiDung, phanReasoning, type TrangThaiCay } from "../../lib/tree";
-import { BranchNav, VachNgan } from "./BranchNav";
+import { hasSiblings, content, reasoningOf, type TreeState } from "../../lib/tree";
+import { BranchNav, Divider } from "./BranchNav";
 import { Markdown } from "./Markdown";
-import { NutDuoiCauTraLoi } from "./NutDuoiCauTraLoi";
+import { AnswerActions } from "./AnswerActions";
 
 /**
  * Mot bong bong tren duong di hien tai — ban T-HD3, §8.2, §7.4, C13.
@@ -29,10 +29,10 @@ import { NutDuoiCauTraLoi } from "./NutDuoiCauTraLoi";
  * │  MOT NGUON SU THAT CHO CHUOI CHU (Cam bay ① va ② cua T-3.5)          │
  * └──────────────────────────────────────────────────────────────────────┘
  *
- * Component nay KHONG giu mot ban chu nao canh `dangBay`. `noiDung(cay, node)`
+ * Component nay KHONG giu mot ban chu nao canh `inFlight`. `noiDung(cay, node)`
  * la cho duy nhat tra loi "message nay dang hien chu gi", va no da biet luat:
  * giua luot sinh `path[i].content` la chuoi RONG (worker chi ghi xuong
- * Postgres luc ket thuc, §7.2 ③) nen phai doc `dangBay`; sau `done` thi hai
+ * Postgres luc ket thuc, §7.2 ③) nen phai doc `inFlight`; sau `done` thi hai
  * ban giong nhau. Giu them mot ban o day la cho chu nhan doi sau mot lan F5,
  * vi duong dung lai tu Postgres cung phat `start` (T-1.14 ④).
  *
@@ -46,7 +46,7 @@ import { NutDuoiCauTraLoi } from "./NutDuoiCauTraLoi";
  * `transition`/`animation`.
  *
  * Nam nut duoi cau tra loi (Copy · Thich · Khong thich · Thu lai · Doi model)
- * nam trong `NutDuoiCauTraLoi` (T-3.7). Chung o mot file rieng chu khong noi
+ * nam trong `AnswerActions` (T-3.7). Chung o mot file rieng chu khong noi
  * tiep vao day vi mot ly do doc duoc: file nay tra loi cau "bong bong nao ve
  * cai gi" (bon trang thai), con file kia tra loi "bam mot nut thi gui gi len
  * server" — va chi cau thu hai can mot bo test rieng.
@@ -58,55 +58,55 @@ import { NutDuoiCauTraLoi } from "./NutDuoiCauTraLoi";
  */
 export function MessageItem({
   node,
-  cay,
-  ghiChu,
-  dangChay,
-  dangBan,
-  modelDangChon,
-  onThuLai,
-  onDanhGia,
-  onSua,
-  onChuyenNhanh,
+  tree,
+  notes,
+  running,
+  busy,
+  selectedModel,
+  onRetry,
+  onFeedback,
+  onEdit,
+  onSwitchBranch,
 }: {
-  node: MessageRa;
-  cay: TrangThaiCay;
-  ghiChu: string[];
-  dangChay: boolean;
+  node: MessageOut;
+  tree: TreeState;
+  notes: string[];
+  running: boolean;
   /**
    * Co mot thao tac doi cay dang bay. Nut "Luu" tat trong luc do — B-232:
    * `PATCH /messages/{id}` nam NGOAI vung phu idempotency cua §11.4 (NQ-93 co
    * y dung o chu "POST" cua A8), nen bam Luu hai lan la hai nhanh va hai hoa
    * don. Day la mot lop chan o FE chu khong phai mot ban va cho khe ay.
    */
-  dangBan: boolean;
+  busy: boolean;
   /** Model dang chon tren picker — nut "Doi model & thu lai" gui no (T-3.6). */
-  modelDangChon: string | null;
-  /** `modelId` vang mat = giu nguyen model cu. Xem `useChat.thuLai`. */
-  onThuLai: (messageId: string, modelId?: string) => void;
-  onDanhGia: (messageId: string, gia: DanhGia | null) => void;
-  onSua: (messageId: string, noiDungMoi: string) => void;
-  onChuyenNhanh: (node: MessageRa, huong: -1 | 1) => void;
+  selectedModel: string | null;
+  /** `modelId` vang mat = giu nguyen model cu. Xem `useChat.retry`. */
+  onRetry: (messageId: string, modelId?: string) => void;
+  onFeedback: (messageId: string, value: Feedback | null) => void;
+  onEdit: (messageId: string, newContent: string) => void;
+  onSwitchBranch: (node: MessageOut, direction: -1 | 1) => void;
 }) {
-  const chu = noiDung(cay, node);
-  const reasoning = phanReasoning(cay, node);
+  const text = content(tree, node);
+  const reasoning = reasoningOf(tree, node);
 
   if (node.role === "user") {
     return (
       <UserBubble
         node={node}
-        chu={chu}
-        dangBan={dangBan}
-        onSua={onSua}
-        onChuyenNhanh={(huong) => onChuyenNhanh(node, huong)}
+        text={text}
+        busy={busy}
+        onEdit={onEdit}
+        onSwitchBranch={(direction) => onSwitchBranch(node, direction)}
       />
     );
   }
 
-  const laLoi = node.status === "failed" || node.error_code !== null;
-  const chuaKhep = node.status === "queued" || node.status === "streaming" || dangChay;
-  const dangCho = !laLoi && chuaKhep && chu === "";
-  const dangStream = !laLoi && chuaKhep && chu !== "";
-  const xong = !laLoi && !chuaKhep;
+  const isError = node.status === "failed" || node.error_code !== null;
+  const isOpen = node.status === "queued" || node.status === "streaming" || running;
+  const waiting = !isError && isOpen && text === "";
+  const streaming = !isError && isOpen && text !== "";
+  const done = !isError && !isOpen;
 
   return (
     <article
@@ -114,7 +114,7 @@ export function MessageItem({
       // T-3.9 / Cam bay ①: hoat anh o VUNG, chay mot lan khi bong bong mount.
       // Hai nhanh chung mot `animation` nen doi sang trang thai loi khong kich lai.
       className={
-        laLoi
+        isError
           ? "motion-enter w-full rounded-bubble border border-danger bg-danger-subtle px-5 py-4"
           : "motion-enter w-full rounded-bubble border border-border bg-surface-assistant px-5 py-4"
       }
@@ -122,34 +122,34 @@ export function MessageItem({
       <h3 className="mb-2 flex items-center gap-2 text-2xs font-semibold tracking-wider uppercase text-muted">
         <span
           aria-hidden="true"
-          className={laLoi ? "size-2 rounded-full bg-danger" : "size-2 rounded-full bg-accent"}
+          className={isError ? "size-2 rounded-full bg-danger" : "size-2 rounded-full bg-accent"}
         />
         {t("chat.assistantLabel")}
       </h3>
 
-      {dangCho && (
+      {waiting && (
         <p aria-live="polite" className="flex min-h-6 items-center gap-2 text-body text-muted">
           {t("chat.waiting")}
           <span aria-hidden="true" className="size-1.5 rounded-full bg-muted motion-pulse" />
         </p>
       )}
 
-      {dangStream && (
+      {streaming && (
         // `motion-none`: phan tu nay doi noi dung 300+ lan mot luot sinh (T-1.14).
         <div className="motion-none min-h-6 text-body text-foreground">
           <span className="sr-only">{t("chat.streaming")}</span>
-          <Markdown text={chu} streaming />
+          <Markdown text={text} streaming />
         </div>
       )}
 
       {/* Ban T-HD3: bong bong loi GIU lai phan chu da chay duoc, khong xoa. */}
-      {laLoi && chu !== "" && (
+      {isError && text !== "" && (
         <div className="mb-3 text-body text-foreground">
-          <Markdown text={chu} streaming={false} />
+          <Markdown text={text} streaming={false} />
         </div>
       )}
 
-      {laLoi && (
+      {isError && (
         <div className="flex flex-col gap-3">
           <p className="text-body font-medium text-danger-text">{t("chat.errorTitle")}</p>
           {node.error_code !== null && (
@@ -157,7 +157,7 @@ export function MessageItem({
           )}
           <button
             type="button"
-            onClick={() => onThuLai(node.id)}
+            onClick={() => onRetry(node.id)}
             className="h-touch self-start rounded-md bg-danger px-4 text-base font-semibold text-danger-foreground hover:bg-danger-hover motion-press"
           >
             {t("chat.errorRetry")}
@@ -165,13 +165,13 @@ export function MessageItem({
         </div>
       )}
 
-      {xong && (
+      {done && (
         <div className="text-body text-foreground">
-          <Markdown text={chu} streaming={false} />
+          <Markdown text={text} streaming={false} />
         </div>
       )}
 
-      {xong && reasoning !== "" && (
+      {done && reasoning !== "" && (
         <details className="mt-3 rounded-md border border-border bg-background">
           <summary className="flex h-touch cursor-pointer list-none items-center gap-2 px-3 text-base font-medium">
             <span aria-hidden="true">▸</span>
@@ -183,37 +183,37 @@ export function MessageItem({
         </details>
       )}
 
-      {xong && (
+      {done && (
         <>
           <ul className="mt-3 flex flex-wrap gap-2">
             {node.model_id !== null && <Chip label={node.model_id} mono />}
             {node.finish_reason !== null && node.finish_reason !== "stop" && (
               <Chip label={node.finish_reason} mono />
             )}
-            {ghiChu.map((chip, i) => (
+            {notes.map((chip, i) => (
               <Chip key={i} label={chip} />
             ))}
           </ul>
 
           <div className="mt-2 flex flex-wrap items-center gap-1">
-            {coAnhEm(node) && (
+            {hasSiblings(node) && (
               <>
                 <BranchNav
                   node={node}
-                  nhan={t("chat.branchLabel")}
-                  onChuyenNhanh={(huong) => onChuyenNhanh(node, huong)}
+                  label={t("chat.branchLabel")}
+                  onSwitchBranch={(direction) => onSwitchBranch(node, direction)}
                 />
-                <VachNgan />
+                <Divider />
               </>
             )}
-            <NutDuoiCauTraLoi
-              chu={chu}
+            <AnswerActions
+              text={text}
               feedback={node.feedback}
-              modelDangDung={node.model_id}
-              modelDangChon={modelDangChon}
-              onDanhGia={(gia) => onDanhGia(node.id, gia)}
-              onThuLai={() => onThuLai(node.id)}
-              onThuLaiModel={(modelId) => onThuLai(node.id, modelId)}
+              usedModel={node.model_id}
+              selectedModel={selectedModel}
+              onFeedback={(value) => onFeedback(node.id, value)}
+              onRetry={() => onRetry(node.id)}
+              onRetryWithModel={(modelId) => onRetry(node.id, modelId)}
             />
           </div>
         </>
@@ -239,21 +239,21 @@ export function MessageItem({
  */
 function UserBubble({
   node,
-  chu,
-  dangBan,
-  onSua,
-  onChuyenNhanh,
+  text,
+  busy,
+  onEdit,
+  onSwitchBranch,
 }: {
-  node: MessageRa;
-  chu: string;
-  dangBan: boolean;
-  onSua: (messageId: string, noiDungMoi: string) => void;
-  onChuyenNhanh: (huong: -1 | 1) => void;
+  node: MessageOut;
+  text: string;
+  busy: boolean;
+  onEdit: (messageId: string, newContent: string) => void;
+  onSwitchBranch: (direction: -1 | 1) => void;
 }) {
-  const [dangSua, setDangSua] = useState(false);
-  const [ban, setBan] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
 
-  if (dangSua) {
+  if (editing) {
     return (
       <article
         aria-label={t("chat.editing")}
@@ -262,9 +262,9 @@ function UserBubble({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (ban.trim() !== "") {
-              onSua(node.id, ban);
-              setDangSua(false);
+            if (draft.trim() !== "") {
+              onEdit(node.id, draft);
+              setEditing(false);
             }
           }}
         >
@@ -272,8 +272,8 @@ function UserBubble({
             <span className="sr-only">{t("chat.editing")}</span>
             <textarea
               autoFocus
-              value={ban}
-              onChange={(e) => setBan(e.target.value)}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
               rows={3}
               className="w-full resize-y rounded-md border border-border-strong bg-surface-panel p-3 text-body text-foreground"
             />
@@ -281,7 +281,7 @@ function UserBubble({
           <div className="mt-2 flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setDangSua(false)}
+              onClick={() => setEditing(false)}
               className="h-touch rounded-md px-4 text-base font-medium hover:bg-surface-hover motion-press"
             >
               {t("chat.cancel")}
@@ -294,7 +294,7 @@ function UserBubble({
             */}
             <button
               type="submit"
-              disabled={dangBan}
+              disabled={busy}
               className="h-touch rounded-md bg-accent px-4 text-base font-semibold text-accent-foreground hover:bg-accent-hover disabled:bg-surface-hover disabled:text-disabled-foreground motion-press"
             >
               {t("chat.save")}
@@ -312,27 +312,27 @@ function UserBubble({
     >
       {/* Tin nhan cua nguoi dung la chu tho: no khong di qua mot model nao,
           va render markdown o day nghia la nguoi go ``` bi mat dau ```. */}
-      <p className="m-0 text-body whitespace-pre-wrap text-foreground">{chu}</p>
+      <p className="m-0 text-body whitespace-pre-wrap text-foreground">{text}</p>
       {/*
         Cung mot ngu phap voi hang duoi bong bong assistant: dieu huong nhanh,
         vach ngan, roi hanh dong. Neo phai vi ca bong bong neo phai (T-HD3 2b).
       */}
       <div className="flex flex-wrap items-center justify-end gap-1">
-        {coAnhEm(node) && (
+        {hasSiblings(node) && (
           <>
             <BranchNav
               node={node}
-              nhan={t("chat.branchLabelCauHoi")}
-              onChuyenNhanh={onChuyenNhanh}
+              label={t("chat.branchLabelCauHoi")}
+              onSwitchBranch={onSwitchBranch}
             />
-            <VachNgan />
+            <Divider />
           </>
         )}
         <button
           type="button"
           onClick={() => {
-            setBan(chu);
-            setDangSua(true);
+            setDraft(text);
+            setEditing(true);
           }}
           className="h-touch rounded-md px-3 text-base font-medium text-muted hover:bg-surface-hover motion-press"
         >

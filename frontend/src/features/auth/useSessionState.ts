@@ -19,47 +19,47 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, MA_LOI, api, type HoSoRa, type NguoiDungRa } from "../../lib/api";
+import { ApiError, ERROR_CODES, api, type ProfileOut, type UserOut } from "../../lib/api";
 
-export interface Phien {
+export interface SessionState {
   /** `null` = chua dang nhap (hoac phien da het). */
-  nguoiDung: NguoiDungRa | null;
+  user: UserOut | null;
   /**
    * Cau tra loi DAY DU cua `GET /auth/me` — `quota`, `message_max_chars`,
    * `default_model` (§18.1, B-213).
    *
-   * Tach khoi `nguoiDung` chu khong mo rong no, vi `/auth/login` KHONG tra
-   * hai truong dau: chung dat hai luot doc Redis (`HoSoRa` cua backend giai
-   * thich vi sao), va mot cai ten kieu `NguoiDungRa` hua ba truong ma chi hai
+   * Tach khoi `user` chu khong mo rong no, vi `/auth/login` KHONG tra
+   * hai truong dau: chung dat hai luot doc Redis (`ProfileOut` cua backend giai
+   * thich vi sao), va mot cai ten kieu `UserOut` hua ba truong ma chi hai
    * duong trong ba tra ve la mot cai bay im lang.
    *
    * `null` khi chua hoi xong, khi chua dang nhap, hoac khi lan hoi do hong.
    * Ben doc phai co duong lui: mot `message_max_chars` khong biet la "khong
    * dem duoc", khong phai "khong co tran" — tran that o `422` cua server.
    */
-  hoSo: HoSoRa | null;
+  profile: ProfileOut | null;
   /**
    * T-3.11 — `Date.now()` luc cau tra loi `/auth/me` dang nam trong `hoSo`
    * VE TOI trinh duyet. `retry_after` la so giay TINH TU LUC DO, nen doi no
    * thanh mot moc gio can dung moc nay chu khong `Date.now()` luc render.
    *
-   * Mot truong rieng chu khong suy tu danh tinh object `hoSo`: `datModelMacDinh`
+   * Mot truong rieng chu khong suy tu danh tinh object `hoSo`: `changeDefaultModel`
    * cung thay `hoSo` bang mot object moi ma khong doc lai quota nao.
    */
   profileReadAt: number | null;
   /** Lan hoi `GET /auth/me` dau tien con dang chay hay khong. */
-  dangTai: boolean;
+  loading: boolean;
   /**
    * `GET /auth/me` tra `403 ACCOUNT_DISABLED` — tai khoan `rejected` hoac
    * `suspended` (§11.1). **Khac** `nguoiDung === null`, xem chu thich trong
    * `useEffect` ben duoi.
    */
-  biKhoa: boolean;
-  /** Loi cua lan `dangNhap()` gan nhat; `null` khi chua thu hoac da thanh cong. */
-  loi: ApiError | null;
-  /** Tra `NguoiDungRa` khi thanh cong — caller can `status` de dinh tuyen (§11.1). */
-  dangNhap: (email: string, matKhau: string) => Promise<NguoiDungRa | null>;
-  dangXuat: () => Promise<void>;
+  locked: boolean;
+  /** Loi cua lan `login()` gan nhat; `null` khi chua thu hoac da thanh cong. */
+  error: ApiError | null;
+  /** Tra `UserOut` khi thanh cong — caller can `status` de dinh tuyen (§11.1). */
+  login: (email: string, password: string) => Promise<UserOut | null>;
+  logout: () => Promise<void>;
   /**
    * T-3.6 — ghi `users.default_model` (`PUT /settings`) va cap nhat `hoSo`
    * tai cho. UC-05 dong 4: *"user doi duoc va duoc nho theo user"*.
@@ -72,7 +72,7 @@ export interface Phien {
    * Nem lai loi cho ben goi: `400 MODEL_UNKNOWN` la mot ket cuc co that
    * (catalog sua nong — Cam bay ③ cua T-3.0) va man hinh phai noi duoc.
    */
-  datModelMacDinh: (modelId: string | null) => Promise<void>;
+  changeDefaultModel: (modelId: string | null) => Promise<void>;
   /**
    * T-3.11 — hoi lai `GET /auth/me` de lam tuoi thanh quota.
    *
@@ -84,24 +84,24 @@ export interface Phien {
   refreshProfile: () => Promise<void>;
 }
 
-export function usePhien(): Phien {
-  const [nguoiDung, setNguoiDung] = useState<NguoiDungRa | null>(null);
-  const [hoSo, setHoSo] = useState<HoSoRa | null>(null);
+export function useSessionState(): SessionState {
+  const [user, setUser] = useState<UserOut | null>(null);
+  const [profile, setProfile] = useState<ProfileOut | null>(null);
   const [profileReadAt, setProfileReadAt] = useState<number | null>(null);
-  const [dangTai, setDangTai] = useState(true);
-  const [biKhoa, setBiKhoa] = useState(false);
-  const [loi, setLoi] = useState<ApiError | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [locked, setLocked] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
 
   useEffect(() => {
-    let conGan = true;
+    let mounted = true;
     void (async () => {
       try {
-        const ra = await api.toiLaAi();
-        if (conGan) {
-          setNguoiDung(ra);
-          setHoSo(ra);
+        const output = await api.me();
+        if (mounted) {
+          setUser(output);
+          setProfile(output);
           setProfileReadAt(Date.now());
-          setBiKhoa(false);
+          setLocked(false);
         }
       } catch (e) {
         // T-2.19 gop 401 va 403 vao mot ket cuc vi luc do chung dan toi cung
@@ -110,37 +110,37 @@ export function usePhien(): Phien {
         // chat"*. Ke tu day hai ma loi ay dan toi hai man hinh khac nhau, nen
         // gop chung lai chinh la danh mat thong tin duy nhat phan biet duoc.
         //
-        // `nguoiDung` VAN la `null` o ca hai ca: khong co phien dung duoc.
-        // `biKhoa` la mot truong RIENG chu khong mot gia tri thu ba cua
-        // `nguoiDung`, de moi cho dang doc `nguoiDung === null` giu nguyen
+        // `user` VAN la `null` o ca hai ca: khong co phien dung duoc.
+        // `locked` la mot truong RIENG chu khong mot gia tri thu ba cua
+        // `user`, de moi cho dang doc `nguoiDung === null` giu nguyen
         // nghia cu.
-        if (conGan) {
-          setNguoiDung(null);
-          setHoSo(null);
-          setBiKhoa(e instanceof ApiError && e.code === MA_LOI.TAI_KHOAN_BI_KHOA);
+        if (mounted) {
+          setUser(null);
+          setProfile(null);
+          setLocked(e instanceof ApiError && e.code === ERROR_CODES.ACCOUNT_DISABLED);
         }
       } finally {
-        if (conGan) {
-          setDangTai(false);
+        if (mounted) {
+          setLoading(false);
         }
       }
     })();
     return () => {
-      conGan = false;
+      mounted = false;
     };
   }, []);
 
-  const dangNhap = useCallback(
-    async (email: string, matKhau: string): Promise<NguoiDungRa | null> => {
-      setLoi(null);
+  const login = useCallback(
+    async (email: string, password: string): Promise<UserOut | null> => {
+      setError(null);
       try {
-        const ra = await api.dangNhap(email, matKhau);
-        setNguoiDung(ra);
-        setBiKhoa(false);
+        const output = await api.login(email, password);
+        setUser(output);
+        setLocked(false);
         /*
           Hoi them `GET /auth/me` sau khi dang nhap — B-213.
 
-          `Layout` goi `usePhien()` MOT lan luc mount, va dieu huong sau dang
+          `Layout` goi `useSessionState()` MOT lan luc mount, va dieu huong sau dang
           nhap la dieu huong phia client: khong co lan mount thu hai nao de
           `/auth/me` tu chay lai. Khong co dong nay thi ca mot phien bat dau
           bang man dang nhap se khong bao gio biet `message_max_chars` —
@@ -151,58 +151,58 @@ export function usePhien(): Phien {
           va ben doc di duong lui cua no.
         */
         void api
-          .toiLaAi()
-          .then((hoSoMoi) => {
-            setHoSo(hoSoMoi);
+          .me()
+          .then((nextProfile) => {
+            setProfile(nextProfile);
             setProfileReadAt(Date.now());
           })
-          .catch(() => setHoSo(null));
+          .catch(() => setProfile(null));
         // Tra `ra` chu khong `true`: caller phai dinh tuyen theo `status`
-        // (§11.1) NGAY trong cung mot nhip, va `nguoiDung` cua state thi chua
+        // (§11.1) NGAY trong cung mot nhip, va `user` cua state thi chua
         // cap nhat o thoi diem promise nay resolve.
-        return ra;
+        return output;
       } catch (e) {
-        setLoi(e instanceof ApiError ? e : new ApiError(0, "HTTP_ERROR", String(e)));
+        setError(e instanceof ApiError ? e : new ApiError(0, "HTTP_ERROR", String(e)));
         return null;
       }
     },
     [],
   );
 
-  const dangXuat = useCallback(async (): Promise<void> => {
+  const logout = useCallback(async (): Promise<void> => {
     try {
-      await api.dangXuat();
+      await api.logout();
     } finally {
       // Xoa danh tinh o FE DU cho loi goi that bai: `POST /auth/logout` co y
       // khong doi xac thuc (NQ-42) va khong co ket cuc thu hai de bao, nen mot
       // loi o day gan nhu chac chan la mang chu khong phai "chua dang xuat".
       // Giu man hinh o trang thai "van dang dang nhap" chi lam nguoi dung
       // tuong minh chua thoat.
-      setNguoiDung(null);
-      setHoSo(null);
-      setBiKhoa(false);
+      setUser(null);
+      setProfile(null);
+      setLocked(false);
     }
   }, []);
 
-  const datModelMacDinh = useCallback(async (modelId: string | null): Promise<void> => {
-    const ra = await api.capNhatCaiDat(modelId);
+  const changeDefaultModel = useCallback(async (modelId: string | null): Promise<void> => {
+    const output = await api.updateSettings(modelId);
     /*
       Doc lai tu RESPONSE chu khong tu `modelId` vua gui: server la noi
-      quyet dinh, va no tra `CaiDatRa` dung de ben goi khong phai suy ra
-      (xem docstring `CaiDatRa` cua backend).
+      quyet dinh, va no tra `SettingsOut` dung de ben goi khong phai suy ra
+      (xem docstring `SettingsOut` cua backend).
 
-      Ca hai cho cung mang truong nay: `NguoiDungRa.default_model` la mot
+      Ca hai cho cung mang truong nay: `UserOut.default_model` la mot
       cot cua hang `users` nen ca `/login`, `/refresh` lan `/me` deu tra —
       cap nhat mot cho roi de cho kia lech la dung cai bay B-213 noi toi.
     */
-    setHoSo((cu) => (cu === null ? cu : { ...cu, default_model: ra.default_model }));
-    setNguoiDung((cu) => (cu === null ? cu : { ...cu, default_model: ra.default_model }));
+    setProfile((prev) => (prev === null ? prev : { ...prev, default_model: output.default_model }));
+    setUser((prev) => (prev === null ? prev : { ...prev, default_model: output.default_model }));
   }, []);
 
   const refreshProfile = useCallback(async (): Promise<void> => {
     try {
-      const ra = await api.toiLaAi();
-      setHoSo(ra);
+      const output = await api.me();
+      setProfile(output);
       setProfileReadAt(Date.now());
     } catch {
       // Giu `hoSo` cu — xem docstring `Phien.refreshProfile`.
@@ -210,15 +210,15 @@ export function usePhien(): Phien {
   }, []);
 
   return {
-    nguoiDung,
-    hoSo,
+    user,
+    profile,
     profileReadAt,
-    dangTai,
-    biKhoa,
-    loi,
-    dangNhap,
-    dangXuat,
-    datModelMacDinh,
+    loading,
+    locked,
+    error,
+    login,
+    logout,
+    changeDefaultModel,
     refreshProfile,
   };
 }

@@ -28,27 +28,27 @@ from app.core.deps import SESSION_COOKIE_NAME
 from app.db.models import Message, MessageRole, MessageStatus, UserRole, UserStatus
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.main import app
-from app.streaming.cancel import GIA_TRI_CO, cancel_key
+from app.streaming.cancel import FLAG_VALUE, cancel_key
 
-DUONG_DAN = "/api/v1/messages/{}/cancel"
+PATH = "/api/v1/messages/{}/cancel"
 
 
-class RedisGia:
-    """Ghi lại mọi `SET`; `no_ra` mô phỏng Redis chết giữa lúc bấm Dừng."""
+class FakeRedis:
+    """Ghi lại mọi `SET`; `raises` mô phỏng Redis chết giữa lúc bấm Dừng."""
 
     def __init__(self) -> None:
-        self.da_set: list[tuple[str, str, Any]] = []
-        self.no_ra = False
+        self.set_calls: list[tuple[str, str, Any]] = []
+        self.raises = False
 
     async def set(self, name: str, value: str, *, ex: int | None = None) -> bool:
-        if self.no_ra:
+        if self.raises:
             raise ConnectionError("redis chet giua chung (gia lap)")
-        self.da_set.append((name, value, ex))
+        self.set_calls.append((name, value, ex))
         return True
 
 
 @pytest.fixture
-def _db_cua_test(
+def _db_for_tests(
     monkeypatch: pytest.MonkeyPatch, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     """`session_scope()` trong handler trỏ vào ĐÚNG kết nối của test (NQ-17)."""
@@ -56,10 +56,10 @@ def _db_cua_test(
 
 
 @pytest.fixture
-def redis_gia(monkeypatch: pytest.MonkeyPatch) -> RedisGia:
-    gia = RedisGia()
-    monkeypatch.setattr("app.api.v1.messages.get_redis", lambda: gia)
-    return gia
+def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
+    fake = FakeRedis()
+    monkeypatch.setattr("app.api.v1.messages.get_redis", lambda: fake)
+    return fake
 
 
 @pytest_asyncio.fixture
@@ -68,7 +68,7 @@ async def client() -> AsyncIterator[AsyncClient]:
         yield http
 
 
-def _phien(user_id: uuid.UUID) -> dict[str, str]:
+def _session(user_id: uuid.UUID) -> dict[str, str]:
     """Header `Cookie` mang phiên thật (§11.2) của `user_id` — T-3.1c.
 
     Trả một `dict` để truyền vào `headers=` của **từng request**, đúng chỗ mà
@@ -96,7 +96,7 @@ def _phien(user_id: uuid.UUID) -> dict[str, str]:
     return {"Cookie": f"{SESSION_COOKIE_NAME}={token}"}
 
 
-async def _tao_message(
+async def _create_message(
     session_factory: async_sessionmaker[AsyncSession],
     user_id: uuid.UUID,
     *,
@@ -116,7 +116,7 @@ async def _tao_message(
         return message
 
 
-async def _doc_lai(session_factory: async_sessionmaker[AsyncSession], mid: uuid.UUID) -> Message:
+async def _reload(session_factory: async_sessionmaker[AsyncSession], mid: uuid.UUID) -> Message:
     async with session_factory() as session:
         message = await session.get(Message, mid)
         assert message is not None
@@ -126,38 +126,38 @@ async def _doc_lai(session_factory: async_sessionmaker[AsyncSession], mid: uuid.
 # ═══════════════════ đường chạy đúng: còn cái để dừng ═══════════════════
 
 
-@pytest.mark.parametrize("trang_thai", [MessageStatus.QUEUED, MessageStatus.STREAMING])
-async def test_dat_co_khi_message_con_dang_sinh(
+@pytest.mark.parametrize("status", [MessageStatus.QUEUED, MessageStatus.STREAMING])
+async def test_sets_flag_while_message_still_generating(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    trang_thai: MessageStatus,
-    _db_cua_test: None,
-    redis_gia: RedisGia,
+    status: MessageStatus,
+    _db_for_tests: None,
+    fake_redis: FakeRedis,
 ) -> None:
     """§7.5: `SET cancel:{id} 1 EX CANCEL_TTL_S`, cho cả `queued` lẫn `streaming`.
 
     `queued` cũng phải nhận cờ: người dùng bấm Dừng ngay sau khi gửi thì job
     còn nằm trong hàng đợi, và cờ phải chờ sẵn ở đó khi worker nhặt nó lên.
     """
-    message = await _tao_message(session_factory, user_a, status=trang_thai)
+    message = await _create_message(session_factory, user_a, status=status)
 
-    resp = await client.post(DUONG_DAN.format(message.id), headers=_phien(user_a))
+    resp = await client.post(PATH.format(message.id), headers=_session(user_a))
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["cancel_requested"] is True
-    assert body["status"] == trang_thai.value
+    assert body["status"] == status.value
     assert body["message_id"] == str(message.id)
-    assert redis_gia.da_set == [(cancel_key(message.id), GIA_TRI_CO, settings.CANCEL_TTL_S)]
+    assert fake_redis.set_calls == [(cancel_key(message.id), FLAG_VALUE, settings.CANCEL_TTL_S)]
 
 
-async def test_api_khong_tu_doi_trang_thai_trong_postgres(
+async def test_api_does_not_change_status_in_postgres_itself(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    redis_gia: RedisGia,
+    _db_for_tests: None,
+    fake_redis: FakeRedis,
 ) -> None:
     """A1: handler dựng một lá cờ, KHÔNG ghi trạng thái xuống Postgres.
 
@@ -165,48 +165,48 @@ async def test_api_khong_tu_doi_trang_thai_trong_postgres(
     một hàng: worker đang sinh sẽ ghi đè lại vài giây sau và nút Dừng trở
     thành thứ đôi khi có tác dụng.
     """
-    message = await _tao_message(session_factory, user_a, status=MessageStatus.STREAMING)
+    message = await _create_message(session_factory, user_a, status=MessageStatus.STREAMING)
 
-    await client.post(DUONG_DAN.format(message.id), headers=_phien(user_a))
+    await client.post(PATH.format(message.id), headers=_session(user_a))
 
-    sau = await _doc_lai(session_factory, message.id)
-    assert sau.status is MessageStatus.STREAMING
-    assert sau.finish_reason is None
+    after = await _reload(session_factory, message.id)
+    assert after.status is MessageStatus.STREAMING
+    assert after.finish_reason is None
 
 
-async def test_bam_dung_hai_lan_deu_dat_co(
+async def test_clicking_stop_twice_sets_flag_both_times(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    redis_gia: RedisGia,
+    _db_for_tests: None,
+    fake_redis: FakeRedis,
 ) -> None:
     """Bấm hai lần trên một lượt ĐANG sinh: vô hại, và gia hạn TTL."""
-    message = await _tao_message(session_factory, user_a, status=MessageStatus.STREAMING)
-    phien = _phien(user_a)
+    message = await _create_message(session_factory, user_a, status=MessageStatus.STREAMING)
+    session = _session(user_a)
 
-    mot = await client.post(DUONG_DAN.format(message.id), headers=phien)
-    hai = await client.post(DUONG_DAN.format(message.id), headers=phien)
+    first = await client.post(PATH.format(message.id), headers=session)
+    second = await client.post(PATH.format(message.id), headers=session)
 
-    assert (mot.status_code, hai.status_code) == (200, 200)
-    assert hai.json()["cancel_requested"] is True
-    assert len(redis_gia.da_set) == 2
+    assert (first.status_code, second.status_code) == (200, 200)
+    assert second.json()["cancel_requested"] is True
+    assert len(fake_redis.set_calls) == 2
 
 
 # ════════════ DoD dòng 4: idempotent trên message đã khép ════════════
 
 
 @pytest.mark.parametrize(
-    "trang_thai",
+    "status",
     [MessageStatus.COMPLETED, MessageStatus.FAILED, MessageStatus.CANCELLED],
 )
-async def test_message_da_khep_tra_200_va_khong_dat_co(
+async def test_settled_message_is_200_and_sets_no_flag(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    trang_thai: MessageStatus,
-    _db_cua_test: None,
-    redis_gia: RedisGia,
+    status: MessageStatus,
+    _db_for_tests: None,
+    fake_redis: FakeRedis,
 ) -> None:
     """DoD: cancel một message đã `completed` → `200`, **không có tác dụng phụ**.
 
@@ -215,82 +215,82 @@ async def test_message_da_khep_tra_200_va_khong_dat_co(
     `CANCEL_TTL_S` giây cho một message đã xong — và nếu T-1.13 cho `retry`
     dùng lại cùng `message_id` thì đó là một quả mìn hẹn giờ.
     """
-    message = await _tao_message(
-        session_factory, user_a, status=trang_thai, content="cau tra loi cu"
+    message = await _create_message(
+        session_factory, user_a, status=status, content="cau tra loi cu"
     )
 
-    resp = await client.post(DUONG_DAN.format(message.id), headers=_phien(user_a))
+    resp = await client.post(PATH.format(message.id), headers=_session(user_a))
 
     assert resp.status_code == 200
     assert resp.json()["cancel_requested"] is False
-    assert resp.json()["status"] == trang_thai.value
-    assert redis_gia.da_set == []
+    assert resp.json()["status"] == status.value
+    assert fake_redis.set_calls == []
 
-    sau = await _doc_lai(session_factory, message.id)
-    assert sau.status is trang_thai
-    assert sau.content == "cau tra loi cu", "không được đụng tới nội dung đã có"
+    after = await _reload(session_factory, message.id)
+    assert after.status is status
+    assert after.content == "cau tra loi cu", "không được đụng tới nội dung đã có"
 
 
 # ═══════════════════════ quyền sở hữu (§20) và lỗi ═══════════════════════
 
 
-async def test_message_cua_user_khac_tra_404_khong_phai_403(
+async def test_other_users_message_is_404_not_403(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     user_b: uuid.UUID,
-    _db_cua_test: None,
-    redis_gia: RedisGia,
+    _db_for_tests: None,
+    fake_redis: FakeRedis,
 ) -> None:
     """§20: 403 cho ca này là xác nhận `message_id` đó có thật.
 
     Và quan trọng hơn: **không** đặt cờ. Nếu handler đặt cờ trước rồi mới kiểm
     quyền thì bất kỳ ai biết một UUID cũng dừng được lượt chat của người khác.
     """
-    message = await _tao_message(session_factory, user_a, status=MessageStatus.STREAMING)
+    message = await _create_message(session_factory, user_a, status=MessageStatus.STREAMING)
 
-    resp = await client.post(DUONG_DAN.format(message.id), headers=_phien(user_b))
+    resp = await client.post(PATH.format(message.id), headers=_session(user_b))
 
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "MESSAGE_NOT_FOUND"
-    assert redis_gia.da_set == []
+    assert fake_redis.set_calls == []
 
 
-async def test_message_khong_ton_tai_tra_404(
+async def test_missing_message_is_404(
     client: AsyncClient,
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    redis_gia: RedisGia,
+    _db_for_tests: None,
+    fake_redis: FakeRedis,
 ) -> None:
-    resp = await client.post(DUONG_DAN.format(uuid.uuid4()), headers=_phien(user_a))
+    resp = await client.post(PATH.format(uuid.uuid4()), headers=_session(user_a))
 
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "MESSAGE_NOT_FOUND"
-    assert redis_gia.da_set == []
+    assert fake_redis.set_calls == []
 
 
-async def test_redis_chet_tra_503_co_ma_rieng(
+async def test_dead_redis_503_with_own_code(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
-    _db_cua_test: None,
-    redis_gia: RedisGia,
+    _db_for_tests: None,
+    fake_redis: FakeRedis,
 ) -> None:
     """Redis hỏng là sự cố *phụ thuộc* → `503` thử lại được, không phải `500`."""
-    message = await _tao_message(session_factory, user_a, status=MessageStatus.STREAMING)
-    redis_gia.no_ra = True
+    message = await _create_message(session_factory, user_a, status=MessageStatus.STREAMING)
+    fake_redis.raises = True
 
-    resp = await client.post(DUONG_DAN.format(message.id), headers=_phien(user_a))
+    resp = await client.post(PATH.format(message.id), headers=_session(user_a))
 
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "CANCEL_FAILED"
 
 
-async def test_debug_bat_cung_khong_mo_cua_nao(
+async def test_debug_on_opens_no_door(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
-    _db_cua_test: None,
-    redis_gia: RedisGia,
+    _db_for_tests: None,
+    fake_redis: FakeRedis,
 ) -> None:
     """`DEBUG=true` không còn mua được gì — T-3.1c.
 
@@ -302,8 +302,8 @@ async def test_debug_bat_cung_khong_mo_cua_nao(
     """
     monkeypatch.setattr(settings, "DEBUG", True)
 
-    resp = await client.post(DUONG_DAN.format(uuid.uuid4()))
+    resp = await client.post(PATH.format(uuid.uuid4()))
 
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "UNAUTHENTICATED"
-    assert redis_gia.da_set == []
+    assert fake_redis.set_calls == []

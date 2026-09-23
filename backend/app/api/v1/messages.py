@@ -73,7 +73,7 @@ nhánh mới"*, và `messages.content` của hàng cũ **không đổi một ký
 con phía dưới bản cũ vẫn nguyên và vẫn mở lại được bằng `active_leaf_id` cũ —
 đó là dòng DoD thứ tư của task.
 
-**Ba đường đều dùng lại `_mo_luot_sinh`**, tức đúng ba bước cuối của §7.2 ①
+**Ba đường đều dùng lại `_open_generation`**, tức đúng ba bước cuối của §7.2 ①
 (assistant `queued` → dời `active_leaf_id` → `enqueue` **trong** transaction).
 Viết lại ba lần là ba cơ hội để một trong ba quên `status='queued'` hoặc đẩy
 job sau `commit`, và không test nào của hai đường kia bắt được.
@@ -94,7 +94,7 @@ from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.conversations import MessageTrenDuongDi
+from app.api.v1.conversations import PathMessage
 from app.config import catalog
 from app.config.settings import FEEDBACK_REASON_MAX_CHARS, settings
 from app.core.deps import (
@@ -106,7 +106,7 @@ from app.core.deps import (
 )
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.queue import GENERATE_JOB_NAME, get_arq_pool
-from app.core.ratelimit import gioi_han_chat, nha_ghe_sinh, nhan_ghe_sinh
+from app.core.ratelimit import acquire_generation_seat, chat_limit, release_generation_seat
 from app.core.redis import get_redis
 from app.db.models import (
     Conversation,
@@ -125,7 +125,7 @@ from app.db.repositories import (
 from app.db.session import session_scope
 from app.llm.credentials import resolve_key_source
 from app.quota.estimator import QuotaWarning, check_quota
-from app.streaming.cancel import dat_co_huy
+from app.streaming.cancel import set_cancel_flag
 
 logger = logging.getLogger(__name__)
 
@@ -135,18 +135,18 @@ router = APIRouter(tags=["messages"])
 #: dựng bằng `url_path_for(...)` chứ không nội suy chuỗi: tiền tố `/api/v1`
 #: sống ở `api/v1/__init__.py` và đường dẫn sống ở `stream.py`, nên chép lại
 #: ở đây là tạo bản thứ ba sẽ lệch trong im lặng (A3 cùng tinh thần).
-TEN_ROUTE_STREAM = "stream_message"
+STREAM_ROUTE_NAME = "stream_message"
 
 #: Tên route của chính `POST /conversations/{id}/messages`. `api/v1/__init__.py`
 #: đọc nó để khai "route này BẮT BUỘC `Idempotency-Key`" (§11.4, A8) — tên
 #: route chứ không phải đường dẫn, cùng lý do đã ghi ở hằng trên và ở
 #: `app/core/idempotency.py::build_key`. FastAPI lấy tên route từ tên hàm, nên
 #: đổi tên `create_message` mà quên hằng này là gỡ luật bắt buộc **trong im
-#: lặng**; test `test_ten_route_khop_ham` canh đúng chiều đó.
-TEN_ROUTE_TAO_MESSAGE = "create_message"
+#: lặng**; test `test_route_name_matches_function` canh đúng chiều đó.
+CREATE_MESSAGE_ROUTE_NAME = "create_message"
 
 #: Tên route của `POST /messages/{id}/retry`. NQ-93 (B-231) đưa nó vào
-#: `ROUTE_BAT_BUOC_IDEMPOTENCY` cạnh hằng trên, và đó là **áp** A8 chứ không
+#: `IDEMPOTENCY_REQUIRED_ROUTES` cạnh hằng trên, và đó là **áp** A8 chứ không
 #: lệch: retry *tạo tài nguyên* — một `assistant_message_id` mới, một anh em
 #: mới, một hoá đơn mới — nên nó nằm đúng trong chữ "mọi POST tạo tài nguyên".
 #: Lớp `_job_id` của B-92 không đỡ được chiều này: mỗi lần bấm sinh một id
@@ -156,7 +156,7 @@ TEN_ROUTE_TAO_MESSAGE = "create_message"
 #: mở `GUARDED_METHOD` sang `PATCH` là một lệch có chủ ý với §11.4/A8 mà NQ-93
 #: chọn chưa mở (khe còn hở: B-232). Cùng lý do đặt tên route ở đây chứ không
 #: đường dẫn: xem hằng trên và `app/core/idempotency.py::build_key`.
-TEN_ROUTE_THU_LAI = "retry_message"
+RETRY_ROUTE_NAME = "retry_message"
 
 #: Hai luật của §10.6 áp cho ba route SINH CHỮ, dựng MỘT lần ở đây rồi gắn ba
 #: chỗ — cùng lối `_idempotency` của `api/v1/__init__.py`.
@@ -164,18 +164,18 @@ TEN_ROUTE_THU_LAI = "retry_message"
 #: Hạn mức theo user (20/phút, nhóm `chat`) là một **dependency**: nó chỉ cần
 #: `user_id` nên nó chạy được trước khi handler ghi dòng nào. Trần đồng thời
 #: thì **không** thể là dependency — nó phải biết `message_id` của lượt sinh,
-#: mà id đó chỉ tồn tại sau `INSERT`; nó sống trong `_mo_luot_sinh`.
-_GIOI_HAN_CHAT = gioi_han_chat()
+#: mà id đó chỉ tồn tại sau `INSERT`; nó sống trong `_open_generation`.
+_CHAT_LIMIT = chat_limit()
 
 #: Ba route sinh chữ khai chung khối này. Viết một lần thay vì chép ba lần: hai
 #: luật phải luôn đi cùng nhau, và một route thứ tư quên một trong hai là đúng
 #: kiểu hỏng không ai thấy.
-_ROUTE_SINH_CHU = [Depends(require_chat_access), Depends(_GIOI_HAN_CHAT)]
+_GENERATION_ROUTE = [Depends(require_chat_access), Depends(_CHAT_LIMIT)]
 
 
 @dataclass(frozen=True, slots=True)
-class LuotSinhMoi:
-    """Thứ `_mo_luot_sinh` trả về: id của message assistant, cộng cảnh báo quota.
+class NewGeneration:
+    """Thứ `_open_generation` trả về: id của message assistant, cộng cảnh báo quota.
 
     Là một khối chứ không phải một `uuid.UUID` trần như trước T-2.11: ba
     endpoint sinh chữ đều phải mang cảnh báo của UC-07 ra body, và cảnh báo ấy
@@ -188,7 +188,7 @@ class LuotSinhMoi:
     quota_warning: QuotaWarning | None
 
 
-class TaoMessageRequest(BaseModel):
+class CreateMessageRequest(BaseModel):
     """Body của §18.2. Ba trường, hai trong đó là tuỳ chọn có ý nghĩa riêng."""
 
     #: Nội dung người dùng gõ. `min_length=1` vì một lượt rỗng không cho model
@@ -210,7 +210,7 @@ class TaoMessageRequest(BaseModel):
     model_id: str | None = None
 
 
-class TaoMessageResponse(BaseModel):
+class CreateMessageResponse(BaseModel):
     """`202` của §7.2 ①, cộng cờ `branched` của C14."""
 
     user_message_id: uuid.UUID
@@ -233,9 +233,9 @@ class TaoMessageResponse(BaseModel):
 @router.post(
     "/conversations/{conversation_id}/messages",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=TaoMessageResponse,
-    # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_ROUTE_SINH_CHU`.
-    dependencies=_ROUTE_SINH_CHU,
+    response_model=CreateMessageResponse,
+    # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_GENERATION_ROUTE`.
+    dependencies=_GENERATION_ROUTE,
     responses={
         400: {
             "model": ErrorEnvelope,
@@ -255,10 +255,10 @@ class TaoMessageResponse(BaseModel):
 async def create_message(
     request: Request,
     conversation_id: uuid.UUID,
-    body: TaoMessageRequest,
+    body: CreateMessageRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     user_status: Annotated[UserStatus, Depends(get_current_user_status)],
-) -> TaoMessageResponse:
+) -> CreateMessageResponse:
     """Ghi hai message, dời con trỏ nhánh, đẩy job, trả `202`. Không gọi model.
 
     `Idempotency-Key` (§11.4, A8) **không** xuất hiện trong chữ ký này nữa kể
@@ -281,13 +281,13 @@ async def create_message(
                 "khong tim thay hoi thoai",
             )
 
-        model = _chon_model(body.model_id, conversation.default_model)
+        model = _pick_model(body.model_id, conversation.default_model)
 
         # C14 — đọc `active_leaf_id` TRƯỚC khi ghi đè nó, nếu không `branched`
         # luôn là `False` (so một giá trị với chính nó).
-        leaf_hien_tai = conversation.active_leaf_id
-        parent_id = body.parent_id if "parent_id" in body.model_fields_set else leaf_hien_tai
-        branched = parent_id != leaf_hien_tai
+        current_leaf = conversation.active_leaf_id
+        parent_id = body.parent_id if "parent_id" in body.model_fields_set else current_leaf
+        branched = parent_id != current_leaf
 
         try:
             user_message = await messages.create_message(
@@ -297,18 +297,18 @@ async def create_message(
                 parent_id=parent_id,
                 content=body.content,
             )
-        except MessageNotInConversationError as loi:
+        except MessageNotInConversationError as exc:
             raise ApiError(
                 status.HTTP_404_NOT_FOUND,
                 ApiErrorCode.PARENT_NOT_FOUND,
                 "parent_id khong nam trong hoi thoai nay",
-            ) from loi
+            ) from exc
 
         # Hai UUID lấy ra TRƯỚC khi session đóng: `Message` sau đó là object
         # detached, và đọc thuộc tính của nó ngoài session là chỗ sinh
         # `DetachedInstanceError` nếu có ai lỡ bật `expire_on_commit`.
         uid = user_message.id
-        luot = await _mo_luot_sinh(
+        generation = await _open_generation(
             session=session,
             messages=messages,
             conversations=conversations,
@@ -320,21 +320,21 @@ async def create_message(
         )
         await session.commit()
 
-    return TaoMessageResponse(
+    return CreateMessageResponse(
         user_message_id=uid,
-        assistant_message_id=luot.assistant_message_id,
-        stream_url=_stream_url(request, luot.assistant_message_id),
+        assistant_message_id=generation.assistant_message_id,
+        stream_url=_stream_url(request, generation.assistant_message_id),
         branched=branched,
-        quota_warning=luot.quota_warning,
+        quota_warning=generation.quota_warning,
     )
 
 
 def _stream_url(request: Request, message_id: uuid.UUID) -> str:
-    """Đường dẫn SSE của một message — xem docstring `TaoMessageResponse`."""
-    return str(request.app.url_path_for(TEN_ROUTE_STREAM, message_id=str(message_id)))
+    """Đường dẫn SSE của một message — xem docstring `CreateMessageResponse`."""
+    return str(request.app.url_path_for(STREAM_ROUTE_NAME, message_id=str(message_id)))
 
 
-async def _mo_luot_sinh(
+async def _open_generation(
     *,
     session: AsyncSession,
     messages: MessageRepository,
@@ -344,7 +344,7 @@ async def _mo_luot_sinh(
     user_status: UserStatus,
     parent_id: uuid.UUID | None,
     model: catalog.ModelEntry,
-) -> LuotSinhMoi:
+) -> NewGeneration:
     """Bốn bước cuối của §7.2 ① — assistant `queued`, dời lá, KIỂM QUOTA, đẩy job.
 
     Dùng chung cho cả ba đường tạo một lượt sinh (`POST .../messages`,
@@ -355,13 +355,13 @@ async def _mo_luot_sinh(
     Nhận cả `ModelEntry` chứ không chỉ `model.id` kể từ T-2.11: cửa chặn
     §10.2 cần `max_output` và giá của model, và tra lại catalog từ một chuỗi
     `id` ngay bên trong hàm là làm hai lần một việc caller vừa làm xong
-    (`_chon_model`).
+    (`_pick_model`).
 
     **Nhận thêm `user_status` kể từ T-2.15, và đó là chỗ B-140 được đóng.**
     `require_chat_access` gắn ở route chạy **trước** khi body được đọc, nên nó
     chỉ hỏi được "người này có khoá **nào đó** không". Câu đúng của §11.1 là
     "có khoá cho provider của model **đang gọi** không", và chỗ duy nhất trả
-    lời được là đây — sau `_chon_model`. Hai lớp, thô rồi tinh: lớp ngoài chặn
+    lời được là đây — sau `_pick_model`. Hai lớp, thô rồi tinh: lớp ngoài chặn
     sớm mà không cần đọc DB thêm cho `active`, lớp trong chặn đúng.
 
     Trả `id` của message assistant vừa tạo, đọc ra **trước** khi session đóng,
@@ -411,12 +411,12 @@ async def _mo_luot_sinh(
             # câu hỏi đã gửi. Worker đọc lại đúng cột này (§7.2 ③).
             model_id=model.id,
         )
-    except MessageNotInConversationError as loi:
+    except MessageNotInConversationError as exc:
         raise ApiError(
             status.HTTP_404_NOT_FOUND,
             ApiErrorCode.PARENT_NOT_FOUND,
             "parent_id khong nam trong hoi thoai nay",
-        ) from loi
+        ) from exc
 
     # A2: con trỏ nhánh trỏ vào message ASSISTANT, không phải message user.
     # Lượt sau nối tiếp sau câu trả lời, và `context.build` đi ngược từ chính
@@ -425,7 +425,7 @@ async def _mo_luot_sinh(
 
     amid = assistant.id
 
-    # §10.2 cửa TRƯỚC (T-2.11). Đứng **trước** `nhan_ghe_sinh` chứ không sau,
+    # §10.2 cửa TRƯỚC (T-2.11). Đứng **trước** `acquire_generation_seat` chứ không sau,
     # và thứ tự ấy là hợp đồng: ghế bận nhả bằng phép đối chiếu Postgres sau
     # `PHANTOM_GRACE_S`, nên từ chối *sau* khi đã nhận ghế là khoá một ghế 60
     # giây cho một lượt sinh chưa từng tồn tại. Cửa quota thì không để lại gì
@@ -442,9 +442,9 @@ async def _mo_luot_sinh(
     # báo UC-07 cũng vắng mặt: thanh "còn ~X USD" nói về quota hệ thống, và
     # hiện nó cho một lượt không trừ quota là nói sai. Rate limit của §10.6
     # thì **vẫn** áp — nó là dependency của route, không đi qua đây.
-    canh_bao = None
+    warning = None
     if key_source is KeySource.SYSTEM:
-        canh_bao = await check_quota(session, user_id=user_id, leaf_id=amid, model=model)
+        warning = await check_quota(session, user_id=user_id, leaf_id=amid, model=model)
 
     # §10.6 hàng "Đồng thời" (T-2.9, B-85, NQ-49). Ở **đây** chứ không ở một
     # dependency vì phép kiểm cần `message_id`, mà id đó chỉ ra đời ở dòng
@@ -452,7 +452,7 @@ async def _mo_luot_sinh(
     # đây làm cả transaction của caller rollback, nên một lượt bị từ chối không
     # để lại hàng `messages` nào — còn từ chối sau khi job đã vào hàng đợi thì
     # worker vẫn sinh chữ và vẫn tính tiền.
-    await nhan_ghe_sinh(messages, user_id=user_id, message_id=amid)
+    await acquire_generation_seat(messages, user_id=user_id, message_id=amid)
 
     try:
         await _day_job(amid)
@@ -462,12 +462,12 @@ async def _mo_luot_sinh(
         # phát hiện nó là rác sau `PHANTOM_GRACE_S`. Bắt `BaseException` vì
         # `asyncio.CancelledError` (client ngắt giữa chừng) cũng để lại đúng
         # một cái ghế trỏ vào hư không.
-        await nha_ghe_sinh(user_id=user_id, message_id=amid)
+        await release_generation_seat(user_id=user_id, message_id=amid)
         raise
-    return LuotSinhMoi(assistant_message_id=amid, quota_warning=canh_bao)
+    return NewGeneration(assistant_message_id=amid, quota_warning=warning)
 
 
-def _chon_model(*uu_tien: str | None) -> catalog.ModelEntry:
+def _pick_model(*preferred: str | None) -> catalog.ModelEntry:
     """Duyệt các mức ưu tiên theo đúng thứ tự truyền vào, cuối cùng là catalog.
 
     `POST .../messages` truyền hai mức (request → `conversations.default_model`);
@@ -490,26 +490,26 @@ def _chon_model(*uu_tien: str | None) -> catalog.ModelEntry:
             `default` cũng đã tắt. Đây là sự cố cấu hình phía server (5xx),
             không phải lỗi của request (4xx).
     """
-    for nguon in uu_tien:
-        if nguon:
-            model = catalog.get_model(nguon)
+    for source in preferred:
+        if source:
+            model = catalog.get_model(source)
             if model is None:
                 raise ApiError(
                     status.HTTP_400_BAD_REQUEST,
                     ApiErrorCode.MODEL_UNKNOWN,
-                    f"model khong co trong catalog hoac da tat: {nguon}",
-                    details={"model_id": nguon},
+                    f"model khong co trong catalog hoac da tat: {source}",
+                    details={"model_id": source},
                 )
             return model
 
-    mac_dinh = catalog.get_default_model()
-    if mac_dinh is None:
+    default = catalog.get_default_model()
+    if default is None:
         raise ApiError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             ApiErrorCode.NO_MODEL_AVAILABLE,
             "khong co model nao dang bat trong catalog",
         )
-    return mac_dinh
+    return default
 
 
 async def _day_job(assistant_message_id: uuid.UUID) -> None:
@@ -546,7 +546,7 @@ async def _day_job(assistant_message_id: uuid.UUID) -> None:
         job = await pool.enqueue_job(
             GENERATE_JOB_NAME, str(assistant_message_id), _job_id=str(assistant_message_id)
         )
-    except Exception as loi:
+    except Exception as exc:
         # KHÔNG nuốt: log kèm traceback rồi đổi thành mã FE đọc được. Không có
         # dòng này thì nguyên nhân thật ("redis:6379 không phân giải được") chỉ
         # còn trong một `INTERNAL_ERROR` không ai truy được.
@@ -555,7 +555,7 @@ async def _day_job(assistant_message_id: uuid.UUID) -> None:
             status.HTTP_503_SERVICE_UNAVAILABLE,
             ApiErrorCode.ENQUEUE_FAILED,
             "khong day duoc job vao hang doi",
-        ) from loi
+        ) from exc
 
     if job is None:
         raise ApiError(
@@ -571,10 +571,10 @@ async def _day_job(assistant_message_id: uuid.UUID) -> None:
 #: Hai trạng thái còn có gì để dừng. Ba trạng thái còn lại (`completed`,
 #: `failed`, `cancelled`) là ba ngả đã khép: bấm Dừng ở đó vẫn trả `200` nhưng
 #: **không** đặt cờ — xem docstring `cancel_message`.
-TRANG_THAI_CON_DUNG_DUOC = frozenset({MessageStatus.QUEUED, MessageStatus.STREAMING})
+CANCELLABLE_STATUSES = frozenset({MessageStatus.QUEUED, MessageStatus.STREAMING})
 
 
-class HuyResponse(BaseModel):
+class CancelResponse(BaseModel):
     """`200` của `POST /messages/{id}/cancel`. §18.2 không ghi hình dạng body.
 
     Ba trường vì FE cần phân biệt hai lần bấm Dừng khác nhau: lần trúng một
@@ -595,7 +595,7 @@ class HuyResponse(BaseModel):
 @router.post(
     "/messages/{message_id}/cancel",
     status_code=status.HTTP_200_OK,
-    response_model=HuyResponse,
+    response_model=CancelResponse,
     responses={
         404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
         503: {"model": ErrorEnvelope, "description": "Khong dat duoc co huy (Redis hong)"},
@@ -604,7 +604,7 @@ class HuyResponse(BaseModel):
 async def cancel_message(
     message_id: uuid.UUID,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-) -> HuyResponse:
+) -> CancelResponse:
     """`SET cancel:{id} 1 EX CANCEL_TTL_S` — §7.5. Không đụng Postgres.
 
     **A1 ở đây cũng như ở `stream.py`:** handler không dừng cái gì cả. Nó dựng
@@ -632,19 +632,19 @@ async def cancel_message(
                 ApiErrorCode.MESSAGE_NOT_FOUND,
                 "khong tim thay message",
             )
-        trang_thai = message.status
+        msg_status = message.status
 
-    if trang_thai not in TRANG_THAI_CON_DUNG_DUOC:
+    if msg_status not in CANCELLABLE_STATUSES:
         logger.info(
             "cancel: %s dang o trang thai %s — khong con gi de dung (§7.5)",
             message_id,
-            trang_thai.value,
+            msg_status.value,
         )
-        return HuyResponse(message_id=message_id, status=trang_thai, cancel_requested=False)
+        return CancelResponse(message_id=message_id, status=msg_status, cancel_requested=False)
 
     try:
-        await dat_co_huy(get_redis(), message_id, ttl_s=settings.CANCEL_TTL_S)
-    except Exception as loi:
+        await set_cancel_flag(get_redis(), message_id, ttl_s=settings.CANCEL_TTL_S)
+    except Exception as exc:
         # Cùng lý lẽ với `_day_job`: Redis chết là sự cố *phụ thuộc*, tức thử
         # lại được. Nguyên nhân thật đi vào log kèm traceback; FE nhận một mã
         # nó phân nhánh được thay vì một `INTERNAL_ERROR` không ai truy ra.
@@ -653,10 +653,10 @@ async def cancel_message(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             ApiErrorCode.CANCEL_FAILED,
             "khong dat duoc co huy",
-        ) from loi
+        ) from exc
 
-    logger.info("cancel: da dat co cho %s (status=%s)", message_id, trang_thai.value)
-    return HuyResponse(message_id=message_id, status=trang_thai, cancel_requested=True)
+    logger.info("cancel: da dat co cho %s (status=%s)", message_id, msg_status.value)
+    return CancelResponse(message_id=message_id, status=msg_status, cancel_requested=True)
 
 
 # ════════════════════ §8.2 — thao tác CÂY (T-1.13) ════════════════════════
@@ -671,12 +671,12 @@ class RetryRequest(BaseModel):
     """
 
     #: Vắng ⇒ dùng lại `messages.model_id` của chính câu trả lời đang thử lại
-    #: (xem `_chon_model`), rồi mới tới `conversations.default_model`.
+    #: (xem `_pick_model`), rồi mới tới `conversations.default_model`.
     model_id: str | None = None
 
 
 class RetryResponse(BaseModel):
-    """`202` của retry — cùng hình dạng với `TaoMessageResponse` trừ hai chỗ.
+    """`202` của retry — cùng hình dạng với `CreateMessageResponse` trừ hai chỗ.
 
     Không có `user_message_id`: retry **không** tạo message user nào, nó chỉ
     thêm một câu trả lời anh em cho câu hỏi đã có. Không có `branched`: cờ đó
@@ -697,10 +697,10 @@ class RetryResponse(BaseModel):
     quota_warning: QuotaWarning | None = None
 
 
-class SuaMessageRequest(BaseModel):
+class EditMessageRequest(BaseModel):
     """Body của `PATCH /messages/{id}` — chỉ nội dung mới của câu hỏi.
 
-    `min_length=1` cùng lý do với `TaoMessageRequest.content`: sửa thành rỗng
+    `min_length=1` cùng lý do với `CreateMessageRequest.content`: sửa thành rỗng
     là trả tiền cho một lượt sinh không có câu hỏi. `max_length` cũng vậy —
     B-205 đếm được **hai** schema thiếu trần, và một nhánh sửa nội dung không
     có trần là đúng đường vòng mà bản vá này đang đóng.
@@ -713,7 +713,7 @@ class SuaMessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=settings.MESSAGE_MAX_CHARS)
 
 
-class SuaMessageResponse(BaseModel):
+class EditMessageResponse(BaseModel):
     """`202` của `PATCH /messages/{id}`.
 
     `user_message_id` là **message MỚI**, không phải `{id}` trong đường dẫn:
@@ -730,7 +730,7 @@ class SuaMessageResponse(BaseModel):
     quota_warning: QuotaWarning | None = None
 
 
-class AnhEmResponse(BaseModel):
+class SiblingsResponse(BaseModel):
     """`GET /messages/{id}/siblings` — mọi nhánh cùng cha, đã sắp thứ tự (§8.3).
 
     Bốn trường đầu là để FE vẽ `‹ 2/3 ›` mà **không phải tự đếm** — đó là toàn
@@ -749,15 +749,15 @@ class AnhEmResponse(BaseModel):
     parent_id: uuid.UUID | None
     sibling_index: int
     sibling_count: int
-    items: list[MessageTrenDuongDi]
+    items: list[PathMessage]
 
 
 @router.post(
     "/messages/{message_id}/retry",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=RetryResponse,
-    # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_ROUTE_SINH_CHU`.
-    dependencies=_ROUTE_SINH_CHU,
+    # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_GENERATION_ROUTE`.
+    dependencies=_GENERATION_ROUTE,
     responses={
         400: {
             "model": ErrorEnvelope,
@@ -794,8 +794,8 @@ async def retry_message(
     **`Idempotency-Key` là BẮT BUỘC ở đây (NQ-93, B-231).** Thiếu header ⇒ `400
     IDEMPOTENCY_KEY_REQUIRED`, đúng như `POST .../messages`: hai đường này cùng
     hạng rủi ro vì bấm hai lần là hai hàng `messages` và hai hoá đơn. Tên route
-    nằm trong `ROUTE_BAT_BUOC_IDEMPOTENCY` (`api/v1/__init__.py`) chứ không khai
-    ở chữ ký hàm này — xem `TEN_ROUTE_THU_LAI`.
+    nằm trong `IDEMPOTENCY_REQUIRED_ROUTES` (`api/v1/__init__.py`) chứ không khai
+    ở chữ ký hàm này — xem `RETRY_ROUTE_NAME`.
 
     **`parent_id` của bản mới chép từ bản cũ, không phải từ `active_leaf_id`.**
     Retry một câu trả lời ở *giữa* hội thoại (sau khi đã cuộn ngược lên) phải
@@ -811,55 +811,55 @@ async def retry_message(
       GENERATION_IN_PROGRESS`. Lượt cũ chưa khép mà mở lượt mới là hai job
       cùng sinh cho một `parent_id`, hoá đơn trả hai lần, và `active_leaf_id`
       bỏ rơi lượt đang chảy giữa màn hình. Đường đúng là §7.5 (bấm Dừng) rồi
-      retry — cùng bộ trạng thái `TRANG_THAI_CON_DUNG_DUOC` mà `cancel` dùng,
+      retry — cùng bộ trạng thái `CANCELLABLE_STATUSES` mà `cancel` dùng,
       cố ý dùng lại để hai endpoint không bao giờ hiểu "đang chạy" khác nhau.
     """
     async with session_scope() as session:
         messages = MessageRepository(session)
         conversations = ConversationRepository(session)
 
-        goc = await _message_cua_toi(messages, message_id, user_id=user_id)
-        _doi_role(goc, MessageRole.ASSISTANT)
-        if goc.status in TRANG_THAI_CON_DUNG_DUOC:
+        original = await _own_message(messages, message_id, user_id=user_id)
+        _require_role(original, MessageRole.ASSISTANT)
+        if original.status in CANCELLABLE_STATUSES:
             raise ApiError(
                 status.HTTP_409_CONFLICT,
                 ApiErrorCode.GENERATION_IN_PROGRESS,
                 "luot sinh cu chua ket thuc; huy no truoc khi thu lai",
-                details={"status": goc.status.value},
+                details={"status": original.status.value},
             )
 
-        conversation = await _hoi_thoai_chua(conversations, goc, user_id=user_id)
-        model = _chon_model(
+        conversation = await _containing_conversation(conversations, original, user_id=user_id)
+        model = _pick_model(
             body.model_id if body is not None else None,
-            goc.model_id,
+            original.model_id,
             conversation.default_model,
         )
-        luot = await _mo_luot_sinh(
+        generation = await _open_generation(
             session=session,
             messages=messages,
             conversations=conversations,
-            conversation_id=goc.conversation_id,
+            conversation_id=original.conversation_id,
             user_id=user_id,
             user_status=user_status,
-            parent_id=goc.parent_id,
+            parent_id=original.parent_id,
             model=model,
         )
         await session.commit()
 
     return RetryResponse(
-        assistant_message_id=luot.assistant_message_id,
-        stream_url=_stream_url(request, luot.assistant_message_id),
+        assistant_message_id=generation.assistant_message_id,
+        stream_url=_stream_url(request, generation.assistant_message_id),
         model_id=model.id,
-        quota_warning=luot.quota_warning,
+        quota_warning=generation.quota_warning,
     )
 
 
 @router.patch(
     "/messages/{message_id}",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=SuaMessageResponse,
-    # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_ROUTE_SINH_CHU`.
-    dependencies=_ROUTE_SINH_CHU,
+    response_model=EditMessageResponse,
+    # §11.1 (T-2.7) + §10.6 (T-2.9) — xem `_GENERATION_ROUTE`.
+    dependencies=_GENERATION_ROUTE,
     responses={
         400: {"model": ErrorEnvelope, "description": "Khong phai message user"},
         404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
@@ -875,10 +875,10 @@ async def retry_message(
 async def edit_message(
     request: Request,
     message_id: uuid.UUID,
-    body: SuaMessageRequest,
+    body: EditMessageRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     user_status: Annotated[UserStatus, Depends(get_current_user_status)],
-) -> SuaMessageResponse:
+) -> EditMessageResponse:
     """Sửa một câu hỏi = thêm một câu hỏi ANH EM rồi sinh lại — §8.2, UC-04.
 
     **`PATCH` ở đây KHÔNG sửa hàng nào.** `messages.content` của `{message_id}`
@@ -904,21 +904,21 @@ async def edit_message(
         messages = MessageRepository(session)
         conversations = ConversationRepository(session)
 
-        goc = await _message_cua_toi(messages, message_id, user_id=user_id)
-        _doi_role(goc, MessageRole.USER)
-        conversation = await _hoi_thoai_chua(conversations, goc, user_id=user_id)
-        model = _chon_model(conversation.default_model)
+        original = await _own_message(messages, message_id, user_id=user_id)
+        _require_role(original, MessageRole.USER)
+        conversation = await _containing_conversation(conversations, original, user_id=user_id)
+        model = _pick_model(conversation.default_model)
 
         try:
             user_message = await messages.create_message(
-                conversation_id=goc.conversation_id,
+                conversation_id=original.conversation_id,
                 user_id=user_id,
                 role=MessageRole.USER,
                 # Cùng cha với bản cũ ⇒ ANH EM của nó, không phải con.
-                parent_id=goc.parent_id,
+                parent_id=original.parent_id,
                 content=body.content,
             )
-        except MessageNotInConversationError as loi:
+        except MessageNotInConversationError as exc:
             # Cha của bản cũ vừa bị xoá mềm giữa chừng. Không có endpoint nào
             # xoá message ở Phase 1, nhưng để ngả này thành `500` là để một
             # thao tác hợp lệ của người dùng hiện ra như lỗi lập trình.
@@ -926,14 +926,14 @@ async def edit_message(
                 status.HTTP_404_NOT_FOUND,
                 ApiErrorCode.PARENT_NOT_FOUND,
                 "message cha khong con nam trong hoi thoai nay",
-            ) from loi
+            ) from exc
 
         uid = user_message.id
-        luot = await _mo_luot_sinh(
+        generation = await _open_generation(
             session=session,
             messages=messages,
             conversations=conversations,
-            conversation_id=goc.conversation_id,
+            conversation_id=original.conversation_id,
             user_id=user_id,
             user_status=user_status,
             parent_id=uid,
@@ -941,23 +941,23 @@ async def edit_message(
         )
         await session.commit()
 
-    return SuaMessageResponse(
+    return EditMessageResponse(
         user_message_id=uid,
-        assistant_message_id=luot.assistant_message_id,
-        stream_url=_stream_url(request, luot.assistant_message_id),
-        quota_warning=luot.quota_warning,
+        assistant_message_id=generation.assistant_message_id,
+        stream_url=_stream_url(request, generation.assistant_message_id),
+        quota_warning=generation.quota_warning,
     )
 
 
 @router.get(
     "/messages/{message_id}/siblings",
-    response_model=AnhEmResponse,
+    response_model=SiblingsResponse,
     responses={404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"}},
 )
 async def list_siblings(
     message_id: uuid.UUID,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-) -> AnhEmResponse:
+) -> SiblingsResponse:
     """Mọi nhánh cùng cha với `{message_id}` — dữ liệu cho `‹ n/m ›` (§8.3, C13).
 
     Chỉ đọc. Chuyển nhánh là một request khác: `PATCH /conversations/{id}` với
@@ -974,17 +974,19 @@ async def list_siblings(
     """
     async with session_scope() as session:
         messages = MessageRepository(session)
-        goc = await _message_cua_toi(messages, message_id, user_id=user_id)
-        anh_em = await messages.get_siblings(goc.conversation_id, goc.parent_id, user_id=user_id)
+        original = await _own_message(messages, message_id, user_id=user_id)
+        siblings = await messages.get_siblings(
+            original.conversation_id, original.parent_id, user_id=user_id
+        )
         items = [
-            MessageTrenDuongDi.from_message(m, sibling_index=vi_tri, sibling_count=len(anh_em))
-            for vi_tri, m in enumerate(anh_em)
+            PathMessage.from_message(m, sibling_index=index, sibling_count=len(siblings))
+            for index, m in enumerate(siblings)
         ]
-        cua_toi = next(i for i in items if i.id == message_id)
-        return AnhEmResponse(
+        mine = next(i for i in items if i.id == message_id)
+        return SiblingsResponse(
             message_id=message_id,
-            parent_id=goc.parent_id,
-            sibling_index=cua_toi.sibling_index,
+            parent_id=original.parent_id,
+            sibling_index=mine.sibling_index,
             sibling_count=len(items),
             items=items,
         )
@@ -993,7 +995,7 @@ async def list_siblings(
 # ═════════ §18.2 — Like/Dislike trên một câu trả lời (T-3.7a, NQ-80) ════════
 
 
-class DanhGiaRequest(BaseModel):
+class FeedbackRequest(BaseModel):
     """Body của `POST /messages/{id}/feedback` — `{value, reason?}` của §18.2.
 
     **`value` là trường BẮT BUỘC, kể cả khi giá trị của nó là `null`.** Gỡ đánh
@@ -1005,7 +1007,7 @@ class DanhGiaRequest(BaseModel):
     thành `null`") và khác có chủ ý: `PUT` thay **cả** tài nguyên nên vắng mặt
     có nghĩa, còn đây là một `POST` nhắm vào một message đã có.
 
-    `extra="forbid"` cùng lý lẽ ấy, và cùng lối `CaiDatIn`: gõ `rating` thay vì
+    `extra="forbid"` cùng lý lẽ ấy, và cùng lối `SettingsIn`: gõ `rating` thay vì
     `value` phải là một `422` đọc được chứ không phải một lần bấm Like không có
     tác dụng gì.
     """
@@ -1021,7 +1023,7 @@ class DanhGiaRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=FEEDBACK_REASON_MAX_CHARS)
 
     @model_validator(mode="after")
-    def _ly_do_phai_di_kem_mot_danh_gia(self) -> DanhGiaRequest:
+    def _reason_requires_value(self) -> FeedbackRequest:
         """`{"value": null, "reason": "..."}` ⇒ `422`, không phải một lần ghi nửa vời.
 
         Một lý do không có đánh giá là một hàng không đọc được: lần đọc sau
@@ -1034,12 +1036,12 @@ class DanhGiaRequest(BaseModel):
         return self
 
 
-class DanhGiaResponse(BaseModel):
+class FeedbackResponse(BaseModel):
     """`200` của `POST /messages/{id}/feedback` — trạng thái SAU khi ghi.
 
     Trả lại cả hai cột thay vì `204`: FE vừa gửi một giá trị và cần biết chắc
-    server đã nhận đúng thứ ấy, cùng lối `CaiDatRa` của T-3.0. Nó cũng là chỗ
-    duy nhất `feedback_reason` đi ra khỏi server — `MessageTrenDuongDi` cố ý
+    server đã nhận đúng thứ ấy, cùng lối `SettingsOut` của T-3.0. Nó cũng là chỗ
+    duy nhất `feedback_reason` đi ra khỏi server — `PathMessage` cố ý
     không mang nó (xem docstring lớp đó).
     """
 
@@ -1053,7 +1055,7 @@ class DanhGiaResponse(BaseModel):
 @router.post(
     "/messages/{message_id}/feedback",
     status_code=status.HTTP_200_OK,
-    response_model=DanhGiaResponse,
+    response_model=FeedbackResponse,
     responses={
         400: {"model": ErrorEnvelope, "description": "Khong phai message assistant"},
         404: {"model": ErrorEnvelope, "description": "Message khong thay (§20 gop ba ca)"},
@@ -1061,9 +1063,9 @@ class DanhGiaResponse(BaseModel):
 )
 async def set_message_feedback(
     message_id: uuid.UUID,
-    body: DanhGiaRequest,
+    body: FeedbackRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-) -> DanhGiaResponse:
+) -> FeedbackResponse:
     """Ghi Like/Dislike lên một câu trả lời — §18.2, UC-02, T-3.7a.
 
     **Idempotent theo message, không theo lần bấm.** Đây là `UPDATE` hai cột
@@ -1086,20 +1088,20 @@ async def set_message_feedback(
 
     **404 chứ không 403 (§20)**, cùng lối `cancel`/`retry`: "không tồn tại",
     "đã xoá mềm" và "của người khác" là cùng một câu trả lời. Phép kiểm quyền
-    chạy **hai** lần trên cùng một bộ điều kiện — `_message_cua_toi` để lấy
+    chạy **hai** lần trên cùng một bộ điều kiện — `_own_message` để lấy
     `role`, rồi `set_feedback` lọc `user_id` ngay trong câu `UPDATE` — và đó
     không phải thừa: §20 đòi phép lọc nằm trong câu SQL *ghi*, chứ không phải
     một lần đọc trước đó rồi tin vào nó.
     """
     async with session_scope() as session:
         messages = MessageRepository(session)
-        message = await _message_cua_toi(messages, message_id, user_id=user_id)
-        _doi_role(message, MessageRole.ASSISTANT)
+        message = await _own_message(messages, message_id, user_id=user_id)
+        _require_role(message, MessageRole.ASSISTANT)
 
-        da_ghi = await messages.set_feedback(
+        written = await messages.set_feedback(
             message_id, user_id=user_id, value=body.value, reason=body.reason
         )
-        if not da_ghi:  # pragma: no cover - `_message_cua_toi` đã lọc cùng điều kiện
+        if not written:  # pragma: no cover - `_own_message` đã lọc cùng điều kiện
             raise ApiError(
                 status.HTTP_404_NOT_FOUND,
                 ApiErrorCode.MESSAGE_NOT_FOUND,
@@ -1114,10 +1116,10 @@ async def set_message_feedback(
         body.value.value if body.value is not None else "null",
         len(body.reason or ""),
     )
-    return DanhGiaResponse(message_id=message_id, feedback=body.value, feedback_reason=body.reason)
+    return FeedbackResponse(message_id=message_id, feedback=body.value, feedback_reason=body.reason)
 
 
-async def _message_cua_toi(
+async def _own_message(
     messages: MessageRepository, message_id: uuid.UUID, *, user_id: uuid.UUID
 ) -> Message:
     """`get_message` + 404 của §20. Ba endpoint trên mở đầu bằng đúng câu này.
@@ -1135,7 +1137,7 @@ async def _message_cua_toi(
     return message
 
 
-def _doi_role(message: Message, can: MessageRole) -> None:
+def _require_role(message: Message, can: MessageRole) -> None:
     """`400 MESSAGE_ROLE_MISMATCH` nếu thao tác gọi nhầm loại message."""
     if message.role is not can:
         raise ApiError(
@@ -1146,18 +1148,18 @@ def _doi_role(message: Message, can: MessageRole) -> None:
         )
 
 
-async def _hoi_thoai_chua(
+async def _containing_conversation(
     conversations: ConversationRepository, message: Message, *, user_id: uuid.UUID
 ) -> Conversation:
-    """Hội thoại chứa `message` — cần `default_model` cho `_chon_model`.
+    """Hội thoại chứa `message` — cần `default_model` cho `_pick_model`.
 
-    Không lặp lại phép kiểm quyền: `_message_cua_toi` đã JOIN sang
+    Không lặp lại phép kiểm quyền: `_own_message` đã JOIN sang
     `conversations` với đúng `user_id` và `deleted_at IS NULL`, trong cùng
     transaction. Nhánh `None` ở đây là chuyện không xảy ra được, nhưng trả 404
     vẫn đúng hơn là để một `AttributeError` thành `500`.
     """
     conversation = await conversations.get_conversation(message.conversation_id, user_id=user_id)
-    if conversation is None:  # pragma: no cover - `_message_cua_toi` đã lọc cùng điều kiện
+    if conversation is None:  # pragma: no cover - `_own_message` đã lọc cùng điều kiện
         raise ApiError(
             status.HTTP_404_NOT_FOUND,
             ApiErrorCode.CONVERSATION_NOT_FOUND,

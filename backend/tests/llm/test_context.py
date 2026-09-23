@@ -4,9 +4,9 @@ KH tham chiếu: §9.6, §8.3, §19.1, C11, C15, C12 · B-33.
 
 Bốn dòng DoD của task nằm ở các test có chữ **DoD** trong docstring:
 
-- `test_chi_gui_duong_di_cua_mot_nhanh` — cây 3 nhánh, build từ nhánh 2 (C11)
-- `test_cat_theo_ngan_sach_tren_hoi_thoai_200_message` — `context_window=8000`
-- `test_cat_khong_bao_gio_de_lai_tool_result_mo_coi` — nhát cắt rơi vào giữa
+- `test_sends_only_one_branch_path` — cây 3 nhánh, build từ nhánh 2 (C11)
+- `test_trims_to_budget_on_200_message_conversation` — `context_window=8000`
+- `test_trimming_never_leaves_orphan_tool_result` — nhát cắt rơi vào giữa
   một cặp tool (C15)
 - (dòng "≥ 10 case xanh" là cả file này)
 
@@ -47,11 +47,11 @@ from app.llm.tokens import count_message, count_messages
 
 #: Model giả lập. Không phải model OpenAI ⇒ đi đúng nhánh "xấp xỉ" của §9.6.
 MODEL_ID = "model-thu-nghiem"
-TEN_HIEN_THI = "Model Thử Nghiệm"
+DISPLAY_NAME = "Model Thử Nghiệm"
 
 #: Hình dạng của DoD dòng 2: ba nhánh tách nhau ngay từ gốc, mỗi nhánh sâu 4.
-SO_NHANH = 3
-SO_TANG = 4
+BRANCHES = 3
+LEVELS = 4
 
 #: DoD dòng 3.
 SO_MESSAGE_200 = 200
@@ -61,7 +61,7 @@ MAX_OUTPUT_8000 = 1024
 #: Nhãn đủ dài để 200 message chắc chắn KHÔNG cùng vừa ngân sách ở trên
 #: (≈ 5976 token). Nhãn ngắn thì bộ test xanh mà chẳng cắt gì — đúng loại xanh
 #: giả mà DoD này sinh ra để bắt.
-NHAN_DAI = (
+LONG_TEXT = (
     "Đây là một message đủ dài để hai trăm cái như nó không thể cùng vừa trong một cửa sổ "
     "ngữ cảnh tám nghìn token, nên bộ dựng ngữ cảnh buộc phải cắt bớt phần quá khứ đi"
 )
@@ -73,7 +73,7 @@ def _model(
     """`model_meta` tối thiểu — chỉ ba trường mà §9.6 thực sự đọc."""
     return ModelEntry(
         id=model_id,
-        display_name=TEN_HIEN_THI,
+        display_name=DISPLAY_NAME,
         provider="thu-nghiem",
         upstream_model="thu-nghiem/model-v1",
         context_window=context_window,
@@ -82,11 +82,11 @@ def _model(
     )
 
 
-async def _hoi_thoai(session: AsyncSession, user_id: uuid.UUID) -> Conversation:
+async def _conversation(session: AsyncSession, user_id: uuid.UUID) -> Conversation:
     return await ConversationRepository(session).create_conversation(user_id=user_id)
 
 
-async def _them(
+async def _add(
     session: AsyncSession,
     conversation: Conversation,
     user_id: uuid.UUID,
@@ -123,78 +123,78 @@ async def _them(
     return message
 
 
-async def _day_thang(
+async def _straight_chain(
     session: AsyncSession,
     conversation: Conversation,
     user_id: uuid.UUID,
     *,
-    sau: int,
-    nhan: str,
-    goc: Message | None = None,
+    depth: int,
+    label: str,
+    root: Message | None = None,
 ) -> list[Message]:
     """Một dây thẳng `sau` tầng, xen kẽ user/assistant."""
     day: list[Message] = []
-    cha = goc
-    for tang in range(sau):
-        cha = await _them(
+    parent = root
+    for level in range(depth):
+        parent = await _add(
             session,
             conversation,
             user_id,
-            role=MessageRole.USER if tang % 2 == 0 else MessageRole.ASSISTANT,
-            parent=cha,
-            content=f"{nhan}-t{tang}",
+            role=MessageRole.USER if level % 2 == 0 else MessageRole.ASSISTANT,
+            parent=parent,
+            content=f"{label}-t{level}",
         )
-        day.append(cha)
+        day.append(parent)
     return day
 
 
-def _goi_tool(call_id: str, *, ten: str = "web_search") -> dict[str, Any]:
+def _tool_call(call_id: str, *, name: str = "web_search") -> dict[str, Any]:
     """Đúng hình dạng khối `tool_calls` của dây OpenAI — hợp đồng ở `_to_wire`."""
     return {
         "id": call_id,
         "type": "function",
-        "function": {"name": ten, "arguments": '{"query":"thời tiết Hà Nội"}'},
+        "function": {"name": name, "arguments": '{"query":"thời tiết Hà Nội"}'},
     }
 
 
-def _khong_co_mo_coi(messages: list[dict[str, Any]]) -> None:
+def _assert_no_orphans(messages: list[dict[str, Any]]) -> None:
     """Bất biến của C15: mọi `tool_result` phải có `tool_call` khai nó phía trên.
 
     Kiểm cả chiều ngược lại: mọi `tool_call` phải có `tool_result` trả lời.
     Hai chiều là hai cách khác nhau để ăn `400 invalid request`.
     """
-    da_khai: set[str] = set()
-    da_tra_loi: set[str] = set()
+    declared: set[str] = set()
+    answered: set[str] = set()
     for message in messages:
         if message["role"] == MessageRole.TOOL.value:
-            assert message["tool_call_id"] in da_khai, (
+            assert message["tool_call_id"] in declared, (
                 f"tool_result mồ côi: {message['tool_call_id']!r} không có tool_call nào khai"
             )
-            da_tra_loi.add(message["tool_call_id"])
+            answered.add(message["tool_call_id"])
         for call in message.get("tool_calls") or ():
-            da_khai.add(call["id"])
-    assert da_khai == da_tra_loi, f"tool_call không có tool_result: {da_khai - da_tra_loi}"
+            declared.add(call["id"])
+    assert declared == answered, f"tool_call không có tool_result: {declared - answered}"
 
 
-def _noi_dung(messages: list[dict[str, Any]]) -> list[str]:
+def _contents(messages: list[dict[str, Any]]) -> list[str]:
     return [m["content"] for m in messages]
 
 
 # ───────────────────────── system prompt (§19.1) ─────────────────────────
 
 
-def test_system_prompt_dung_dau_va_khong_rong() -> None:
-    noi_dung = render_system_prompt(model_display_name=TEN_HIEN_THI)
-    assert noi_dung.strip()
-    assert "{{" not in noi_dung, "template chưa được render"
+def test_system_prompt_comes_first_and_is_not_empty() -> None:
+    content = render_system_prompt(model_display_name=DISPLAY_NAME)
+    assert content.strip()
+    assert "{{" not in content, "template chưa được render"
 
 
-def test_system_prompt_mang_ten_hien_thi_cua_model() -> None:
+def test_system_prompt_carries_model_display_name() -> None:
     """Biến duy nhất mà `system.jinja` khai — hợp đồng giữa file và code."""
-    assert TEN_HIEN_THI in render_system_prompt(model_display_name=TEN_HIEN_THI)
+    assert DISPLAY_NAME in render_system_prompt(model_display_name=DISPLAY_NAME)
 
 
-def test_system_prompt_cache_60_giay() -> None:
+def test_system_prompt_cached_60_seconds() -> None:
     """§19.1: sửa file có hiệu lực trong 60 s, và giữa hai lần thì KHÔNG chạm đĩa.
 
     Đếm số lần `get_template` — đó là lần duy nhất Jinja đọc file. Chạm vào
@@ -202,102 +202,102 @@ def test_system_prompt_cache_60_giay() -> None:
     không có cách nào quan sát nó từ bên ngoài.
     """
     context.reload_system_prompt()
-    that = context._ENV.get_template
-    dem: list[str] = []
+    real = context._ENV.get_template
+    calls: list[str] = []
 
-    def dem_roi_goi(name: str) -> Any:
-        dem.append(name)
-        return that(name)
+    def count_then_call(name: str) -> Any:
+        calls.append(name)
+        return real(name)
 
-    context._ENV.get_template = dem_roi_goi  # type: ignore[method-assign]
+    context._ENV.get_template = count_then_call  # type: ignore[method-assign]
     try:
-        render_system_prompt(model_display_name=TEN_HIEN_THI)
-        render_system_prompt(model_display_name=TEN_HIEN_THI)
-        assert len(dem) == 1, "lần thứ hai trong TTL vẫn đọc đĩa"
+        render_system_prompt(model_display_name=DISPLAY_NAME)
+        render_system_prompt(model_display_name=DISPLAY_NAME)
+        assert len(calls) == 1, "lần thứ hai trong TTL vẫn đọc đĩa"
 
         assert context._cached_template is not None
         context._cached_template.loaded_at -= context.SYSTEM_PROMPT_TTL_S + 1
-        render_system_prompt(model_display_name=TEN_HIEN_THI)
-        assert len(dem) == 2, "quá TTL mà vẫn dùng bản cache — sửa file sẽ không có hiệu lực"
+        render_system_prompt(model_display_name=DISPLAY_NAME)
+        assert len(calls) == 2, "quá TTL mà vẫn dùng bản cache — sửa file sẽ không có hiệu lực"
     finally:
-        context._ENV.get_template = that  # type: ignore[method-assign]
+        context._ENV.get_template = real  # type: ignore[method-assign]
         context.reload_system_prompt()
 
 
 # ───────────────────────────── ngân sách (§9.6) ────────────────────────────
 
 
-def test_token_budget_dung_cong_thuc_9_6() -> None:
+def test_token_budget_follows_formula_9_6() -> None:
     model_meta = _model(context_window=CONTEXT_WINDOW_8000, max_output=MAX_OUTPUT_8000)
     assert token_budget(model_meta) == (
         CONTEXT_WINDOW_8000 - MAX_OUTPUT_8000 - settings.RESERVE_TOKENS
     )
 
 
-def test_context_window_cap_ham_model_khai_cua_so_khong_lo() -> None:
+def test_context_window_cap_caps_model_declaring_huge_window() -> None:
     """`CONTEXT_WINDOW_CAP` là chỗ chặn hoá đơn, không phải chặn kỹ thuật."""
-    khong_lo = _model(context_window=settings.CONTEXT_WINDOW_CAP * 10, max_output=1000)
-    assert token_budget(khong_lo) == (settings.CONTEXT_WINDOW_CAP - 1000 - settings.RESERVE_TOKENS)
+    huge = _model(context_window=settings.CONTEXT_WINDOW_CAP * 10, max_output=1000)
+    assert token_budget(huge) == (settings.CONTEXT_WINDOW_CAP - 1000 - settings.RESERVE_TOKENS)
 
 
 # ─────────────────────────── đường đi & nhánh (C11) ────────────────────────
 
 
-async def test_chi_gui_duong_di_cua_mot_nhanh(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_sends_only_one_branch_path(session: AsyncSession, user_a: uuid.UUID) -> None:
     """**DoD**: cây 3 nhánh × 4 tầng, build từ nhánh 2 → số message = độ dài đường đi.
 
     Đây là C11 viết thành số: 12 message trong hội thoại, đường đi dài 4. Một
     cài đặt gom theo `conversation_id` sẽ trả 12 và test đỏ ngay.
     """
-    conversation = await _hoi_thoai(session, user_a)
-    nhanh = [
-        await _day_thang(session, conversation, user_a, sau=SO_TANG, nhan=f"n{so}")
-        for so in range(SO_NHANH)
+    conversation = await _conversation(session, user_a)
+    branches = [
+        await _straight_chain(session, conversation, user_a, depth=LEVELS, label=f"n{so}")
+        for so in range(BRANCHES)
     ]
 
-    tong_message = await session.scalar(
+    message_total = await session.scalar(
         select(func.count()).select_from(Message).where(Message.conversation_id == conversation.id)
     )
-    assert tong_message == SO_NHANH * SO_TANG
+    assert message_total == BRANCHES * LEVELS
 
-    ket_qua = await build(session, nhanh[1][-1].id, _model(), user_id=user_a)
+    result = await build(session, branches[1][-1].id, _model(), user_id=user_a)
 
     # 1 system prompt + đúng độ dài đường đi.
-    assert len(ket_qua) == 1 + SO_TANG
-    assert ket_qua[0]["role"] == MessageRole.SYSTEM.value
-    assert _noi_dung(ket_qua[1:]) == [f"n1-t{tang}" for tang in range(SO_TANG)]
-    assert not [c for c in _noi_dung(ket_qua[1:]) if c.startswith(("n0-", "n2-"))]
+    assert len(result) == 1 + LEVELS
+    assert result[0]["role"] == MessageRole.SYSTEM.value
+    assert _contents(result[1:]) == [f"n1-t{level}" for level in range(LEVELS)]
+    assert not [c for c in _contents(result[1:]) if c.startswith(("n0-", "n2-"))]
 
 
-async def test_thu_tu_la_goc_truoc_la_sau(session: AsyncSession, user_a: uuid.UUID) -> None:
-    conversation = await _hoi_thoai(session, user_a)
-    day = await _day_thang(session, conversation, user_a, sau=6, nhan="x")
-    ket_qua = await build(session, day[-1].id, _model(), user_id=user_a)
-    assert _noi_dung(ket_qua[1:]) == [f"x-t{tang}" for tang in range(6)]
+async def test_order_is_root_first_leaf_last(session: AsyncSession, user_a: uuid.UUID) -> None:
+    conversation = await _conversation(session, user_a)
+    day = await _straight_chain(session, conversation, user_a, depth=6, label="x")
+    result = await build(session, day[-1].id, _model(), user_id=user_a)
+    assert _contents(result[1:]) == [f"x-t{level}" for level in range(6)]
 
 
-async def test_to_tien_bi_xoa_mem_cat_duong_di(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_soft_deleted_ancestor_cuts_path(session: AsyncSession, user_a: uuid.UUID) -> None:
     """C12: message đã xoá mềm không được lỏn vào ngữ cảnh, và cắt luôn phần trên nó."""
-    conversation = await _hoi_thoai(session, user_a)
-    day = await _day_thang(session, conversation, user_a, sau=5, nhan="x")
+    conversation = await _conversation(session, user_a)
+    day = await _straight_chain(session, conversation, user_a, depth=5, label="x")
     await MessageRepository(session).soft_delete_message(day[1].id, user_id=user_a)
 
-    ket_qua = await build(session, day[-1].id, _model(), user_id=user_a)
-    assert _noi_dung(ket_qua[1:]) == ["x-t2", "x-t3", "x-t4"]
+    result = await build(session, day[-1].id, _model(), user_id=user_a)
+    assert _contents(result[1:]) == ["x-t2", "x-t3", "x-t4"]
 
 
-async def test_leaf_cua_user_khac_thi_raise(
+async def test_other_users_leaf_raises(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID
 ) -> None:
     """IDOR (§20): lọc `user_id` nằm trong SQL của `get_path`, không phải ở đây."""
-    conversation = await _hoi_thoai(session, user_a)
-    day = await _day_thang(session, conversation, user_a, sau=3, nhan="x")
+    conversation = await _conversation(session, user_a)
+    day = await _straight_chain(session, conversation, user_a, depth=3, label="x")
 
     with pytest.raises(EmptyPathError):
         await build(session, day[-1].id, _model(), user_id=user_b)
 
 
-async def test_leaf_khong_ton_tai_thi_raise(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_missing_leaf_raises(session: AsyncSession, user_a: uuid.UUID) -> None:
     with pytest.raises(EmptyPathError):
         await build(session, uuid.uuid4(), _model(), user_id=user_a)
 
@@ -305,7 +305,7 @@ async def test_leaf_khong_ton_tai_thi_raise(session: AsyncSession, user_a: uuid.
 # ──────────────────────── trạng thái message (§7.2) ────────────────────────
 
 
-async def test_message_assistant_dang_queued_o_la_khong_vao_context(
+async def test_queued_assistant_leaf_stays_out_of_context(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """§7.2 ③: `leaf_id` chính là message `queued` mà worker sắp viết vào.
@@ -313,40 +313,42 @@ async def test_message_assistant_dang_queued_o_la_khong_vao_context(
     Nó phải tự rụng, nếu không mọi request đều kết thúc bằng một lượt assistant
     rỗng — thứ mà một phần provider từ chối thẳng.
     """
-    conversation = await _hoi_thoai(session, user_a)
-    cau_hoi = await _them(session, conversation, user_a, role=MessageRole.USER, content="câu hỏi")
-    cho_sinh = await _them(
+    conversation = await _conversation(session, user_a)
+    question = await _add(session, conversation, user_a, role=MessageRole.USER, content="câu hỏi")
+    awaiting = await _add(
         session,
         conversation,
         user_a,
         role=MessageRole.ASSISTANT,
-        parent=cau_hoi,
+        parent=question,
         status=MessageStatus.QUEUED,
     )
 
-    ket_qua = await build(session, cho_sinh.id, _model(), user_id=user_a)
-    assert _noi_dung(ket_qua[1:]) == ["câu hỏi"]
+    result = await build(session, awaiting.id, _model(), user_id=user_a)
+    assert _contents(result[1:]) == ["câu hỏi"]
 
 
-async def test_message_cancelled_van_vao_context(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_cancelled_message_still_enters_context(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
     """§7.5 lưu phần đã sinh; người dùng đã đọc nó, nên model cũng phải thấy nó."""
-    conversation = await _hoi_thoai(session, user_a)
-    cau_hoi = await _them(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
-    da_huy = await _them(
+    conversation = await _conversation(session, user_a)
+    question = await _add(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
+    cancelled_msg = await _add(
         session,
         conversation,
         user_a,
         role=MessageRole.ASSISTANT,
-        parent=cau_hoi,
+        parent=question,
         content="trả lời dở dang",
         status=MessageStatus.CANCELLED,
     )
 
-    ket_qua = await build(session, da_huy.id, _model(), user_id=user_a)
-    assert _noi_dung(ket_qua[1:]) == ["hỏi", "trả lời dở dang"]
+    result = await build(session, cancelled_msg.id, _model(), user_id=user_a)
+    assert _contents(result[1:]) == ["hỏi", "trả lời dở dang"]
 
 
-async def test_trang_thai_chua_xong_bi_loai_ke_ca_khi_DA_CO_chu(
+async def test_unfinished_status_excluded_even_WITH_text(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """`failed`/`streaming` bị loại vì TRẠNG THÁI, không phải vì rỗng.
@@ -360,122 +362,130 @@ async def test_trang_thai_chua_xong_bi_loai_ke_ca_khi_DA_CO_chu(
     "bỏ message rỗng" sẽ che mất luật trạng thái, và nới `USABLE_STATUSES` ra
     cả năm giá trị vẫn xanh — đúng kiểu phép kiểm vô dụng.
     """
-    conversation = await _hoi_thoai(session, user_a)
-    cau_hoi = await _them(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
-    that_bai = await _them(
+    conversation = await _conversation(session, user_a)
+    question = await _add(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
+    failed = await _add(
         session,
         conversation,
         user_a,
         role=MessageRole.ASSISTANT,
-        parent=cau_hoi,
+        parent=question,
         content="một phần chữ đã kịp ghi trước khi worker chết",
         status=MessageStatus.FAILED,
     )
-    dang_sinh = await _them(
+    generating = await _add(
         session,
         conversation,
         user_a,
         role=MessageRole.ASSISTANT,
-        parent=that_bai,
+        parent=failed,
         content="chữ của một lượt CHƯA chốt",
         status=MessageStatus.STREAMING,
     )
-    tiep = await _them(
-        session, conversation, user_a, role=MessageRole.USER, parent=dang_sinh, content="hỏi lại"
+    next_resp = await _add(
+        session, conversation, user_a, role=MessageRole.USER, parent=generating, content="hỏi lại"
     )
 
-    ket_qua = await build(session, tiep.id, _model(), user_id=user_a)
-    assert _noi_dung(ket_qua[1:]) == ["hỏi", "hỏi lại"]
+    result = await build(session, next_resp.id, _model(), user_id=user_a)
+    assert _contents(result[1:]) == ["hỏi", "hỏi lại"]
 
 
-async def test_reasoning_khong_bao_gio_gui_lai(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_reasoning_never_sent_back(session: AsyncSession, user_a: uuid.UUID) -> None:
     """B-33: `deepseek-flash` sinh 333 chunk reasoning cho một lượt. Gửi lại = nhân đôi hoá đơn."""
-    conversation = await _hoi_thoai(session, user_a)
-    cau_hoi = await _them(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
-    tra_loi = await _them(
+    conversation = await _conversation(session, user_a)
+    question = await _add(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
+    answer = await _add(
         session,
         conversation,
         user_a,
         role=MessageRole.ASSISTANT,
-        parent=cau_hoi,
+        parent=question,
         content="đáp án là 42",
         reasoning="ĐÂY LÀ PHẦN SUY NGHĨ KHÔNG ĐƯỢC GỬI LẠI",
     )
 
-    ket_qua = await build(session, tra_loi.id, _model(), user_id=user_a)
-    assert not [m for m in ket_qua if "SUY NGHĨ" in str(m.get("content"))]
-    assert not [m for m in ket_qua if "reasoning" in m]
+    result = await build(session, answer.id, _model(), user_id=user_a)
+    assert not [m for m in result if "SUY NGHĨ" in str(m.get("content"))]
+    assert not [m for m in result if "reasoning" in m]
 
 
 # ──────────────────────────── cắt theo ngân sách ───────────────────────────
 
 
-async def test_cat_theo_ngan_sach_tren_hoi_thoai_200_message(
+async def test_trims_to_budget_on_200_message_conversation(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """**DoD**: 200 message, `context_window=8000` → kết quả ≤ 8000 − max_output − RESERVE."""
-    conversation = await _hoi_thoai(session, user_a)
-    day = await _day_thang(session, conversation, user_a, sau=SO_MESSAGE_200, nhan=NHAN_DAI)
+    conversation = await _conversation(session, user_a)
+    day = await _straight_chain(
+        session, conversation, user_a, depth=SO_MESSAGE_200, label=LONG_TEXT
+    )
 
     model_meta = _model(context_window=CONTEXT_WINDOW_8000, max_output=MAX_OUTPUT_8000)
-    ket_qua = await build(session, day[-1].id, model_meta, user_id=user_a)
+    result = await build(session, day[-1].id, model_meta, user_id=user_a)
 
-    ngan_sach = CONTEXT_WINDOW_8000 - MAX_OUTPUT_8000 - settings.RESERVE_TOKENS
-    assert token_budget(model_meta) == ngan_sach
-    assert count_messages(ket_qua, model_id=MODEL_ID) <= ngan_sach
+    budget = CONTEXT_WINDOW_8000 - MAX_OUTPUT_8000 - settings.RESERVE_TOKENS
+    assert token_budget(model_meta) == budget
+    assert count_messages(result, model_id=MODEL_ID) <= budget
     # Có cắt thật (không phải "vừa hết"), và vẫn còn hội thoại để trả lời.
-    assert 1 < len(ket_qua) < 1 + SO_MESSAGE_200
+    assert 1 < len(result) < 1 + SO_MESSAGE_200
 
 
-async def test_cat_thi_giu_lai_phan_moi_nhat(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_trimming_keeps_newest_part(session: AsyncSession, user_a: uuid.UUID) -> None:
     """§9.6: "message mới nhất → lùi dần về quá khứ" — giữ đoạn CUỐI, không phải đoạn đầu."""
-    conversation = await _hoi_thoai(session, user_a)
-    day = await _day_thang(session, conversation, user_a, sau=SO_MESSAGE_200, nhan=NHAN_DAI)
+    conversation = await _conversation(session, user_a)
+    day = await _straight_chain(
+        session, conversation, user_a, depth=SO_MESSAGE_200, label=LONG_TEXT
+    )
 
-    ket_qua = await build(
+    result = await build(
         session,
         day[-1].id,
         _model(context_window=CONTEXT_WINDOW_8000, max_output=MAX_OUTPUT_8000),
         user_id=user_a,
     )
-    noi_dung = _noi_dung(ket_qua[1:])
-    assert noi_dung[-1].endswith(f"-t{SO_MESSAGE_200 - 1}")
-    assert not noi_dung[0].endswith("-t0")
+    content = _contents(result[1:])
+    assert content[-1].endswith(f"-t{SO_MESSAGE_200 - 1}")
+    assert not content[0].endswith("-t0")
 
 
-async def test_khong_co_lo_o_giua_khi_cat(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_no_hole_in_the_middle_when_trimming(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
     """Dừng ở khối đầu tiên không vừa, KHÔNG nhảy qua nó để nhặt khối cũ hơn.
 
     Nhảy qua tạo ra một lỗ giữa hội thoại, và model sẽ bịa ra đoạn nối.
     """
-    conversation = await _hoi_thoai(session, user_a)
-    day = await _day_thang(session, conversation, user_a, sau=SO_MESSAGE_200, nhan=NHAN_DAI)
+    conversation = await _conversation(session, user_a)
+    day = await _straight_chain(
+        session, conversation, user_a, depth=SO_MESSAGE_200, label=LONG_TEXT
+    )
 
-    ket_qua = await build(
+    result = await build(
         session,
         day[-1].id,
         _model(context_window=CONTEXT_WINDOW_8000, max_output=MAX_OUTPUT_8000),
         user_id=user_a,
     )
-    so_tang = [int(c.rsplit("-t", 1)[1]) for c in _noi_dung(ket_qua[1:])]
-    assert so_tang[0] > 0, "không cắt gì thì phép kiểm này vô nghĩa"
-    assert so_tang == list(range(so_tang[0], SO_MESSAGE_200))
+    levels = [int(c.rsplit("-t", 1)[1]) for c in _contents(result[1:])]
+    assert levels[0] > 0, "không cắt gì thì phép kiểm này vô nghĩa"
+    assert levels == list(range(levels[0], SO_MESSAGE_200))
 
 
-async def test_ngan_sach_qua_nho_thi_raise(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_budget_too_small_raises(session: AsyncSession, user_a: uuid.UUID) -> None:
     """Thà nổ còn hơn gửi một request chắc chắn bị provider từ chối."""
-    conversation = await _hoi_thoai(session, user_a)
-    cau_hoi = await _them(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
+    conversation = await _conversation(session, user_a)
+    question = await _add(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
 
-    chat_hep = _model(context_window=settings.RESERVE_TOKENS + 2, max_output=1)
+    narrow_chat = _model(context_window=settings.RESERVE_TOKENS + 2, max_output=1)
     with pytest.raises(BudgetTooSmallError):
-        await build(session, cau_hoi.id, chat_hep, user_id=user_a)
+        await build(session, question.id, narrow_chat, user_id=user_a)
 
 
 # ─────────────────────────── cặp tool nguyên tử (C15) ──────────────────────
 
 
-async def _cay_co_cap_tool(
+async def _tree_with_tool_pair(
     session: AsyncSession, user_a: uuid.UUID, *, call_id: str = "call_1"
 ) -> tuple[Conversation, list[Message]]:
     """user → assistant(tool_call) → tool(result) → assistant(đáp) → user.
@@ -483,54 +493,52 @@ async def _cay_co_cap_tool(
     Kết quả của tool cố ý DÀI, còn lời gọi tool thì ngắn: nhờ chênh lệch đó mới
     đặt được một ngân sách vừa đúng chỗ khiến nhát cắt rơi vào giữa cặp.
     """
-    conversation = await _hoi_thoai(session, user_a)
-    q1 = await _them(session, conversation, user_a, role=MessageRole.USER, content="thời tiết?")
-    goi = await _them(
+    conversation = await _conversation(session, user_a)
+    q1 = await _add(session, conversation, user_a, role=MessageRole.USER, content="thời tiết?")
+    call = await _add(
         session,
         conversation,
         user_a,
         role=MessageRole.ASSISTANT,
         parent=q1,
-        tool_calls=[_goi_tool(call_id)],
+        tool_calls=[_tool_call(call_id)],
     )
-    ket_qua_tool = await _them(
+    tool_result = await _add(
         session,
         conversation,
         user_a,
         role=MessageRole.TOOL,
-        parent=goi,
+        parent=call,
         tool_call_id=call_id,
         content="KẾT QUẢ TOOL " + ("rất dài " * 200),
     )
-    dap = await _them(
+    reply = await _add(
         session,
         conversation,
         user_a,
         role=MessageRole.ASSISTANT,
-        parent=ket_qua_tool,
+        parent=tool_result,
         content="Hà Nội hôm nay nắng.",
     )
-    q2 = await _them(
-        session, conversation, user_a, role=MessageRole.USER, parent=dap, content="còn mai?"
+    q2 = await _add(
+        session, conversation, user_a, role=MessageRole.USER, parent=reply, content="còn mai?"
     )
-    return conversation, [q1, goi, ket_qua_tool, dap, q2]
+    return conversation, [q1, call, tool_result, reply, q2]
 
 
-async def test_cap_tool_di_qua_nguyen_ven_khi_du_cho(
-    session: AsyncSession, user_a: uuid.UUID
-) -> None:
+async def test_tool_pair_passes_intact_when_room(session: AsyncSession, user_a: uuid.UUID) -> None:
     """Hình dạng khối `tool_calls` đi lên dây NGUYÊN VĂN — hợp đồng của cột JSONB."""
-    _, day = await _cay_co_cap_tool(session, user_a)
-    ket_qua = await build(session, day[-1].id, _model(), user_id=user_a)
+    _, day = await _tree_with_tool_pair(session, user_a)
+    result = await build(session, day[-1].id, _model(), user_id=user_a)
 
-    _khong_co_mo_coi(ket_qua)
-    goi = [m for m in ket_qua if m.get("tool_calls")]
-    assert len(goi) == 1
-    assert goi[0]["tool_calls"] == [_goi_tool("call_1")]
-    assert goi[0]["tool_calls"][0]["function"]["arguments"] == '{"query":"thời tiết Hà Nội"}'
+    _assert_no_orphans(result)
+    call = [m for m in result if m.get("tool_calls")]
+    assert len(call) == 1
+    assert call[0]["tool_calls"] == [_tool_call("call_1")]
+    assert call[0]["tool_calls"][0]["function"]["arguments"] == '{"query":"thời tiết Hà Nội"}'
 
 
-async def test_cat_khong_bao_gio_de_lai_tool_result_mo_coi(
+async def test_trimming_never_leaves_orphan_tool_result(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """**DoD**: nhát cắt rơi vào GIỮA một cặp tool → không có `tool_result` mồ côi.
@@ -540,50 +548,50 @@ async def test_cat_khong_bao_gio_de_lai_tool_result_mo_coi(
     **không** đủ cho cả cặp. Một cài đặt cắt theo từng message sẽ nhặt
     `tool_result` vào rồi bỏ lại `tool_call` — và ăn `400 invalid request`.
     """
-    _, day = await _cay_co_cap_tool(session, user_a)
-    q1, goi, ket_qua_tool, dap, q2 = day
+    _, day = await _tree_with_tool_pair(session, user_a)
+    q1, call, tool_result, reply, q2 = day
 
     do = _model()
-    he_thong = count_messages(
+    system_msgs = count_messages(
         [
             {
                 "role": MessageRole.SYSTEM.value,
-                "content": render_system_prompt(model_display_name=TEN_HIEN_THI),
+                "content": render_system_prompt(model_display_name=DISPLAY_NAME),
             }
         ],
         model_id=MODEL_ID,
     )
-    duoi = count_message({"role": "user", "content": "còn mai?"}, model_id=MODEL_ID)
-    duoi += count_message(
+    tail = count_message({"role": "user", "content": "còn mai?"}, model_id=MODEL_ID)
+    tail += count_message(
         {"role": "assistant", "content": "Hà Nội hôm nay nắng."}, model_id=MODEL_ID
     )
-    gia_tool_result = count_message(
-        {"role": "tool", "tool_call_id": "call_1", "content": ket_qua_tool.content},
+    tool_result_cost = count_message(
+        {"role": "tool", "tool_call_id": "call_1", "content": tool_result.content},
         model_id=MODEL_ID,
     )
 
     # Vừa đúng chỗ: đủ cho `tool_result`, thiếu cho `tool_call` đi kèm nó.
-    ngan_sach = he_thong + duoi + gia_tool_result
-    cua_so = ngan_sach + do.max_output + settings.RESERVE_TOKENS
-    chat = _model(context_window=cua_so, max_output=do.max_output)
+    budget = system_msgs + tail + tool_result_cost
+    window = budget + do.max_output + settings.RESERVE_TOKENS
+    chat = _model(context_window=window, max_output=do.max_output)
 
-    ket_qua = await build(session, q2.id, chat, user_id=user_a)
+    result = await build(session, q2.id, chat, user_id=user_a)
 
-    _khong_co_mo_coi(ket_qua)
-    assert not [m for m in ket_qua if m["role"] == MessageRole.TOOL.value]
-    assert not [m for m in ket_qua if m.get("tool_calls")]
-    assert _noi_dung(ket_qua[1:]) == ["Hà Nội hôm nay nắng.", "còn mai?"]
-    assert q1.content not in _noi_dung(ket_qua)
-    assert goi.id != dap.id  # cả hai node vẫn còn nguyên trong cây
+    _assert_no_orphans(result)
+    assert not [m for m in result if m["role"] == MessageRole.TOOL.value]
+    assert not [m for m in result if m.get("tool_calls")]
+    assert _contents(result[1:]) == ["Hà Nội hôm nay nắng.", "còn mai?"]
+    assert q1.content not in _contents(result)
+    assert call.id != reply.id  # cả hai node vẫn còn nguyên trong cây
 
 
-async def test_tool_result_mo_coi_trong_du_lieu_bi_bo(
+async def test_orphan_tool_result_in_data_is_dropped(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """Một `tool` không có `tool_call` nào khai nó — dữ liệu hỏng, không được gửi đi."""
-    conversation = await _hoi_thoai(session, user_a)
-    q1 = await _them(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
-    mo_coi = await _them(
+    conversation = await _conversation(session, user_a)
+    q1 = await _add(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
+    orphan = await _add(
         session,
         conversation,
         user_a,
@@ -592,17 +600,17 @@ async def test_tool_result_mo_coi_trong_du_lieu_bi_bo(
         tool_call_id="call_khong_ai_khai",
         content="kết quả của một lời gọi không tồn tại",
     )
-    q2 = await _them(
-        session, conversation, user_a, role=MessageRole.USER, parent=mo_coi, content="hỏi tiếp"
+    q2 = await _add(
+        session, conversation, user_a, role=MessageRole.USER, parent=orphan, content="hỏi tiếp"
     )
 
-    ket_qua = await build(session, q2.id, _model(), user_id=user_a)
+    result = await build(session, q2.id, _model(), user_id=user_a)
 
-    _khong_co_mo_coi(ket_qua)
-    assert _noi_dung(ket_qua[1:]) == ["hỏi", "hỏi tiếp"]
+    _assert_no_orphans(result)
+    assert _contents(result[1:]) == ["hỏi", "hỏi tiếp"]
 
 
-async def test_tool_call_thieu_tool_result_thi_go_tool_calls_nhung_giu_chu(
+async def test_tool_call_without_result_drops_tool_calls_keeps_text(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """Nửa còn lại của C15: `tool_call` không ai trả lời cũng là `400`.
@@ -610,23 +618,23 @@ async def test_tool_call_thieu_tool_result_thi_go_tool_calls_nhung_giu_chu(
     Xảy ra mỗi khi một lượt sinh chết sau lúc model khai tool, trước lúc tool
     trả lời. Phần chữ của lượt đó người dùng đã thấy nên phải giữ.
     """
-    conversation = await _hoi_thoai(session, user_a)
-    q1 = await _them(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
-    goi = await _them(
+    conversation = await _conversation(session, user_a)
+    q1 = await _add(session, conversation, user_a, role=MessageRole.USER, content="hỏi")
+    call = await _add(
         session,
         conversation,
         user_a,
         role=MessageRole.ASSISTANT,
         parent=q1,
         content="Để tôi tra cứu đã.",
-        tool_calls=[_goi_tool("call_khong_bao_gio_tra_loi")],
+        tool_calls=[_tool_call("call_khong_bao_gio_tra_loi")],
     )
-    q2 = await _them(
-        session, conversation, user_a, role=MessageRole.USER, parent=goi, content="hỏi tiếp"
+    q2 = await _add(
+        session, conversation, user_a, role=MessageRole.USER, parent=call, content="hỏi tiếp"
     )
 
-    ket_qua = await build(session, q2.id, _model(), user_id=user_a)
+    result = await build(session, q2.id, _model(), user_id=user_a)
 
-    _khong_co_mo_coi(ket_qua)
-    assert _noi_dung(ket_qua[1:]) == ["hỏi", "Để tôi tra cứu đã.", "hỏi tiếp"]
-    assert not [m for m in ket_qua if m.get("tool_calls")]
+    _assert_no_orphans(result)
+    assert _contents(result[1:]) == ["hỏi", "Để tôi tra cứu đã.", "hỏi tiếp"]
+    assert not [m for m in result if m.get("tool_calls")]

@@ -34,7 +34,7 @@ from app.core.errors import ApiErrorCode, ErrorBody, ErrorEnvelope
 #: OPTIONS không đổi gì nên không cần kiểm.
 STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-_BODY_TU_CHOI = (
+_REJECT_BODY = (
     ErrorEnvelope(error=ErrorBody(code=ApiErrorCode.FORBIDDEN, message="origin khong hop le"))
     .model_dump_json()
     .encode("utf-8")
@@ -59,7 +59,7 @@ class OriginCheckMiddleware:
                     "headers": [(b"content-type", b"application/json")],
                 }
             )
-            await send({"type": "http.response.body", "body": _BODY_TU_CHOI})
+            await send({"type": "http.response.body", "body": _REJECT_BODY})
             return
 
         await self.app(scope, receive, send)

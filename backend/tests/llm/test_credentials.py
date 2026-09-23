@@ -31,7 +31,7 @@ from app.llm.credentials import resolve_credential, resolve_key_source
 
 #: Ghép lúc chạy: một chuỗi khớp `sk-[a-zA-Z0-9]{20,}` nằm nguyên văn trong
 #: repo làm `scripts/check_hardcode.sh` lệnh 4 đỏ vĩnh viễn (T-2.14).
-KHOA_GIA = "sk-" + "0123456789abcdef" * 2
+FAKE_KEY = "sk-" + "0123456789abcdef" * 2
 
 
 def _model_byok() -> ModelEntry:
@@ -43,7 +43,7 @@ def _model_byok() -> ModelEntry:
     pytest.fail("catalog phải có ít nhất một model thuộc provider byok_supported")
 
 
-def _model_khong_byok() -> ModelEntry:
+def _model_without_byok() -> ModelEntry:
     """Một model thuộc provider `byok_supported: false`."""
     cat = catalog.get_catalog()
     for model in cat.models:
@@ -52,7 +52,7 @@ def _model_khong_byok() -> ModelEntry:
     pytest.fail("catalog phải có ít nhất một model thuộc provider KHÔNG byok")
 
 
-def _model_hai_ten_khac_nhau() -> ModelEntry:
+def _model_with_two_names() -> ModelEntry:
     """Model mà alias LiteLLM (`id`) KHÁC tên gốc của provider (`provider_model`).
 
     Không có model nào như vậy thì phép phân biệt của `Credential.model_name`
@@ -65,12 +65,12 @@ def _model_hai_ten_khac_nhau() -> ModelEntry:
     pytest.fail("catalog phải có một model byok mà alias khác tên gốc của provider")
 
 
-async def _luu_khoa(session: AsyncSession, user_id: uuid.UUID, provider: str) -> None:
+async def _save_key(session: AsyncSession, user_id: uuid.UUID, provider: str) -> None:
     await ProviderKeyRepository(session).upsert(
         user_id=user_id,
         provider=provider,
-        sealed=seal(KHOA_GIA),
-        masked=mask_secret(KHOA_GIA),
+        sealed=seal(FAKE_KEY),
+        masked=mask_secret(FAKE_KEY),
         verified_at=None,
     )
     await session.commit()
@@ -79,7 +79,7 @@ async def _luu_khoa(session: AsyncSession, user_id: uuid.UUID, provider: str) ->
 # ════════════════════════ bốn ngả lùi về system key ════════════════════════
 
 
-async def test_khong_co_hang_nao_thi_system(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_no_row_means_system(session: AsyncSession, user_a: uuid.UUID) -> None:
     """Ca thường: chưa ai cấu hình BYOK ⇒ tiền của người vận hành ⇒ có quota."""
     model = _model_byok()
 
@@ -90,10 +90,10 @@ async def test_khong_co_hang_nao_thi_system(session: AsyncSession, user_a: uuid.
     assert cred.provider is None
 
 
-async def test_xoa_khoa_thi_quay_ve_system(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_deleting_key_returns_to_system(session: AsyncSession, user_a: uuid.UUID) -> None:
     """**DoD dòng 3 của T-2.15** ở mức đơn vị: không cần dọn gì thêm."""
     model = _model_byok()
-    await _luu_khoa(session, user_a, model.provider)
+    await _save_key(session, user_a, model.provider)
     assert await resolve_key_source(session, user_id=user_a, model=model) is KeySource.BYOK
 
     assert await ProviderKeyRepository(session).delete(user_id=user_a, provider=model.provider)
@@ -102,24 +102,26 @@ async def test_xoa_khoa_thi_quay_ve_system(session: AsyncSession, user_a: uuid.U
     assert await resolve_key_source(session, user_id=user_a, model=model) is KeySource.SYSTEM
 
 
-async def test_khoa_cua_provider_KHAC_khong_tinh(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_key_for_OTHER_provider_does_not_count(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
     """B-140: "có khoá" không đủ — phải là khoá của provider model đang gọi."""
     cat = catalog.get_catalog()
     model = _model_byok()
-    khac = next(
-        ten for ten in sorted(cat.providers) if ten != model.provider and cat.providers[ten]
+    other = next(
+        name for name in sorted(cat.providers) if name != model.provider and cat.providers[name]
     )
-    await _luu_khoa(session, user_a, khac)
+    await _save_key(session, user_a, other)
 
     assert await resolve_key_source(session, user_id=user_a, model=model) is KeySource.SYSTEM
 
 
-async def test_provider_tat_byok_thi_khoa_cu_khong_con_hieu_luc(
+async def test_provider_disabling_byok_invalidates_old_key(
     session: AsyncSession, user_a: uuid.UUID, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Người vận hành tắt `byok_supported` ⇒ hàng còn sót KHÔNG lật lại quyết định đó."""
     model = _model_byok()
-    await _luu_khoa(session, user_a, model.provider)
+    await _save_key(session, user_a, model.provider)
     assert await resolve_key_source(session, user_id=user_a, model=model) is KeySource.BYOK
 
     provider = catalog.get_catalog().providers[model.provider]
@@ -128,12 +130,12 @@ async def test_provider_tat_byok_thi_khoa_cu_khong_con_hieu_luc(
     assert await resolve_key_source(session, user_id=user_a, model=model) is KeySource.SYSTEM
 
 
-async def test_khong_giai_ma_duoc_thi_lui_ve_system(
+async def test_undecryptable_falls_back_to_system(
     session: AsyncSession, user_a: uuid.UUID, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`MASTER_ENCRYPTION_KEY` đã xoay ⇒ lùi, KHÔNG ném vào giữa lượt chat."""
     model = _model_byok()
-    await _luu_khoa(session, user_a, model.provider)
+    await _save_key(session, user_a, model.provider)
     monkeypatch.setattr(settings, "MASTER_ENCRYPTION_KEY", SecretStr("mot-master-key-khac-han"))
 
     assert await resolve_key_source(session, user_id=user_a, model=model) is KeySource.SYSTEM
@@ -141,12 +143,12 @@ async def test_khong_giai_ma_duoc_thi_lui_ve_system(
     assert cred.api_key is None
 
 
-async def test_khoa_cua_NGUOI_KHAC_khong_dung_duoc(
+async def test_SOMEONE_ELSES_key_is_unusable(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID
 ) -> None:
     """§20 — `user_id` lọc **trong câu SQL**; đây là bảng chứa credential."""
     model = _model_byok()
-    await _luu_khoa(session, user_b, model.provider)
+    await _save_key(session, user_b, model.provider)
 
     assert await resolve_key_source(session, user_id=user_a, model=model) is KeySource.SYSTEM
     assert await resolve_key_source(session, user_id=user_b, model=model) is KeySource.BYOK
@@ -155,25 +157,25 @@ async def test_khoa_cua_NGUOI_KHAC_khong_dung_duoc(
 # ══════════════════════════ ngả BYOK: có đủ ba thứ ═════════════════════════
 
 
-async def test_co_khoa_dung_provider_thi_byok_kem_ban_ro_va_provider(
+async def test_key_for_right_provider_gives_byok_with_plaintext_and_provider(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """Worker cần cả ba: nguồn, bản ghi provider (để có `base_url`), và khoá."""
     model = _model_byok()
-    await _luu_khoa(session, user_a, model.provider)
+    await _save_key(session, user_a, model.provider)
 
     cred = await resolve_credential(session, user_id=user_a, model=model)
 
     assert cred.key_source is KeySource.BYOK
-    assert cred.api_key == KHOA_GIA
+    assert cred.api_key == FAKE_KEY
     assert cred.provider is catalog.get_catalog().providers[model.provider]
 
 
-async def test_model_cua_provider_khong_ho_tro_byok_luon_la_system(
+async def test_model_of_non_byok_provider_is_always_system(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
-    model = _model_khong_byok()
-    await _luu_khoa(session, user_a, model.provider)
+    model = _model_without_byok()
+    await _save_key(session, user_a, model.provider)
 
     assert await resolve_key_source(session, user_id=user_a, model=model) is KeySource.SYSTEM
 
@@ -181,7 +183,7 @@ async def test_model_cua_provider_khong_ho_tro_byok_luon_la_system(
 # ═══════════════════ tên model gửi lên: alias hay tên gốc ══════════════════
 
 
-async def test_model_name_system_la_alias_litellm(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_system_model_name_is_litellm_alias(session: AsyncSession, user_a: uuid.UUID) -> None:
     """System đi qua LiteLLM ⇒ tên phải là alias trong `litellm.config.yaml`."""
     model = _model_byok()
     cred = await resolve_credential(session, user_id=user_a, model=model)
@@ -189,7 +191,7 @@ async def test_model_name_system_la_alias_litellm(session: AsyncSession, user_a:
     assert cred.model_name(model) == model.id
 
 
-async def test_model_name_byok_la_ten_goc_cua_provider(
+async def test_byok_model_name_is_provider_native_name(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """BYOK gọi thẳng provider ⇒ alias của LiteLLM ở đó là `400 model not found`.
@@ -197,8 +199,8 @@ async def test_model_name_byok_la_ten_goc_cua_provider(
     Chọn một model mà hai tên **thật sự khác nhau**: `deepseek-flash` có alias
     trùng tên gốc, nên đo trên nó thì bỏ `provider_model` đi test vẫn xanh.
     """
-    model = _model_hai_ten_khac_nhau()
-    await _luu_khoa(session, user_a, model.provider)
+    model = _model_with_two_names()
+    await _save_key(session, user_a, model.provider)
     cred = await resolve_credential(session, user_id=user_a, model=model)
 
     assert cred.model_name(model) == model.provider_model != model.id
@@ -207,16 +209,16 @@ async def test_model_name_byok_la_ten_goc_cua_provider(
 # ═════════════ hai đường vào, một lõi: không được trả lời khác ═════════════
 
 
-@pytest.mark.parametrize("co_khoa", [False, True])
-async def test_hai_ham_luon_dong_y_ve_key_source(
-    session: AsyncSession, user_a: uuid.UUID, co_khoa: bool
+@pytest.mark.parametrize("has_key", [False, True])
+async def test_both_functions_always_agree_on_key_source(
+    session: AsyncSession, user_a: uuid.UUID, has_key: bool
 ) -> None:
     """Lệch một lần là một lượt vừa được miễn quota vừa tiêu system key."""
     model = _model_byok()
-    if co_khoa:
-        await _luu_khoa(session, user_a, model.provider)
+    if has_key:
+        await _save_key(session, user_a, model.provider)
 
-    mot = await resolve_key_source(session, user_id=user_a, model=model)
-    hai = (await resolve_credential(session, user_id=user_a, model=model)).key_source
+    first = await resolve_key_source(session, user_id=user_a, model=model)
+    second = (await resolve_credential(session, user_id=user_a, model=model)).key_source
 
-    assert mot is hai
+    assert first is second

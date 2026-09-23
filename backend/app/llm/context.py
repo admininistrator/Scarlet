@@ -299,7 +299,7 @@ def _atomic_blocks(messages: Iterable[Message]) -> list[list[dict[str, Any]]]:
     - `tool_result` không có `tool_call` phía trên khai `tool_call_id` của nó
       thì bị bỏ (đây là dòng DoD thứ tư của T-1.4);
     - `tool_call` thiếu dù chỉ một `tool_result` thì cả khối bị gỡ `tool_calls`
-      và mọi `tool_result` đi kèm — xem `_dong_khoi`.
+      và mọi `tool_result` đi kèm — xem `_close_block`.
 
     Nửa hỏng xuất hiện được ở hai đường: tổ tiên bị xoá mềm nên `get_path` cắt
     đường đi ngay giữa cặp (§8.3, C12), hoặc một lượt sinh chết giữa lúc chạy
@@ -308,7 +308,7 @@ def _atomic_blocks(messages: Iterable[Message]) -> list[list[dict[str, Any]]]:
     blocks: list[list[dict[str, Any]]] = []
     #: `tool_call_id` mà khối đang mở đã khai. Rỗng = khối hiện tại không nhận
     #: thêm `tool_result` nào.
-    dang_cho: set[str] = set()
+    pending: set[str] = set()
 
     for message in messages:
         wire = _to_wire(message)
@@ -319,7 +319,7 @@ def _atomic_blocks(messages: Iterable[Message]) -> list[list[dict[str, Any]]]:
             continue
 
         if wire["role"] == MessageRole.TOOL.value:
-            if blocks and wire.get("tool_call_id") in dang_cho:
+            if blocks and wire.get("tool_call_id") in pending:
                 blocks[-1].append(wire)
             else:
                 logger.warning(
@@ -330,9 +330,9 @@ def _atomic_blocks(messages: Iterable[Message]) -> list[list[dict[str, Any]]]:
             continue
 
         blocks.append([wire])
-        dang_cho = _declared_call_ids(wire)
+        pending = _declared_call_ids(wire)
 
-    return [block for block in map(_dong_khoi, blocks) if block]
+    return [block for block in map(_close_block, blocks) if block]
 
 
 def _declared_call_ids(wire: dict[str, Any]) -> set[str]:
@@ -343,7 +343,7 @@ def _declared_call_ids(wire: dict[str, Any]) -> set[str]:
     }
 
 
-def _dong_khoi(block: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+def _close_block(block: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
     """Chốt một khối: hoặc cặp tool đủ đôi, hoặc không còn dấu vết cặp tool nào.
 
     Nửa còn lại của C15. Gửi một `tool_call` mà thiếu `tool_result` trả lời nó
@@ -387,7 +387,7 @@ def _to_wire(message: Message) -> dict[str, Any] | None:
     **Ngoại lệ: `role=tool` giữ lại kể cả khi rỗng.** "Tool chạy xong và không
     trả về gì" là một kết quả có thật và model cần biết; quan trọng hơn, bỏ nó
     đi sẽ để lại một `tool_call` không có ai trả lời — đúng nửa còn lại của
-    C15 mà `_dong_khoi` phải đi dọn.
+    C15 mà `_close_block` phải đi dọn.
 
     **Hợp đồng của cột `messages.tool_calls` (JSONB)** — chốt ở NQ-22 (B-68):
     nó lưu **đúng** khối `tool_calls` của dây OpenAI —

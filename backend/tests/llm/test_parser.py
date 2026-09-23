@@ -65,7 +65,7 @@ def entry_for(name: str) -> dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def test_manifest_phu_het_provider_cua_catalog() -> None:
+def test_manifest_covers_all_catalog_providers() -> None:
     """DoD đòi fixture của *mọi* provider đang bật, không phải "ba provider".
 
     Bảng đổi ước lượng ở tasks.md §14 đã ghi: từ T-0.12 catalog có **bốn**
@@ -74,19 +74,19 @@ def test_manifest_phu_het_provider_cua_catalog() -> None:
     """
     catalog_path = Path(__file__).resolve().parents[3] / "config" / "model_catalog.json"
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-    providers_bat = {m["provider"] for m in catalog["models"] if m.get("enabled", True)}
-    providers_co_fixture = {e["provider"] for e in ENTRIES}
-    assert providers_bat <= providers_co_fixture, (
-        f"provider chưa có fixture: {sorted(providers_bat - providers_co_fixture)}"
+    enabled_providers = {m["provider"] for m in catalog["models"] if m.get("enabled", True)}
+    providers_with_fixture = {e["provider"] for e in ENTRIES}
+    assert enabled_providers <= providers_with_fixture, (
+        f"provider chưa có fixture: {sorted(enabled_providers - providers_with_fixture)}"
     )
 
 
-def test_co_fixture_cua_ca_hai_ca() -> None:
+def test_fixtures_exist_for_both_cases() -> None:
     assert {e["case"] for e in ENTRIES} == {"text", "tools"}
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
-def test_moi_fixture_ket_thuc_bang_dung_mot_done(name: str) -> None:
+def test_every_fixture_ends_with_exactly_one_done(name: str) -> None:
     chunks = run_parser(load_raw(name))
     assert chunks, f"{name}: parser không sinh chunk nào"
     assert chunks[-1].kind == "done"
@@ -94,7 +94,7 @@ def test_moi_fixture_ket_thuc_bang_dung_mot_done(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
-def test_moi_fixture_bat_duoc_usage_o_cuoi_stream(name: str) -> None:
+def test_every_fixture_captures_usage_at_stream_end(name: str) -> None:
     """C40: `usage` về 0 hoặc thiếu thì quota không bao giờ trừ."""
     chunks = run_parser(load_raw(name))
     done = chunks[-1]
@@ -103,31 +103,31 @@ def test_moi_fixture_bat_duoc_usage_o_cuoi_stream(name: str) -> None:
     assert done.usage.completion_tokens > 0
     assert done.usage.total_tokens >= done.usage.prompt_tokens + done.usage.completion_tokens - 1
 
-    truoc_done = [c for c in chunks if c.kind == "usage"]
-    assert len(truoc_done) == 1, f"{name}: phải có đúng một event usage (§7.4)"
-    assert truoc_done[0].usage == done.usage
+    before_done = [c for c in chunks if c.kind == "usage"]
+    assert len(before_done) == 1, f"{name}: phải có đúng một event usage (§7.4)"
+    assert before_done[0].usage == done.usage
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
-def test_moi_fixture_co_finish_reason(name: str) -> None:
+def test_every_fixture_has_finish_reason(name: str) -> None:
     chunks = run_parser(load_raw(name))
     assert chunks[-1].finish_reason in {"stop", "length", "tool_calls"}
 
 
 @pytest.mark.parametrize("name", [e["file"] for e in ENTRIES if e["case"] == "text"])
-def test_noi_delta_khong_co_ky_tu_thay_the(name: str) -> None:
+def test_joined_deltas_have_no_replacement_char(name: str) -> None:
     """C9 — phép kiểm chính của DoD, chạy trên chữ thật của model."""
     chunks = run_parser(load_raw(name))
-    noi = text_of(chunks, "delta")
-    assert noi, f"{name}: không có delta nào"
-    assert REPLACEMENT_CHAR not in noi
-    assert any(ch in VIETNAMESE_MARKS for ch in noi), (
+    joined = text_of(chunks, "delta")
+    assert joined, f"{name}: không có delta nào"
+    assert REPLACEMENT_CHAR not in joined
+    assert any(ch in VIETNAMESE_MARKS for ch in joined), (
         f"{name}: câu trả lời không có dấu tiếng Việt — phép kiểm C9 vô nghĩa"
     )
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
-def test_khong_chunk_nao_mang_text_rong(name: str) -> None:
+def test_no_chunk_carries_empty_text(name: str) -> None:
     """B-33: `content: ""` không phải lỗi, nhưng cũng không phải một event.
 
     `claude-haiku` gửi `content: ""` kèm **mỗi** mảnh tool call. Để chúng lọt
@@ -139,7 +139,7 @@ def test_khong_chunk_nao_mang_text_rong(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
-def test_sdk_model_dump_khong_lam_mat_gi(name: str) -> None:
+def test_sdk_model_dump_loses_nothing(name: str) -> None:
     """Adapter đưa `chunk.model_dump()` vào parser, không phải dict thô.
 
     Test này là cây cầu giữa fixture (dòng `data:` thật) và đường chạy thật
@@ -148,27 +148,27 @@ def test_sdk_model_dump_khong_lam_mat_gi(name: str) -> None:
     một hội thoại im lặng mất khối "Đang suy nghĩ…".
     """
     raws = load_raw(name)
-    qua_sdk = [ChatCompletionChunk.model_validate(raw).model_dump() for raw in raws]
-    assert run_parser(raws) == run_parser(qua_sdk)
+    through_sdk = [ChatCompletionChunk.model_validate(raw).model_dump() for raw in raws]
+    assert run_parser(raws) == run_parser(through_sdk)
 
 
-def test_deepseek_stream_reasoning_qua_reasoning_content() -> None:
+def test_deepseek_streams_reasoning_via_reasoning_content() -> None:
     """B-33: `deepseek-flash` sinh trọn khối reasoning TRƯỚC content."""
     chunks = run_parser(load_raw("deepseek-flash.text.jsonl"))
     kinds = [c.kind for c in chunks]
     assert "reasoning" in kinds
     assert text_of(chunks, "reasoning")
 
-    vi_tri_reasoning_cuoi = max(i for i, k in enumerate(kinds) if k == "reasoning")
-    vi_tri_delta_dau = min(i for i, k in enumerate(kinds) if k == "delta")
-    assert vi_tri_reasoning_cuoi < vi_tri_delta_dau
+    last_reasoning_index = max(i for i, k in enumerate(kinds) if k == "reasoning")
+    first_delta_index = min(i for i, k in enumerate(kinds) if k == "delta")
+    assert last_reasoning_index < first_delta_index
 
     done = chunks[-1]
     assert done.usage is not None
     assert done.usage.reasoning_tokens is not None and done.usage.reasoning_tokens > 0
 
 
-def test_provider_khong_reasoning_thi_khong_co_chunk_reasoning() -> None:
+def test_non_reasoning_provider_has_no_reasoning_chunks() -> None:
     """`reasoning` không nằm trong `capabilities` của `claude-haiku` (§9.4)."""
     chunks = run_parser(load_raw("claude-haiku.text.jsonl"))
     assert not any(c.kind == "reasoning" for c in chunks)
@@ -177,21 +177,21 @@ def test_provider_khong_reasoning_thi_khong_co_chunk_reasoning() -> None:
     assert done.usage.reasoning_tokens == 0  # báo và bằng 0, khác hẳn None
 
 
-def test_doc_duoc_cached_tokens_cua_prompt() -> None:
+def test_reads_prompt_cached_tokens() -> None:
     """`cached_input_per_1m` đã có trong catalog (§9.2) nên §10.2 cần số này."""
     done = run_parser(load_raw("deepseek-flash.tools.jsonl"))[-1]
     assert done.usage is not None
     assert done.usage.cached_prompt_tokens is not None and done.usage.cached_prompt_tokens > 0
 
 
-def test_ollama_bao_finish_reason_length() -> None:
+def test_ollama_reports_finish_reason_length() -> None:
     """`max_tokens` chạm trần là `length`, không phải `stop` — §9.6 dựa vào đó."""
     done = run_parser(load_raw("ol-qwen-small.text.jsonl"))[-1]
     assert done.finish_reason == "length"
 
 
 @pytest.mark.parametrize("name", [e["file"] for e in ENTRIES if e["case"] == "tools"])
-def test_tool_call_duoc_ghep_du_manh(name: str) -> None:
+def test_tool_call_assembled_from_all_pieces(name: str) -> None:
     """Ba provider gửi tool call ba kiểu; parser phải trả ra cùng một thứ.
 
     `deepseek-flash` nhỏ giọt `arguments` từng vài ký tự (31 chunk),
@@ -223,19 +223,19 @@ def chunk_delta(**delta: Any) -> dict[str, Any]:
     return {"choices": [{"index": 0, "delta": delta}]}
 
 
-def test_truong_reasoning_khong_hau_to_content_cung_duoc_nhan() -> None:
+def test_reasoning_field_without_content_suffix_also_accepted() -> None:
     """Provider dùng `delta.reasoning` thay `delta.reasoning_content`."""
     out = run_parser([chunk_delta(reasoning="đang nghĩ")])
     assert [c.kind for c in out] == ["reasoning", "done"]
     assert out[0].text == "đang nghĩ"
 
 
-def test_mot_chunk_mang_ca_reasoning_lan_content() -> None:
+def test_one_chunk_carrying_both_reasoning_and_content() -> None:
     out = run_parser([chunk_delta(reasoning_content="nghĩ", content="nói")])
     assert [(c.kind, c.text) for c in out[:2]] == [("reasoning", "nghĩ"), ("delta", "nói")]
 
 
-def test_noi_lai_ky_tu_tieng_viet_bi_chia_doi_chunk(  # C9 ở tầng parser
+def test_rejoins_vietnamese_char_split_across_chunks(  # C9 ở tầng parser
 ) -> None:
     """`claude-haiku` thật sự chia "Hà Nội" thành "Hà N" + "ội" (xem fixture)."""
     out = run_parser([chunk_delta(content="Hà N"), chunk_delta(content="ội")])
@@ -243,7 +243,7 @@ def test_noi_lai_ky_tu_tieng_viet_bi_chia_doi_chunk(  # C9 ở tầng parser
     assert REPLACEMENT_CHAR not in text_of(out, "delta")
 
 
-def test_thieu_usage_han_thi_done_mang_usage_none() -> None:
+def test_no_usage_at_all_done_carries_usage_none() -> None:
     """C40 phải *nhìn thấy được*: `None` là tín hiệu để ước tính bằng tiktoken."""
     out = run_parser([chunk_delta(content="xin chào")])
     assert out[-1].kind == "done"
@@ -251,20 +251,20 @@ def test_thieu_usage_han_thi_done_mang_usage_none() -> None:
     assert not any(c.kind == "usage" for c in out)
 
 
-def test_usage_toan_null_khong_tinh_la_bao_cao_token() -> None:
+def test_all_null_usage_is_not_a_token_report() -> None:
     raw = {"choices": [], "usage": {"prompt_tokens": None, "completion_tokens": None}}
     out = run_parser([raw])
     assert out[-1].usage is None
 
 
-def test_thieu_total_tokens_thi_cong_lai() -> None:
+def test_missing_total_tokens_is_summed() -> None:
     raw = {"choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 7}}
     out = run_parser([raw])
     assert out[-1].usage is not None
     assert out[-1].usage.total_tokens == 17
 
 
-def test_stream_dut_giua_chung_van_xa_tool_call_dang_ghep() -> None:
+def test_stream_cut_midway_still_flushes_partial_tool_call() -> None:
     """C19: upstream đứt mà chưa gửi `finish_reason`."""
     out = run_parser(
         [
@@ -286,7 +286,7 @@ def test_stream_dut_giua_chung_van_xa_tool_call_dang_ghep() -> None:
     assert out[-1].finish_reason is None
 
 
-def test_hai_tool_call_song_song_ra_dung_thu_tu_index() -> None:
+def test_two_parallel_tool_calls_in_index_order() -> None:
     out = run_parser(
         [
             chunk_delta(
@@ -298,11 +298,11 @@ def test_hai_tool_call_song_song_ra_dung_thu_tu_index() -> None:
             {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]},
         ]
     )
-    ten = [c.tool_call.name for c in out if c.kind == "tool_call" and c.tool_call]
-    assert ten == ["mot", "hai"]
+    name = [c.tool_call.name for c in out if c.kind == "tool_call" and c.tool_call]
+    assert name == ["mot", "hai"]
 
 
-def test_tool_call_khong_co_ten_van_duoc_phat_ra_va_co_canh_bao(
+def test_nameless_tool_call_still_emitted_with_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Bỏ im lặng sẽ thành "model không gọi tool" — lỗi vô hình."""
@@ -317,7 +317,7 @@ def test_tool_call_khong_co_ten_van_duoc_phat_ra_va_co_canh_bao(
     assert "không có tên hàm" in caplog.text
 
 
-def test_bo_qua_choice_khac_index_0() -> None:
+def test_skips_choices_other_than_index_0() -> None:
     raw = {
         "choices": [
             {"index": 0, "delta": {"content": "giữ"}},
@@ -327,14 +327,14 @@ def test_bo_qua_choice_khac_index_0() -> None:
     assert text_of(run_parser([raw]), "delta") == "giữ"
 
 
-def test_finish_goi_lan_hai_khong_phat_them_done() -> None:
+def test_second_finish_emits_no_extra_done() -> None:
     parser = StreamParser()
     parser.feed(chunk_delta(content="x"))
     assert len(parser.finish()) == 1
     assert parser.finish() == []
 
 
-def test_chunk_di_dang_khong_lam_vo_parser() -> None:
+def test_odd_chunk_does_not_break_parser() -> None:
     """Thà bỏ qua một chunk lạ còn hơn cho cả lượt chat chết vì `TypeError`."""
     out = run_parser(
         [
@@ -359,13 +359,13 @@ async def aiter(raws: list[dict[str, Any]]) -> Any:
         yield raw
 
 
-async def test_parse_stream_tra_ra_cung_ket_qua_voi_streamparser() -> None:
+async def test_parse_stream_matches_streamparser() -> None:
     raws = load_raw("nr-gemini-flash.text.jsonl")
-    qua_stream = [c async for c in parse_stream(aiter(raws))]
-    assert qua_stream == run_parser(raws)
+    through_stream = [c async for c in parse_stream(aiter(raws))]
+    assert through_stream == run_parser(raws)
 
 
-async def test_huy_giua_chung_khong_no_runtime_error() -> None:
+async def test_cancel_midway_raises_no_runtime_error() -> None:
     """§7.5: consumer thoát sớm. `yield` trong `finally` sẽ nổ ở đúng chỗ này."""
     stream = parse_stream(aiter(load_raw("deepseek-flash.text.jsonl")))
     async for chunk in stream:

@@ -59,7 +59,7 @@ hàng ở cấu hình hôm nay.
 │  TRẠNG THÁI TÀI KHOẢN: `require_app_access`, KHÔNG PHẢI `require_chat_*` │
 └──────────────────────────────────────────────────────────────────────────┘
 
-Router này nằm trong danh sách `_CO_DANH_TINH` của `api/v1/__init__.py`, tức
+Router này nằm trong danh sách `_AUTHENTICATED` của `api/v1/__init__.py`, tức
 cột "Xem UI" của §11.1. Điều đó là bắt buộc chứ không tiện tay:
 `pending_approval` **phải** thêm được khoá riêng — bảng §11.1 cho họ chat bằng
 BYOK, và cánh cửa đó chỉ mở khi có một hàng trong `user_provider_keys`. Chặn ở
@@ -90,7 +90,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 #: Câu trả lời cho mọi kiểu "khoá này không dùng được". Một hằng chứ không ba
 #: chuỗi rải rác: nó là câu **không được phép** chứa khoá (C20, DoD dòng 4), và
 #: một câu thì soi được bằng mắt trong ba giây.
-_LOI_KHOA_BI_TU_CHOI = "provider tu choi khoa nay, hay kiem tra lai roi nhap lai"
+_KEY_REJECTED_MSG = "provider tu choi khoa nay, hay kiem tra lai roi nhap lai"
 
 
 class ProviderKeyOut(BaseModel):
@@ -144,51 +144,51 @@ class ProviderKeyIn(BaseModel):
     key: str = Field(min_length=1)
 
 
-def _tim_provider(provider: str) -> Provider:
+def _find_provider(provider: str) -> Provider:
     """Provider trong catalog, hoặc `404`/`400` — §9.2, §10.5.
 
     Raises:
         ApiError 404 `PROVIDER_UNKNOWN`: không có trong `providers`.
         ApiError 400 `BYOK_NOT_SUPPORTED`: có, nhưng `byok_supported: false`.
     """
-    ban_ghi = catalog.get_catalog().providers.get(provider)
-    if ban_ghi is None:
+    record = catalog.get_catalog().providers.get(provider)
+    if record is None:
         raise ApiError(
             status.HTTP_404_NOT_FOUND,
             ApiErrorCode.PROVIDER_UNKNOWN,
             "provider khong co trong catalog",
             details={"provider": provider},
         )
-    if not ban_ghi.byok_supported:
+    if not record.byok_supported:
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
             ApiErrorCode.BYOK_NOT_SUPPORTED,
             "provider nay khong dung duoc khoa API rieng",
             details={"provider": provider},
         )
-    return ban_ghi
+    return record
 
 
-def _doc_duoc(hang: UserProviderKey) -> bool:
+def _is_readable(row: UserProviderKey) -> bool:
     """`MASTER_ENCRYPTION_KEY` hiện tại còn mở được hàng này không.
 
     Bản rõ **không** được gán vào biến nào: nó chỉ tồn tại trong khung của
     `unseal` rồi biến mất cùng câu lệnh — xem docstring module.
     """
     try:
-        unseal(Sealed(cipher=hang.key_cipher, nonce=hang.key_nonce))
+        unseal(Sealed(cipher=row.key_cipher, nonce=row.key_nonce))
     except DecryptionError:
         return False
     return True
 
 
-def _ra(hang: UserProviderKey) -> ProviderKeyOut:
+def _to_out(row: UserProviderKey) -> ProviderKeyOut:
     return ProviderKeyOut(
-        provider=hang.provider,
-        masked_key=hang.key_last4,
-        verified_at=hang.verified_at,
-        created_at=hang.created_at,
-        usable=_doc_duoc(hang),
+        provider=row.provider,
+        masked_key=row.key_last4,
+        verified_at=row.verified_at,
+        created_at=row.created_at,
+        usable=_is_readable(row),
     )
 
 
@@ -209,13 +209,13 @@ async def list_provider_keys(
     """
     cat = catalog.get_catalog()
     byok_providers = [
-        ByokProviderOut(provider=khoa, label=p.label)
-        for khoa, p in cat.providers.items()
+        ByokProviderOut(provider=key, label=p.label)
+        for key, p in cat.providers.items()
         if p.byok_supported
     ]
     async with session_scope() as session:
-        hang = await ProviderKeyRepository(session).list_for_user(user_id)
-        return ProviderKeyListOut(keys=[_ra(h) for h in hang], byok_providers=byok_providers)
+        row = await ProviderKeyRepository(session).list_for_user(user_id)
+        return ProviderKeyListOut(keys=[_to_out(h) for h in row], byok_providers=byok_providers)
 
 
 @router.put(
@@ -251,25 +251,25 @@ async def put_provider_key(
     nó **không** cần `Idempotency-Key` của §11.4 — luật đó chỉ áp cho `POST`
     (xem `core/idempotency.py`).
     """
-    ban_ghi = _tim_provider(provider)
-    khoa = body.key.strip()
+    record = _find_provider(provider)
+    key = body.key.strip()
 
     try:
-        ket_cuc = await verify_key(provider, ban_ghi, khoa)
-    except VerifyUnavailable as loi:
+        outcome = await verify_key(provider, record, key)
+    except VerifyUnavailable as exc:
         raise ApiError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             ApiErrorCode.SERVICE_UNAVAILABLE,
             "khong hoi duoc provider de kiem khoa, hay thu lai",
             details={"provider": provider},
-        ) from loi
+        ) from exc
 
-    if ket_cuc is VerifyOutcome.REJECTED:
+    if outcome is VerifyOutcome.REJECTED:
         # `details` KHÔNG mang `body.key`, và thông điệp cũng vậy — DoD dòng 4.
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
             ApiErrorCode.PROVIDER_KEY_REJECTED,
-            _LOI_KHOA_BI_TU_CHOI,
+            _KEY_REJECTED_MSG,
             details={"provider": provider},
         )
 
@@ -281,18 +281,18 @@ async def put_provider_key(
     # xảy ra xong trước khi transaction dưới đây mở ra. `func.now()` là mốc mở
     # transaction, tức nó sẽ trả lời một câu hỏi khác — và với một lần verify
     # chậm thì hai câu trả lời lệch nhau bằng đúng độ trễ của provider.
-    verified_at = datetime.now(UTC) if ket_cuc is VerifyOutcome.ALIVE else None
+    verified_at = datetime.now(UTC) if outcome is VerifyOutcome.ALIVE else None
 
     async with session_scope() as session:
-        hang = await ProviderKeyRepository(session).upsert(
+        row = await ProviderKeyRepository(session).upsert(
             user_id=user_id,
             provider=provider,
-            sealed=seal(khoa),
-            masked=mask_secret(khoa),
+            sealed=seal(key),
+            masked=mask_secret(key),
             verified_at=verified_at,
         )
         await session.commit()
-        return _ra(hang)
+        return _to_out(row)
 
 
 @router.delete(
@@ -311,7 +311,7 @@ async def delete_provider_key(
 ) -> Response:
     """Xoá **cứng** khoá BYOK của một provider (§10.5 — không soft-delete).
 
-    **Không** gọi `_tim_provider`: một provider vừa bị gỡ khỏi catalog vẫn có
+    **Không** gọi `_find_provider`: một provider vừa bị gỡ khỏi catalog vẫn có
     thể còn để lại một hàng trong bảng này, và chặn ở đây nghĩa là hàng ấy
     không ai xoá được nữa. Xoá thì luôn được phép.
 
@@ -320,8 +320,8 @@ async def delete_provider_key(
     với "vừa xoá xong", và FE dựa vào đó để biết danh sách của nó đã cũ.
     """
     async with session_scope() as session:
-        da_xoa = await ProviderKeyRepository(session).delete(user_id=user_id, provider=provider)
-        if not da_xoa:
+        deleted = await ProviderKeyRepository(session).delete(user_id=user_id, provider=provider)
+        if not deleted:
             raise ApiError(
                 status.HTTP_404_NOT_FOUND,
                 ApiErrorCode.PROVIDER_KEY_NOT_FOUND,
@@ -335,7 +335,7 @@ async def delete_provider_key(
 # ═══════════════════ PUT /settings (§18.4, B-206, NQ-79) — T-3.0 ════════════
 
 
-class CaiDatIn(BaseModel):
+class SettingsIn(BaseModel):
     """Body của `PUT /settings`. Đúng **một** trường, cố ý.
 
     NQ-79 chốt "tối thiểu": không dựng sẵn khung cho tuỳ chọn chưa tồn tại.
@@ -357,7 +357,7 @@ class CaiDatIn(BaseModel):
     default_model: str | None = None
 
 
-class CaiDatRa(BaseModel):
+class SettingsOut(BaseModel):
     """`200` của `PUT /settings` — trạng thái sau khi ghi.
 
     Trả lại giá trị thay vì `204`: FE vừa gửi một tên model và cần biết chắc
@@ -374,7 +374,7 @@ class CaiDatRa(BaseModel):
 @router.put(
     "",
     status_code=status.HTTP_200_OK,
-    response_model=CaiDatRa,
+    response_model=SettingsOut,
     responses={
         400: {
             "model": ErrorEnvelope,
@@ -383,9 +383,9 @@ class CaiDatRa(BaseModel):
     },
 )
 async def put_settings(
-    body: CaiDatIn,
+    body: SettingsIn,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-) -> CaiDatRa:
+) -> SettingsOut:
     """Ghi cài đặt cá nhân của **chính mình** (§18.4, UC-05).
 
     Không có tham số nào trỏ sang người khác: `user_id` đến từ dependency và đi
@@ -400,7 +400,7 @@ async def put_settings(
     mặt một người không làm gì cả. `GET /auth/me` vì vậy trả nguyên văn giá trị
     đã lưu và để FE rơi về `default: true` của catalog.
 
-    `catalog.get_model` lọc luôn `enabled`, cùng lối `_chon_model` của
+    `catalog.get_model` lọc luôn `enabled`, cùng lối `_pick_model` của
     `api/v1/messages.py`: chọn mặc định một model đang tắt là hẹn trước một
     `MODEL_UNKNOWN` cho mọi lượt chat sau đó.
 
@@ -418,8 +418,8 @@ async def put_settings(
         )
 
     async with session_scope() as session:
-        da_ghi = await UserRepository(session).set_default_model(user_id, body.default_model)
-        if not da_ghi:
+        written = await UserRepository(session).set_default_model(user_id, body.default_model)
+        if not written:
             raise ApiError(
                 status.HTTP_401_UNAUTHORIZED,
                 ApiErrorCode.UNAUTHENTICATED,
@@ -427,4 +427,4 @@ async def put_settings(
             )
         await session.commit()
 
-    return CaiDatRa(default_model=body.default_model)
+    return SettingsOut(default_model=body.default_model)

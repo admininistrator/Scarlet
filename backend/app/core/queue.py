@@ -53,7 +53,7 @@ from app.config.settings import settings
 GENERATE_JOB_NAME = "generate"
 
 _pool: ArqRedis | None = None
-_khoa = asyncio.Lock()
+_lock = asyncio.Lock()
 
 
 def redis_settings() -> RedisSettings:
@@ -70,7 +70,7 @@ async def get_arq_pool() -> ArqRedis:
     """Pool dùng chung của tiến trình. Dựng ở lần gọi đầu tiên."""
     global _pool
     if _pool is None:
-        async with _khoa:
+        async with _lock:
             if _pool is None:
                 _pool = await create_pool(redis_settings())
     return _pool

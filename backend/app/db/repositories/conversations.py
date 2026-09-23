@@ -42,7 +42,7 @@ from app.db.repositories.errors import MessageNotInConversationError
 #: "message này có thuộc đúng hội thoại không". Cho nó vào đây là mở đường trỏ
 #: `active_leaf_id` sang cây của hội thoại khác — `get_path` khi đó dựng ra một
 #: đường đi lẫn hai hội thoại và mọi lượt chat sau gửi nhầm ngữ cảnh lên model.
-CO_THE_SUA = frozenset({"title", "default_model", "pinned"})
+EDITABLE_FIELDS = frozenset({"title", "default_model", "pinned"})
 
 
 class ConversationRepository:
@@ -118,7 +118,7 @@ class ConversationRepository:
         conversation_id: uuid.UUID,
         *,
         user_id: uuid.UUID,
-        thay_doi: Mapping[str, Any],
+        changes: Mapping[str, Any],
     ) -> bool:
         """Đổi metadata của một hội thoại (§18.2). Trả `False` nếu không thấy được.
 
@@ -127,7 +127,7 @@ class ConversationRepository:
         không phải "đừng đụng tới tiêu đề". Router đã đọc `model_fields_set`
         để biết người gọi gửi những gì, nên nó truyền xuống đúng những khoá đó.
 
-        Khoá ngoài `CO_THE_SUA` → `ValueError`, không phải bỏ qua im lặng: gọi
+        Khoá ngoài `EDITABLE_FIELDS` → `ValueError`, không phải bỏ qua im lặng: gọi
         nhầm tên cột là lỗi lập trình ở tầng trên, và một `PATCH` lặng lẽ không
         đổi gì là thứ chỉ phát hiện được khi có người ngồi soi DB.
 
@@ -135,10 +135,10 @@ class ConversationRepository:
         object `Conversation` caller đang giữ **vẫn mang giá trị cũ**. Caller
         muốn đọc lại phải `refresh()` hoặc dùng session khác.
         """
-        la = set(thay_doi) - CO_THE_SUA
-        if la:
-            raise ValueError(f"cot khong duoc sua qua update_conversation: {sorted(la)}")
-        if not thay_doi:
+        unknown = set(changes) - EDITABLE_FIELDS
+        if unknown:
+            raise ValueError(f"cot khong duoc sua qua update_conversation: {sorted(unknown)}")
+        if not changes:
             raise ValueError("update_conversation goi voi thay_doi rong")
 
         stmt = (
@@ -148,7 +148,7 @@ class ConversationRepository:
                 Conversation.user_id == user_id,
                 Conversation.deleted_at.is_(None),
             )
-            .values(**thay_doi)
+            .values(**changes)
             .returning(Conversation.id)
             .execution_options(synchronize_session=False)
         )

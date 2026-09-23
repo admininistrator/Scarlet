@@ -71,14 +71,14 @@ from app.db.repositories import (
     MessageNotInConversationError,
     MessageRepository,
 )
-from app.db.repositories.conversations import CO_THE_SUA
+from app.db.repositories.conversations import EDITABLE_FIELDS
 from app.db.repositories.messages import PathNode
 from app.db.session import session_scope
 
 router = APIRouter(tags=["conversations"])
 
 
-class TaoHoiThoaiRequest(BaseModel):
+class CreateConversationRequest(BaseModel):
     """Body của `POST /conversations`. Cả ba trường đều tuỳ chọn.
 
     Không có `content` ở đây: §18.2 ghi "Tạo rỗng", và lượt chat đầu tiên đi
@@ -94,7 +94,7 @@ class TaoHoiThoaiRequest(BaseModel):
     system_prompt_override: str | None = None
 
 
-class SuaHoiThoaiRequest(BaseModel):
+class UpdateConversationRequest(BaseModel):
     """Body của `PATCH /conversations/{id}` — bốn trường của §18.2.
 
     Cả bốn đều tuỳ chọn, và **vắng mặt khác `null`**: handler đọc
@@ -104,7 +104,7 @@ class SuaHoiThoaiRequest(BaseModel):
 
     `system_prompt_override` **không** có mặt dù `POST /conversations` nhận nó:
     §18.2 liệt đúng bốn thứ cho `PATCH` ("Đổi tiêu đề, model mặc định, ghim,
-    `active_leaf_id`"), và allowlist `CO_THE_SUA` của repository là bản thứ
+    `active_leaf_id`"), và allowlist `EDITABLE_FIELDS` của repository là bản thứ
     hai của cùng danh sách đó — hai chỗ phải cùng nói một chuyện.
     """
 
@@ -119,7 +119,7 @@ class SuaHoiThoaiRequest(BaseModel):
     active_leaf_id: uuid.UUID | None = None
 
 
-class HoiThoaiRa(BaseModel):
+class ConversationOut(BaseModel):
     """Metadata một hội thoại — dùng cho cả danh sách lẫn chi tiết."""
 
     model_config = ConfigDict(from_attributes=True)
@@ -134,7 +134,7 @@ class HoiThoaiRa(BaseModel):
     updated_at: datetime
 
 
-class MessageTrenDuongDi(BaseModel):
+class PathMessage(BaseModel):
     """Một message trên đường đi hiện tại, kèm vị trí giữa các anh em (C13).
 
     `sibling_index` đếm từ **0** (B-60): giao diện `‹ 2/3 ›` của §8.2 hiển thị
@@ -173,7 +173,7 @@ class MessageTrenDuongDi(BaseModel):
     feedback: MessageFeedback | None
 
     @classmethod
-    def from_path_node(cls, node: PathNode) -> MessageTrenDuongDi:
+    def from_path_node(cls, node: PathNode) -> PathMessage:
         """Một node của `get_path`, hai con số anh em do SQL tính sẵn (§8.3)."""
         return cls.from_message(
             node.message,
@@ -182,9 +182,7 @@ class MessageTrenDuongDi(BaseModel):
         )
 
     @classmethod
-    def from_message(
-        cls, m: Message, *, sibling_index: int, sibling_count: int
-    ) -> MessageTrenDuongDi:
+    def from_message(cls, m: Message, *, sibling_index: int, sibling_count: int) -> PathMessage:
         """Liệt từng trường bằng tay, **không** `from_attributes`.
 
         `Message` có 20 cột và ba trong số đó (`raw_response`, `tool_calls`,
@@ -214,17 +212,17 @@ class MessageTrenDuongDi(BaseModel):
         )
 
 
-class HoiThoaiChiTiet(HoiThoaiRa):
+class ConversationDetail(ConversationOut):
     """`GET /conversations/{id}` — metadata + đường đi hiện tại (§18.2)."""
 
     #: Gốc trước, lá sau. Rỗng khi `active_leaf_id` là NULL.
-    path: list[MessageTrenDuongDi]
+    path: list[PathMessage]
 
 
-class DanhSachHoiThoai(BaseModel):
+class ConversationList(BaseModel):
     """`GET /conversations` — một trang, kèm con trỏ sang trang kế."""
 
-    items: list[HoiThoaiRa]
+    items: list[ConversationOut]
     #: `updated_at` của dòng cuối trang này; gửi lại vào `?updated_before=` để
     #: lấy trang kế. `null` = hết. **Không** trả tổng số dòng: đếm cả bảng mỗi
     #: lần mở sidebar là một câu quét mà không màn hình nào hiển thị kết quả.
@@ -233,7 +231,7 @@ class DanhSachHoiThoai(BaseModel):
 
 @router.get(
     "/conversations",
-    response_model=DanhSachHoiThoai,
+    response_model=ConversationList,
     responses={422: {"model": ErrorEnvelope, "description": "limit ngoai khoang cho phep"}},
 )
 async def list_conversations(
@@ -246,35 +244,35 @@ async def list_conversations(
         datetime | None,
         Query(description="next_cursor cua trang truoc"),
     ] = None,
-) -> DanhSachHoiThoai:
+) -> ConversationList:
     """Sidebar: mới nhất trước, phân trang bằng con trỏ `updated_at` (§17.4)."""
     async with session_scope() as session:
         rows = await ConversationRepository(session).list_conversations(
             user_id=user_id, limit=limit, updated_before=updated_before
         )
-        items = [HoiThoaiRa.model_validate(row) for row in rows]
+        items = [ConversationOut.model_validate(row) for row in rows]
 
     # Trang chưa đầy ⇒ chắc chắn hết dữ liệu, khỏi mời client hỏi thêm một vòng
     # nữa chỉ để nhận về danh sách rỗng.
-    con_nua = len(items) == limit
-    return DanhSachHoiThoai(
+    has_more = len(items) == limit
+    return ConversationList(
         items=items,
-        next_cursor=items[-1].updated_at if (items and con_nua) else None,
+        next_cursor=items[-1].updated_at if (items and has_more) else None,
     )
 
 
 @router.post(
     "/conversations",
     status_code=status.HTTP_201_CREATED,
-    response_model=HoiThoaiRa,
+    response_model=ConversationOut,
     responses={
         400: {"model": ErrorEnvelope, "description": "default_model khong co trong catalog"}
     },
 )
 async def create_conversation(
-    body: TaoHoiThoaiRequest,
+    body: CreateConversationRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-) -> HoiThoaiRa:
+) -> ConversationOut:
     """Tạo hội thoại RỖNG: `active_leaf_id` NULL, chưa có message nào (§18.2).
 
     `201` chứ không `202`: ở đây không có job nào được đẩy đi, tài nguyên tồn
@@ -298,20 +296,20 @@ async def create_conversation(
         )
         # Đọc ra schema TRƯỚC khi session đóng — sau `commit()` object là
         # detached, cùng lý do với `uid, amid` của `messages.py`.
-        ra = HoiThoaiRa.model_validate(conversation)
+        out = ConversationOut.model_validate(conversation)
         await session.commit()
-    return ra
+    return out
 
 
 @router.get(
     "/conversations/{conversation_id}",
-    response_model=HoiThoaiChiTiet,
+    response_model=ConversationDetail,
     responses={404: {"model": ErrorEnvelope, "description": "Khong thay (§20 gop ba ca)"}},
 )
 async def get_conversation(
     conversation_id: uuid.UUID,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-) -> HoiThoaiChiTiet:
+) -> ConversationDetail:
     """Metadata + đường đi từ gốc xuống `active_leaf_id` (§8.3, A2).
 
     Đây là thứ T-1.14 gọi khi mở lại một tab đã đóng: nó dựng lại đúng màn hình
@@ -329,15 +327,15 @@ async def get_conversation(
                 ApiErrorCode.CONVERSATION_NOT_FOUND,
                 "khong tim thay hoi thoai",
             )
-        path = await _duong_di(session, conversation, user_id=user_id)
-        meta = HoiThoaiRa.model_validate(conversation)
+        path = await _path(session, conversation, user_id=user_id)
+        meta = ConversationOut.model_validate(conversation)
 
-    return HoiThoaiChiTiet(**meta.model_dump(), path=path)
+    return ConversationDetail(**meta.model_dump(), path=path)
 
 
 @router.patch(
     "/conversations/{conversation_id}",
-    response_model=HoiThoaiChiTiet,
+    response_model=ConversationDetail,
     responses={
         400: {"model": ErrorEnvelope, "description": "default_model la, hoac pinned=null"},
         404: {"model": ErrorEnvelope, "description": "Khong thay hoi thoai, hoac leaf la"},
@@ -345,9 +343,9 @@ async def get_conversation(
 )
 async def update_conversation(
     conversation_id: uuid.UUID,
-    body: SuaHoiThoaiRequest,
+    body: UpdateConversationRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-) -> HoiThoaiChiTiet:
+) -> ConversationDetail:
     """Đổi tiêu đề, model mặc định, ghim, và **con trỏ nhánh** (§18.2, §8.2).
 
     Đây là đường CHUYỂN NHÁNH của T-1.13: `‹ 2/3 ›` trên màn hình chỉ là một
@@ -356,7 +354,7 @@ async def update_conversation(
     ghi đúng một dòng cho thao tác này: *"Chỉ đổi `active_leaf_id`"*.
 
     **Con trỏ dừng ở LÁ SÂU NHẤT của nhánh được chọn, không ở đúng id client
-    gửi** (B-109, ngả (a) của NQ-35 — xem `_la_sau_nhat`). Anh em được chọn có
+    gửi** (B-109, ngả (a) của NQ-35 — xem `_is_deepest`). Anh em được chọn có
     thể còn cả một đoạn hội thoại phía dưới, và `get_path` đi ngược từ con trỏ
     lên gốc nên đậu lại ở đó sẽ cắt cụt màn hình. Vì thế `active_leaf_id` trong
     response **có thể khác** id vừa gửi lên; nó là con số DB đang giữ, và đó là
@@ -381,20 +379,22 @@ async def update_conversation(
     đúng như `GET`. Một `400 "phải gửi ít nhất một trường"` chỉ bắt FE viết
     thêm một nhánh `if` mà không ngăn được sai sót nào.
     """
-    thay_doi = {ten: getattr(body, ten) for ten in body.model_fields_set if ten in CO_THE_SUA}
-    if "pinned" in thay_doi and thay_doi["pinned"] is None:
+    changes = {
+        name: getattr(body, name) for name in body.model_fields_set if name in EDITABLE_FIELDS
+    }
+    if "pinned" in changes and changes["pinned"] is None:
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
             ApiErrorCode.BAD_REQUEST,
             "pinned khong nhan null; gui true hoac false",
         )
-    model_moi: str | None = thay_doi.get("default_model")
-    if model_moi is not None and catalog.get_model(model_moi) is None:
+    new_model: str | None = changes.get("default_model")
+    if new_model is not None and catalog.get_model(new_model) is None:
         raise ApiError(
             status.HTTP_400_BAD_REQUEST,
             ApiErrorCode.MODEL_UNKNOWN,
-            f"model khong co trong catalog hoac da tat: {model_moi}",
-            details={"model_id": model_moi},
+            f"model khong co trong catalog hoac da tat: {new_model}",
+            details={"model_id": new_model},
         )
 
     async with session_scope() as session:
@@ -407,16 +407,18 @@ async def update_conversation(
                 "khong tim thay hoi thoai",
             )
 
-        if thay_doi:
+        if changes:
             await conversations.update_conversation(
-                conversation_id, user_id=user_id, thay_doi=thay_doi
+                conversation_id, user_id=user_id, changes=changes
             )
         if "active_leaf_id" in body.model_fields_set:
             # B-109 ngả (a) — đi tiếp xuống lá sâu nhất của nhánh vừa chọn.
-            la = await _la_sau_nhat(session, body.active_leaf_id, user_id=user_id)
+            unknown = await _is_deepest(session, body.active_leaf_id, user_id=user_id)
             try:
-                await conversations.set_active_leaf(conversation_id, user_id=user_id, message_id=la)
-            except MessageNotInConversationError as loi:
+                await conversations.set_active_leaf(
+                    conversation_id, user_id=user_id, message_id=unknown
+                )
+            except MessageNotInConversationError as exc:
                 # §20: câu trả lời không nói message ấy có tồn tại ở hội thoại
                 # khác hay không. Trỏ con trỏ nhánh sang cây của hội thoại khác
                 # sẽ làm `get_path` dựng ra đường đi lẫn hai hội thoại (C11).
@@ -424,7 +426,7 @@ async def update_conversation(
                     status.HTTP_404_NOT_FOUND,
                     ApiErrorCode.LEAF_NOT_FOUND,
                     "active_leaf_id khong nam trong hoi thoai nay",
-                ) from loi
+                ) from exc
 
         # Hai câu UPDATE ở trên đi THẲNG xuống DB (`synchronize_session=False`),
         # nên object `conversation` vẫn mang giá trị cũ và identity map sẽ trả
@@ -432,11 +434,11 @@ async def update_conversation(
         # cách duy nhất đọc được thứ DB thực sự đang chứa — thiếu nó thì
         # response của mọi `PATCH` là ảnh chụp TRƯỚC khi sửa.
         await session.refresh(conversation)
-        path = await _duong_di(session, conversation, user_id=user_id)
-        meta = HoiThoaiRa.model_validate(conversation)
+        path = await _path(session, conversation, user_id=user_id)
+        meta = ConversationOut.model_validate(conversation)
         await session.commit()
 
-    return HoiThoaiChiTiet(**meta.model_dump(), path=path)
+    return ConversationDetail(**meta.model_dump(), path=path)
 
 
 @router.delete(
@@ -456,10 +458,10 @@ async def delete_conversation(
     đó. Một `204` ở lần thứ hai sẽ nói với client rằng nó vừa xoá được cái gì.
     """
     async with session_scope() as session:
-        xoa_duoc = await ConversationRepository(session).soft_delete_conversation(
+        deleted = await ConversationRepository(session).soft_delete_conversation(
             conversation_id, user_id=user_id
         )
-        if not xoa_duoc:
+        if not deleted:
             raise ApiError(
                 status.HTTP_404_NOT_FOUND,
                 ApiErrorCode.CONVERSATION_NOT_FOUND,
@@ -469,7 +471,7 @@ async def delete_conversation(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-async def _la_sau_nhat(
+async def _is_deepest(
     session: AsyncSession, leaf_id: uuid.UUID | None, *, user_id: uuid.UUID
 ) -> uuid.UUID | None:
     """`active_leaf_id` client gửi → lá SÂU NHẤT của nhánh đó (B-109, NQ-35).
@@ -496,15 +498,15 @@ async def _la_sau_nhat(
     """
     if leaf_id is None:
         return None
-    sau_nhat = await MessageRepository(session).get_deepest_leaf(leaf_id, user_id=user_id)
-    return leaf_id if sau_nhat is None else sau_nhat
+    deepest = await MessageRepository(session).get_deepest_leaf(leaf_id, user_id=user_id)
+    return leaf_id if deepest is None else deepest
 
 
-async def _duong_di(
+async def _path(
     session: AsyncSession, conversation: Conversation, *, user_id: uuid.UUID
-) -> list[MessageTrenDuongDi]:
+) -> list[PathMessage]:
     """`get_path(active_leaf_id)` → schema. `active_leaf_id` NULL ⇒ rỗng."""
     if conversation.active_leaf_id is None:
         return []
     nodes = await MessageRepository(session).get_path(conversation.active_leaf_id, user_id=user_id)
-    return [MessageTrenDuongDi.from_path_node(node) for node in nodes]
+    return [PathMessage.from_path_node(node) for node in nodes]

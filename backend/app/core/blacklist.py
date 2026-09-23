@@ -45,7 +45,7 @@ request là hai lần độ trễ mạng cho một câu hỏi duy nhất; `MGET`
 khoá trong một lượt. Giá trị `None` đọc ra phân biệt được "không có khoá" với
 mọi thứ khác, nên không mất thông tin gì so với `EXISTS`.
 
-**Vì sao `thu_hoi_moi_phien()` ở đây chứ không ở router**, dù nó kéo theo một
+**Vì sao `revoke_all_sessions()` ở đây chứ không ở router**, dù nó kéo theo một
 import từ `db/repositories/` vào `core/` (`core/access_token.py` đã có tiền lệ
 nhập `db/models`): hai nửa của "đổi mật khẩu" trong §11.3 — revoke refresh
 family (Postgres) và đặt mốc (Redis) — **không** được phép rời nhau. Làm nửa
@@ -79,8 +79,8 @@ BL_USER_PREFIX = "bl:user:"
 
 #: §11.3 viết `SET bl:jti:{jti} 1`. Không ai đọc nội dung; câu hỏi duy nhất là
 #: "khoá có tồn tại không". Vẫn ghi đúng `1` để `redis-cli GET` lúc debug cho ra
-#: thứ người đọc kế hoạch đang chờ thấy (cùng lối `GIA_TRI_CO` của §7.5).
-GIA_TRI_CHAN = "1"
+#: thứ người đọc kế hoạch đang chờ thấy (cùng lối `FLAG_VALUE` của §7.5).
+BLOCKED_VALUE = "1"
 
 
 def jti_key(jti: str) -> str:
@@ -91,7 +91,7 @@ def user_key(user_id: uuid.UUID | str) -> str:
     return f"{BL_USER_PREFIX}{user_id}"
 
 
-def ttl_moc_user() -> int:
+def user_cutoff_ttl() -> int:
     """TTL của `bl:user:{uid}`, suy ra từ cấu hình chứ không gõ tay (A3).
 
     Xem docstring module: mốc chỉ cần sống đúng bằng trần tuổi của một access
@@ -101,7 +101,7 @@ def ttl_moc_user() -> int:
     return settings.ACCESS_TOKEN_TTL_MIN * 60
 
 
-async def chan_jti(redis: Redis, claims: AccessTokenClaims, *, now: datetime | None = None) -> int:
+async def block_jti(redis: Redis, claims: AccessTokenClaims, *, now: datetime | None = None) -> int:
     """`SET bl:jti:{jti} 1 EX <thời gian còn lại>` — nửa Redis của logout.
 
     Trả về TTL đã đặt (giây) để chỗ gọi log được con số thật — DoD T-2.4 đo
@@ -113,46 +113,48 @@ async def chan_jti(redis: Redis, claims: AccessTokenClaims, *, now: datetime | N
     nên đường đó có thật. `ceil` chứ không `int`: cắt xuống là để khoá chết
     sớm hơn token nó chặn, đúng một giây — nhỏ, nhưng sai chiều.
     """
-    moc = now or datetime.now(UTC)
-    ttl_s = max(1, math.ceil((claims.expires_at - moc).total_seconds()))
-    await redis.set(jti_key(claims.jti), GIA_TRI_CHAN, ex=ttl_s)
+    cutoff = now or datetime.now(UTC)
+    ttl_s = max(1, math.ceil((claims.expires_at - cutoff).total_seconds()))
+    await redis.set(jti_key(claims.jti), BLOCKED_VALUE, ex=ttl_s)
     return ttl_s
 
 
-async def dat_moc_user(redis: Redis, user_id: uuid.UUID, *, now: datetime | None = None) -> float:
+async def set_user_cutoff(
+    redis: Redis, user_id: uuid.UUID, *, now: datetime | None = None
+) -> float:
     """`SET bl:user:{uid} <now> EX 900` — nửa Redis của "đổi mật khẩu" (§11.3).
 
     Trả về mốc đã ghi để chỗ gọi log/test đọc lại được đúng giá trị.
     """
-    moc = (now or datetime.now(UTC)).timestamp()
-    await redis.set(user_key(user_id), repr(moc), ex=ttl_moc_user())
-    return moc
+    cutoff = (now or datetime.now(UTC)).timestamp()
+    await redis.set(user_key(user_id), repr(cutoff), ex=user_cutoff_ttl())
+    return cutoff
 
 
-async def bi_chan(redis: Redis, claims: AccessTokenClaims) -> bool:
+async def is_blocked(redis: Redis, claims: AccessTokenClaims) -> bool:
     """Token này có nằm trong blacklist nào không — phép kiểm của mọi request.
 
     Ngoại lệ của Redis **không** bị nuốt ở đây: chỗ gọi (`app/core/deps.py`)
     mới là nơi biết phải trả lời người dùng thế nào khi Redis chết.
     """
-    gia_tri_jti, gia_tri_moc = await redis.mget([jti_key(claims.jti), user_key(claims.user_id)])
+    jti_value, cutoff_value = await redis.mget([jti_key(claims.jti), user_key(claims.user_id)])
 
-    if gia_tri_jti is not None:
+    if jti_value is not None:
         return True
-    if gia_tri_moc is None:
+    if cutoff_value is None:
         return False
 
     try:
-        moc = float(gia_tri_moc)
+        cutoff = float(cutoff_value)
     except (TypeError, ValueError):
         # Khoá đúng tên nhưng nội dung không đọc được (ai đó `SET` tay lúc
         # debug, hoặc một phiên bản trước ghi định dạng khác). Chặn, không tha:
         # khoá này chỉ tồn tại vì có người đã yêu cầu thu hồi.
         return True
-    return claims.issued_at.timestamp() < moc
+    return claims.issued_at.timestamp() < cutoff
 
 
-async def thu_hoi_moi_phien(
+async def revoke_all_sessions(
     session: AsyncSession, redis: Redis, user_id: uuid.UUID, *, now: datetime | None = None
 ) -> float:
     """Nhánh "đổi mật khẩu" của §11.3: revoke **mọi** refresh family + đặt mốc.
@@ -165,5 +167,5 @@ async def thu_hoi_moi_phien(
     tự ngược lại có một khe: mốc đã đặt mà `UPDATE` trượt ⇒ refresh token cũ
     vẫn sống và sẽ đổi ra access token mới sau 15 phút.
     """
-    await RefreshTokenRepository(session).thu_hoi_moi_family(user_id)
-    return await dat_moc_user(redis, user_id, now=now)
+    await RefreshTokenRepository(session).revoke_all_families(user_id)
+    return await set_user_cutoff(redis, user_id, now=now)

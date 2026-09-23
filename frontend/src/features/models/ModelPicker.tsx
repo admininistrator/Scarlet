@@ -39,37 +39,37 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
 
-import { t, type KhoaChu } from "../../lib/i18n";
-import type { ModelRa } from "../../lib/api";
-import type { KetQuaMacDinh, TangMacDinh } from "./macDinh";
+import { t, type TextKey } from "../../lib/i18n";
+import type { ModelOut } from "../../lib/api";
+import type { DefaultPick, DefaultTier } from "./defaults";
 
 /**
  * Bon capability cua §9.4 → khoa chuoi trong `vi.json`.
  *
  * Catalog la file sua nong, nen mot capability la (hoac mot cai moi cua §9.4
- * chua co ban dich) phai hien duoc chu khong duoc lam vo hang: `nhanKhaNang`
+ * chua co ban dich) phai hien duoc chu khong duoc lam vo hang: `capabilityLabel`
  * roi ve chinh chuoi tho.
  */
-const NHAN_KHA_NANG: Record<string, KhoaChu> = {
+const CAPABILITY_LABELS: Record<string, TextKey> = {
   tools: "model.cap.tools",
   vision: "model.cap.vision",
   reasoning: "model.cap.reasoning",
   attachments: "model.cap.attachments",
 };
 
-const NHAN_TANG: Record<TangMacDinh, KhoaChu> = {
-  hoiThoai: "model.tierConversation",
-  taiKhoan: "model.tierAccount",
+const TIER_LABELS: Record<DefaultTier, TextKey> = {
+  conversation: "model.tierConversation",
+  account: "model.tierAccount",
   catalog: "model.tierCatalog",
 };
 
 /** Duoi bề rong nay picker la sheet, khong phai dropdown (ban T-HD4, 3c). */
-const NGUONG_HEP = "(max-width: 639px)";
+const NARROW_QUERY = "(max-width: 639px)";
 
 export interface ModelPickerProps {
-  models: ModelRa[];
-  /** Ket qua cua `chonMacDinh()` — model dang dung + tang cua tung id. */
-  macDinh: KetQuaMacDinh;
+  models: ModelOut[];
+  /** Ket qua cua `pickDefault()` — model dang dung + tang cua tung id. */
+  defaultPick: DefaultPick;
   /**
    * Moc gio da dinh dang SAN ben ngoai, vi du `"14:32"`.
    *
@@ -77,86 +77,86 @@ export interface ModelPickerProps {
    * interpolation (xem `lib/i18n.ts`): cau "Trang thai kiem luc" va con so la
    * hai phan tu canh nhau, khong phai mot chuoi ghep.
    */
-  nhanDocLuc: string;
-  dangLamMoi?: boolean;
-  onLamMoi: () => void;
-  onChon: (modelId: string) => void;
+  loadedAtLabel: string;
+  refreshing?: boolean;
+  onRefresh: () => void;
+  onPick: (modelId: string) => void;
 }
 
-function nhanKhaNang(khaNang: string): string {
-  const khoa = NHAN_KHA_NANG[khaNang];
-  return khoa === undefined ? khaNang : t(khoa);
+function capabilityLabel(capability: string): string {
+  const key = CAPABILITY_LABELS[capability];
+  return key === undefined ? capability : t(key);
 }
 
 /** Bề rong nho hay khong. Theo doi song, khong doc mot lan roi thoi. */
-function useBeRongHep(): boolean {
-  const [hep, setHep] = useState(
-    () => typeof window !== "undefined" && window.matchMedia(NGUONG_HEP).matches,
+function useIsNarrow(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(NARROW_QUERY).matches,
   );
   useEffect(() => {
-    const mq = window.matchMedia(NGUONG_HEP);
-    const khiDoi = (): void => setHep(mq.matches);
-    mq.addEventListener("change", khiDoi);
+    const mq = window.matchMedia(NARROW_QUERY);
+    const handleChange = (): void => setNarrow(mq.matches);
+    mq.addEventListener("change", handleChange);
     // Doc lai ngay: giua lan render dau va lan `useEffect` chay, be rong co
     // the da khac (xoay may, mo DevTools).
-    khiDoi();
-    return () => mq.removeEventListener("change", khiDoi);
+    handleChange();
+    return () => mq.removeEventListener("change", handleChange);
   }, []);
-  return hep;
+  return narrow;
 }
 
 /** Thanh doc ben trai hang — bao tang mac dinh, khong bao "dang chon". */
-function VachTang({ tang }: { tang: TangMacDinh | null }) {
+function TierRail({ tier }: { tier: DefaultTier | null }) {
   const tone =
-    tang === "hoiThoai"
+    tier === "conversation"
       ? "bg-accent"
-      : tang === "taiKhoan"
+      : tier === "account"
         ? "border border-accent-text"
-        : tang === "catalog"
+        : tier === "catalog"
           ? "bg-border-strong"
           : "";
   return <span aria-hidden="true" className={`w-rail shrink-0 self-stretch rounded-full ${tone}`} />;
 }
 
-function ChipKhaNang({ khaNang }: { khaNang: string[] }) {
-  if (khaNang.length === 0) {
+function CapabilityChips({ capability }: { capability: string[] }) {
+  if (capability.length === 0) {
     return <span className="text-xs text-muted">{t("model.capNone")}</span>;
   }
   return (
     <ul className="flex flex-wrap items-center gap-1">
-      {khaNang.map((kn) => (
+      {capability.map((kn) => (
         <li
           key={kn}
           className="rounded-sm border border-border bg-background px-1.5 py-0.5 text-2xs font-medium text-muted"
         >
-          {nhanKhaNang(kn)}
+          {capabilityLabel(kn)}
         </li>
       ))}
     </ul>
   );
 }
 
-function HangModel({
+function ModelRow({
   model,
-  tang,
-  dangChon,
-  hep,
-  onChon,
+  tier,
+  selected,
+  narrow,
+  onPick,
 }: {
-  model: ModelRa;
-  tang: TangMacDinh | null;
-  dangChon: boolean;
-  hep: boolean;
-  onChon: (modelId: string) => void;
+  model: ModelOut;
+  tier: DefaultTier | null;
+  selected: boolean;
+  narrow: boolean;
+  onPick: (modelId: string) => void;
 }) {
-  const khoa = !model.available;
-  const idLyDo = `${model.id}-ly-do`;
+  const key = !model.available;
+  const reasonId = `${model.id}-ly-do`;
 
-  const hang = (
+  const row = (
     <li
       role="option"
-      aria-selected={dangChon}
-      aria-disabled={khoa || undefined}
+      aria-selected={selected}
+      aria-disabled={key || undefined}
       /*
         CHI o nhanh hep, vi chi o do cau ly do co that trong DOM. O desktop
         no nam trong tooltip — thu chua ton tai khi tooltip dong — nen mot
@@ -172,35 +172,35 @@ function HangModel({
         — tuc tooltip mo ma screen reader khong duoc bao. Khong truyen khoa
         do thi khong co gi de ghi de. (Bat duoc bang ca test 13.)
       */
-      {...(khoa && hep ? { "aria-describedby": idLyDo } : {})}
+      {...(key && narrow ? { "aria-describedby": reasonId } : {})}
       tabIndex={0}
-      // Cam bay ③ — hang khoa KHONG co duong nao vao `onChon`, ke ca ban phim.
-      onClick={khoa ? undefined : () => onChon(model.id)}
+      // Cam bay ③ — hang khoa KHONG co duong nao vao `onPick`, ke ca ban phim.
+      onClick={key ? undefined : () => onPick(model.id)}
       onKeyDown={
-        khoa
+        key
           ? undefined
           : (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                onChon(model.id);
+                onPick(model.id);
               }
             }
       }
       className={
-        khoa
+        key
           ? "motion-control flex min-h-row-model shrink-0 cursor-not-allowed items-stretch gap-3 rounded-md bg-surface-disabled px-2 py-2 text-disabled-foreground"
-          : dangChon
+          : selected
             ? "motion-control flex min-h-row-model shrink-0 cursor-pointer items-stretch gap-3 rounded-md bg-accent-subtle px-2 py-2"
             : "motion-control flex min-h-row-model shrink-0 cursor-pointer items-stretch gap-3 rounded-md px-2 py-2 hover:bg-surface-hover"
       }
     >
-      <VachTang tang={tang} />
+      <TierRail tier={tier} />
       <span className="flex w-5 shrink-0 items-start justify-center pt-0.5">
-        {dangChon ? <IconTich /> : null}
+        {selected ? <IconCheck /> : null}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className={khoa ? "text-base font-semibold" : "text-base font-semibold text-foreground"}>
+          <span className={key ? "text-base font-semibold" : "text-base font-semibold text-foreground"}>
             {model.display_name}
           </span>
           {model.badge ? (
@@ -210,15 +210,15 @@ function HangModel({
           ) : null}
         </span>
         <span className="text-xs text-muted">{model.provider}</span>
-        <ChipKhaNang khaNang={model.capabilities} />
+        <CapabilityChips capability={model.capabilities} />
         {/*
           Be rong nho: khong co hover nen ly do nam THANG trong hang. Cung
           phan tu `id` voi tooltip cua desktop, nen `aria-describedby` tro
           dung cho o ca hai hinh dang.
         */}
-        {khoa && hep ? (
+        {key && narrow ? (
           <span
-            id={idLyDo}
+            id={reasonId}
             className="rounded-sm border border-border bg-background px-2 py-1.5 text-xs text-muted"
           >
             {model.unavailable_reason}
@@ -226,30 +226,30 @@ function HangModel({
         ) : null}
       </span>
       <span className="flex shrink-0 flex-col items-end justify-start gap-1">
-        {tang ? (
+        {tier ? (
           <span
             className={
-              tang === "hoiThoai"
+              tier === "conversation"
                 ? "rounded-full bg-accent px-2 py-0.5 text-2xs font-semibold text-accent-foreground"
-                : tang === "taiKhoan"
+                : tier === "account"
                   ? "rounded-full border border-accent-text px-2 py-0.5 text-2xs font-semibold text-accent-text"
                   : "rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted"
             }
           >
-            {t(NHAN_TANG[tang])}
+            {t(TIER_LABELS[tier])}
           </span>
         ) : null}
-        {khoa ? <span className="text-2xs font-semibold uppercase">{t("model.unavailable")}</span> : null}
+        {key ? <span className="text-2xs font-semibold uppercase">{t("model.unavailable")}</span> : null}
       </span>
     </li>
   );
 
-  if (!khoa || hep) {
-    return hang;
+  if (!key || narrow) {
+    return row;
   }
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger asChild>{hang}</Tooltip.Trigger>
+      <Tooltip.Trigger asChild>{row}</Tooltip.Trigger>
       <Tooltip.Portal>
         <Tooltip.Content
           side="right"
@@ -265,52 +265,52 @@ function HangModel({
   );
 }
 
-function StripTrangThai({
-  nhanDocLuc,
-  dangLamMoi,
-  onLamMoi,
-}: Pick<ModelPickerProps, "nhanDocLuc" | "dangLamMoi" | "onLamMoi">) {
+function StatusStrip({
+  loadedAtLabel,
+  refreshing,
+  onRefresh,
+}: Pick<ModelPickerProps, "loadedAtLabel" | "refreshing" | "onRefresh">) {
   return (
     <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5">
       <p className="min-w-0 text-xs text-muted">
         <span>{t("model.checkedAtPrefix")}</span>{" "}
-        <span className="tabular font-medium text-foreground">{nhanDocLuc}</span>
+        <span className="tabular font-medium text-foreground">{loadedAtLabel}</span>
       </p>
       <button
         type="button"
-        onClick={onLamMoi}
-        aria-label={dangLamMoi ? t("model.refreshing") : t("model.refresh")}
-        aria-busy={dangLamMoi || undefined}
+        onClick={onRefresh}
+        aria-label={refreshing ? t("model.refreshing") : t("model.refresh")}
+        aria-busy={refreshing || undefined}
         className="motion-press flex size-touch shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground"
       >
-        <IconLamMoi quay={dangLamMoi} />
+        <IconRefresh spinning={refreshing} />
       </button>
     </div>
   );
 }
 
-function ThanPicker({
+function PickerBody({
   models,
-  macDinh,
-  hep,
-  onChon,
+  defaultPick,
+  narrow,
+  onPick,
   ...strip
-}: ModelPickerProps & { hep: boolean }) {
+}: ModelPickerProps & { narrow: boolean }) {
   return (
     <>
-      <StripTrangThai {...strip} />
+      <StatusStrip {...strip} />
       {models.length === 0 ? (
         <p className="px-3 py-4 text-xs text-muted">{t("model.trong")}</p>
       ) : (
         <ul role="listbox" aria-label={t("model.listLabel")} className="flex flex-col gap-0.5 p-2">
           {models.map((m) => (
-            <HangModel
+            <ModelRow
               key={m.id}
               model={m}
-              tang={tangCua(m.id, macDinh)}
-              dangChon={m.id === macDinh.modelId}
-              hep={hep}
-              onChon={onChon}
+              tier={tierOf(m.id, defaultPick)}
+              selected={m.id === defaultPick.modelId}
+              narrow={narrow}
+              onPick={onPick}
             />
           ))}
         </ul>
@@ -327,26 +327,26 @@ function ThanPicker({
   );
 }
 
-function tangCua(modelId: string, macDinh: KetQuaMacDinh): TangMacDinh | null {
-  if (modelId === macDinh.theoTang.hoiThoai) {
-    return "hoiThoai";
+function tierOf(modelId: string, defaultPick: DefaultPick): DefaultTier | null {
+  if (modelId === defaultPick.byTier.conversation) {
+    return "conversation";
   }
-  if (modelId === macDinh.theoTang.taiKhoan) {
-    return "taiKhoan";
+  if (modelId === defaultPick.byTier.account) {
+    return "account";
   }
-  if (modelId === macDinh.theoTang.catalog) {
+  if (modelId === defaultPick.byTier.catalog) {
     return "catalog";
   }
   return null;
 }
 
 export function ModelPicker(props: ModelPickerProps) {
-  const hep = useBeRongHep();
-  const [mo, setMo] = useState(false);
-  const dangChon = props.models.find((m) => m.id === props.macDinh.modelId);
-  const tangDangChon = props.macDinh.tang;
+  const narrow = useIsNarrow();
+  const [open, setOpen] = useState(false);
+  const selected = props.models.find((m) => m.id === props.defaultPick.modelId);
+  const selectedTier = props.defaultPick.tier;
 
-  const nutMo = (
+  const trigger = (
     <button
       type="button"
       aria-label={t("model.pickerOpen")}
@@ -354,29 +354,29 @@ export function ModelPicker(props: ModelPickerProps) {
     >
       <span className="flex min-w-0 flex-col">
         <span className="truncate text-base font-semibold text-foreground">
-          {dangChon?.display_name ?? t("model.trong")}
+          {selected?.display_name ?? t("model.trong")}
         </span>
         {/*
           Dong thu hai la cho tra loi "model nay den tu dau" (ban T-HD4, 3d).
-          Vang mat khi khong tang nao dat ra no — xem `chonMacDinh`.
+          Vang mat khi khong tang nao dat ra no — xem `pickDefault`.
         */}
-        {tangDangChon ? (
-          <span className="truncate text-2xs text-muted">{t(NHAN_TANG[tangDangChon])}</span>
+        {selectedTier ? (
+          <span className="truncate text-2xs text-muted">{t(TIER_LABELS[selectedTier])}</span>
         ) : null}
       </span>
       <IconChevron />
     </button>
   );
 
-  const chonRoiDong = (id: string): void => {
-    props.onChon(id);
-    setMo(false);
+  const selectAndClose = (id: string): void => {
+    props.onPick(id);
+    setOpen(false);
   };
 
-  if (hep) {
+  if (narrow) {
     return (
-      <Dialog.Root open={mo} onOpenChange={setMo}>
-        <Dialog.Trigger asChild>{nutMo}</Dialog.Trigger>
+      <Dialog.Root open={open} onOpenChange={setOpen}>
+        <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>
         <Dialog.Portal>
           <Dialog.Overlay className="motion-scrim fixed inset-0 z-40 bg-scrim" />
           <Dialog.Content className="motion-sheet fixed inset-x-0 bottom-0 z-50 flex max-h-sheet-max flex-col overflow-y-auto rounded-t-xl border-t border-border bg-surface-panel shadow-popover">
@@ -389,10 +389,10 @@ export function ModelPicker(props: ModelPickerProps) {
                 aria-label={t("model.closeSheet")}
                 className="motion-press flex size-touch items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground"
               >
-                <IconDong />
+                <IconClose />
               </Dialog.Close>
             </div>
-            <ThanPicker {...props} hep onChon={chonRoiDong} />
+            <PickerBody {...props} narrow onPick={selectAndClose} />
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -401,8 +401,8 @@ export function ModelPicker(props: ModelPickerProps) {
 
   return (
     <Tooltip.Provider delayDuration={200}>
-      <Popover.Root open={mo} onOpenChange={setMo}>
-        <Popover.Trigger asChild>{nutMo}</Popover.Trigger>
+      <Popover.Root open={open} onOpenChange={setOpen}>
+        <Popover.Trigger asChild>{trigger}</Popover.Trigger>
         <Popover.Portal>
           <Popover.Content
             side="top"
@@ -411,7 +411,7 @@ export function ModelPicker(props: ModelPickerProps) {
             collisionPadding={16}
             className="motion-popover z-50 w-picker max-w-picker-max rounded-lg border border-border bg-surface-panel shadow-popover"
           >
-            <ThanPicker {...props} hep={false} onChon={chonRoiDong} />
+            <PickerBody {...props} narrow={false} onPick={selectAndClose} />
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
@@ -420,7 +420,7 @@ export function ModelPicker(props: ModelPickerProps) {
 }
 
 /* Icon: mau lay `currentColor`, khong mot gia tri mau tho nao (§19.4 lenh 3). */
-function IconTich() {
+function IconCheck() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="text-accent-text">
       <path d="M3 8.5 6.2 11.6 13 4.8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -434,14 +434,14 @@ function IconChevron() {
     </svg>
   );
 }
-function IconDong() {
+function IconClose() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
       <path d="M4.5 4.5l9 9m0-9-9 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }
-function IconLamMoi({ quay }: { quay?: boolean }) {
+function IconRefresh({ spinning }: { spinning?: boolean }) {
   return (
     <svg
       width="18"
@@ -449,7 +449,7 @@ function IconLamMoi({ quay }: { quay?: boolean }) {
       viewBox="0 0 18 18"
       fill="none"
       aria-hidden="true"
-      className={quay ? "motion-spin" : undefined}
+      className={spinning ? "motion-spin" : undefined}
     >
       <path d="M15 9a6 6 0 1 1-1.8-4.3M15 2.5V6h-3.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>

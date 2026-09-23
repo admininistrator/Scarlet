@@ -2,9 +2,9 @@
 
 Bốn dòng DoD của task nằm ở các test có chữ `DoD` trong docstring:
 
-- `test_get_conversation_cua_user_khac_tra_None`
-- `test_xoa_mem_message_thi_con_van_con_trong_db`
-- `test_tao_message_voi_parent_thuoc_conversation_khac_thi_raise`
+- `test_get_conversation_of_other_user_returns_None`
+- `test_soft_deleted_message_children_remain_in_db`
+- `test_create_message_with_foreign_conversation_parent_raises`
 
 Mọi phép kiểm "dữ liệu có thật trong DB" đều đọc lại bằng session THỨ HAI hoặc
 bằng SQL thô, không tin vào object còn nằm trong identity map của session đã ghi.
@@ -30,7 +30,7 @@ from app.db.repositories import (
 LIMIT = 50
 
 
-async def _tao_hoi_thoai_co_goc(
+async def _create_conversation_with_root(
     session: AsyncSession, user_id: uuid.UUID
 ) -> tuple[Conversation, Message]:
     conversations = ConversationRepository(session)
@@ -48,7 +48,7 @@ async def _tao_hoi_thoai_co_goc(
 # ───────────────────────────── conversations ─────────────────────────────
 
 
-async def test_tao_conversation_dat_dung_default_cua_ddl(
+async def test_create_conversation_sets_ddl_defaults(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     conversation = await ConversationRepository(session).create_conversation(user_id=user_a)
@@ -62,22 +62,22 @@ async def test_tao_conversation_dat_dung_default_cua_ddl(
     assert conversation.active_leaf_id is None
 
 
-async def test_get_conversation_cua_user_khac_tra_None(
+async def test_get_conversation_of_other_user_returns_None(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID
 ) -> None:
     """DoD: `get_conversation(conv_cua_B, user_id=A)` → `None`, không raise, không trả object."""
     conversations = ConversationRepository(session)
-    cua_b = await conversations.create_conversation(user_id=user_b)
+    of_b = await conversations.create_conversation(user_id=user_b)
 
-    ket_qua = await conversations.get_conversation(cua_b.id, user_id=user_a)
+    result = await conversations.get_conversation(of_b.id, user_id=user_a)
 
-    assert ket_qua is None
+    assert result is None
     # Và B vẫn đọc được của chính mình — chứng minh dòng trên không xanh chỉ vì
     # hàm hỏng hoàn toàn.
-    assert await conversations.get_conversation(cua_b.id, user_id=user_b) is not None
+    assert await conversations.get_conversation(of_b.id, user_id=user_b) is not None
 
 
-async def test_get_conversation_khong_ton_tai_tra_None(
+async def test_get_missing_conversation_returns_None(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     conversations = ConversationRepository(session)
@@ -85,7 +85,7 @@ async def test_get_conversation_khong_ton_tai_tra_None(
     assert await conversations.get_conversation(uuid.uuid4(), user_id=user_a) is None
 
 
-async def test_xoa_mem_conversation_thi_truy_van_mac_dinh_khong_thay(
+async def test_soft_deleted_conversation_hidden_from_default_queries(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
@@ -98,56 +98,58 @@ async def test_xoa_mem_conversation_thi_truy_van_mac_dinh_khong_thay(
     async with session_factory() as session2:
         repo2 = ConversationRepository(session2)
         assert await repo2.get_conversation(conversation.id, user_id=user_a) is None
-        con_trong_db = await repo2.get_conversation(
+        still_in_db = await repo2.get_conversation(
             conversation.id, user_id=user_a, include_deleted=True
         )
-        assert con_trong_db is not None
-        assert con_trong_db.deleted_at is not None
+        assert still_in_db is not None
+        assert still_in_db.deleted_at is not None
 
 
-async def test_xoa_mem_conversation_cua_user_khac_tra_False(
+async def test_soft_delete_other_users_conversation_returns_False(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     user_b: uuid.UUID,
 ) -> None:
     conversations = ConversationRepository(session)
-    cua_b = await conversations.create_conversation(user_id=user_b)
+    of_b = await conversations.create_conversation(user_id=user_b)
 
-    assert await conversations.soft_delete_conversation(cua_b.id, user_id=user_a) is False
+    assert await conversations.soft_delete_conversation(of_b.id, user_id=user_a) is False
 
     async with session_factory() as session2:
-        van_con = await ConversationRepository(session2).get_conversation(cua_b.id, user_id=user_b)
-        assert van_con is not None
-        assert van_con.deleted_at is None
+        still_there = await ConversationRepository(session2).get_conversation(
+            of_b.id, user_id=user_b
+        )
+        assert still_there is not None
+        assert still_there.deleted_at is None
 
 
-async def test_list_conversations_chi_tra_cua_dung_user(
+async def test_list_conversations_returns_only_own(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID
 ) -> None:
     conversations = ConversationRepository(session)
-    cua_a = await conversations.create_conversation(user_id=user_a)
+    of_a = await conversations.create_conversation(user_id=user_a)
     await conversations.create_conversation(user_id=user_b)
 
-    ket_qua = await conversations.list_conversations(user_id=user_a, limit=LIMIT)
+    result = await conversations.list_conversations(user_id=user_a, limit=LIMIT)
 
-    assert [c.id for c in ket_qua] == [cua_a.id]
+    assert [c.id for c in result] == [of_a.id]
 
 
-async def test_list_conversations_khong_tra_ban_da_xoa_mem(
+async def test_list_conversations_omits_soft_deleted(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     conversations = ConversationRepository(session)
-    giu_lai = await conversations.create_conversation(user_id=user_a)
-    xoa_di = await conversations.create_conversation(user_id=user_a)
-    await conversations.soft_delete_conversation(xoa_di.id, user_id=user_a)
+    kept = await conversations.create_conversation(user_id=user_a)
+    to_delete = await conversations.create_conversation(user_id=user_a)
+    await conversations.soft_delete_conversation(to_delete.id, user_id=user_a)
 
-    ket_qua = await conversations.list_conversations(user_id=user_a, limit=LIMIT)
+    result = await conversations.list_conversations(user_id=user_a, limit=LIMIT)
 
-    assert [c.id for c in ket_qua] == [giu_lai.id]
+    assert [c.id for c in result] == [kept.id]
 
 
-async def test_list_conversations_ton_trong_limit(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_list_conversations_honors_limit(session: AsyncSession, user_a: uuid.UUID) -> None:
     conversations = ConversationRepository(session)
     for _ in range(3):
         await conversations.create_conversation(user_id=user_a)
@@ -155,34 +157,34 @@ async def test_list_conversations_ton_trong_limit(session: AsyncSession, user_a:
     assert len(await conversations.list_conversations(user_id=user_a, limit=2)) == 2
 
 
-async def test_set_active_leaf_doi_con_tro_va_bump_updated_at(
+async def test_set_active_leaf_moves_pointer_and_bumps_updated_at(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
-    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
-    truoc = conversation.updated_at
+    conversation, root = await _create_conversation_with_root(session, user_a)
+    before = conversation.updated_at
 
-    da_doi = await ConversationRepository(session).set_active_leaf(
+    changed = await ConversationRepository(session).set_active_leaf(
         conversation.id, user_id=user_a, message_id=root.id
     )
 
-    assert da_doi is True
+    assert changed is True
     async with session_factory() as session2:
-        sau = await ConversationRepository(session2).get_conversation(
+        after = await ConversationRepository(session2).get_conversation(
             conversation.id, user_id=user_a
         )
-        assert sau is not None
-        assert sau.active_leaf_id == root.id
-        assert sau.updated_at >= truoc
+        assert after is not None
+        assert after.active_leaf_id == root.id
+        assert after.updated_at >= before
 
 
-async def test_set_active_leaf_voi_message_cua_conversation_khac_thi_raise(
+async def test_set_active_leaf_with_foreign_conversation_message_raises(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """Trỏ con trỏ nhánh sang cây của hội thoại khác = ngữ cảnh lẫn hai hội thoại (C11)."""
-    conversation_1, _ = await _tao_hoi_thoai_co_goc(session, user_a)
-    _, root_2 = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation_1, _ = await _create_conversation_with_root(session, user_a)
+    _, root_2 = await _create_conversation_with_root(session, user_a)
 
     with pytest.raises(MessageNotInConversationError):
         await ConversationRepository(session).set_active_leaf(
@@ -190,22 +192,22 @@ async def test_set_active_leaf_voi_message_cua_conversation_khac_thi_raise(
         )
 
 
-async def test_set_active_leaf_tren_conversation_cua_user_khac_tra_False(
+async def test_set_active_leaf_on_other_users_conversation_returns_False(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID
 ) -> None:
-    conversation_b, root_b = await _tao_hoi_thoai_co_goc(session, user_b)
+    conversation_b, root_b = await _create_conversation_with_root(session, user_b)
 
-    da_doi = await ConversationRepository(session).set_active_leaf(
+    changed = await ConversationRepository(session).set_active_leaf(
         conversation_b.id, user_id=user_a, message_id=root_b.id
     )
 
-    assert da_doi is False
+    assert changed is False
 
 
 # ─────────────────────────────── messages ────────────────────────────────
 
 
-async def test_tao_message_goc_co_parent_id_null_va_default_cua_ddl(
+async def test_create_root_message_null_parent_id_and_ddl_defaults(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     conversation = await ConversationRepository(session).create_conversation(user_id=user_a)
@@ -221,18 +223,18 @@ async def test_tao_message_goc_co_parent_id_null_va_default_cua_ddl(
     assert message.content == ""
 
 
-async def test_tao_message_trong_conversation_cua_user_khac_thi_raise(
+async def test_create_message_in_other_users_conversation_raises(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID
 ) -> None:
-    cua_b = await ConversationRepository(session).create_conversation(user_id=user_b)
+    of_b = await ConversationRepository(session).create_conversation(user_id=user_b)
 
     with pytest.raises(ConversationNotFoundError):
         await MessageRepository(session).create_message(
-            conversation_id=cua_b.id, user_id=user_a, role=MessageRole.USER
+            conversation_id=of_b.id, user_id=user_a, role=MessageRole.USER
         )
 
 
-async def test_tao_message_voi_parent_thuoc_conversation_khac_thi_raise(
+async def test_create_message_with_foreign_conversation_parent_raises(
     session: AsyncSession, connection: AsyncConnection, user_a: uuid.UUID
 ) -> None:
     """DoD: `parent_id` thuộc conversation khác → raise, kiểm ở tầng repo.
@@ -241,7 +243,7 @@ async def test_tao_message_voi_parent_thuoc_conversation_khac_thi_raise(
     không có phép kiểm này thì hai cây của hai hội thoại nối được vào nhau.
     """
     conversation_1 = await ConversationRepository(session).create_conversation(user_id=user_a)
-    _, root_2 = await _tao_hoi_thoai_co_goc(session, user_a)
+    _, root_2 = await _create_conversation_with_root(session, user_a)
 
     with pytest.raises(MessageNotInConversationError):
         await MessageRepository(session).create_message(
@@ -251,17 +253,17 @@ async def test_tao_message_voi_parent_thuoc_conversation_khac_thi_raise(
             parent_id=root_2.id,
         )
 
-    con_lai = await connection.scalar(
+    remaining = await connection.scalar(
         text("SELECT count(*) FROM messages WHERE conversation_id = :cid"),
         {"cid": conversation_1.id},
     )
-    assert con_lai == 0  # không message mồ côi nào được ghi
+    assert remaining == 0  # không message mồ côi nào được ghi
 
 
-async def test_tao_message_voi_parent_da_xoa_mem_thi_raise(
+async def test_create_message_with_soft_deleted_parent_raises(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
-    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, root = await _create_conversation_with_root(session, user_a)
     await MessageRepository(session).soft_delete_message(root.id, user_id=user_a)
 
     with pytest.raises(MessageNotInConversationError):
@@ -273,19 +275,21 @@ async def test_tao_message_voi_parent_da_xoa_mem_thi_raise(
         )
 
 
-async def test_retry_tao_anh_em_cung_parent(session: AsyncSession, user_a: uuid.UUID) -> None:
+async def test_retry_creates_sibling_with_same_parent(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
     """§8.2: retry = thêm ANH EM của message assistant, không đè lên nó."""
-    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, root = await _create_conversation_with_root(session, user_a)
     messages = MessageRepository(session)
 
-    tra_loi_1 = await messages.create_message(
+    answer_1 = await messages.create_message(
         conversation_id=conversation.id,
         user_id=user_a,
         role=MessageRole.ASSISTANT,
         parent_id=root.id,
         content="bubble sort",
     )
-    tra_loi_2 = await messages.create_message(
+    answer_2 = await messages.create_message(
         conversation_id=conversation.id,
         user_id=user_a,
         role=MessageRole.ASSISTANT,
@@ -293,19 +297,19 @@ async def test_retry_tao_anh_em_cung_parent(session: AsyncSession, user_a: uuid.
         content="quicksort",
     )
 
-    assert tra_loi_1.id != tra_loi_2.id
-    assert tra_loi_1.parent_id == tra_loi_2.parent_id == root.id
+    assert answer_1.id != answer_2.id
+    assert answer_1.parent_id == answer_2.parent_id == root.id
     # Câu trả lời cũ KHÔNG biến mất khi có câu mới.
-    assert await messages.get_message(tra_loi_1.id, user_id=user_a) is not None
+    assert await messages.get_message(answer_1.id, user_id=user_a) is not None
 
 
-async def test_tao_message_giu_nguyen_status_va_model_id_duoc_truyen(
+async def test_create_message_keeps_given_status_and_model_id(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
 ) -> None:
     """Message assistant lúc vừa enqueue là `queued`, chưa có chữ nào (A1, §7.2)."""
-    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, root = await _create_conversation_with_root(session, user_a)
 
     message = await MessageRepository(session).create_message(
         conversation_id=conversation.id,
@@ -317,110 +321,110 @@ async def test_tao_message_giu_nguyen_status_va_model_id_duoc_truyen(
     )
 
     async with session_factory() as session2:
-        doc_lai = await MessageRepository(session2).get_message(message.id, user_id=user_a)
-        assert doc_lai is not None
-        assert doc_lai.status is MessageStatus.QUEUED
-        assert doc_lai.model_id == "model-nao-do"
-        assert doc_lai.content == ""
+        reloaded = await MessageRepository(session2).get_message(message.id, user_id=user_a)
+        assert reloaded is not None
+        assert reloaded.status is MessageStatus.QUEUED
+        assert reloaded.model_id == "model-nao-do"
+        assert reloaded.content == ""
 
 
-async def test_get_message_cua_user_khac_tra_None(
+async def test_get_message_of_other_user_returns_None(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID
 ) -> None:
-    _, root_b = await _tao_hoi_thoai_co_goc(session, user_b)
+    _, root_b = await _create_conversation_with_root(session, user_b)
     messages = MessageRepository(session)
 
     assert await messages.get_message(root_b.id, user_id=user_a) is None
     assert await messages.get_message(root_b.id, user_id=user_b) is not None
 
 
-async def test_get_message_trong_conversation_da_xoa_mem_tra_None(
+async def test_get_message_in_soft_deleted_conversation_returns_None(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """Xoá hội thoại thì message bên trong cũng biến khỏi truy vấn mặc định."""
-    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, root = await _create_conversation_with_root(session, user_a)
     await ConversationRepository(session).soft_delete_conversation(conversation.id, user_id=user_a)
 
     assert await MessageRepository(session).get_message(root.id, user_id=user_a) is None
 
 
-async def test_xoa_mem_message_thi_con_van_con_trong_db(
+async def test_soft_deleted_message_children_remain_in_db(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     connection: AsyncConnection,
     user_a: uuid.UUID,
 ) -> None:
     """DoD + C12: xoá mềm một message giữa cây, nhánh phía dưới KHÔNG mất."""
-    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, root = await _create_conversation_with_root(session, user_a)
     messages = MessageRepository(session)
-    giua = await messages.create_message(
+    middle = await messages.create_message(
         conversation_id=conversation.id,
         user_id=user_a,
         role=MessageRole.ASSISTANT,
         parent_id=root.id,
         content="bubble sort",
     )
-    con = await messages.create_message(
+    child = await messages.create_message(
         conversation_id=conversation.id,
         user_id=user_a,
         role=MessageRole.USER,
-        parent_id=giua.id,
+        parent_id=middle.id,
         content="nhanh hơn đi",
     )
 
-    assert await messages.soft_delete_message(giua.id, user_id=user_a) is True
+    assert await messages.soft_delete_message(middle.id, user_id=user_a) is True
 
     async with session_factory() as session2:
         repo2 = MessageRepository(session2)
         # Truy vấn mặc định không thấy nó nữa…
-        assert await repo2.get_message(giua.id, user_id=user_a) is None
+        assert await repo2.get_message(middle.id, user_id=user_a) is None
         # …nhưng nó vẫn nằm trong DB, chỉ là đã đánh dấu xoá…
-        van_con = await repo2.get_message(giua.id, user_id=user_a, include_deleted=True)
-        assert van_con is not None
-        assert van_con.deleted_at is not None
+        still_there = await repo2.get_message(middle.id, user_id=user_a, include_deleted=True)
+        assert still_there is not None
+        assert still_there.deleted_at is not None
         # …và con của nó thì nguyên vẹn, vẫn trỏ vào nó.
-        con_doc_lai = await repo2.get_message(con.id, user_id=user_a)
-        assert con_doc_lai is not None
-        assert con_doc_lai.parent_id == giua.id
+        child_reloaded = await repo2.get_message(child.id, user_id=user_a)
+        assert child_reloaded is not None
+        assert child_reloaded.parent_id == middle.id
 
     # Đọc bằng SQL thô, không qua ORM: dòng con thật sự còn trong bảng.
-    so_con = await connection.scalar(
-        text("SELECT count(*) FROM messages WHERE parent_id = :pid"), {"pid": giua.id}
+    child_count = await connection.scalar(
+        text("SELECT count(*) FROM messages WHERE parent_id = :pid"), {"pid": middle.id}
     )
-    assert so_con == 1
+    assert child_count == 1
 
 
-async def test_xoa_mem_message_cua_user_khac_tra_False(
+async def test_soft_delete_other_users_message_returns_False(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     user_b: uuid.UUID,
 ) -> None:
-    _, root_b = await _tao_hoi_thoai_co_goc(session, user_b)
+    _, root_b = await _create_conversation_with_root(session, user_b)
 
     assert await MessageRepository(session).soft_delete_message(root_b.id, user_id=user_a) is False
 
     async with session_factory() as session2:
-        van_con = await MessageRepository(session2).get_message(root_b.id, user_id=user_b)
-        assert van_con is not None
-        assert van_con.deleted_at is None
+        still_there = await MessageRepository(session2).get_message(root_b.id, user_id=user_b)
+        assert still_there is not None
+        assert still_there.deleted_at is None
 
 
-async def test_xoa_mem_message_hai_lan_thi_lan_hai_tra_False(
+async def test_soft_delete_message_twice_second_returns_False(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
-    _, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    _, root = await _create_conversation_with_root(session, user_a)
     messages = MessageRepository(session)
 
     assert await messages.soft_delete_message(root.id, user_id=user_a) is True
     assert await messages.soft_delete_message(root.id, user_id=user_a) is False
 
 
-async def test_enum_role_va_status_di_ve_dung_gia_tri_trong_postgres(
+async def test_role_and_status_enums_round_trip_through_postgres(
     session: AsyncSession, connection: AsyncConnection, user_a: uuid.UUID
 ) -> None:
     """Postgres phải nhận `assistant`/`streaming`, không phải tên thành viên enum Python."""
-    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, root = await _create_conversation_with_root(session, user_a)
 
     message = await MessageRepository(session).create_message(
         conversation_id=conversation.id,
@@ -430,16 +434,16 @@ async def test_enum_role_va_status_di_ve_dung_gia_tri_trong_postgres(
         status=MessageStatus.STREAMING,
     )
 
-    hang = (
+    row = (
         await connection.execute(
             text("SELECT role::text, status::text FROM messages WHERE id = :id"),
             {"id": message.id},
         )
     ).one()
-    assert hang == ("assistant", "streaming")
+    assert row == ("assistant", "streaming")
 
 
-async def test_created_at_khac_nhau_giua_cac_message_cung_transaction(
+async def test_created_at_differs_between_messages_in_one_transaction(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """B-53: `created_at` phải sắp được các message ghi trong CÙNG một transaction.
@@ -452,10 +456,10 @@ async def test_created_at_khac_nhau_giua_cac_message_cung_transaction(
     Cả ba message ở đây là ANH EM (cùng `parent_id`), tức đúng hình dạng dữ liệu
     mà `get_siblings` của T-1.2 sẽ phải sắp.
     """
-    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, root = await _create_conversation_with_root(session, user_a)
     messages = MessageRepository(session)
 
-    anh_em = [
+    siblings = [
         await messages.create_message(
             conversation_id=conversation.id,
             user_id=user_a,
@@ -466,12 +470,12 @@ async def test_created_at_khac_nhau_giua_cac_message_cung_transaction(
         for i in range(3)
     ]
 
-    moc = [m.created_at for m in anh_em]
-    assert len(set(moc)) == 3, f"ba message cùng transaction trùng created_at: {moc}"
-    assert moc == sorted(moc), f"created_at không tăng theo thứ tự tạo: {moc}"
+    mark = [m.created_at for m in siblings]
+    assert len(set(mark)) == 3, f"ba message cùng transaction trùng created_at: {mark}"
+    assert mark == sorted(mark), f"created_at không tăng theo thứ tự tạo: {mark}"
 
 
-async def test_created_at_cua_messages_dung_clock_timestamp(
+async def test_messages_created_at_uses_clock_timestamp(
     connection: AsyncConnection,
 ) -> None:
     """Chốt DEFAULT ở tầng schema, không chỉ ở hành vi.
@@ -480,20 +484,20 @@ async def test_created_at_cua_messages_dung_clock_timestamp(
     gian lên Python; dòng này bắt đúng thứ mà migration 0002 đã đổi, và sẽ đỏ
     nếu một migration sau vô tình đặt lại `now()`.
     """
-    mac_dinh = await connection.scalar(
+    default = await connection.scalar(
         text(
             "SELECT column_default FROM information_schema.columns "
             "WHERE table_name = 'messages' AND column_name = 'created_at'"
         )
     )
 
-    assert mac_dinh == "clock_timestamp()"
+    assert default == "clock_timestamp()"
 
 
 # ────────────── vòng đời lượt sinh (T-1.6, §7.2 ③) ──────────────
 
 
-async def test_get_message_for_worker_tra_ve_user_id_cua_chu_hoi_thoai(
+async def test_get_message_for_worker_returns_conversation_owner_id(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """Worker không có `user_id` để lọc, nên nó phải NHẬN được đúng một.
@@ -501,7 +505,7 @@ async def test_get_message_for_worker_tra_ve_user_id_cua_chu_hoi_thoai(
     Con số này đi thẳng vào `get_path` của `context.build`, tức mọi truy vấn
     sau đó vẫn lọc quyền sở hữu trong câu SQL (§20).
     """
-    _, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    _, root = await _create_conversation_with_root(session, user_a)
 
     owned = await MessageRepository(session).get_message_for_worker(root.id)
 
@@ -510,26 +514,26 @@ async def test_get_message_for_worker_tra_ve_user_id_cua_chu_hoi_thoai(
     assert owned.user_id == user_a
 
 
-async def test_get_message_for_worker_khong_thay_message_da_xoa_mem(
+async def test_get_message_for_worker_skips_soft_deleted_message(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     repo = MessageRepository(session)
-    _, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    _, root = await _create_conversation_with_root(session, user_a)
     await repo.soft_delete_message(root.id, user_id=user_a)
 
     assert await repo.get_message_for_worker(root.id) is None
 
 
-async def test_get_message_for_worker_khong_thay_hoi_thoai_da_xoa_mem(
+async def test_get_message_for_worker_skips_soft_deleted_conversation(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
-    conversation, root = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, root = await _create_conversation_with_root(session, user_a)
     await ConversationRepository(session).soft_delete_conversation(conversation.id, user_id=user_a)
 
     assert await MessageRepository(session).get_message_for_worker(root.id) is None
 
 
-async def test_mark_streaming_chi_an_mot_lan(
+async def test_mark_streaming_applies_only_once(
     session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], user_a: uuid.UUID
 ) -> None:
     """B-72: hai worker cùng nhận một job thì chỉ một cái đổi được trạng thái.
@@ -537,7 +541,7 @@ async def test_mark_streaming_chi_an_mot_lan(
     Không có `WHERE status = 'queued'` thì cả hai cùng sinh, cùng ghi đè
     `content`, và người dùng trả tiền hai lần cho một câu hỏi.
     """
-    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, _ = await _create_conversation_with_root(session, user_a)
     repo = MessageRepository(session)
     message = await repo.create_message(
         conversation_id=conversation.id,
@@ -549,35 +553,35 @@ async def test_mark_streaming_chi_an_mot_lan(
     assert await repo.mark_streaming(message.id, model_id="mo-hinh-x") is True
     assert await repo.mark_streaming(message.id, model_id="mo-hinh-x") is False
 
-    async with session_factory() as doc:
-        lai = await doc.get(Message, message.id)
-        assert lai is not None
-        assert lai.status is MessageStatus.STREAMING
-        assert lai.model_id == "mo-hinh-x"
-        assert lai.heartbeat_at is not None, "§7.6: NULL thì reaper không bao giờ dọn"
+    async with session_factory() as reader:
+        reloaded = await reader.get(Message, message.id)
+        assert reloaded is not None
+        assert reloaded.status is MessageStatus.STREAMING
+        assert reloaded.model_id == "mo-hinh-x"
+        assert reloaded.heartbeat_at is not None, "§7.6: NULL thì reaper không bao giờ dọn"
 
 
-async def test_touch_heartbeat_chi_cham_message_dang_streaming(
+async def test_touch_heartbeat_only_touches_streaming_message(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """Message đã xong mà còn nhích `heartbeat_at` là nói dối với reaper."""
-    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, _ = await _create_conversation_with_root(session, user_a)
     repo = MessageRepository(session)
-    xong = await repo.create_message(
+    finished = await repo.create_message(
         conversation_id=conversation.id,
         user_id=user_a,
         role=MessageRole.ASSISTANT,
         status=MessageStatus.COMPLETED,
     )
 
-    assert await repo.touch_heartbeat(xong.id) is False
+    assert await repo.touch_heartbeat(finished.id) is False
 
 
-async def test_finish_generation_ghi_ca_duong_loi(
+async def test_finish_generation_writes_error_path_too(
     session: AsyncSession, session_factory: async_sessionmaker[AsyncSession], user_a: uuid.UUID
 ) -> None:
     """Phần chữ đã sinh được giữ lại kể cả khi lượt sinh thất bại (§7.5, C19)."""
-    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, _ = await _create_conversation_with_root(session, user_a)
     repo = MessageRepository(session)
     message = await repo.create_message(
         conversation_id=conversation.id,
@@ -596,12 +600,12 @@ async def test_finish_generation_ghi_ca_duong_loi(
         is True
     )
 
-    async with session_factory() as doc:
-        lai = await doc.get(Message, message.id)
-        assert lai is not None
-        assert lai.status is MessageStatus.FAILED
-        assert lai.content == "mot nua cau tra loi"
-        assert lai.error_code == "UPSTREAM_ERROR"
+    async with session_factory() as reader:
+        reloaded = await reader.get(Message, message.id)
+        assert reloaded is not None
+        assert reloaded.status is MessageStatus.FAILED
+        assert reloaded.content == "mot nua cau tra loi"
+        assert reloaded.error_code == "UPSTREAM_ERROR"
 
 
 # ───────── generation_states — trần đồng thời §10.6 (T-2.9, B-85) ─────────
@@ -613,55 +617,55 @@ async def test_finish_generation_ghi_ca_duong_loi(
 # dùng ra khỏi chính tài khoản của họ.
 
 
-async def test_generation_states_tach_dang_sinh_khoi_da_khep(
+async def test_generation_states_split_generating_from_settled(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
-    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, _ = await _create_conversation_with_root(session, user_a)
     messages = MessageRepository(session)
-    theo_trang_thai: dict[MessageStatus, uuid.UUID] = {}
-    for trang_thai in MessageStatus:
+    by_status: dict[MessageStatus, uuid.UUID] = {}
+    for status in MessageStatus:
         message = await messages.create_message(
             conversation_id=conversation.id,
             user_id=user_a,
             role=MessageRole.ASSISTANT,
-            status=trang_thai,
+            status=status,
         )
-        theo_trang_thai[trang_thai] = message.id
+        by_status[status] = message.id
 
-    ket_qua = await messages.generation_states(list(theo_trang_thai.values()), user_id=user_a)
+    result = await messages.generation_states(list(by_status.values()), user_id=user_a)
 
-    assert ket_qua.known == frozenset(theo_trang_thai.values()), "cả năm đều có thật"
-    assert ket_qua.in_flight == {
-        theo_trang_thai[MessageStatus.QUEUED],
-        theo_trang_thai[MessageStatus.STREAMING],
+    assert result.known == frozenset(by_status.values()), "cả năm đều có thật"
+    assert result.in_flight == {
+        by_status[MessageStatus.QUEUED],
+        by_status[MessageStatus.STREAMING],
     }, "chỉ `queued` và `streaming` là lượt sinh chưa khép"
 
 
-async def test_generation_states_khong_thay_message_cua_user_khac(
+async def test_generation_states_do_not_see_other_users_messages(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID
 ) -> None:
     """IDOR: ghế của người khác không được tính là ghế của mình — và cũng
     không được coi là "đã khép" theo kiểu biết chắc. Nó chỉ đơn giản là một id
     lạ, tức rơi ra khỏi cả hai tập hợp."""
-    conversation_b, _ = await _tao_hoi_thoai_co_goc(session, user_b)
+    conversation_b, _ = await _create_conversation_with_root(session, user_b)
     messages = MessageRepository(session)
-    cua_b = await messages.create_message(
+    of_b = await messages.create_message(
         conversation_id=conversation_b.id,
         user_id=user_b,
         role=MessageRole.ASSISTANT,
         status=MessageStatus.STREAMING,
     )
 
-    ket_qua = await messages.generation_states([cua_b.id], user_id=user_a)
+    result = await messages.generation_states([of_b.id], user_id=user_a)
 
-    assert ket_qua.known == frozenset()
-    assert ket_qua.in_flight == frozenset()
+    assert result.known == frozenset()
+    assert result.in_flight == frozenset()
 
-    cua_b_nhin_tu_b = await messages.generation_states([cua_b.id], user_id=user_b)
-    assert cua_b_nhin_tu_b.in_flight == {cua_b.id}, "cùng hàng, đúng chủ thì vẫn đang sinh"
+    b_seen_by_b = await messages.generation_states([of_b.id], user_id=user_b)
+    assert b_seen_by_b.in_flight == {of_b.id}, "cùng hàng, đúng chủ thì vẫn đang sinh"
 
 
-async def test_generation_states_coi_message_da_xoa_mem_la_da_khep(
+async def test_generation_states_treat_soft_deleted_message_as_settled(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """Xoá mềm giữa lúc đang sinh ⇒ `status` còn `streaming` mãi mãi.
@@ -670,7 +674,7 @@ async def test_generation_states_coi_message_da_xoa_mem_la_da_khep(
     **không** ghi trạng thái mới. Không có dòng này thì đó là một ghế không bao
     giờ được nhả.
     """
-    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, _ = await _create_conversation_with_root(session, user_a)
     messages = MessageRepository(session)
     message = await messages.create_message(
         conversation_id=conversation.id,
@@ -680,16 +684,16 @@ async def test_generation_states_coi_message_da_xoa_mem_la_da_khep(
     )
     assert await messages.soft_delete_message(message.id, user_id=user_a) is True
 
-    ket_qua = await messages.generation_states([message.id], user_id=user_a)
+    result = await messages.generation_states([message.id], user_id=user_a)
 
-    assert ket_qua.known == {message.id}, "hàng vẫn còn trong DB (C12)"
-    assert ket_qua.in_flight == frozenset()
+    assert result.known == {message.id}, "hàng vẫn còn trong DB (C12)"
+    assert result.in_flight == frozenset()
 
 
-async def test_generation_states_coi_hoi_thoai_da_xoa_mem_la_da_khep(
+async def test_generation_states_treat_soft_deleted_conversation_as_settled(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
-    conversation, _ = await _tao_hoi_thoai_co_goc(session, user_a)
+    conversation, _ = await _create_conversation_with_root(session, user_a)
     messages = MessageRepository(session)
     message = await messages.create_message(
         conversation_id=conversation.id,
@@ -704,29 +708,29 @@ async def test_generation_states_coi_hoi_thoai_da_xoa_mem_la_da_khep(
         is True
     )
 
-    ket_qua = await messages.generation_states([message.id], user_id=user_a)
+    result = await messages.generation_states([message.id], user_id=user_a)
 
-    assert ket_qua.known == {message.id}
-    assert ket_qua.in_flight == frozenset()
+    assert result.known == {message.id}
+    assert result.in_flight == frozenset()
 
 
-async def test_generation_states_id_khong_ton_tai_roi_ra_khoi_ca_hai_tap(
+async def test_generation_states_missing_id_falls_out_of_both_sets(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
     """Khác biệt giữa "không có trong `known`" và "đã khép" là thứ giữ cho
     `PHANTOM_GRACE_S` có nghĩa — xem `app/core/ratelimit.py`."""
-    la = uuid.uuid4()
+    unknown = uuid.uuid4()
 
-    ket_qua = await MessageRepository(session).generation_states([la], user_id=user_a)
+    result = await MessageRepository(session).generation_states([unknown], user_id=user_a)
 
-    assert ket_qua.known == frozenset()
-    assert ket_qua.in_flight == frozenset()
+    assert result.known == frozenset()
+    assert result.in_flight == frozenset()
 
 
-async def test_generation_states_danh_sach_rong_khong_hoi_db(
+async def test_generation_states_empty_list_skips_db(
     session: AsyncSession, user_a: uuid.UUID
 ) -> None:
-    ket_qua = await MessageRepository(session).generation_states([], user_id=user_a)
+    result = await MessageRepository(session).generation_states([], user_id=user_a)
 
-    assert ket_qua.known == frozenset()
-    assert ket_qua.in_flight == frozenset()
+    assert result.known == frozenset()
+    assert result.in_flight == frozenset()

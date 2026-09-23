@@ -14,7 +14,7 @@ blacklist §11.3):
 
 1. `idempotency_redis` — **autouse**. Redis thật nằm ở `redis:6379`, một host
    chỉ phân giải được bên trong network `internal` của compose, còn `make test`
-   chạy từ WSL host (cùng lý do đã ghi ở `ArqGia` của `test_messages.py`).
+   chạy từ WSL host (cùng lý do đã ghi ở `FakeArq` của `test_messages.py`).
    Autouse chứ không phải xin-thì-có: một file test quên xin sẽ không đỏ ngay
    mà **treo** ở lần kết nối Redis đầu tiên, và đó là kiểu hỏng khó truy nhất.
 2. `ratelimit_redis` — **autouse**, cùng lý do.

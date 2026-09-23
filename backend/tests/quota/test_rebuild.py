@@ -57,27 +57,27 @@ from app.quota.windows import (
 )
 
 #: `metered`, có giá niêm yết — cùng model mà `test_estimator.py` dùng.
-MODEL_CO_GIA = "deepseek-flash"
+PRICED_MODEL = "deepseek-flash"
 
 #: Vài mốc tuổi, tính bằng giây, đặt tên để mỗi test nói được nó đang kiểm ca
 #: nào. `QUOTA_WINDOW_SHORT_S` mặc định 18000 (5 giờ), `LONG` 604800 (7 ngày).
-TRONG_5H = 3600
-NGOAI_5H_TRONG_TUAN = 6 * 3600
-NGOAI_CA_HAI = 8 * 24 * 3600
+INSIDE_5H = 3600
+OUTSIDE_5H_INSIDE_WEEK = 6 * 3600
+OUTSIDE_BOTH = 8 * 24 * 3600
 
 
-def _model(model_id: str = MODEL_CO_GIA) -> catalog.ModelEntry:
+def _model(model_id: str = PRICED_MODEL) -> catalog.ModelEntry:
     model = catalog.get_model(model_id)
     assert model is not None, model_id
     return model
 
 
-async def _ghi_so(
+async def _write_ledger(
     session: AsyncSession,
     user_id: uuid.UUID,
     *,
     cost: str,
-    tuoi_giay: float = 0.0,
+    age_seconds: float = 0.0,
     key_source: KeySource = KeySource.SYSTEM,
 ) -> uuid.UUID:
     """Một dòng `usage_events` có tuổi cho trước. Trả `id` của nó.
@@ -92,7 +92,7 @@ async def _ghi_so(
     event = await UsageEventRepository(session).record(
         user_id=user_id,
         message_id=None,
-        model_id=MODEL_CO_GIA,
+        model_id=PRICED_MODEL,
         provider="deepseek",
         key_source=key_source,
         prompt_tokens=100,
@@ -102,13 +102,13 @@ async def _ghi_so(
         cost_confidence=CostConfidence.EXACT,
         price_snapshot={"source": "catalog"},
     )
-    if tuoi_giay:
+    if age_seconds:
         await session.execute(
             text(
                 "UPDATE usage_events SET created_at = now() - make_interval(secs => :t) "
                 "WHERE id = :id"
             ),
-            {"t": tuoi_giay, "id": event.id},
+            {"t": age_seconds, "id": event.id},
         )
     await session.flush()
     return event.id
@@ -123,7 +123,7 @@ def _zset(redis: Any, limit_type: LimitType, user_id: uuid.UUID) -> dict[str, fl
     return redis.zset.get(Window(limit_type, seconds).key(user_id), {})
 
 
-def _tong(redis: Any, limit_type: LimitType, user_id: uuid.UUID) -> Decimal:
+def _total(redis: Any, limit_type: LimitType, user_id: uuid.UUID) -> Decimal:
     return sum(
         (parse_member(m) or Decimal(0) for m in _zset(redis, limit_type, user_id)),
         Decimal(0),
@@ -133,40 +133,40 @@ def _tong(redis: Any, limit_type: LimitType, user_id: uuid.UUID) -> Decimal:
 # ═══════════════════ rebuild_quota: trong và ngoài cửa sổ ═══════════════════
 
 
-async def test_dung_lai_tu_redis_rong_ra_dung_so_tien_cua_postgres(
+async def test_rebuild_from_empty_redis_matches_postgres_amount(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Ca chính của RR-7: Redis trắng, Postgres có sổ ⇒ ZSET quay lại như cũ."""
-    await _ghi_so(session, user_a, cost="0.120000", tuoi_giay=TRONG_5H)
-    await _ghi_so(session, user_a, cost="0.030000", tuoi_giay=TRONG_5H * 2)
+    await _write_ledger(session, user_a, cost="0.120000", age_seconds=INSIDE_5H)
+    await _write_ledger(session, user_a, cost="0.030000", age_seconds=INSIDE_5H * 2)
 
     report = await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
 
     assert report.members == 4  # hai dòng × hai cửa sổ
-    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.150000")
-    assert _tong(quota_redis_fake, LimitType.LONG, user_a) == Decimal("0.150000")
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.150000")
+    assert _total(quota_redis_fake, LimitType.LONG, user_a) == Decimal("0.150000")
 
 
-async def test_dong_ngoai_cua_so_5h_chi_vao_cua_so_tuan(
+async def test_row_outside_5h_window_only_enters_weekly(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """DoD dòng 2 — "dữ liệu nằm trong và ngoài cửa sổ", vế thứ nhất."""
-    await _ghi_so(session, user_a, cost="0.100000", tuoi_giay=TRONG_5H)
-    await _ghi_so(session, user_a, cost="0.200000", tuoi_giay=NGOAI_5H_TRONG_TUAN)
+    await _write_ledger(session, user_a, cost="0.100000", age_seconds=INSIDE_5H)
+    await _write_ledger(session, user_a, cost="0.200000", age_seconds=OUTSIDE_5H_INSIDE_WEEK)
 
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
 
     assert len(_zset(quota_redis_fake, LimitType.SHORT, user_a)) == 1
-    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.100000")
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.100000")
     assert len(_zset(quota_redis_fake, LimitType.LONG, user_a)) == 2
-    assert _tong(quota_redis_fake, LimitType.LONG, user_a) == Decimal("0.300000")
+    assert _total(quota_redis_fake, LimitType.LONG, user_a) == Decimal("0.300000")
 
 
-async def test_dong_ngoai_ca_hai_cua_so_khong_vao_dau_ca(
+async def test_row_outside_both_windows_goes_nowhere(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """DoD dòng 2 — vế thứ hai. Tiền của tuần trước KHÔNG được sống lại."""
-    await _ghi_so(session, user_a, cost="9.000000", tuoi_giay=NGOAI_CA_HAI)
+    await _write_ledger(session, user_a, cost="9.000000", age_seconds=OUTSIDE_BOTH)
 
     report = await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
 
@@ -174,10 +174,10 @@ async def test_dong_ngoai_ca_hai_cua_so_khong_vao_dau_ca(
     # Và không tạo khoá rỗng: một khoá rỗng khác một khoá không tồn tại ở đúng
     # phép đo `--scan --pattern 'quota:*'` của DoD T-2.12.
     assert quota_redis_fake.zset == {}
-    assert quota_redis_fake.da_dat_ttl == []
+    assert quota_redis_fake.ttl_calls == []
 
 
-async def test_score_la_created_at_chu_khong_phai_now(
+async def test_score_is_created_at_not_now(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Chỗ mà "một truy vấn `SUM`" của §10.3 không làm được.
@@ -186,22 +186,22 @@ async def test_score_la_created_at_chu_khong_phai_now(
     nữa — người dùng bị phạt hai lần cho cùng một khoản. Phép kiểm: dựng lại
     rồi đọc cửa sổ ở một `now` **tương lai**, chỗ mà dòng ấy phải đã rơi ra.
     """
-    bon_gio = 4 * 3600
-    await _ghi_so(session, user_a, cost="0.400000", tuoi_giay=bon_gio)
+    four_hours = 4 * 3600
+    await _write_ledger(session, user_a, cost="0.400000", age_seconds=four_hours)
     now = time.time()
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=now)
 
-    ngan, _ = windows()
-    ngay_bay_gio = await read_window(quota_redis_fake, ngan, user_id=user_a, now=now)
-    assert ngay_bay_gio.spent == Decimal("0.400000")
+    short_window, _ = windows()
+    right_now = await read_window(quota_redis_fake, short_window, user_id=user_a, now=now)
+    assert right_now.spent == Decimal("0.400000")
 
     # 1 giờ 1 phút nữa là dòng ấy tròn 5 giờ 1 phút tuổi ⇒ ngoài cửa sổ.
-    sau_nay = now + 3660
-    da_roi = await read_window(quota_redis_fake, ngan, user_id=user_a, now=sau_nay)
-    assert da_roi.spent == Decimal(0)
+    later = now + 3660
+    dropped_out = await read_window(quota_redis_fake, short_window, user_id=user_a, now=later)
+    assert dropped_out.spent == Decimal(0)
 
 
-async def test_so_member_bang_so_dong_so_chu_khong_chi_bang_tong_tien(
+async def test_member_count_equals_row_count_not_just_total(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Bất biến mà DoD T-2.12 dòng 5 đo, giữ nguyên sau khi dựng lại.
@@ -211,31 +211,31 @@ async def test_so_member_bang_so_dong_so_chu_khong_chi_bang_tong_tien(
     thì ba dòng đè lên nhau còn một, và tổng tiền tụt xuống một phần ba.
     """
     for _ in range(3):
-        await _ghi_so(session, user_a, cost="0.010000", tuoi_giay=TRONG_5H)
+        await _write_ledger(session, user_a, cost="0.010000", age_seconds=INSIDE_5H)
 
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
 
     assert len(_zset(quota_redis_fake, LimitType.SHORT, user_a)) == 3
-    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.030000")
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.030000")
 
 
-async def test_dung_lai_hai_lan_cho_ra_dung_mot_ket_qua(
+async def test_rebuilding_twice_gives_same_result(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Không `DEL` thì phép này phải không đổi — nếu không, mỗi lần chạy là một
     lần nhân đôi hoá đơn."""
-    await _ghi_so(session, user_a, cost="0.070000", tuoi_giay=TRONG_5H)
+    await _write_ledger(session, user_a, cost="0.070000", age_seconds=INSIDE_5H)
     now = time.time()
 
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=now)
-    lan_dau = dict(_zset(quota_redis_fake, LimitType.SHORT, user_a))
+    first_time = dict(_zset(quota_redis_fake, LimitType.SHORT, user_a))
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=now)
 
-    assert _zset(quota_redis_fake, LimitType.SHORT, user_a) == lan_dau
-    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.070000")
+    assert _zset(quota_redis_fake, LimitType.SHORT, user_a) == first_time
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.070000")
 
 
-async def test_khong_xoa_member_cua_luot_sinh_vua_ghi_so_song_song(
+async def test_does_not_delete_member_of_concurrently_billed_generation(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Vì sao hàm này HỢP chứ không THAY — xem docstring `quota/rebuild.py`.
@@ -244,19 +244,19 @@ async def test_khong_xoa_member_cua_luot_sinh_vua_ghi_so_song_song(
     một lượt sinh mà ảnh chụp chưa thấy. Một bản `DEL` + `ZADD` sẽ nuốt mất
     khoản ấy, và dòng `usage_events` của nó thì vẫn nằm trong Postgres.
     """
-    await _ghi_so(session, user_a, cost="0.050000", tuoi_giay=TRONG_5H)
+    await _write_ledger(session, user_a, cost="0.050000", age_seconds=INSIDE_5H)
     now = time.time()
-    ngan, _ = windows()
-    ma_worker_vua_ghi = encode_member(uuid.uuid4(), Decimal("0.020000"))
-    quota_redis_fake.zset[ngan.key(user_a)] = {ma_worker_vua_ghi: now}
+    short_window, _ = windows()
+    worker_member = encode_member(uuid.uuid4(), Decimal("0.020000"))
+    quota_redis_fake.zset[short_window.key(user_a)] = {worker_member: now}
 
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=now)
 
-    assert ma_worker_vua_ghi in _zset(quota_redis_fake, LimitType.SHORT, user_a)
-    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.070000")
+    assert worker_member in _zset(quota_redis_fake, LimitType.SHORT, user_a)
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.070000")
 
 
-async def test_moi_cua_so_duoc_dat_ttl_bang_do_dai_cua_chinh_no(
+async def test_each_window_ttl_equals_its_own_length(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Cùng luật với `add_to_windows` (nửa (b) của B-156).
@@ -264,17 +264,17 @@ async def test_moi_cua_so_duoc_dat_ttl_bang_do_dai_cua_chinh_no(
     Không có nó thì một khoá dựng lại cho người đã ngừng chat nằm lại vô thời
     hạn — đúng thứ B-156 mở ra để sửa.
     """
-    await _ghi_so(session, user_a, cost="0.010000", tuoi_giay=TRONG_5H)
+    await _write_ledger(session, user_a, cost="0.010000", age_seconds=INSIDE_5H)
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
 
-    ngan, dai = windows()
-    assert quota_redis_fake.da_dat_ttl == [
-        (ngan.key(user_a), settings.QUOTA_WINDOW_SHORT_S),
-        (dai.key(user_a), settings.QUOTA_WINDOW_LONG_S),
+    short_window, long_window = windows()
+    assert quota_redis_fake.ttl_calls == [
+        (short_window.key(user_a), settings.QUOTA_WINDOW_SHORT_S),
+        (long_window.key(user_a), settings.QUOTA_WINDOW_LONG_S),
     ]
 
 
-async def test_nap_theo_lo_chu_khong_mot_lenh_moi_dong(
+async def test_loads_in_batches_not_one_command_per_row(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Thứ đứng sau DoD dòng 3 (10k dòng < 2 s), đo được mà không cần 10k dòng.
@@ -284,13 +284,13 @@ async def test_nap_theo_lo_chu_khong_mot_lenh_moi_dong(
     dòng" sẽ cho `2 × (ZADD_BATCH + 1)` lệnh và vẫn **đúng** — nó chỉ chậm,
     tức đúng loại hỏng mà không phép kiểm nào khác nhìn thấy.
     """
-    so_dong = ZADD_BATCH + 1
+    row_count = ZADD_BATCH + 1
     repo = UsageEventRepository(session)
-    for _ in range(so_dong):
+    for _ in range(row_count):
         await repo.record(
             user_id=user_a,
             message_id=None,
-            model_id=MODEL_CO_GIA,
+            model_id=PRICED_MODEL,
             provider="deepseek",
             key_source=KeySource.SYSTEM,
             prompt_tokens=1,
@@ -304,67 +304,67 @@ async def test_nap_theo_lo_chu_khong_mot_lenh_moi_dong(
 
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
 
-    lenh = [so for _, so in quota_redis_fake.da_ghi]
-    assert lenh == [ZADD_BATCH, 1, ZADD_BATCH, 1]
-    assert len(_zset(quota_redis_fake, LimitType.SHORT, user_a)) == so_dong
+    command = [so for _, so in quota_redis_fake.written]
+    assert command == [ZADD_BATCH, 1, ZADD_BATCH, 1]
+    assert len(_zset(quota_redis_fake, LimitType.SHORT, user_a)) == row_count
 
 
-async def test_chi_dung_lai_cho_dung_nguoi(
+async def test_rebuilds_only_for_that_user(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """§20 — phép lọc `user_id` nằm trong câu SQL, và đây là chỗ nó được đo."""
-    await _ghi_so(session, user_a, cost="0.100000", tuoi_giay=TRONG_5H)
-    await _ghi_so(session, user_b, cost="0.900000", tuoi_giay=TRONG_5H)
+    await _write_ledger(session, user_a, cost="0.100000", age_seconds=INSIDE_5H)
+    await _write_ledger(session, user_b, cost="0.900000", age_seconds=INSIDE_5H)
 
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
 
-    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.100000")
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.100000")
     assert _zset(quota_redis_fake, LimitType.SHORT, user_b) == {}
 
 
-def test_bien_cua_so_la_datetime_co_mui_gio() -> None:
+def test_window_bounds_are_timezone_aware_datetimes() -> None:
     """NQ-50 ⑦ cùng bài học: một `datetime` trần đi vào `timestamptz` là một
     phép so sánh do driver đoán hộ."""
-    ngan, _ = windows()
-    bien = cutoff_at(ngan, time.time())
-    assert bien.tzinfo is not None
-    assert bien.utcoffset() == datetime.now(UTC).utcoffset()
+    short_window, _ = windows()
+    bound = cutoff_at(short_window, time.time())
+    assert bound.tzinfo is not None
+    assert bound.utcoffset() == datetime.now(UTC).utcoffset()
 
 
 # ═══════════════════ refill_if_empty: tự gọi khi phát hiện lệch ═════════════
 
 
-async def test_cua_so_rong_ma_postgres_co_tien_thi_tu_dung_lai(
+async def test_empty_window_with_postgres_spend_self_rebuilds(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
-    await _ghi_so(session, user_a, cost="0.250000", tuoi_giay=TRONG_5H)
+    await _write_ledger(session, user_a, cost="0.250000", age_seconds=INSIDE_5H)
     now = time.time()
-    ngan, _ = windows()
+    short_window, _ = windows()
 
-    truoc = await read_window(quota_redis_fake, ngan, user_id=user_a, now=now)
-    assert truoc.spent == Decimal(0)
+    before = await read_window(quota_redis_fake, short_window, user_id=user_a, now=now)
+    assert before.spent == Decimal(0)
 
-    sau = await refill_if_empty(session, quota_redis_fake, truoc, user_id=user_a, now=now)
-    assert sau.spent == Decimal("0.250000")
-    assert len(sau.entries) == 1
+    after = await refill_if_empty(session, quota_redis_fake, before, user_id=user_a, now=now)
+    assert after.spent == Decimal("0.250000")
+    assert len(after.entries) == 1
 
 
-async def test_cua_so_rong_va_postgres_cung_rong_thi_khong_ghi_gi(
+async def test_empty_window_and_empty_postgres_write_nothing(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Ca thường của một người dùng mới — nó không được tốn một lệnh ghi nào."""
     now = time.time()
-    ngan, _ = windows()
-    truoc = await read_window(quota_redis_fake, ngan, user_id=user_a, now=now)
+    short_window, _ = windows()
+    before = await read_window(quota_redis_fake, short_window, user_id=user_a, now=now)
 
-    sau = await refill_if_empty(session, quota_redis_fake, truoc, user_id=user_a, now=now)
+    after = await refill_if_empty(session, quota_redis_fake, before, user_id=user_a, now=now)
 
-    assert sau is truoc
-    assert quota_redis_fake.da_ghi == []
+    assert after is before
+    assert quota_redis_fake.written == []
     assert quota_redis_fake.zset == {}
 
 
-async def test_cua_so_con_du_lieu_thi_khong_hoi_postgres(
+async def test_window_with_data_does_not_ask_postgres(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Đường nóng: ZSET có dữ liệu ⇒ không một lượt dựng lại nào.
@@ -378,21 +378,21 @@ async def test_cua_so_con_du_lieu_thi_khong_hoi_postgres(
     hiện thực bỏ cửa ấy — không có gì để nạp thì không có gì để thấy.)*
     """
     now = time.time()
-    ngan, _ = windows()
-    await _ghi_so(session, user_a, cost="0.050000", tuoi_giay=TRONG_5H)
-    quota_redis_fake.zset[ngan.key(user_a)] = {
+    short_window, _ = windows()
+    await _write_ledger(session, user_a, cost="0.050000", age_seconds=INSIDE_5H)
+    quota_redis_fake.zset[short_window.key(user_a)] = {
         encode_member(uuid.uuid4(), Decimal("0.300000")): now - 60
     }
-    truoc = await read_window(quota_redis_fake, ngan, user_id=user_a, now=now)
+    before = await read_window(quota_redis_fake, short_window, user_id=user_a, now=now)
 
-    sau = await refill_if_empty(session, quota_redis_fake, truoc, user_id=user_a, now=now)
+    after = await refill_if_empty(session, quota_redis_fake, before, user_id=user_a, now=now)
 
-    assert sau is truoc
-    assert sau.spent == Decimal("0.300000")
-    assert quota_redis_fake.da_ghi == []
+    assert after is before
+    assert after.spent == Decimal("0.300000")
+    assert quota_redis_fake.written == []
 
 
-async def test_tien_ngoai_cua_so_khong_lam_no_tu_dung_lai(
+async def test_money_outside_window_does_not_trigger_rebuild(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Vế "trong cửa sổ" của điều kiện, đo riêng.
@@ -400,15 +400,15 @@ async def test_tien_ngoai_cua_so_khong_lam_no_tu_dung_lai(
     Một người tiêu tiền 6 giờ trước có cửa sổ 5 giờ **đúng là** rỗng. Dựng lại
     ở đó là ghi đè một câu trả lời đúng bằng chính nó, mỗi request một lần.
     """
-    await _ghi_so(session, user_a, cost="0.500000", tuoi_giay=NGOAI_5H_TRONG_TUAN)
+    await _write_ledger(session, user_a, cost="0.500000", age_seconds=OUTSIDE_5H_INSIDE_WEEK)
     now = time.time()
-    ngan, _ = windows()
-    truoc = await read_window(quota_redis_fake, ngan, user_id=user_a, now=now)
+    short_window, _ = windows()
+    before = await read_window(quota_redis_fake, short_window, user_id=user_a, now=now)
 
-    sau = await refill_if_empty(session, quota_redis_fake, truoc, user_id=user_a, now=now)
+    after = await refill_if_empty(session, quota_redis_fake, before, user_id=user_a, now=now)
 
-    assert sau is truoc
-    assert quota_redis_fake.da_ghi == []
+    assert after is before
+    assert quota_redis_fake.written == []
 
 
 # ═════════════════ qua check_quota: bản pytest của DoD dòng 1 ═══════════════
@@ -422,42 +422,42 @@ def _quota_redis(monkeypatch: pytest.MonkeyPatch, quota_redis_fake: Any) -> Any:
 
 
 @pytest.fixture
-def _db_cua_test(
+def _db_for_tests(
     monkeypatch: pytest.MonkeyPatch, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     monkeypatch.setattr("app.db.session.get_sessionmaker", lambda: session_factory)
 
 
-async def _cay_mot_luot(
+async def _single_turn_tree(
     session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
 ) -> uuid.UUID:
     """Một hội thoại + câu hỏi + một assistant `queued`. Trả `leaf_id` của nó."""
     async with session_factory() as session:
         conversation = await ConversationRepository(session).create_conversation(user_id=user_id)
         messages = MessageRepository(session)
-        cau_hoi = await messages.create_message(
+        question = await messages.create_message(
             conversation_id=conversation.id,
             user_id=user_id,
             role=MessageRole.USER,
             parent_id=None,
             content="mot cau hoi ngan",
         )
-        tra_loi = await messages.create_message(
+        answer = await messages.create_message(
             conversation_id=conversation.id,
             user_id=user_id,
             role=MessageRole.ASSISTANT,
-            parent_id=cau_hoi.id,
-            model_id=MODEL_CO_GIA,
+            parent_id=question.id,
+            model_id=PRICED_MODEL,
         )
         await session.commit()
-        return tra_loi.id
+        return answer.id
 
 
-async def test_redis_bi_xoa_sach_thi_cua_chan_van_thay_tien_da_tieu(
+async def test_wiped_redis_gate_still_sees_spent_money(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     _quota_redis: Any,
-    _db_cua_test: None,
+    _db_for_tests: None,
 ) -> None:
     """DoD dòng 1 ở dạng tự động: `FLUSHDB` rồi gọi API ⇒ quota KHÔNG về 0.
 
@@ -466,10 +466,10 @@ async def test_redis_bi_xoa_sach_thi_cua_chan_van_thay_tien_da_tieu(
     ZSET từ Postgres. Không có `refill_if_empty` thì request này đi qua, và đó
     đúng là câu "quota của mọi người reset" trong Cạm bẫy của T-2.13.
     """
-    leaf = await _cay_mot_luot(session_factory, user_a)
-    async with session_factory() as ghi:
-        await _ghi_so(ghi, user_a, cost="0.500000", tuoi_giay=TRONG_5H)
-        await ghi.commit()
+    leaf = await _single_turn_tree(session_factory, user_a)
+    async with session_factory() as record_statement:
+        await _write_ledger(record_statement, user_a, cost="0.500000", age_seconds=INSIDE_5H)
+        await record_statement.commit()
 
     # Redis trắng — đúng trạng thái sau `redis-cli FLUSHDB`.
     assert _quota_redis.zset == {}
@@ -483,14 +483,14 @@ async def test_redis_bi_xoa_sach_thi_cua_chan_van_thay_tien_da_tieu(
     assert exc.value.details["limit_type"] == "5h"
     assert exc.value.details["spent_usd"] == "0.500000"
     # …và ZSET đã được nạp lại, nên request kế tiếp không phải hỏi Postgres nữa.
-    assert _tong(_quota_redis, LimitType.SHORT, user_a) == Decimal("0.500000")
+    assert _total(_quota_redis, LimitType.SHORT, user_a) == Decimal("0.500000")
 
 
-async def test_postgres_chet_giua_luc_dung_lai_thi_503_chu_khong_cho_qua(
+async def test_postgres_dying_mid_rebuild_503_not_let_through(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     _quota_redis: Any,
-    _db_cua_test: None,
+    _db_for_tests: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Không hỏi được Postgres ⇒ vẫn "không biết còn bao nhiêu tiền" ⇒ `503`.
@@ -498,7 +498,7 @@ async def test_postgres_chet_giua_luc_dung_lai_thi_503_chu_khong_cho_qua(
     Cùng câu trả lời với ca Redis chết (NQ-53). Cho qua ở đây là gỡ lớp phòng
     thủ P2 vào đúng lúc cả hai kho đều không trả lời được.
     """
-    leaf = await _cay_mot_luot(session_factory, user_a)
+    leaf = await _single_turn_tree(session_factory, user_a)
 
     async def no(*_a: Any, **_k: Any) -> bool:
         raise RuntimeError("postgres chet (gia lap)")
@@ -518,27 +518,27 @@ async def test_postgres_chet_giua_luc_dung_lai_thi_503_chu_khong_cho_qua(
 # ══════════════════════ rebuild_all: lệnh CLI `--all` ═══════════════════════
 
 
-async def test_rebuild_all_dung_lai_cho_moi_nguoi_co_chi_tieu(
+async def test_rebuild_all_rebuilds_every_spender(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID, quota_redis_fake: Any
 ) -> None:
-    await _ghi_so(session, user_a, cost="0.110000", tuoi_giay=TRONG_5H)
-    await _ghi_so(session, user_b, cost="0.220000", tuoi_giay=NGOAI_5H_TRONG_TUAN)
+    await _write_ledger(session, user_a, cost="0.110000", age_seconds=INSIDE_5H)
+    await _write_ledger(session, user_b, cost="0.220000", age_seconds=OUTSIDE_5H_INSIDE_WEEK)
 
     reports = await rebuild_all(session, quota_redis_fake, now=time.time())
 
-    theo_user = {r.user_id: r for r in reports}
-    assert {user_a, user_b} <= set(theo_user)
-    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.110000")
-    assert _tong(quota_redis_fake, LimitType.LONG, user_b) == Decimal("0.220000")
+    by_user = {r.user_id: r for r in reports}
+    assert {user_a, user_b} <= set(by_user)
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.110000")
+    assert _total(quota_redis_fake, LimitType.LONG, user_b) == Decimal("0.220000")
     # `user_b` tiêu tiền ngoài cửa sổ 5 giờ ⇒ cửa sổ ấy vẫn phải rỗng.
     assert _zset(quota_redis_fake, LimitType.SHORT, user_b) == {}
 
 
-async def test_rebuild_all_bo_qua_nguoi_khong_co_dong_so_nao(
+async def test_rebuild_all_skips_users_without_ledger_rows(
     session: AsyncSession, user_a: uuid.UUID, user_b: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """Tập người đọc từ `usage_events`, không từ `users`."""
-    await _ghi_so(session, user_a, cost="0.010000", tuoi_giay=TRONG_5H)
+    await _write_ledger(session, user_a, cost="0.010000", age_seconds=INSIDE_5H)
 
     reports = await rebuild_all(session, quota_redis_fake, now=time.time())
 
@@ -548,7 +548,7 @@ async def test_rebuild_all_bo_qua_nguoi_khong_co_dong_so_nao(
 # ══════════════════════════ app/cli.py — vỏ lệnh ═══════════════════════════
 
 
-def test_thieu_co_all_thi_argparse_bao_loi_chu_khong_chay(
+def test_missing_all_flag_argparse_errors_not_runs(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """`--all` là bắt buộc — xem docstring `app/cli.py`.
@@ -563,13 +563,13 @@ def test_thieu_co_all_thi_argparse_bao_loi_chu_khong_chay(
     assert "--all" in capsys.readouterr().err
 
 
-def test_khong_co_lenh_nao_thi_cung_bao_loi() -> None:
+def test_no_command_also_errors() -> None:
     with pytest.raises(SystemExit) as exc:
         cli.main([])
     assert exc.value.code == 2
 
 
-async def test_lenh_rebuild_quota_all_nap_lai_zset_va_tra_ma_thoat_0(
+async def test_rebuild_quota_all_command_reloads_zset_exit_0(
     user_a: uuid.UUID,
     quota_redis_fake: Any,
     session_factory: async_sessionmaker[AsyncSession],
@@ -584,14 +584,14 @@ async def test_lenh_rebuild_quota_all_nap_lai_zset_va_tra_ma_thoat_0(
     """
     monkeypatch.setattr("app.db.session.get_sessionmaker", lambda: session_factory)
     monkeypatch.setattr("app.cli.get_redis", lambda: quota_redis_fake)
-    async with session_factory() as ghi:
-        await _ghi_so(ghi, user_a, cost="0.330000", tuoi_giay=TRONG_5H)
-        await ghi.commit()
+    async with session_factory() as record_statement:
+        await _write_ledger(record_statement, user_a, cost="0.330000", age_seconds=INSIDE_5H)
+        await record_statement.commit()
 
-    ma_thoat = await cli._rebuild_quota_all()
+    exit_code = await cli._rebuild_quota_all()
 
-    assert ma_thoat == 0
-    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.330000")
+    assert exit_code == 0
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.330000")
     assert str(user_a) in capsys.readouterr().out
 
 
@@ -607,22 +607,24 @@ async def test_lenh_rebuild_quota_all_nap_lai_zset_va_tra_ma_thoat_0(
 # ZSET dựng lại ra 2 member, một trong đó là đúng khoản BYOK vừa tiêu.
 
 
-async def test_dong_BYOK_khong_vao_ZSET_khi_dung_lai(
+async def test_BYOK_rows_stay_out_of_ZSET_on_rebuild(
     session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
 ) -> None:
     """`rebuild_quota` chỉ dựng lại phần tiền của NGƯỜI VẬN HÀNH."""
-    await _ghi_so(session, user_a, cost="0.100000", tuoi_giay=TRONG_5H)
-    await _ghi_so(session, user_a, cost="0.900000", tuoi_giay=TRONG_5H, key_source=KeySource.BYOK)
+    await _write_ledger(session, user_a, cost="0.100000", age_seconds=INSIDE_5H)
+    await _write_ledger(
+        session, user_a, cost="0.900000", age_seconds=INSIDE_5H, key_source=KeySource.BYOK
+    )
     await session.commit()
 
     await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
 
-    assert _tong(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.100000")
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.100000")
     assert len(_zset(quota_redis_fake, LimitType.SHORT, user_a)) == 1
-    assert _tong(quota_redis_fake, LimitType.LONG, user_a) == Decimal("0.100000")
+    assert _total(quota_redis_fake, LimitType.LONG, user_a) == Decimal("0.100000")
 
 
-async def test_chi_co_dong_BYOK_thi_KHONG_HOI_postgres_lan_thu_hai(
+async def test_only_BYOK_rows_does_NOT_ASK_postgres_twice(
     session: AsyncSession,
     user_a: uuid.UUID,
     quota_redis_fake: Any,
@@ -639,43 +641,51 @@ async def test_chi_co_dong_BYOK_thi_KHONG_HOI_postgres_lan_thu_hai(
     Vì vậy phép kiểm đếm câu SQL, không đếm kết quả: bỏ bộ lọc khỏi
     `has_events_since` thì `list_since` bị gọi và test đỏ.
     """
-    await _ghi_so(session, user_a, cost="0.900000", tuoi_giay=TRONG_5H, key_source=KeySource.BYOK)
+    await _write_ledger(
+        session, user_a, cost="0.900000", age_seconds=INSIDE_5H, key_source=KeySource.BYOK
+    )
     await session.commit()
     state = await read_window(quota_redis_fake, windows()[0], user_id=user_a, now=time.time())
-    so_lan_doc_ca_cua_so = 0
-    goc = UsageEventRepository.list_since
+    full_window_reads = 0
+    original = UsageEventRepository.list_since
 
-    async def dem(self: UsageEventRepository, **kwargs: Any) -> Any:
-        nonlocal so_lan_doc_ca_cua_so
-        so_lan_doc_ca_cua_so += 1
-        return await goc(self, **kwargs)
+    async def counting(self: UsageEventRepository, **kwargs: Any) -> Any:
+        nonlocal full_window_reads
+        full_window_reads += 1
+        return await original(self, **kwargs)
 
-    monkeypatch.setattr(UsageEventRepository, "list_since", dem)
+    monkeypatch.setattr(UsageEventRepository, "list_since", counting)
 
-    sau = await refill_if_empty(session, quota_redis_fake, state, user_id=user_a, now=time.time())
+    after = await refill_if_empty(session, quota_redis_fake, state, user_id=user_a, now=time.time())
 
-    assert sau.spent == Decimal(0)
+    assert after.spent == Decimal(0)
     assert _zset(quota_redis_fake, LimitType.SHORT, user_a) == {}
-    assert so_lan_doc_ca_cua_so == 0, (
+    assert full_window_reads == 0, (
         "chỉ có tiền BYOK thì `has_events_since` phải nói KHÔNG, và lượt đọc cả "
         "cửa sổ không được xảy ra"
     )
 
 
-async def test_rebuild_all_bo_qua_nguoi_chi_tieu_bang_BYOK(
+async def test_rebuild_all_skips_byok_only_spenders(
     session_factory: async_sessionmaker[AsyncSession],
     user_a: uuid.UUID,
     user_b: uuid.UUID,
     quota_redis_fake: Any,
 ) -> None:
     """`user_ids_since` là vế thứ ba — bỏ sót nó thì `--all` vẫn nạp nhầm."""
-    async with session_factory() as ghi:
-        await _ghi_so(ghi, user_a, cost="0.200000", tuoi_giay=TRONG_5H)
-        await _ghi_so(ghi, user_b, cost="0.700000", tuoi_giay=TRONG_5H, key_source=KeySource.BYOK)
-        await ghi.commit()
+    async with session_factory() as record_statement:
+        await _write_ledger(record_statement, user_a, cost="0.200000", age_seconds=INSIDE_5H)
+        await _write_ledger(
+            record_statement,
+            user_b,
+            cost="0.700000",
+            age_seconds=INSIDE_5H,
+            key_source=KeySource.BYOK,
+        )
+        await record_statement.commit()
 
-    async with session_factory() as doc:
-        da_dung = await rebuild_all(doc, quota_redis_fake, now=time.time())
+    async with session_factory() as reader:
+        rebuilt = await rebuild_all(reader, quota_redis_fake, now=time.time())
 
-    assert [bao_cao.user_id for bao_cao in da_dung] == [user_a]
+    assert [report.user_id for report in rebuilt] == [user_a]
     assert _zset(quota_redis_fake, LimitType.SHORT, user_b) == {}

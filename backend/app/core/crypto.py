@@ -39,7 +39,7 @@ HKDF phải được **lưu** để dẫn xuất lại, mà chỗ duy nhất lư
 này, tức thêm một cột cho một giá trị công khai; với master key đã là 32+ byte
 ngẫu nhiên thì salt không thêm gì.
 
-**`settings` đọc lúc GỌI, không lúc import.** Cùng lý do với `da_bat()` của
+**`settings` đọc lúc GỌI, không lúc import.** Cùng lý do với `is_enabled()` của
 `core/turnstile.py`: một phép kiểm đổi `MASTER_ENCRYPTION_KEY` rồi gọi lại phải
 thấy hiệu lực mà không cần nạp lại module — và đó chính là DoD dòng 6 của task
 này. HKDF là hai lần HMAC-SHA256, tính lại mỗi lần gọi là chi phí không đo được
@@ -173,15 +173,15 @@ def unseal(sealed: Sealed) -> str:
     """
     try:
         plaintext = AESGCM(_data_key()).decrypt(sealed.nonce, sealed.cipher, None)
-    except InvalidTag as loi:
+    except InvalidTag as exc:
         # KHÔNG kèm `sealed` vào thông điệp: bản mã không phải bí mật, nhưng
         # một exception có dữ liệu đi kèm là một exception sẽ vào log (C20).
         raise DecryptionError(
             "khong giai ma duoc khoa BYOK bang MASTER_ENCRYPTION_KEY hien tai"
-        ) from loi
-    except ValueError as loi:
+        ) from exc
+    except ValueError as exc:
         # Nonce sai độ dài — một hàng hỏng trong DB, không phải một tag sai.
-        raise DecryptionError("ban ghi khoa BYOK khong dung dinh dang") from loi
+        raise DecryptionError("ban ghi khoa BYOK khong dung dinh dang") from exc
     return plaintext.decode("utf-8")
 
 

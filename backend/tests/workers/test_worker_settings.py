@@ -36,24 +36,24 @@ from app.workers.main import (
 from app.workers.reaper import REAPER_JOB_NAME
 
 
-def test_dung_mot_job_ten_generate() -> None:
+def test_exactly_one_job_named_generate() -> None:
     """§7.2 bước ① viết `enqueue('generate', ...)` — tên đó là giao kèo."""
     assert [f.name for f in FUNCTIONS] == ["generate"]
     assert GENERATE_JOB_NAME == "generate"
 
 
-def test_generate_khong_bao_gio_thu_lai() -> None:
+def test_generate_never_retries() -> None:
     assert GENERATE_MAX_TRIES == 1
 
 
-def test_redis_settings_doc_tu_env_chu_khong_phai_mac_dinh_arq() -> None:
+def test_redis_settings_from_env_not_arq_default() -> None:
     """Mặc định của arq là `localhost:6379`; trong compose host là `redis`."""
     conn = redis_settings()
     assert str(settings.REDIS_URL).startswith(f"redis://{conn.host}:{conn.port}")
     assert conn.host != "localhost"
 
 
-def test_worker_that_nhan_du_ba_tham_so() -> None:
+def test_real_worker_gets_all_three_params() -> None:
     """Dựng `Worker` đúng đường mà lệnh `arq` đi, rồi đọc lại trên đối tượng."""
     worker: Worker = create_worker(WorkerSettings)
 
@@ -73,7 +73,7 @@ def test_worker_that_nhan_du_ba_tham_so() -> None:
     assert len(worker.cron_jobs) == len(CRON_JOBS)
 
 
-def test_nhip_healthcheck_tach_khoi_nhip_heartbeat_cua_dieu_7_6() -> None:
+def test_healthcheck_beat_separate_from_7_6_heartbeat() -> None:
     """B-74 → NQ-27: hai nhịp, hai biến, hai người đọc.
 
     `WORKER_HEARTBEAT_S` nay chỉ còn nghĩa "nhịp ghi `messages.heartbeat_at`"
@@ -92,15 +92,15 @@ def test_nhip_healthcheck_tach_khoi_nhip_heartbeat_cua_dieu_7_6() -> None:
     # Và chỗ *dùng* phải gọi đúng tên. Đọc mã nguồn vì hai giá trị bằng nhau ở
     # mặc định nên không phép so sánh runtime nào phân biệt được — cùng lối với
     # `tests/api/test_messages.py::test_tang_api_khong_import_gi_cua_provider`.
-    nguon = (Path(worker_main.__file__)).read_text(encoding="utf-8")
-    assert "health_check_interval = settings.WORKER_HEALTHCHECK_S" in nguon
-    assert "health_check_interval = settings.WORKER_HEARTBEAT_S" not in nguon
+    source = (Path(worker_main.__file__)).read_text(encoding="utf-8")
+    assert "health_check_interval = settings.WORKER_HEALTHCHECK_S" in source
+    assert "health_check_interval = settings.WORKER_HEARTBEAT_S" not in source
 
     # Tỉ lệ phải còn nghĩa: reaper đợi ít nhất hai nhịp trước khi kết luận chết.
     assert settings.REAPER_STALE_S >= 2 * settings.WORKER_HEARTBEAT_S
 
 
-def test_poll_delay_doc_tu_settings_chu_khong_phai_mac_dinh_arq() -> None:
+def test_poll_delay_from_settings_not_arq_default() -> None:
     """B-104 — nhịp poll của arq nằm chình ình trong TTFT của mọi model.
 
     T-1.12 đo chặng `202` → `start`: p95 0.486–0.505 s và `max` 0.494–0.510 s
@@ -118,11 +118,11 @@ def test_poll_delay_doc_tu_settings_chu_khong_phai_mac_dinh_arq() -> None:
 
     # Đọc mã nguồn vì nếu ai đó gõ nhầm tên thuộc tính thì phép so sánh ở trên
     # vẫn xanh khi `ARQ_POLL_DELAY_S` tình cờ bằng mặc định của arq.
-    nguon = (Path(worker_main.__file__)).read_text(encoding="utf-8")
-    assert "poll_delay = settings.ARQ_POLL_DELAY_S" in nguon
+    source = (Path(worker_main.__file__)).read_text(encoding="utf-8")
+    assert "poll_delay = settings.ARQ_POLL_DELAY_S" in source
 
 
-def test_ha_poll_delay_khong_pha_lich_cron_cua_dieu_7_6() -> None:
+def test_lower_poll_delay_does_not_break_7_6_cron_schedule() -> None:
     """Ghim giả định của arq mà quyết định hạ `poll_delay` dựa vào.
 
     `REAPER_MOI_N_GIAY = 30` chỉ đúng nếu arq **kẹp** cửa sổ cron ở 0.5 s:
@@ -134,15 +134,15 @@ def test_ha_poll_delay_khong_pha_lich_cron_cua_dieu_7_6() -> None:
     Giá trị được đọc ra từ chính mã nguồn arq đang cài, không chép lại: test
     này phải đỏ khi nâng arq làm đổi hành vi, chứ không đỏ khi mình đổi số.
     """
-    nguon_arq = Path(arq_worker.__file__).read_text(encoding="utf-8")
-    assert "max(self.poll_delay_s, 0.5)" in nguon_arq, (
+    arq_source = Path(arq_worker.__file__).read_text(encoding="utf-8")
+    assert "max(self.poll_delay_s, 0.5)" in arq_source, (
         "arq đã đổi cách tính cron_window_size — kiểm lại REAPER_MOI_N_GIAY "
         "trước khi giữ ARQ_POLL_DELAY_S dưới 0.5 s"
     )
     assert settings.ARQ_POLL_DELAY_S <= 0.5
 
 
-def test_job_timeout_lon_hon_timeout_http_cua_tang_model() -> None:
+def test_job_timeout_exceeds_model_layer_http_timeout() -> None:
     """Hai timeout lồng nhau: cái trong (HTTP) phải nổ trước cái ngoài (arq).
 
     Ngược lại thì arq huỷ job giữa lúc model đang sinh — tiền vẫn mất, mà

@@ -26,14 +26,14 @@
  * de HIEN.
  */
 
-import type { CuaSoQuota, LoaiHanMuc, ModelRa, QuotaWarning } from "../../lib/api";
+import type { QuotaWindow, LimitType, ModelOut, QuotaWarning } from "../../lib/api";
 
 /** Ba muc cua ban Design System muc 05 — moi muc mot token `--color-quota-*`. */
 export type QuotaLevel = "normal" | "warning" | "empty";
 
 /** Mot lan doc mot cua so, kem thoi diem no ve toi trinh duyet. */
 export interface QuotaReading {
-  window: CuaSoQuota;
+  window: QuotaWindow;
   /** `Date.now()` luc response ve — moc cua `retry_after`. */
   readAt: number;
 }
@@ -46,7 +46,7 @@ export interface QuotaReading {
  * Man hinh noi dung nhu vay, khong bia mot moc gio.
  */
 export interface QuotaBlock {
-  windows: LoaiHanMuc[];
+  windows: LimitType[];
   resetAt: number | null;
 }
 
@@ -75,26 +75,26 @@ export function quotaLevel(remainingPct: number, warnPct: number): QuotaLevel {
  * cua chan, tuc chua co gi de cho.
  */
 export function mergeReadings(
-  snapshot: CuaSoQuota[] | null,
+  snapshot: QuotaWindow[] | null,
   snapshotReadAt: number | null,
-  warnings: Partial<Record<LoaiHanMuc, { warning: QuotaWarning; readAt: number }>>,
+  warnings: Partial<Record<LimitType, { warning: QuotaWarning; readAt: number }>>,
 ): QuotaReading[] {
   if (snapshot === null || snapshotReadAt === null) {
     return [];
   }
   return snapshot.map((window) => {
-    const moi = warnings[window.limit_type];
-    if (moi === undefined || moi.readAt <= snapshotReadAt) {
+    const next = warnings[window.limit_type];
+    if (next === undefined || next.readAt <= snapshotReadAt) {
       return { window, readAt: snapshotReadAt };
     }
-    return { window: { ...moi.warning, retry_after: null }, readAt: moi.readAt };
+    return { window: { ...next.warning, retry_after: null }, readAt: next.readAt };
   });
 }
 
 /** `retry_after` (giay, tinh tu `readAt`) → moc gio tuyet doi, hoac `null`. */
 export function resetAt(reading: QuotaReading): number | null {
-  const giay = reading.window.retry_after;
-  return giay === null ? null : reading.readAt + giay * 1000;
+  const seconds = reading.window.retry_after;
+  return seconds === null ? null : reading.readAt + seconds * 1000;
 }
 
 /**
@@ -104,15 +104,15 @@ export function resetAt(reading: QuotaReading): number | null {
  * truoc van chua gui duoc — nut chi mo khi CA HAI da nha.
  */
 export function quotaBlock(readings: QuotaReading[]): QuotaBlock | null {
-  const het = readings.filter((r) => r.window.remaining_pct <= 0);
-  if (het.length === 0) {
+  const exhausted = readings.filter((r) => r.window.remaining_pct <= 0);
+  if (exhausted.length === 0) {
     return null;
   }
-  const moc = het.map(resetAt);
-  const biet = moc.every((m): m is number => m !== null);
+  const resets = exhausted.map(resetAt);
+  const known = resets.every((m): m is number => m !== null);
   return {
-    windows: het.map((r) => r.window.limit_type),
-    resetAt: biet ? Math.max(...moc) : null,
+    windows: exhausted.map((r) => r.window.limit_type),
+    resetAt: known ? Math.max(...resets) : null,
   };
 }
 
@@ -153,7 +153,7 @@ export function byokCovers(byokProviders: ReadonlySet<string> | null, provider: 
  * gui dung luc Cam bay ① cua T-3.11 hua la khong.
  */
 export function selectedProviderId(
-  models: readonly Pick<ModelRa, "id" | "provider_id">[],
+  models: readonly Pick<ModelOut, "id" | "provider_id">[],
   modelId: string | null,
 ): string | null {
   return models.find((m) => m.id === modelId)?.provider_id ?? null;
@@ -165,11 +165,11 @@ export function selectedProviderId(
  * `estimator._warning`, vi do la cua so se chan nguoi dung truoc.
  */
 export function warningReading(readings: QuotaReading[], warnPct: number): QuotaReading | null {
-  const ung = readings.filter((r) => quotaLevel(r.window.remaining_pct, warnPct) === "warning");
-  if (ung.length === 0) {
+  const warnings = readings.filter((r) => quotaLevel(r.window.remaining_pct, warnPct) === "warning");
+  if (warnings.length === 0) {
     return null;
   }
-  return ung.reduce((a, b) => (b.window.remaining_pct < a.window.remaining_pct ? b : a));
+  return warnings.reduce((a, b) => (b.window.remaining_pct < a.window.remaining_pct ? b : a));
 }
 
 /** `Decimal` cua backend la CHUOI — doi sang so DUNG MOT LAN, de hien. */

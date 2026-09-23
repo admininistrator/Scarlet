@@ -20,7 +20,7 @@ import { routes } from "./app/routes";
  *
  * Nay no lam dung mot viec: dung router len va cang mot luoi an toan quanh
  * no. Bang route o `app/routes.tsx`, header o `app/Layout.tsx`, phien o
- * `usePhien` goi tu `Layout`.
+ * `useSessionState` goi tu `Layout`.
  *
  * ── `createBrowserRouter` o tam module ────────────────────────────────────
  *

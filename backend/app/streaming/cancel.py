@@ -17,7 +17,7 @@ cái gì, và nó **không báo lỗi**, nó chỉ im lặng.
 
 **Vì sao cờ nằm ở Redis chứ không phải một cột trong Postgres.** Worker phải
 hỏi "đã bấm Dừng chưa" nhiều lần trong một lượt sinh (mỗi
-`KIEM_HUY_MOI_N_CHUNK` chunk, xem `generate.py`); với một câu trả lời dài của
+`CANCEL_CHECK_EVERY_N_CHUNKS` chunk, xem `generate.py`); với một câu trả lời dài của
 `deepseek-flash` (~533 chunk đo ở T-1.3) đó là ~66 lần hỏi. Hỏi Postgres từng
 ấy lần cho mỗi lượt chat là đúng thứ ADR-01 đã loại khi chọn Redis làm nơi giữ
 dữ liệu **đang bay**. Cờ này cũng đúng nghĩa dữ liệu đang bay: nó chỉ có ý
@@ -50,7 +50,7 @@ CANCEL_KEY_PREFIX = "cancel:"
 #: Giá trị của khoá — §7.5 viết `SET cancel:{amid} 1`. Không ai đọc nội dung
 #: này; câu hỏi duy nhất là `EXISTS`. Vẫn ghi đúng `1` của kế hoạch để
 #: `redis-cli GET` lúc debug cho ra thứ người đọc kế hoạch đang chờ thấy.
-GIA_TRI_CO = "1"
+FLAG_VALUE = "1"
 
 #: `messages.finish_reason` và khoá `finish_reason` của event `done` (§7.4) khi
 #: lượt sinh dừng vì người dùng bấm Dừng. Nằm ở đây chứ không ở `events.py`:
@@ -65,17 +65,17 @@ def cancel_key(message_id: uuid.UUID | str) -> str:
     return f"{CANCEL_KEY_PREFIX}{message_id}"
 
 
-async def dat_co_huy(redis: Redis, message_id: uuid.UUID | str, *, ttl_s: int) -> None:
+async def set_cancel_flag(redis: Redis, message_id: uuid.UUID | str, *, ttl_s: int) -> None:
     """`SET cancel:{message_id} 1 EX ttl_s` — nửa GHI của §7.5, do `api` gọi.
 
     Không trả về gì vì không có câu trả lời nào đáng hỏi: `SET` luôn thành
     công, và "worker có kịp thấy cờ không" thì Redis không biết. Câu trả lời
     thật cho người dùng nằm ở `messages.status` sau đó.
     """
-    await redis.set(cancel_key(message_id), GIA_TRI_CO, ex=ttl_s)
+    await redis.set(cancel_key(message_id), FLAG_VALUE, ex=ttl_s)
 
 
-async def da_yeu_cau_huy(redis: Redis, message_id: uuid.UUID | str) -> bool:
+async def is_cancel_requested(redis: Redis, message_id: uuid.UUID | str) -> bool:
     """`EXISTS cancel:{message_id}` — nửa ĐỌC của §7.5, do `worker` gọi.
 
     Trả `bool` chứ không trả số của Redis: chỗ gọi nó là một câu `if`, và một

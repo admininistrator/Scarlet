@@ -24,13 +24,13 @@ import { PATHS } from "./paths";
 export function SignedInOnly({ children }: { children: ReactNode }) {
   const session = useSession();
 
-  if (session.dangTai) {
+  if (session.loading) {
     return <p className="px-6 py-4 text-sm text-muted">{t("admin.dangTai")}</p>;
   }
-  if (session.biKhoa) {
+  if (session.locked) {
     return <AccountDisabledScreen />;
   }
-  if (session.nguoiDung === null) {
+  if (session.user === null) {
     return <Navigate to={PATHS.login} replace />;
   }
   return <>{children}</>;

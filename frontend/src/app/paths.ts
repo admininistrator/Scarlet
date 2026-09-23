@@ -12,7 +12,7 @@
  * thanh 404 luc nguoi dung bam nut, khong phai luc build. Bang route va moi
  * `<Link to>` doc CUNG mot hang o day, nen hai ben khong the lech nhau.
  *
- * `as const` chu khong `string`: `PATHS.dangKy` go nham thanh `PATHS.dangKi`
+ * `as const` chu khong `string`: `PATHS.register` go nham thanh `PATHS.dangKi`
  * la loi `tsc`, dung ho hang voi `keyof vi.json` cua `t()`.
  *
  * ── Chin, khong phai muoi mot ─────────────────────────────────────────────

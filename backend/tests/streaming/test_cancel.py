@@ -19,30 +19,30 @@ import pytest
 from app.streaming.cancel import (
     CANCEL_KEY_PREFIX,
     FINISH_REASON_CANCELLED,
-    GIA_TRI_CO,
+    FLAG_VALUE,
     cancel_key,
-    da_yeu_cau_huy,
-    dat_co_huy,
+    is_cancel_requested,
+    set_cancel_flag,
 )
 
 
-class RedisGia:
+class FakeRedis:
     """Chỉ đủ `set`/`exists`, và ghi lại mọi tham số để khẳng định được."""
 
     def __init__(self) -> None:
-        self.da_set: list[tuple[str, str, Any]] = []
-        self.co: set[str] = set()
+        self.set_calls: list[tuple[str, str, Any]] = []
+        self.flags: set[str] = set()
 
     async def set(self, name: str, value: str, *, ex: int | None = None) -> bool:
-        self.da_set.append((name, value, ex))
-        self.co.add(name)
+        self.set_calls.append((name, value, ex))
+        self.flags.add(name)
         return True
 
     async def exists(self, name: str) -> int:
-        return 1 if name in self.co else 0
+        return 1 if name in self.flags else 0
 
 
-def test_khoa_dung_tien_to_cua_ke_hoach() -> None:
+def test_key_uses_planned_prefix() -> None:
     """§7.5 viết `cancel:{amid}`. UUID và chuỗi phải ra cùng một khoá."""
     mid = uuid.uuid4()
 
@@ -51,56 +51,56 @@ def test_khoa_dung_tien_to_cua_ke_hoach() -> None:
     assert CANCEL_KEY_PREFIX == "cancel:"
 
 
-async def test_dat_co_co_kem_ttl() -> None:
+async def test_setting_flag_carries_ttl() -> None:
     """`SET cancel:{id} 1 EX <ttl>` — thiếu `EX` là C8 ở dạng thứ hai."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
 
-    await dat_co_huy(redis, mid, ttl_s=300)
+    await set_cancel_flag(redis, mid, ttl_s=300)
 
-    assert redis.da_set == [(f"cancel:{mid}", GIA_TRI_CO, 300)]
+    assert redis.set_calls == [(f"cancel:{mid}", FLAG_VALUE, 300)]
 
 
-async def test_dat_co_hai_lan_gia_han_dong_ho() -> None:
+async def test_setting_flag_twice_extends_clock() -> None:
     """Bấm Dừng lần hai phải đặt lại TTL, không giữ đồng hồ của lần đầu.
 
     Đây là lý do `cancel.py` dùng `SET` chứ không `SETNX`: lần bấm thứ hai
     nghĩa là người dùng **vẫn** đang chờ nó dừng.
     """
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
 
-    await dat_co_huy(redis, mid, ttl_s=300)
-    await dat_co_huy(redis, mid, ttl_s=300)
+    await set_cancel_flag(redis, mid, ttl_s=300)
+    await set_cancel_flag(redis, mid, ttl_s=300)
 
-    assert len(redis.da_set) == 2
-    assert {ex for _, _, ex in redis.da_set} == {300}
+    assert len(redis.set_calls) == 2
+    assert {ex for _, _, ex in redis.set_calls} == {300}
 
 
-@pytest.mark.parametrize("dat_truoc", [True, False])
-async def test_doc_co_tra_ve_bool(dat_truoc: bool) -> None:
-    redis = RedisGia()
+@pytest.mark.parametrize("preset", [True, False])
+async def test_reading_flag_returns_bool(preset: bool) -> None:
+    redis = FakeRedis()
     mid = uuid.uuid4()
-    if dat_truoc:
-        await dat_co_huy(redis, mid, ttl_s=300)
+    if preset:
+        await set_cancel_flag(redis, mid, ttl_s=300)
 
-    ket_qua = await da_yeu_cau_huy(redis, mid)
+    result = await is_cancel_requested(redis, mid)
 
-    assert ket_qua is dat_truoc
-    assert isinstance(ket_qua, bool), "chỗ gọi là một câu `if`, không phải một phép so số"
+    assert result is preset
+    assert isinstance(result, bool), "chỗ gọi là một câu `if`, không phải một phép so số"
 
 
-async def test_co_cua_message_nay_khong_anh_huong_message_kia() -> None:
+async def test_flag_of_one_message_does_not_affect_another() -> None:
     """Một khoá cho mỗi message — huỷ lượt này không dừng lượt đang chạy song song."""
-    redis = RedisGia()
-    mot, hai = uuid.uuid4(), uuid.uuid4()
+    redis = FakeRedis()
+    first, second = uuid.uuid4(), uuid.uuid4()
 
-    await dat_co_huy(redis, mot, ttl_s=300)
+    await set_cancel_flag(redis, first, ttl_s=300)
 
-    assert await da_yeu_cau_huy(redis, mot) is True
-    assert await da_yeu_cau_huy(redis, hai) is False
+    assert await is_cancel_requested(redis, first) is True
+    assert await is_cancel_requested(redis, second) is False
 
 
-def test_finish_reason_la_chuoi_cua_ke_hoach() -> None:
+def test_finish_reason_is_the_planned_string() -> None:
     """§7.5: `UPDATE finish_reason='cancelled'`. FE phân nhánh theo đúng chuỗi này."""
     assert FINISH_REASON_CANCELLED == "cancelled"

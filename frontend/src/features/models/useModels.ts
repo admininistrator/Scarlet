@@ -25,12 +25,12 @@
  * lop chong nhau — co y: lop o day chan so LAN GOI, lop kia chan so LUOT DO.
  * Hai tab cung bam lam moi thi van chi mot lan ai do that su di hoi 9Router.
  *
- * ── `docLuc` la thoi diem FE DOC, khong phai thoi diem backend DO ─────────
+ * ── `loadedAt` la thoi diem FE DOC, khong phai thoi diem backend DO ─────────
  *
  * Ban T-HD4 doi mot moc gio o dau danh sach ("Trang thai kiem luc 14:32").
  * Con so o day la luc `GET /models` **tra ve**, va no co the moi hon luc do
  * that toi 30 giay (TTL cua backend). Chenh lech ay khong duoc giau: no la
- * ly do `lamMoi()` ton tai va la ly do mot lan bam lam moi co the khong doi
+ * ly do `refresh()` ton tai va la ly do mot lan bam lam moi co the khong doi
  * gi ca. Dua them mot truong `checked_at` qua API se xoa duoc chenh lech,
  * nhung do la mot truong thu ba them vao §18.3 — vung cam (A10), nen chua
  * lam. Xem Backlog.
@@ -38,56 +38,56 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, type ModelRa } from "../../lib/api";
+import { api, type ModelOut } from "../../lib/api";
 
-export interface DanhMucModel {
+export interface ModelCatalog {
   /** Thu tu giu nguyen thu tu `order` cua catalog (§9.2) — khong sap lai. */
-  models: ModelRa[];
+  models: ModelOut[];
   /** Luc `GET /models` tra ve lan gan nhat. `null` = chua lan nao xong. */
-  docLuc: Date | null;
+  loadedAt: Date | null;
   /** Lan doc dau tien chua xong. */
-  dangTai: boolean;
+  loading: boolean;
   /** Mot lan lam moi TUONG MINH dang chay — nut quay, danh sach van bam duoc. */
-  dangLamMoi: boolean;
+  refreshing: boolean;
   /** Loi cua lan doc gan nhat, hoac `null`. */
-  loi: string | null;
-  lamMoi: () => Promise<void>;
+  error: string | null;
+  refresh: () => Promise<void>;
 }
 
-export function useModels(): DanhMucModel {
-  const [models, setModels] = useState<ModelRa[]>([]);
-  const [docLuc, setDocLuc] = useState<Date | null>(null);
-  const [dangTai, setDangTai] = useState(true);
-  const [dangLamMoi, setDangLamMoi] = useState(false);
-  const [loi, setLoi] = useState<string | null>(null);
+export function useModels(): ModelCatalog {
+  const [models, setModels] = useState<ModelOut[]>([]);
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   /*
     Component co the thao giua luc `GET /models` con bay (nguoi dung dieu
     huong sang `/admin`). Ghi state sau do la mot canh bao cua React va —
     te hon — la mot `dangLamMoi` ket o `true` neu ho quay lai.
   */
-  const conGanRef = useRef(true);
+  const mountedRef = useRef(true);
   useEffect(() => {
-    conGanRef.current = true;
+    mountedRef.current = true;
     return () => {
-      conGanRef.current = false;
+      mountedRef.current = false;
     };
   }, []);
 
-  const doc = useCallback(async (tuongMinh: boolean): Promise<void> => {
-    if (tuongMinh) {
-      setDangLamMoi(true);
+  const load = useCallback(async (explicit: boolean): Promise<void> => {
+    if (explicit) {
+      setRefreshing(true);
     }
     try {
-      const ra = await api.danhSachModel();
-      if (!conGanRef.current) {
+      const output = await api.listModels();
+      if (!mountedRef.current) {
         return;
       }
-      setModels(ra);
-      setDocLuc(new Date());
-      setLoi(null);
+      setModels(output);
+      setLoadedAt(new Date());
+      setError(null);
     } catch (e: unknown) {
-      if (!conGanRef.current) {
+      if (!mountedRef.current) {
         return;
       }
       /*
@@ -99,29 +99,29 @@ export function useModels(): DanhMucModel {
         xoa nhung gi dang dung duoc. Do la cung mot luat ma ban T-HD4 dat
         cho luc dang lam moi — "danh sach khong bi che, khong skeleton".
       */
-      setLoi(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (conGanRef.current) {
-        setDangTai(false);
-        setDangLamMoi(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
       }
     }
   }, []);
 
-  const lamMoi = useCallback(() => doc(true), [doc]);
+  const refresh = useCallback(() => load(true), [load]);
 
   useEffect(() => {
-    void doc(false);
+    void load(false);
 
-    function khiCoMang(): void {
-      void doc(false);
+    function handleOnline(): void {
+      void load(false);
     }
 
-    window.addEventListener("online", khiCoMang);
+    window.addEventListener("online", handleOnline);
     return () => {
-      window.removeEventListener("online", khiCoMang);
+      window.removeEventListener("online", handleOnline);
     };
-  }, [doc]);
+  }, [load]);
 
-  return { models, docLuc, dangTai, dangLamMoi, loi, lamMoi };
+  return { models, loadedAt, loading, refreshing, error, refresh };
 }

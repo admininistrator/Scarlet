@@ -91,7 +91,7 @@ class CostSplit:
     """Chi tiêu của MỘT người trong MỘT cửa sổ, tách theo `cost_confidence` (T-2.17).
 
     Hai trường, và **không** có trường thứ ba tên `total` — cùng lý lẽ đã ghi
-    cho `HaiCot` của T-2.16: C16 nói chính con số gộp ấy làm bảng chi phí vô
+    cho `MeteredSplit` của T-2.16: C16 nói chính con số gộp ấy làm bảng chi phí vô
     nghĩa, và một trường tiện tay thì sẽ có người dùng. Nơi duy nhất trong app
     được phép cộng hai cột là `workers/spend_alert.py::_combined`, một hàm có
     tên để `grep` ra được, đứng ở đúng chỗ người dùng đã chốt là "ngưỡng so
@@ -130,7 +130,7 @@ class UsageBucket:
     events: int
 
 
-def _khoa(gia_tri: Any) -> str:
+def _bucket_key(value: Any) -> str:
     """Khoá của một ô, dưới dạng chuỗi FE dùng thẳng được.
 
     `date_trunc` trả về một `datetime` lúc 00:00, và `str()` của nó là
@@ -138,9 +138,9 @@ def _khoa(gia_tri: Any) -> str:
     và cắt bằng `[:10]` ở ba chỗ khác nhau là ba chỗ để cắt sai. Trục "theo
     ngày" trả về một **ngày**, nên khoá của nó là `"2026-09-19"`.
     """
-    if isinstance(gia_tri, datetime):
-        return gia_tri.date().isoformat()
-    return "" if gia_tri is None else str(gia_tri)
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    return "" if value is None else str(value)
 
 
 class UsageEventRepository:
@@ -236,13 +236,13 @@ class UsageEventRepository:
         )
         if key_source is not None:
             stmt = stmt.where(UsageEvent.key_source == key_source)
-        theo_do_tin = {
-            CostConfidence(do_tin): Decimal(str(tong))
-            for do_tin, tong in (await self._session.execute(stmt)).all()
+        by_confidence = {
+            CostConfidence(confidence): Decimal(str(total))
+            for confidence, total in (await self._session.execute(stmt)).all()
         }
         return CostSplit(
-            exact=theo_do_tin.get(CostConfidence.EXACT, Decimal(0)),
-            low=theo_do_tin.get(CostConfidence.LOW, Decimal(0)),
+            exact=by_confidence.get(CostConfidence.EXACT, Decimal(0)),
+            low=by_confidence.get(CostConfidence.LOW, Decimal(0)),
         )
 
     async def list_since(self, *, user_id: uuid.UUID, since: datetime) -> Sequence[LedgerEntry]:
@@ -318,7 +318,7 @@ class UsageEventRepository:
     # ═══════════ tổng hợp cho `GET /admin/usage` (§16.3, §18.5, C16) ═══════════
     #
     # Bốn hàm dưới đây là **một** câu hỏi hỏi theo bốn trục, nên chúng là bốn
-    # lời gọi của cùng một hàm dựng câu (`_tong_hop`) chứ không phải bốn câu
+    # lời gọi của cùng một hàm dựng câu (`_aggregate`) chứ không phải bốn câu
     # SQL chép tay: bốn bản sao là bốn chỗ để `WHERE` lệch nhau, và một bảng
     # chi phí trong đó "theo ngày" cộng ra khác "theo model" là một bảng không
     # ai tin được nữa.
@@ -329,11 +329,11 @@ class UsageEventRepository:
     # endpoint `/api/v1/admin/*` kiểm lại quyền phía server"*), không phải một
     # `WHERE` ở đây.
 
-    async def _tong_hop(
+    async def _aggregate(
         self,
         *,
-        nhom: Any,
-        nhan: Any | None,
+        group: Any,
+        label: Any | None,
         since: datetime,
         until: datetime,
         key_source: KeySource | None = None,
@@ -343,7 +343,7 @@ class UsageEventRepository:
         `cost_confidence` **luôn** nằm trong `GROUP BY`, ở mọi trục — đó chính
         là C16 viết thành SQL: *"trộn chung model `metered` và `unmetered` vào
         một con số làm bảng chi phí vô nghĩa — phải tách từ đây, không phải sửa
-        ở tầng hiển thị"*. Một hàm `_tong_hop` không có cột ấy sẽ mời người gọi
+        ở tầng hiển thị"*. Một hàm `_aggregate` không có cột ấy sẽ mời người gọi
         thứ hai quên nó đi.
 
         Biên `>= since` và `< until` (nửa mở), cùng luật với `list_since`: hai
@@ -355,32 +355,32 @@ class UsageEventRepository:
         một tổng đã cộng xong rồi mới trừ đi phần BYOK là một phép trừ ai cũng
         có thể quên, còn một `WHERE` thì không quên được.
         """
-        cot = [nhom.label("khoa")]
-        if nhan is not None:
-            cot.append(nhan.label("nhan"))
-        cot += [
-            UsageEvent.cost_confidence.label("do_tin"),
+        columns = [group.label("key")]
+        if label is not None:
+            columns.append(label.label("label"))
+        columns += [
+            UsageEvent.cost_confidence.label("confidence"),
             func.coalesce(func.sum(UsageEvent.cost_usd), 0).label("cost_usd"),
             func.coalesce(func.sum(UsageEvent.prompt_tokens), 0).label("prompt_tokens"),
             func.coalesce(func.sum(UsageEvent.completion_tokens), 0).label("completion_tokens"),
             func.count().label("events"),
         ]
-        stmt = select(*cot).where(
+        stmt = select(*columns).where(
             UsageEvent.created_at >= since,
             UsageEvent.created_at < until,
         )
         if key_source is not None:
             stmt = stmt.where(UsageEvent.key_source == key_source)
-        if nhan is not None:
+        if label is not None:
             stmt = stmt.join(User, User.id == UsageEvent.user_id, isouter=True)
-        stmt = stmt.group_by(*cot[: 2 if nhan is not None else 1], UsageEvent.cost_confidence)
-        stmt = stmt.order_by(cot[0])
+        stmt = stmt.group_by(*columns[: 2 if label is not None else 1], UsageEvent.cost_confidence)
+        stmt = stmt.order_by(columns[0])
         rows = (await self._session.execute(stmt)).all()
         return [
             UsageBucket(
-                key=_khoa(r.khoa),
-                label=getattr(r, "nhan", None),
-                confidence=CostConfidence(r.do_tin),
+                key=_bucket_key(r.key),
+                label=getattr(r, "label", None),
+                confidence=CostConfidence(r.confidence),
                 cost_usd=Decimal(str(r.cost_usd)),
                 prompt_tokens=int(r.prompt_tokens),
                 completion_tokens=int(r.completion_tokens),
@@ -400,9 +400,9 @@ class UsageEventRepository:
         bằng UTC (`datetime.now(UTC)` ở mọi chỗ ghi mốc), nên chọn UTC ở đây là
         giữ đúng một đồng hồ chứ không phải thêm một quy ước.
         """
-        ngay = func.date_trunc("day", func.timezone("UTC", UsageEvent.created_at))
-        return await self._tong_hop(
-            nhom=ngay, nhan=None, since=since, until=until, key_source=key_source
+        day_col = func.date_trunc("day", func.timezone("UTC", UsageEvent.created_at))
+        return await self._aggregate(
+            group=day_col, label=None, since=since, until=until, key_source=key_source
         )
 
     async def admin_by_user(
@@ -415,9 +415,9 @@ class UsageEventRepository:
         `soft-delete` (§20 "Quyền riêng tư") thì có — và một bảng chi phí tụt
         mất vài dòng vì người ta vừa xoá tài khoản là một bảng nói dối.
         """
-        return await self._tong_hop(
-            nhom=UsageEvent.user_id,
-            nhan=User.email,
+        return await self._aggregate(
+            group=UsageEvent.user_id,
+            label=User.email,
             since=since,
             until=until,
             key_source=key_source,
@@ -427,8 +427,8 @@ class UsageEventRepository:
         self, *, since: datetime, until: datetime, key_source: KeySource | None = None
     ) -> Sequence[UsageBucket]:
         """Chi phí theo MODEL — §16.3 ("bảng theo model")."""
-        return await self._tong_hop(
-            nhom=UsageEvent.model_id, nhan=None, since=since, until=until, key_source=key_source
+        return await self._aggregate(
+            group=UsageEvent.model_id, label=None, since=since, until=until, key_source=key_source
         )
 
     async def admin_by_key_source(
@@ -450,4 +450,6 @@ class UsageEventRepository:
         ngay cạnh nó. Lọc nó đi thì người vận hành không còn đường nào biết là
         có tồn tại phần BYOK mình vừa loại ra.
         """
-        return await self._tong_hop(nhom=UsageEvent.key_source, nhan=None, since=since, until=until)
+        return await self._aggregate(
+            group=UsageEvent.key_source, label=None, since=since, until=until
+        )

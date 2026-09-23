@@ -300,7 +300,7 @@ class Settings(BaseSettings):
     #: `ol-qwen-small` (upstream 0.048 s) thì ~85% TTFT là chờ arq nhặt job.
     #:
     #: Là một *giới hạn vận hành* nên nó ở đây chứ không phải một số trong
-    #: `WorkerSettings` (A3, §19.2 L4) — khác `REAPER_MOI_N_GIAY`, vốn là *độ
+    #: `WorkerSettings` (A3, §19.2 L4) — khác `REAPER_EVERY_N_SECONDS`, vốn là *độ
     #: phân giải* của một phép quét và chỉ nhận ước của 60.
     #:
     #: Giá trị 0.1 đổi ~0.2 s p50 TTFT cho mọi model, giá là worker quay vòng
@@ -443,7 +443,7 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def _khong_nhan_gia_tri_la_chu_thich(self) -> Settings:
+    def _reject_comment_values(self) -> Settings:
         """Giá trị bắt đầu bằng `#` là một chú thích bị nuốt — KHÔNG boot (A4).
 
         B-44/B-118: `KEY=<rỗng>   # ghi chú` trong `.env` cho ra giá trị là
@@ -468,15 +468,15 @@ class Settings(BaseSettings):
         lời cho ca ấy là đổi giá trị — rẻ hơn nhiều so với một cấu hình rác chạy
         im lặng.
         """
-        for ten in type(self).model_fields:
-            gia_tri = getattr(self, ten)
-            if isinstance(gia_tri, SecretStr):
-                gia_tri = gia_tri.get_secret_value()
-            if isinstance(gia_tri, str) and gia_tri.lstrip().startswith("#"):
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if isinstance(value, SecretStr):
+                value = value.get_secret_value()
+            if isinstance(value, str) and value.lstrip().startswith("#"):
                 raise RuntimeError(
-                    f"{ten} đang mang giá trị là một CHÚ THÍCH, không phải giá trị thật "
+                    f"{name} đang mang giá trị là một CHÚ THÍCH, không phải giá trị thật "
                     f"(B-44/B-118). Trong `.env`, chú thích phải nằm ở dòng riêng phía "
-                    f"trên phép gán — `{ten}=` rồi khoảng trắng rồi `# …` cho ra giá trị "
+                    f"trên phép gán — `{name}=` rồi khoảng trắng rồi `# …` cho ra giá trị "
                     f"là chính câu chú thích đó."
                 )
         return self

@@ -1,7 +1,7 @@
 /**
  * Luat THUAN cua man "Nguoi dung" — T-3.12, §16.3, §10.4.
  *
- * KH tham chieu: §10.4, §16.3 · tasks.md T-2.16 (`SuaUserRequest`), T-2.20,
+ * KH tham chieu: §10.4, §16.3 · tasks.md T-2.16 (`UpdateUserRequest`), T-2.20,
  * T-3.12 (Cam bay ②) · NQ-51.
  *
  * ╔════════════════════════════════════════════════════════════════════════╗
@@ -9,7 +9,7 @@
  * ╚════════════════════════════════════════════════════════════════════════╝
  *
  * `PATCH /admin/users/{id}` co hai truong (`tier_name`, `limit_override`), va
- * docstring `SuaUserRequest` noi ro vi sao khong co truong thu ba: cong tac
+ * docstring `UpdateUserRequest` noi ro vi sao khong co truong thu ba: cong tac
  * "Chay skill" ghi vao `limit_override.can_execute_skills`. Nen moi thao tac
  * o day la "doc ban ghi de hien co → doi DUNG mot khoa → gui lai CA ban ghi
  * de": gui mot ban ghi de chi co khoa vua doi la xoa mat moi khoa khac.
@@ -20,11 +20,11 @@
  * Ban ghi de rong thi gui `null` ("quay ve dung han muc cua tier").
  */
 
-import type { AdminUserRa, TierRow, TrangThaiUser } from "../../lib/api";
-import type { KhoaChu } from "../../lib/i18n";
+import type { AdminUserOut, TierRow, UserStatus } from "../../lib/api";
+import type { TextKey } from "../../lib/i18n";
 
 /** Nam trang thai §11.1 → nhan (dung chung cho bang Nguoi dung va so audit). */
-export const STATUS_LABEL: Record<TrangThaiUser, KhoaChu> = {
+export const STATUS_LABEL: Record<UserStatus, TextKey> = {
   pending_email: "admin.status.pending_email",
   pending_approval: "admin.status.pending_approval",
   active: "admin.status.active",
@@ -45,10 +45,10 @@ export function tierOf(tiers: readonly TierRow[], name: string): TierRow | null 
 }
 
 /** Quyen chay skill DANG CO HIEU LUC: ban ghi de thang tier (§10.4). */
-export function effectiveSkills(user: AdminUserRa, tiers: readonly TierRow[]): boolean {
-  const ghiDe = user.limit_override_json?.[SKILLS_KEY];
-  if (typeof ghiDe === "boolean") {
-    return ghiDe;
+export function effectiveSkills(user: AdminUserOut, tiers: readonly TierRow[]): boolean {
+  const overridden = user.limit_override_json?.[SKILLS_KEY];
+  if (typeof overridden === "boolean") {
+    return overridden;
   }
   return tierOf(tiers, user.tier_name)?.can_execute_skills ?? false;
 }
@@ -66,13 +66,13 @@ export function overrideWithSkills(
   next: boolean,
   tierDefault: boolean | null,
 ): LimitOverride | null {
-  const ban = { ...(current ?? {}) };
+  const copy = { ...(current ?? {}) };
   if (tierDefault !== null && next === tierDefault) {
-    delete ban[SKILLS_KEY];
+    delete copy[SKILLS_KEY];
   } else {
-    ban[SKILLS_KEY] = next;
+    copy[SKILLS_KEY] = next;
   }
-  return orNull(ban);
+  return orNull(copy);
 }
 
 /**
@@ -84,16 +84,16 @@ export function overrideWithLimits(
   current: LimitOverride | null,
   values: Record<LimitKey, string>,
 ): LimitOverride | null {
-  const ban = { ...(current ?? {}) };
+  const copy = { ...(current ?? {}) };
   for (const key of LIMIT_KEYS) {
     const value = values[key].trim();
     if (value === "") {
-      delete ban[key];
+      delete copy[key];
     } else {
-      ban[key] = value;
+      copy[key] = value;
     }
   }
-  return orNull(ban);
+  return orNull(copy);
 }
 
 /** Gia tri dang ghi de cua mot khoa tien, de dien san vao o nhap. */

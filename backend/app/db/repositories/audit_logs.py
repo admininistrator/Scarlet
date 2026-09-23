@@ -66,7 +66,7 @@ class AuditLogRow(NamedTuple):
     target_display_name: str | None = None
 
 
-def _ip_hop_le(ip: str | None) -> IPv4Address | IPv6Address | None:
+def _valid_ip(ip: str | None) -> IPv4Address | IPv6Address | None:
     """Địa chỉ dùng được cho cột `INET`, hoặc `None`.
 
     `core/ratelimit.py::dia_chi_ip` trả về `"unknown"` khi không đọc được IP
@@ -114,7 +114,7 @@ class AuditLogRepository:
             target_type=target_type,
             target_id=target_id,
             details=details,
-            ip=_ip_hop_le(ip),
+            ip=_valid_ip(ip),
         )
         self._session.add(row)
         await self._session.flush()

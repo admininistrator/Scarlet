@@ -32,7 +32,7 @@
  * cung bo cuoc. `CONNECTING` ⇒ de trinh duyet tu thu (no se gui
  * `Last-Event-ID`); `CLOSED` ⇒ tu hen gio mo lai, luy thua co tran, cong mot
  * lan mo NGAY khi su kien `online` bao mang da ve. Chi sau
- * `SO_LAN_THU_TOI_DA` lan lien tiep khong len duoc moi bao `onChet` — va luc
+ * `MAX_ATTEMPTS` lan lien tiep khong len duoc moi bao `onFatal` — va luc
  * do no that su la 404/401 chu khong phai mot lan rot mang.
  *
  * Dieu nay KHONG mau thuan voi "khong tu dong khi `error`" cua task: cai bi
@@ -46,7 +46,7 @@
  * EventSource(...)` thi "last event ID string" cua no khoi tao RONG, nen no
  * khong gui header nao ca va server se phat lai tu dau (§7.2 ② mac dinh
  * cursor `0`) — tuc chu bi LAP, dung trieu chung C3. Vi vay o day tu giu
- * `cursor` va noi vao `?cursor=`. `doc_cursor` phia server doc header TRUOC
+ * `cursor` va noi vao `?cursor=`. `parse_cursor` phia server doc header TRUOC
  * query, nen khi trinh duyet tu reconnect object moi do thi header (moi hon)
  * van thang cai `?cursor=` (da cu) trong URL — dung nhu no da viet.
  *
@@ -57,12 +57,12 @@
  *
  * **5. Im lang KHONG bao gio la "xong" (§7.4).** Khong co bo dem thoi gian nao
  * trong file nay ket thuc mot luot sinh. Chi `done` va `error` lam duoc viec
- * do; het `SO_LAN_THU_TOI_DA` chi doi trang thai duong day sang `dong` va goi
- * `onChet`, no khong bia ra mot ket cuc cho cau tra loi.
+ * do; het `MAX_ATTEMPTS` chi doi trang thai duong day sang `dong` va goi
+ * `onFatal`, no khong bia ra mot ket cuc cho cau tra loi.
  */
 
 /** So token — payload cua `usage`. Khoa VANG MAT nghia la provider khong bao. */
-export interface UsageRa {
+export interface UsageOut {
   in: number;
   out: number;
   reasoning?: number;
@@ -70,7 +70,7 @@ export interface UsageRa {
 }
 
 /** Chin loai event cua §7.4 / Phu luc F. */
-export type SuKienStream =
+export type StreamEvent =
   | { event: "start"; data: { message_id: string; model_id: string } }
   | { event: "delta"; data: { t: string } }
   | { event: "reasoning"; data: { t: string } }
@@ -83,17 +83,17 @@ export type SuKienStream =
       data: { call_id: string; name: string; ok: boolean; result: unknown };
     }
   | { event: "artifact"; data: { artifact_id: string; version: number } }
-  | { event: "usage"; data: UsageRa }
-  | { event: "done"; data: { finish_reason: string | null; usage: UsageRa | null } }
+  | { event: "usage"; data: UsageOut }
+  | { event: "done"; data: { finish_reason: string | null; usage: UsageOut | null } }
   | { event: "error"; data: { code: string; message: string } };
 
-export type LoaiSuKien = SuKienStream["event"];
+export type EventType = StreamEvent["event"];
 
 /**
  * Tam loai dang ky bang vong lap. `error` KHONG o day — no co mot handler
  * rieng vi ten do dung chung voi su kien dut duong truyen (diem 1).
  */
-const LOAI_KHONG_PHAI_LOI = [
+const NON_ERROR_EVENTS = [
   "start",
   "delta",
   "reasoning",
@@ -105,12 +105,12 @@ const LOAI_KHONG_PHAI_LOI = [
 ] as const;
 
 /** Du chin loai — dung cho test va cho nguoi doc dem lai. */
-export const MOI_LOAI_SU_KIEN: readonly LoaiSuKien[] = [...LOAI_KHONG_PHAI_LOI, "error"];
+export const ALL_EVENT_TYPES: readonly EventType[] = [...NON_ERROR_EVENTS, "error"];
 
 /** Cho bao lau truoc lan thu DAU khi trinh duyet bo cuoc (diem 2). */
-const CHO_DAU_MS = 1_000;
+const INITIAL_DELAY_MS = 1_000;
 /** Tran cua luy thua. Lon hon nua thi mot lan mat mang ngan cung phai cho lau. */
-const CHO_TOI_DA_MS = 15_000;
+const MAX_DELAY_MS = 15_000;
 /**
  * Bao nhieu lan lien tiep khong len duoc thi thoi.
  *
@@ -119,7 +119,7 @@ const CHO_TOI_DA_MS = 15_000;
  * tuc, nho su kien `online`); mot message 404 that thi dung sau ~60 s va noi
  * ra — thay vi quay vong mai voi mot con tro nhap nhay.
  */
-const SO_LAN_THU_TOI_DA = 8;
+const MAX_ATTEMPTS = 8;
 
 /**
  * Trang thai duong day, de man hinh noi dung su that.
@@ -128,22 +128,22 @@ const SO_LAN_THU_TOI_DA = 8;
  * hoac minh dang hen gio thu), cai sau la "da thoi". Gop hai cai vao mot la
  * mat dung thu nguoi dung can biet.
  */
-export type TrangThaiKetNoi = "dang-mo" | "dang-chay" | "dang-noi-lai" | "dong";
+export type ConnectionStatus = "dang-mo" | "dang-chay" | "dang-noi-lai" | "dong";
 
-export interface ThamSoStream {
+export interface StreamParams {
   /** Duong dan tuong doi, lay nguyen tu `stream_url` cua `202`. */
   url: string;
-  onSuKien: (suKien: SuKienStream) => void;
-  onTrangThai?: (trangThai: TrangThaiKetNoi) => void;
-  /** Da thu het `SO_LAN_THU_TOI_DA` lan ma khong len — xem diem 2. */
-  onChet?: (lyDo: string) => void;
+  onEvent: (event: StreamEvent) => void;
+  onStatus?: (status: ConnectionStatus) => void;
+  /** Da thu het `MAX_ATTEMPTS` lan ma khong len — xem diem 2. */
+  onFatal?: (reason: string) => void;
   /** Khung doc khong duoc. Mac dinh in ra console, khong nuot. */
-  onCanhBao?: (lyDo: string) => void;
+  onWarning?: (reason: string) => void;
 }
 
-export interface TayCamStream {
+export interface StreamHandle {
   /** Dong han. Go het listener va hen gio. Goi nhieu lan khong sao. */
-  dong: () => void;
+  close: () => void;
   /** Redis Stream ID cuoi cung DA NHAN — de kiem trong DevTools. */
   cursor: () => string;
 }
@@ -155,37 +155,37 @@ export interface TayCamStream {
  * `done` hoac `error` dong duoc mot luot sinh; moi thu khac chi doi trang thai
  * duong day.
  */
-export function moStream(thamSo: ThamSoStream): TayCamStream {
-  const canhBao = thamSo.onCanhBao ?? ((lyDo: string) => console.error("[sse]", lyDo));
+export function openStream(params: StreamParams): StreamHandle {
+  const warn = params.onWarning ?? ((reason: string) => console.error("[sse]", reason));
 
   let es: EventSource | null = null;
   //: Redis Stream ID cua ban ghi CUOI CUNG DA GIAO CHO NGUOI DUNG (§7.3).
   let cursor = "";
   //: `done`/`error` da toi, hoac nguoi goi da `dong()`. Khong noi lai nua.
-  let daKetThuc = false;
+  let finished = false;
   //: So lan mo KHONG len lien tiep. Ve 0 moi khi `open`, hoac khi mang vua ve.
-  let lanThu = 0;
-  let hen: number | null = null;
+  let attempt = 0;
+  let timer: number | null = null;
 
-  function baoTrangThai(trangThai: TrangThaiKetNoi): void {
-    thamSo.onTrangThai?.(trangThai);
+  function reportStatus(status: ConnectionStatus): void {
+    params.onStatus?.(status);
   }
 
-  function huyHen(): void {
-    if (hen !== null) {
-      window.clearTimeout(hen);
-      hen = null;
+  function clearReconnect(): void {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
     }
   }
 
-  function dongKetNoi(): void {
+  function closeConnection(): void {
     if (es !== null) {
       es.close();
       es = null;
     }
   }
 
-  function nhanKhung(loai: LoaiSuKien, ev: MessageEvent<string>): void {
+  function handleFrame(kind: EventType, ev: MessageEvent<string>): void {
     // Cap nhat cursor TRUOC khi giao su kien ra ngoai: neu handler nem thi
     // cursor van dung, va lan noi lai sau do khong phat lai khung nay.
     if (ev.lastEventId) {
@@ -198,57 +198,57 @@ export function moStream(thamSo: ThamSoStream): TayCamStream {
     } catch {
       // Mot khung doc khong duoc KHONG phai ly do de ngung doc nhung khung
       // con lai — nhung cung khong duoc bien mat khong dau vet.
-      canhBao(`khung ${loai} khong phai JSON: ${ev.data.slice(0, 120)}`);
+      warn(`khung ${kind} khong phai JSON: ${ev.data.slice(0, 120)}`);
       return;
     }
 
-    thamSo.onSuKien({ event: loai, data } as SuKienStream);
+    params.onEvent({ event: kind, data } as StreamEvent);
 
-    if (loai === "done" || loai === "error") {
-      daKetThuc = true;
-      huyHen();
-      dongKetNoi();
-      baoTrangThai("dong");
+    if (kind === "done" || kind === "error") {
+      finished = true;
+      clearReconnect();
+      closeConnection();
+      reportStatus("dong");
     }
   }
 
   /** Hen mo lai — chi goi khi TRINH DUYET da bo cuoc (diem 2). */
-  function henMoLai(): void {
-    if (daKetThuc || hen !== null) {
+  function scheduleReconnect(): void {
+    if (finished || timer !== null) {
       return;
     }
-    lanThu += 1;
-    if (lanThu > SO_LAN_THU_TOI_DA) {
-      dongKetNoi();
-      baoTrangThai("dong");
-      thamSo.onChet?.(
-        `da thu noi lai ${SO_LAN_THU_TOI_DA} lan ma khong len duoc — ` +
+    attempt += 1;
+    if (attempt > MAX_ATTEMPTS) {
+      closeConnection();
+      reportStatus("dong");
+      params.onFatal?.(
+        `da thu noi lai ${MAX_ATTEMPTS} lan ma khong len duoc — ` +
           `kiem tra mang, hoac message nay khong con doc duoc`,
       );
       return;
     }
-    const cho = Math.min(CHO_DAU_MS * 2 ** (lanThu - 1), CHO_TOI_DA_MS);
-    hen = window.setTimeout(() => {
-      hen = null;
-      moKetNoi();
-    }, cho);
+    const delay = Math.min(INITIAL_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+    timer = window.setTimeout(() => {
+      timer = null;
+      openConnection();
+    }, delay);
   }
 
   /** Mot ten, hai chuyen — xem diem 1 trong docstring module. */
-  function xuLySuKienError(ev: Event): void {
-    const khung = ev as MessageEvent<unknown>;
-    if (typeof khung.data === "string") {
-      nhanKhung("error", khung as MessageEvent<string>);
+  function handleErrorEvent(ev: Event): void {
+    const frame = ev as MessageEvent<unknown>;
+    if (typeof frame.data === "string") {
+      handleFrame("error", frame as MessageEvent<string>);
       return;
     }
 
-    baoTrangThai("dang-noi-lai");
+    reportStatus("dang-noi-lai");
 
     if (es === null || es.readyState === EventSource.CLOSED) {
       // Trinh duyet da bo cuoc (Offline, 404, 401...) va se KHONG thu lai.
       // MINH nhan viec — khong phai minh cung bo cuoc (diem 2, B-115).
-      dongKetNoi();
-      henMoLai();
+      closeConnection();
+      scheduleReconnect();
       return;
     }
 
@@ -256,26 +256,26 @@ export function moStream(thamSo: ThamSoStream): TayCamStream {
     // KHONG goi close() o day — do dung la thu task cam.
   }
 
-  function moKetNoi(): void {
-    huyHen();
-    dongKetNoi();
-    const url = cursor === "" ? thamSo.url : `${thamSo.url}?cursor=${encodeURIComponent(cursor)}`;
+  function openConnection(): void {
+    clearReconnect();
+    closeConnection();
+    const url = cursor === "" ? params.url : `${params.url}?cursor=${encodeURIComponent(cursor)}`;
     // `withCredentials` la chu cua Phu luc F, va la duong danh tinh di qua
     // (NQ-33): `EventSource` khong dat duoc header nen cookie la thu duy nhat
     // no mang theo.
-    const nguon = new EventSource(url, { withCredentials: true });
-    es = nguon;
+    const eventSource = new EventSource(url, { withCredentials: true });
+    es = eventSource;
 
-    nguon.addEventListener("open", () => {
-      lanThu = 0;
-      baoTrangThai("dang-chay");
+    eventSource.addEventListener("open", () => {
+      attempt = 0;
+      reportStatus("dang-chay");
     });
-    for (const loai of LOAI_KHONG_PHAI_LOI) {
-      nguon.addEventListener(loai, (ev) => nhanKhung(loai, ev as MessageEvent<string>));
+    for (const kind of NON_ERROR_EVENTS) {
+      eventSource.addEventListener(kind, (ev) => handleFrame(kind, ev as MessageEvent<string>));
     }
-    nguon.addEventListener("error", xuLySuKienError);
+    eventSource.addEventListener("error", handleErrorEvent);
 
-    baoTrangThai("dang-mo");
+    reportStatus("dang-mo");
   }
 
   /**
@@ -288,39 +288,39 @@ export function moStream(thamSo: ThamSoStream): TayCamStream {
    * khong mat va khong lap mot chu nao, nen khong can doan xem ket noi con
    * song hay khong — mot phep doan sai o day la treo man hinh.
    */
-  function khiDoiHienThi(): void {
-    if (daKetThuc || document.visibilityState !== "visible") {
+  function handleVisibilityChange(): void {
+    if (finished || document.visibilityState !== "visible") {
       return;
     }
-    moKetNoi();
+    openConnection();
   }
 
   /**
    * Mang vua ve — mo lai NGAY, khong doi het luy thua.
    *
    * Day la thu bien "Offline 5 s roi bat lai" tu "cho toi 8 giay" thanh "chay
-   * tiep gan nhu tuc thi". `lanThu` ve 0 vi mot lan chuyen trang thai mang la
+   * tiep gan nhu tuc thi". `attempt` ve 0 vi mot lan chuyen trang thai mang la
    * thong tin moi: nhung lan truot truoc do khong noi gi ve lan nay.
    */
-  function khiCoMang(): void {
-    if (daKetThuc) {
+  function handleOnline(): void {
+    if (finished) {
       return;
     }
-    lanThu = 0;
-    moKetNoi();
+    attempt = 0;
+    openConnection();
   }
 
-  document.addEventListener("visibilitychange", khiDoiHienThi);
-  window.addEventListener("online", khiCoMang);
-  moKetNoi();
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("online", handleOnline);
+  openConnection();
 
   return {
-    dong: () => {
-      daKetThuc = true;
-      document.removeEventListener("visibilitychange", khiDoiHienThi);
-      window.removeEventListener("online", khiCoMang);
-      huyHen();
-      dongKetNoi();
+    close: () => {
+      finished = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("online", handleOnline);
+      clearReconnect();
+      closeConnection();
     },
     cursor: () => cursor,
   };

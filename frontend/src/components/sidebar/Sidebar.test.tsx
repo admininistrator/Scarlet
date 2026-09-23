@@ -44,23 +44,23 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/api", async (importOriginal) => {
-  const that = await importOriginal<typeof import("../../lib/api")>();
+  const actual = await importOriginal<typeof import("../../lib/api")>();
   return {
-    ...that,
+    ...actual,
     api: {
-      ...that.api,
-      danhSachHoiThoai: vi.fn(),
-      suaHoiThoai: vi.fn(),
-      xoaHoiThoai: vi.fn(),
+      ...actual.api,
+      listConversations: vi.fn(),
+      updateConversation: vi.fn(),
+      deleteConversation: vi.fn(),
     },
   };
 });
 
 import {
   api,
-  type DanhSachHoiThoai,
-  type HoiThoaiChiTiet,
-  type HoiThoaiRa,
+  type ConversationList,
+  type ConversationDetail,
+  type ConversationOut,
 } from "../../lib/api";
 import { Sidebar, sortConversations } from "./Sidebar";
 import { resetSidebarOpenForTest, toggleSidebar } from "./sidebarOpen";
@@ -71,15 +71,15 @@ import { resetSidebarOpenForTest, toggleSidebar } from "./sidebarOpen";
  * test va console day canh bao. Nut that o header (`Layout.tsx`) di qua mot
  * `onClick`, tuc da nam trong `act` san.
  */
-function batTat(): void {
+function toggle(): void {
   act(() => {
     toggleSidebar();
   });
 }
 
-const KHOA_LUU = "scarlet-sidebar";
+const STORAGE_KEY = "scarlet-sidebar";
 
-function hoiThoai(sua: Partial<HoiThoaiRa> & Pick<HoiThoaiRa, "id">): HoiThoaiRa {
+function conversation(patch: Partial<ConversationOut> & Pick<ConversationOut, "id">): ConversationOut {
   return {
     title: null,
     default_model: null,
@@ -88,25 +88,25 @@ function hoiThoai(sua: Partial<HoiThoaiRa> & Pick<HoiThoaiRa, "id">): HoiThoaiRa
     pinned: false,
     created_at: "2026-09-01T00:00:00+00:00",
     updated_at: "2026-09-01T00:00:00+00:00",
-    ...sua,
+    ...patch,
   };
 }
 
-function trang(items: HoiThoaiRa[], nextCursor: string | null = null): DanhSachHoiThoai {
+function page(items: ConversationOut[], nextCursor: string | null = null): ConversationList {
   return { items, next_cursor: nextCursor };
 }
 
-function chiTiet(item: HoiThoaiRa): HoiThoaiChiTiet {
+function detail(item: ConversationOut): ConversationDetail {
   return { ...item, path: [] };
 }
 
-const goi = () => vi.mocked(api.danhSachHoiThoai);
+const listMock = () => vi.mocked(api.listConversations);
 
-function dungLen(props: Partial<Parameters<typeof Sidebar>[0]> = {}) {
+function mount(props: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const onSelect = vi.fn();
   const onNewChat = vi.fn();
   const onOpenConversationDeleted = vi.fn();
-  const ket = render(
+  const view = render(
     <Sidebar
       openConversationId={null}
       onSelect={onSelect}
@@ -115,62 +115,62 @@ function dungLen(props: Partial<Parameters<typeof Sidebar>[0]> = {}) {
       {...props}
     />,
   );
-  return { ...ket, onSelect, onNewChat, onOpenConversationDeleted };
+  return { ...view, onSelect, onNewChat, onOpenConversationDeleted };
 }
 
 /** Mo menu "⋯" cua mot hang roi bam mot muc trong do. */
-async function quaMenu(tieuDe: string, muc: string) {
-  await userEvent.click(screen.getByRole("button", { name: `Tuỳ chọn hội thoại — ${tieuDe}` }));
-  await userEvent.click(screen.getByRole("menuitem", { name: muc }));
+async function throughMenu(title: string, item: string) {
+  await userEvent.click(screen.getByRole("button", { name: `Tuỳ chọn hội thoại — ${title}` }));
+  await userEvent.click(screen.getByRole("menuitem", { name: item }));
 }
 
 /** Nhom "Đã ghim" / "Gần đây" — tra ve `<section>` chua tieu de nhom ay. */
-function nhom(ten: string): HTMLElement {
-  return screen.getByRole("heading", { name: ten }).closest("section") as HTMLElement;
+function group(name: string): HTMLElement {
+  return screen.getByRole("heading", { name: name }).closest("section") as HTMLElement;
 }
 
 beforeEach(() => {
   localStorage.clear();
   // Store song o tam module nen no song sot qua `cleanup()`.
   resetSidebarOpenForTest();
-  goi().mockResolvedValue(trang([]));
+  listMock().mockResolvedValue(page([]));
 });
 
 describe("Sidebar — phan trang", () => {
   it("1. `next_cursor: null` thi KHONG co nut Tai them va khong goi trang ke", async () => {
-    goi().mockResolvedValue(trang([hoiThoai({ id: "a", title: "Mot" })], null));
+    listMock().mockResolvedValue(page([conversation({ id: "a", title: "Mot" })], null));
 
-    dungLen();
+    mount();
 
     expect(await screen.findByText("Mot")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Tải thêm" })).not.toBeInTheDocument();
-    expect(goi()).toHaveBeenCalledTimes(1);
-    expect(goi()).toHaveBeenCalledWith();
+    expect(listMock()).toHaveBeenCalledTimes(1);
+    expect(listMock()).toHaveBeenCalledWith();
   });
 
   it("2. co con tro thi bam Tai them goi dung `updated_before` cua trang truoc", async () => {
-    const conTro = "2026-09-02T03:04:05.678901+00:00";
-    goi()
-      .mockResolvedValueOnce(trang([hoiThoai({ id: "a", title: "Mot" })], conTro))
-      .mockResolvedValueOnce(trang([hoiThoai({ id: "b", title: "Hai" })], null));
+    const cursor = "2026-09-02T03:04:05.678901+00:00";
+    listMock()
+      .mockResolvedValueOnce(page([conversation({ id: "a", title: "Mot" })], cursor))
+      .mockResolvedValueOnce(page([conversation({ id: "b", title: "Hai" })], null));
 
-    dungLen();
+    mount();
     await screen.findByText("Mot");
 
     await userEvent.click(screen.getByRole("button", { name: "Tải thêm" }));
 
     expect(await screen.findByText("Hai")).toBeInTheDocument();
-    expect(goi()).toHaveBeenNthCalledWith(2, conTro);
+    expect(listMock()).toHaveBeenNthCalledWith(2, cursor);
     expect(screen.queryByRole("button", { name: "Tải thêm" })).not.toBeInTheDocument();
   });
 
   it("3. hai trang tra ve cung mot hoi thoai thi no chi hien MOT lan", async () => {
-    const trung = hoiThoai({ id: "a", title: "Trùng" });
-    goi()
-      .mockResolvedValueOnce(trang([trung, hoiThoai({ id: "b", title: "Hai" })], "cursor-1"))
-      .mockResolvedValueOnce(trang([trung, hoiThoai({ id: "c", title: "Ba" })], null));
+    const duplicate = conversation({ id: "a", title: "Trùng" });
+    listMock()
+      .mockResolvedValueOnce(page([duplicate, conversation({ id: "b", title: "Hai" })], "cursor-1"))
+      .mockResolvedValueOnce(page([duplicate, conversation({ id: "c", title: "Ba" })], null));
 
-    dungLen();
+    mount();
     await screen.findByText("Trùng");
 
     await userEvent.click(screen.getByRole("button", { name: "Tải thêm" }));
@@ -183,33 +183,33 @@ describe("Sidebar — phan trang", () => {
 
 describe("Sidebar — xoa", () => {
   it("4. xoa xong thi hang bien mat NGAY, khong co lan `GET /conversations` thu hai", async () => {
-    goi().mockResolvedValue(
-      trang([hoiThoai({ id: "a", title: "Một" }), hoiThoai({ id: "b", title: "Hai" })]),
+    listMock().mockResolvedValue(
+      page([conversation({ id: "a", title: "Một" }), conversation({ id: "b", title: "Hai" })]),
     );
-    vi.mocked(api.xoaHoiThoai).mockResolvedValue(undefined);
+    vi.mocked(api.deleteConversation).mockResolvedValue(undefined);
 
-    dungLen();
+    mount();
     await screen.findByText("Một");
 
-    await quaMenu("Một", "Xoá");
+    await throughMenu("Một", "Xoá");
     await userEvent.click(screen.getByRole("button", { name: "Xoá" }));
 
     await waitFor(() => {
       expect(screen.queryByText("Một")).not.toBeInTheDocument();
     });
-    expect(api.xoaHoiThoai).toHaveBeenCalledWith("a");
+    expect(api.deleteConversation).toHaveBeenCalledWith("a");
     expect(screen.getByText("Hai")).toBeInTheDocument();
-    expect(goi()).toHaveBeenCalledTimes(1);
+    expect(listMock()).toHaveBeenCalledTimes(1);
   });
 
   it("5. xoa hoi thoai DANG MO thi man chat duoc bao", async () => {
-    goi().mockResolvedValue(trang([hoiThoai({ id: "a", title: "Một" })]));
-    vi.mocked(api.xoaHoiThoai).mockResolvedValue(undefined);
+    listMock().mockResolvedValue(page([conversation({ id: "a", title: "Một" })]));
+    vi.mocked(api.deleteConversation).mockResolvedValue(undefined);
 
-    const { onOpenConversationDeleted } = dungLen({ openConversationId: "a" });
+    const { onOpenConversationDeleted } = mount({ openConversationId: "a" });
     await screen.findByText("Một");
 
-    await quaMenu("Một", "Xoá");
+    await throughMenu("Một", "Xoá");
     await userEvent.click(screen.getByRole("button", { name: "Xoá" }));
 
     await waitFor(() => {
@@ -220,28 +220,28 @@ describe("Sidebar — xoa", () => {
 
 describe("Sidebar — tim kiem cuc bo", () => {
   it("6. loc dung va KHONG goi mang mot lan nao", async () => {
-    goi().mockResolvedValue(
-      trang([
-        hoiThoai({ id: "a", title: "Hạn mức Redis" }),
-        hoiThoai({ id: "b", title: "Sửa nginx" }),
+    listMock().mockResolvedValue(
+      page([
+        conversation({ id: "a", title: "Hạn mức Redis" }),
+        conversation({ id: "b", title: "Sửa nginx" }),
       ]),
     );
 
-    dungLen();
+    mount();
     await screen.findByText("Hạn mức Redis");
-    const truoc = goi().mock.calls.length;
+    const before = listMock().mock.calls.length;
 
     await userEvent.type(screen.getByLabelText("Tìm hội thoại"), "nginx");
 
     expect(screen.getByText("Sửa nginx")).toBeInTheDocument();
     expect(screen.queryByText("Hạn mức Redis")).not.toBeInTheDocument();
-    expect(goi().mock.calls.length).toBe(truoc);
+    expect(listMock().mock.calls.length).toBe(before);
   });
 
   it("7. go KHONG DAU van tim ra tieu de co dau", async () => {
-    goi().mockResolvedValue(trang([hoiThoai({ id: "a", title: "Hạn mức Redis" })]));
+    listMock().mockResolvedValue(page([conversation({ id: "a", title: "Hạn mức Redis" })]));
 
-    dungLen();
+    mount();
     await screen.findByText("Hạn mức Redis");
 
     await userEvent.type(screen.getByLabelText("Tìm hội thoại"), "han muc");
@@ -252,101 +252,101 @@ describe("Sidebar — tim kiem cuc bo", () => {
 
 describe("Sidebar — ghim va doi ten", () => {
   it("8. ghim goi `PATCH {pinned:true}` va chuyen hang sang nhom “Đã ghim”", async () => {
-    const cu = hoiThoai({ id: "a", title: "Cũ", updated_at: "2026-09-01T00:00:00+00:00" });
-    const moi = hoiThoai({ id: "b", title: "Mới", updated_at: "2026-09-09T00:00:00+00:00" });
-    goi().mockResolvedValue(trang([cu, moi]));
-    vi.mocked(api.suaHoiThoai).mockResolvedValue(chiTiet({ ...cu, pinned: true }));
+    const old = conversation({ id: "a", title: "Cũ", updated_at: "2026-09-01T00:00:00+00:00" });
+    const next = conversation({ id: "b", title: "Mới", updated_at: "2026-09-09T00:00:00+00:00" });
+    listMock().mockResolvedValue(page([old, next]));
+    vi.mocked(api.updateConversation).mockResolvedValue(detail({ ...old, pinned: true }));
 
-    dungLen();
+    mount();
     await screen.findByText("Cũ");
     // Truoc khi ghim: chua co nhom "Da ghim", va "Moi" dung dau nhom "Gan day".
     expect(screen.queryByRole("heading", { name: "Đã ghim" })).not.toBeInTheDocument();
-    expect(within(nhom("Gần đây")).getAllByRole("listitem")[0]).toHaveTextContent("Mới");
+    expect(within(group("Gần đây")).getAllByRole("listitem")[0]).toHaveTextContent("Mới");
 
-    await quaMenu("Cũ", "Ghim");
+    await throughMenu("Cũ", "Ghim");
 
     await waitFor(() => {
-      expect(within(nhom("Đã ghim")).getByText("Cũ")).toBeInTheDocument();
+      expect(within(group("Đã ghim")).getByText("Cũ")).toBeInTheDocument();
     });
-    expect(within(nhom("Gần đây")).queryByText("Cũ")).not.toBeInTheDocument();
-    expect(api.suaHoiThoai).toHaveBeenCalledWith("a", { pinned: true });
+    expect(within(group("Gần đây")).queryByText("Cũ")).not.toBeInTheDocument();
+    expect(api.updateConversation).toHaveBeenCalledWith("a", { pinned: true });
     // Nhom "Da ghim" dung TRUOC nhom "Gan day" trong DOM.
-    expect(nhom("Đã ghim").compareDocumentPosition(nhom("Gần đây"))).toBe(
+    expect(group("Đã ghim").compareDocumentPosition(group("Gần đây"))).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });
 
   it("9. doi ten goi `PATCH {title}`; de trong goi `PATCH {title: null}`", async () => {
-    const item = hoiThoai({ id: "a", title: "Cũ" });
-    goi().mockResolvedValue(trang([item]));
-    vi.mocked(api.suaHoiThoai).mockResolvedValue(chiTiet({ ...item, title: "Tên mới" }));
+    const item = conversation({ id: "a", title: "Cũ" });
+    listMock().mockResolvedValue(page([item]));
+    vi.mocked(api.updateConversation).mockResolvedValue(detail({ ...item, title: "Tên mới" }));
 
-    dungLen();
+    mount();
     await screen.findByText("Cũ");
 
-    await quaMenu("Cũ", "Đổi tên");
+    await throughMenu("Cũ", "Đổi tên");
     await userEvent.clear(screen.getByLabelText("Tên mới"));
     await userEvent.type(screen.getByLabelText("Tên mới"), "Tên mới");
     await userEvent.click(screen.getByRole("button", { name: "Lưu" }));
 
     await waitFor(() => {
-      expect(api.suaHoiThoai).toHaveBeenCalledWith("a", { title: "Tên mới" });
+      expect(api.updateConversation).toHaveBeenCalledWith("a", { title: "Tên mới" });
     });
 
-    vi.mocked(api.suaHoiThoai).mockResolvedValue(chiTiet({ ...item, title: null }));
-    await quaMenu("Tên mới", "Đổi tên");
+    vi.mocked(api.updateConversation).mockResolvedValue(detail({ ...item, title: null }));
+    await throughMenu("Tên mới", "Đổi tên");
     await userEvent.clear(screen.getByLabelText("Tên mới"));
     await userEvent.click(screen.getByRole("button", { name: "Lưu" }));
 
     await waitFor(() => {
-      expect(api.suaHoiThoai).toHaveBeenLastCalledWith("a", { title: null });
+      expect(api.updateConversation).toHaveBeenLastCalledWith("a", { title: null });
     });
   });
 });
 
 describe("Sidebar — an/hien", () => {
   it("10a. an roi mount lai thi van an, va mo lai ghi duoc vao localStorage", async () => {
-    goi().mockResolvedValue(trang([hoiThoai({ id: "a", title: "Một" })]));
+    listMock().mockResolvedValue(page([conversation({ id: "a", title: "Một" })]));
 
-    const { unmount } = dungLen();
+    const { unmount } = mount();
     await screen.findByText("Một");
 
-    batTat();
+    toggle();
     await waitFor(() => {
       expect(screen.queryByText("Một")).not.toBeInTheDocument();
     });
-    expect(localStorage.getItem(KHOA_LUU)).toBe("closed");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("closed");
 
     unmount();
     resetSidebarOpenForTest();
-    dungLen();
+    mount();
 
     expect(screen.queryByText("Một")).not.toBeInTheDocument();
-    batTat();
+    toggle();
     expect(await screen.findByText("Một")).toBeInTheDocument();
-    expect(localStorage.getItem(KHOA_LUU)).toBe("open");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("open");
   });
 
   it("10b. `localStorage` nem (che do rieng tu) thi sidebar van chay, khong vo app", async () => {
-    goi().mockResolvedValue(trang([hoiThoai({ id: "a", title: "Một" })]));
-    const doc = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    listMock().mockResolvedValue(page([conversation({ id: "a", title: "Một" })]));
+    const readSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new DOMException("bi chan", "SecurityError");
     });
-    const ghi = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    const writeSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("bi chan", "SecurityError");
     });
 
     resetSidebarOpenForTest();
-    dungLen();
+    mount();
 
     expect(await screen.findByText("Một")).toBeInTheDocument();
-    batTat();
+    toggle();
     await waitFor(() => {
       expect(screen.queryByText("Một")).not.toBeInTheDocument();
     });
 
-    doc.mockRestore();
-    ghi.mockRestore();
+    readSpy.mockRestore();
+    writeSpy.mockRestore();
   });
 });
 
@@ -366,13 +366,13 @@ describe("Sidebar — chon hoi thoai", () => {
    * va no van xanh khi guard bi go.)
    */
   it("11. doi hoi thoai dang mo: DA CO ⇒ khong goi mang · CHUA CO ⇒ goi lai", async () => {
-    goi().mockResolvedValue(
-      trang([hoiThoai({ id: "a", title: "Một" }), hoiThoai({ id: "b", title: "Hai" })]),
+    listMock().mockResolvedValue(
+      page([conversation({ id: "a", title: "Một" }), conversation({ id: "b", title: "Hai" })]),
     );
 
-    const { rerender } = dungLen({ openConversationId: "a" });
+    const { rerender } = mount({ openConversationId: "a" });
     await screen.findByText("Hai");
-    expect(goi()).toHaveBeenCalledTimes(1);
+    expect(listMock()).toHaveBeenCalledTimes(1);
 
     rerender(
       <Sidebar
@@ -385,10 +385,10 @@ describe("Sidebar — chon hoi thoai", () => {
     await waitFor(() => {
       expect(screen.getByText("Hai").closest("button")).toHaveAttribute("aria-current", "page");
     });
-    expect(goi()).toHaveBeenCalledTimes(1);
+    expect(listMock()).toHaveBeenCalledTimes(1);
 
-    goi().mockResolvedValue(
-      trang([hoiThoai({ id: "moi", title: "Vừa tạo" }), hoiThoai({ id: "a", title: "Một" })]),
+    listMock().mockResolvedValue(
+      page([conversation({ id: "moi", title: "Vừa tạo" }), conversation({ id: "a", title: "Một" })]),
     );
     rerender(
       <Sidebar
@@ -399,20 +399,20 @@ describe("Sidebar — chon hoi thoai", () => {
       />,
     );
     expect(await screen.findByText("Vừa tạo")).toBeInTheDocument();
-    expect(goi()).toHaveBeenCalledTimes(2);
+    expect(listMock()).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("sortConversations", () => {
   it("12. ghim truoc, roi `updated_at` giam dan, roi `id` giam dan", () => {
-    const xep = sortConversations([
-      hoiThoai({ id: "a1", updated_at: "2026-09-01T00:00:00+00:00" }),
-      hoiThoai({ id: "a2", updated_at: "2026-09-01T00:00:00+00:00" }),
-      hoiThoai({ id: "b", updated_at: "2026-09-05T00:00:00+00:00" }),
-      hoiThoai({ id: "c", updated_at: "2026-08-01T00:00:00+00:00", pinned: true }),
+    const sorted = sortConversations([
+      conversation({ id: "a1", updated_at: "2026-09-01T00:00:00+00:00" }),
+      conversation({ id: "a2", updated_at: "2026-09-01T00:00:00+00:00" }),
+      conversation({ id: "b", updated_at: "2026-09-05T00:00:00+00:00" }),
+      conversation({ id: "c", updated_at: "2026-08-01T00:00:00+00:00", pinned: true }),
     ]);
 
-    expect(xep.map((x) => x.id)).toEqual(["c", "b", "a2", "a1"]);
+    expect(sorted.map((x) => x.id)).toEqual(["c", "b", "a2", "a1"]);
   });
 });
 
@@ -424,12 +424,12 @@ describe("Sidebar — ban T-HD2", () => {
    * lech ban ve — nen phai co mot ca noi thang ra rang khong con gi ca.
    */
   it("13. dong = 0 px: khong `<nav>`, khong nut nao con lai trong sidebar", async () => {
-    goi().mockResolvedValue(trang([hoiThoai({ id: "a", title: "Một" })]));
+    listMock().mockResolvedValue(page([conversation({ id: "a", title: "Một" })]));
 
-    const { container } = dungLen();
+    const { container } = mount();
     await screen.findByText("Một");
 
-    batTat();
+    toggle();
 
     await waitFor(() => {
       expect(container.querySelector("nav")).toBeNull();

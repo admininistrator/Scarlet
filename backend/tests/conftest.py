@@ -258,41 +258,41 @@ class FakeQuotaRedis:
         self.store: dict[str, str] = {}
         #: Mỗi lời gọi `zremrangebyscore`, theo thứ tự — test đọc để chứng minh
         #: bước dọn chạy TRƯỚC bước đọc.
-        self.da_don: list[tuple[str, object, object]] = []
+        self.cleaned: list[tuple[str, object, object]] = []
         #: Mỗi lời gọi `expire`, theo thứ tự — T-2.12 đọc để chứng minh nửa (b)
         #: của B-156 (hai khoá quota có TTL) thật sự chạy ở **mỗi** lần ghi.
-        self.da_dat_ttl: list[tuple[str, int]] = []
+        self.ttl_calls: list[tuple[str, int]] = []
         #: Mỗi lời gọi `zadd` dưới dạng `(khoá, số member)` — T-2.13 đọc để
         #: chứng minh `rebuild_quota` gửi **theo lô** chứ không một lệnh mỗi
         #: dòng sổ. Đó là thứ đứng sau DoD dòng 3 (10k dòng dưới 2 giây), và
         #: một bản giả không đếm gì sẽ xanh y hệt với 20 000 vòng đi-về.
-        self.da_ghi: list[tuple[str, int]] = []
+        self.written: list[tuple[str, int]] = []
         #: Bật lên để mô phỏng Redis chết giữa chừng.
         self.fail = False
 
     @staticmethod
-    def _diem(bien: object) -> tuple[float, bool]:
+    def _parse_bound(bound: object) -> tuple[float, bool]:
         """Một biên của `ZRANGEBYSCORE`: `-inf`, `+inf`, `12.5`, hoặc `(12.5`."""
-        raw = bien if isinstance(bien, str) else repr(bien)
-        mo = raw.startswith("(")
-        return float(raw[1:] if mo else raw), mo
+        raw = bound if isinstance(bound, str) else repr(bound)
+        is_open = raw.startswith("(")
+        return float(raw[1:] if is_open else raw), is_open
 
     async def zremrangebyscore(self, name: str, min: object, max: object) -> int:
         if self.fail:
             raise ConnectionError("redis chet (gia lap)")
-        self.da_don.append((name, min, max))
-        can_duoi, mo_duoi = self._diem(min)
-        can_tren, mo_tren = self._diem(max)
-        ghe = self.zset.get(name, {})
-        bo = [
+        self.cleaned.append((name, min, max))
+        lower, lower_open = self._parse_bound(min)
+        upper, upper_open = self._parse_bound(max)
+        seats = self.zset.get(name, {})
+        removed = [
             member
-            for member, score in ghe.items()
-            if (score > can_duoi if mo_duoi else score >= can_duoi)
-            and (score < can_tren if mo_tren else score <= can_tren)
+            for member, score in seats.items()
+            if (score > lower if lower_open else score >= lower)
+            and (score < upper if upper_open else score <= upper)
         ]
-        for member in bo:
-            del ghe[member]
-        return len(bo)
+        for member in removed:
+            del seats[member]
+        return len(removed)
 
     async def zrangebyscore(
         self, name: str, min: object, max: object, *, withscores: bool = False
@@ -300,29 +300,29 @@ class FakeQuotaRedis:
         if self.fail:
             raise ConnectionError("redis chet (gia lap)")
         assert withscores, "`read_window` luon doc kem score — xem retry_after_s"
-        can_duoi, mo_duoi = self._diem(min)
-        can_tren, mo_tren = self._diem(max)
-        trong = [
+        lower, lower_open = self._parse_bound(min)
+        upper, upper_open = self._parse_bound(max)
+        inside = [
             (member, score)
             for member, score in self.zset.get(name, {}).items()
-            if (score > can_duoi if mo_duoi else score >= can_duoi)
-            and (score < can_tren if mo_tren else score <= can_tren)
+            if (score > lower if lower_open else score >= lower)
+            and (score < upper if upper_open else score <= upper)
         ]
-        return sorted(trong, key=lambda muc: muc[1])
+        return sorted(inside, key=lambda item: item[1])
 
     async def zadd(self, name: str, mapping: dict[str, float]) -> int:
         if self.fail:
             raise ConnectionError("redis chet (gia lap)")
-        self.da_ghi.append((name, len(mapping)))
-        ghe = self.zset.setdefault(name, {})
-        moi = sum(1 for member in mapping if member not in ghe)
-        ghe.update(mapping)
-        return moi
+        self.written.append((name, len(mapping)))
+        seats = self.zset.setdefault(name, {})
+        added = sum(1 for member in mapping if member not in seats)
+        seats.update(mapping)
+        return added
 
     async def expire(self, name: str, ttl: int) -> bool:
         if self.fail:
             raise ConnectionError("redis chet (gia lap)")
-        self.da_dat_ttl.append((name, ttl))
+        self.ttl_calls.append((name, ttl))
         return name in self.zset or name in self.store
 
     # ── cache tier (T-2.10) — cùng client, nên cùng fake ──
@@ -411,7 +411,7 @@ class FakeIdempotencyRedis:
 
     `set(..., nx=True)` tôn trọng NX **thật sự** chứ không ghi bừa: đó chính là
     tính chất mà cả §11.4 dựa vào, nên một stub dễ tính hơn Redis thật sẽ làm
-    phép kiểm mất nghĩa (bài học B-102, cùng lối `_RedisDem` của
+    phép kiểm mất nghĩa (bài học B-102, cùng lối `_CountingRedis` của
     `tests/core/test_ratelimit.py`).
 
     `ttl` giữ lại giá trị `ex` đã truyền để DoD dòng 4 của T-2.8 ("`TTL
@@ -467,7 +467,7 @@ class FakeRateLimitRedis:
 
         * route nào có gọi hạn mức, route nào không
         * `429`/`503` đi ra đúng mã lỗi, đúng header
-        * `_ghe_can_nha` chọn đúng ghế để nhả (phần này là Python thuần)
+        * `_seats_to_release` chọn đúng ghế để nhả (phần này là Python thuần)
 
     Nó **không** kiểm được phép tính nạp lại và tính nguyên tử của script. Hai
     thứ đó chỉ chứng minh được trên Redis thật — `scripts/test_ratelimit.sh`,
@@ -475,7 +475,7 @@ class FakeRateLimitRedis:
 
     Nó phủ **cả ba** lớp của `core/ratelimit.py` chứ không riêng hai lớp mới:
     một module, một `get_redis`, nên một fake thiếu lệnh là một test treo.
-    Phần theo IP (`incr`/`expire`/`ttl`) mô phỏng thật, đúng như `_RedisDem`
+    Phần theo IP (`incr`/`expire`/`ttl`) mô phỏng thật, đúng như `_CountingRedis`
     của `tests/core/test_ratelimit.py` — ở đó bản mô phỏng *đúng* được.
     """
 
@@ -490,10 +490,10 @@ class FakeRateLimitRedis:
         #: đã chạy và nó được truyền những ghế nào để nhả.
         self.calls: list[tuple[str, tuple[object, ...]]] = []
         #: Mỗi lời gọi `zrem` — test đọc để biết ghế có được nhả hay không.
-        self.da_nha: list[tuple[str, tuple[str, ...]]] = []
+        self.released: list[tuple[str, tuple[str, ...]]] = []
         #: Bộ đếm + TTL của lớp theo IP (T-2.5).
-        self.dem: dict[str, int] = {}
-        self.ttl_da_dat: dict[str, int] = {}
+        self.counts: dict[str, int] = {}
+        self.ttl_set: dict[str, int] = {}
         #: Bật lên để mô phỏng Redis chết giữa chừng.
         self.fail = False
 
@@ -503,7 +503,7 @@ class FakeRateLimitRedis:
         if script is ratelimit.LUA_TOKEN_BUCKET:
             self.calls.append(("bucket", args))
             return list(self.bucket)
-        if script is ratelimit.LUA_GIU_GHE:
+        if script is ratelimit.LUA_ACQUIRE_SEAT:
             self.calls.append(("slot", args))
             return list(self.slot)
         raise AssertionError("script Lua khong biet — fake nay chi phuc vu T-2.9")
@@ -519,29 +519,29 @@ class FakeRateLimitRedis:
     async def zrem(self, name: str, *members: str) -> int:
         if self.fail:
             raise ConnectionError("redis chet (gia lap)")
-        self.da_nha.append((name, members))
-        ghe = self.zset.get(name, {})
-        return sum(1 for member in members if ghe.pop(member, None) is not None)
+        self.released.append((name, members))
+        seats = self.zset.get(name, {})
+        return sum(1 for member in members if seats.pop(member, None) is not None)
 
     # ── lớp theo IP (T-2.5): cửa sổ cố định, mô phỏng đầy đủ ──
     async def incr(self, name: str) -> int:
         if self.fail:
             raise ConnectionError("redis chet (gia lap)")
-        self.dem[name] = self.dem.get(name, 0) + 1
-        return self.dem[name]
+        self.counts[name] = self.counts.get(name, 0) + 1
+        return self.counts[name]
 
     async def expire(self, name: str, time: int, *, nx: bool = False) -> bool:
         if self.fail:
             raise ConnectionError("redis chet (gia lap)")
-        if nx and name in self.ttl_da_dat:
+        if nx and name in self.ttl_set:
             return False
-        self.ttl_da_dat[name] = time
+        self.ttl_set[name] = time
         return True
 
     async def ttl(self, name: str) -> int:
-        if name not in self.dem:
+        if name not in self.counts:
             return -2
-        return self.ttl_da_dat.get(name, -1)
+        return self.ttl_set.get(name, -1)
 
 
 @pytest.fixture

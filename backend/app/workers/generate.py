@@ -13,13 +13,13 @@ model nằm ở đây. Thứ tự các bước bám đúng §7.2 ③ và **khôn
                        + kiểm cờ huỷ mỗi KIEM_HUY_MOI_N_CHUNK chunk (§7.5)
     ⑥ UPDATE messages (content/status/usage)  → ⑦ XADD done|error  → ⑧ EXPIRE
 
-    ╰─ song song từ ③ tới ⑤: task `_nhip_tim` ghi `heartbeat_at` mỗi
+    ╰─ song song từ ③ tới ⑤: task `_heartbeat` ghi `heartbeat_at` mỗi
        `WORKER_HEARTBEAT_S` (§7.6), ĐỘC LẬP với việc có chunk hay không (B-122)
 
 **Ba luật của file này:**
 
 1. **Không có đường thoát nào không ghi event kết thúc (C19).** `finally` gọi
-   `_dong_so` đúng một lần cho cả ba ngả: chạy xong, lỗi, và bị huỷ. Thiếu nó
+   `_close_ledger` đúng một lần cho cả ba ngả: chạy xong, lỗi, và bị huỷ. Thiếu nó
    thì upstream đứt bất thường = client treo vô hạn, vì §7.4 cấm FE suy ra
    "đã xong" từ việc stream im lặng — im lặng nghĩa là *đang chờ*.
 
@@ -99,7 +99,7 @@ from app.llm.adapters.byok import ByokAdapter
 from app.llm.client import Chunk, LLMClient, ToolCall, Usage
 from app.llm.credentials import Credential, resolve_credential
 from app.quota import meter
-from app.streaming.cancel import FINISH_REASON_CANCELLED, da_yeu_cau_huy
+from app.streaming.cancel import FINISH_REASON_CANCELLED, is_cancel_requested
 from app.streaming.events import (
     DeltaEvent,
     DoneEvent,
@@ -123,23 +123,23 @@ logger = logging.getLogger(__name__)
 CTX_LLM_CLIENT = "llm_client"
 
 #: §7.5 viết thẳng "mỗi 8 chunk kiểm EXISTS cancel:{amid}". Đếm theo **chunk**
-#: chứ không theo giây như `_nhip_tim` của heartbeat, và khác biệt đó là cố ý: nhịp
+#: chứ không theo giây như `_heartbeat` của heartbeat, và khác biệt đó là cố ý: nhịp
 #: tim trả lời một câu hỏi đo bằng giây (reaper §7.6 so `heartbeat_at` với
 #: `now()`), còn nút Dừng trả lời câu "bao nhiêu chữ nữa thì người dùng thôi
 #: thấy chữ chảy" — đo bằng chunk là đo đúng thứ họ nhìn.
 #:
 #: **Không** phải biến `Settings`: đây là nhịp hỏi nội bộ của một vòng lặp, cùng
-#: loại với `SO_BAN_GHI_MOI_LAN` của `streaming/consumer.py`, chứ không phải
+#: loại với `ENTRIES_PER_READ` của `streaming/consumer.py`, chứ không phải
 #: một *giới hạn* vận hành như `CANCEL_TTL_S` (A3 liệt "tên model, giá, giới
 #: hạn, URL provider, màu sắc"). Giá của nó: một `EXISTS` cho mỗi 8 chunk, tức
 #: ~66 lệnh cho một câu trả lời dài của `deepseek-flash` (533 chunk đo ở T-1.3).
-KIEM_HUY_MOI_N_CHUNK = 8
+CANCEL_CHECK_EVERY_N_CHUNKS = 8
 
 
-class LoiSinh(Exception):
+class GenerationError(Exception):
     """Lỗi đã phân loại được thành một `ErrorCode` của §7.4.
 
-    Có kiểu riêng vì `_dong_so` phải phân biệt hai thứ: lỗi mình *biết tên*
+    Có kiểu riêng vì `_close_ledger` phải phân biệt hai thứ: lỗi mình *biết tên*
     (ghi thẳng mã vào event và vào `messages.error_code`) và lỗi lạ (ghi
     `INTERNAL_ERROR` kèm traceback vào log — còn thấy mã đó nghĩa là còn một
     nhánh chưa ai đặt tên).
@@ -148,11 +148,11 @@ class LoiSinh(Exception):
     def __init__(self, code: ErrorCode, message: str) -> None:
         super().__init__(f"{code.value}: {message}")
         self.code = code
-        self.chi_tiet = message
+        self.details = message
 
 
 @dataclass(slots=True)
-class _KetQua:
+class _Result:
     """Những gì gom được trong lúc stream. Sống đúng một lượt sinh.
 
     Là biến cục bộ truyền vào các hàm con chứ **không** phải thuộc tính của
@@ -161,11 +161,11 @@ class _KetQua:
 
     #: Model đã tra được trong catalog. Thay cho `model_id` trần của T-1.6:
     #: bước ghi sổ (T-2.12) cần cả `provider`, `pricing_mode` và bảng giá, và
-    #: tra lại catalog lần thứ hai ở `_dong_so` là mời một kết quả khác — một
+    #: tra lại catalog lần thứ hai ở `_close_ledger` là mời một kết quả khác — một
     #: `POST /admin/catalog/reload` chen vào giữa lượt sinh là đủ.
     model: ModelEntry | None = None
     #: Chủ hội thoại. `messages` không có cột `user_id` (Phụ lục A) nên con số
-    #: này chỉ lấy được một lần, ở `_chuan_bi`, và `usage_events.user_id` là
+    #: này chỉ lấy được một lần, ở `_prepare`, và `usage_events.user_id` là
     #: cột NOT NULL cần nó.
     user_id: uuid.UUID | None = None
     #: Đúng danh sách message đã gửi lên. Giữ **tham chiếu**, không phải bản
@@ -178,7 +178,7 @@ class _KetQua:
     #: giờ cao điểm và kết thúc lúc 17:08 giờ thường — giá phải là giá 16:58.
     started_at: datetime | None = None
     #: Credential nào trả tiền cho lượt này (§10.5, T-2.15). Mặc định là
-    #: `system` chứ không `None`: một lượt sinh chết **trước** `_chuan_bi`
+    #: `system` chứ không `None`: một lượt sinh chết **trước** `_prepare`
     #: không ghi sổ gì cả (xem `billable`), nên giá trị này chỉ có nghĩa khi
     #: nó đã được điền — và mặc định chặt hơn (trừ quota) là mặc định đúng
     #: chiều nếu có ngày nào đó một nhánh quên điền.
@@ -187,17 +187,17 @@ class _KetQua:
     #: B-78). `None` = chưa ghi sổ được, và khi đó khoá `cost_usd` **vắng mặt**
     #: trên dây chứ không bằng 0.
     cost_usd: Decimal | None = None
-    chu: list[str] = field(default_factory=list)
+    text: list[str] = field(default_factory=list)
     reasoning: list[str] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: Usage | None = None
     finish_reason: str | None = None
-    loi: LoiSinh | None = None
+    error: GenerationError | None = None
     #: §7.5 — người dùng đã bấm Dừng và vòng lặp đã thoát vì thế. Cờ RIÊNG chứ
     #: không phải `finish_reason == "cancelled"`: ba giá trị `finish_reason`
     #: kia đến từ provider, và một ngày nào đó provider trả đúng chuỗi ấy thì
     #: `messages.status` sẽ thành `cancelled` cho một lượt không ai huỷ.
-    bi_huy: bool = False
+    cancelled: bool = False
 
     @property
     def content(self) -> str:
@@ -207,7 +207,7 @@ class _KetQua:
         tự tiếng Việt làm đôi, và nó chỉ xuất hiện khi có chỗ nào đó làm việc
         với `bytes`. Ở đây không có chỗ nào như vậy.
         """
-        return "".join(self.chu)
+        return "".join(self.text)
 
     @property
     def billable(self) -> bool:
@@ -216,7 +216,7 @@ class _KetQua:
         Hai điều kiện, và cả hai đều là "đã thật sự chạm tới provider chưa".
 
         `model`/`user_id`/`started_at` cùng được điền một lần ngay sau
-        `_chuan_bi`, nên thiếu một cái nghĩa là lượt sinh chết **trước** khi
+        `_prepare`, nên thiếu một cái nghĩa là lượt sinh chết **trước** khi
         gọi model: message không còn trong DB, model đã tắt trong catalog,
         ngữ cảnh dựng không nổi, hoặc một worker khác đã nhận job. Không token
         nào được tiêu, nên một dòng sổ 0 đồng ở đó chỉ là rác — và rác trong
@@ -232,27 +232,27 @@ class _KetQua:
         """
         if self.model is None or self.user_id is None or self.started_at is None:
             return False
-        return bool(self.usage or self.chu or self.reasoning or self.tool_calls)
+        return bool(self.usage or self.text or self.reasoning or self.tool_calls)
 
 
-async def _vong_nhip_tim(mid: uuid.UUID) -> None:
+async def _heartbeat_loop(mid: uuid.UUID) -> None:
     """Ghi `messages.heartbeat_at` mỗi `WORKER_HEARTBEAT_S` cho tới khi bị huỷ.
 
     Ngủ **trước** rồi mới ghi: `mark_streaming` vừa đặt `heartbeat_at = now()`
     ngay trước khi vòng này chạy, nên một lần ghi tức thì chỉ tốn một
     round-trip để viết lại đúng con số vừa có.
 
-    Không có `try/except` quanh vòng lặp: `_ghi_heartbeat` đã tự nuốt mọi lỗi
+    Không có `try/except` quanh vòng lặp: `_write_heartbeat` đã tự nuốt mọi lỗi
     của nó rồi (một blip Postgres không được phép giết nhịp tim), nên ngoại lệ
     thoát tới đây chỉ có thể là `CancelledError` — và cái đó phải bay tiếp.
     """
     while True:
         await asyncio.sleep(settings.WORKER_HEARTBEAT_S)
-        await _ghi_heartbeat(mid)
+        await _write_heartbeat(mid)
 
 
 @asynccontextmanager
-async def _nhip_tim(mid: uuid.UUID) -> AsyncIterator[None]:
+async def _heartbeat(mid: uuid.UUID) -> AsyncIterator[None]:
     """Nhịp tim §7.6 chạy như một task ĐỘC LẬP, không bám vào vòng chunk (B-122).
 
     **Vì sao không còn là một bộ đếm trong vòng lặp.** Bản cũ (`_Nhip`) đo bằng
@@ -272,13 +272,13 @@ async def _nhip_tim(mid: uuid.UUID) -> AsyncIterator[None]:
     một nhịp muộn rơi vào message đã khép là no-op — hai lớp, vì một nhịp tim
     mồ côi sẽ làm reaper mù đúng ca nó sinh ra để bắt.
     """
-    task = asyncio.create_task(_vong_nhip_tim(mid), name=f"nhip-tim:{mid}")
+    task = asyncio.create_task(_heartbeat_loop(mid), name=f"nhip-tim:{mid}")
     try:
         yield
     finally:
         task.cancel()
         # `await` để chắc chắn task đã dừng hẳn trước khi hàm thoát: bỏ qua
-        # bước này thì nó có thể còn ghi thêm một nhịp *sau* `_dong_so`.
+        # bước này thì nó có thể còn ghi thêm một nhịp *sau* `_close_ledger`.
         with suppress(asyncio.CancelledError):
             await task
 
@@ -293,56 +293,56 @@ async def generate(ctx: dict[str, Any], message_id: str) -> None:
     """
     mid = uuid.UUID(message_id)
     producer = StreamProducer(ctx["redis"], mid, ttl_s=settings.STREAM_TTL_S)
-    ket_qua = _KetQua()
+    result = _Result()
 
     logger.info("generate: bat dau %s (job=%s)", mid, ctx.get("job_id"))
     try:
-        await _chay(ctx, mid, producer, ket_qua)
-    except LoiSinh as loi:
-        ket_qua.loi = loi
-        logger.warning("generate: %s dung vi %s", mid, loi)
+        await _run(ctx, mid, producer, result)
+    except GenerationError as error:
+        result.error = error
+        logger.warning("generate: %s dung vi %s", mid, error)
     except asyncio.CancelledError:
         # arq cắt job quá `GENERATE_TIMEOUT_S`, hoặc container nhận SIGTERM.
         # `finally` vẫn chạy để client không treo, rồi ném tiếp — nuốt
         # `CancelledError` là nói dối với vòng lặp sự kiện.
-        ket_qua.loi = LoiSinh(ErrorCode.WORKER_TIMEOUT, "job bi huy giua chung")
+        result.error = GenerationError(ErrorCode.WORKER_TIMEOUT, "job bi huy giua chung")
         logger.warning("generate: %s bi huy giua chung", mid)
         raise
     except Exception as exc:  # noqa: BLE001 — C19: không có ngoại lệ nào được thoát ra ngoài mà không ghi event
-        ket_qua.loi = LoiSinh(ErrorCode.INTERNAL_ERROR, type(exc).__name__)
+        result.error = GenerationError(ErrorCode.INTERNAL_ERROR, type(exc).__name__)
         logger.exception("generate: %s loi khong phan loai duoc", mid)
     finally:
         # C19. Đường duy nhất ra khỏi hàm này đi qua đây.
-        await _dong_so(ctx, mid, producer, ket_qua)
+        await _close_ledger(ctx, mid, producer, result)
 
 
 # ───────────────────────────── các bước ─────────────────────────────
 
 
-async def _chay(
+async def _run(
     ctx: dict[str, Any],
     mid: uuid.UUID,
     producer: StreamProducer,
-    ket_qua: _KetQua,
+    result: _Result,
 ) -> None:
-    """Bước ① → ⑤ của §7.2 ③. Ném `LoiSinh` cho mọi ngả không đi tiếp được."""
-    model_meta, wire_messages, user_id, credential = await _chuan_bi(mid)
-    ket_qua.model = model_meta
-    ket_qua.user_id = user_id
-    ket_qua.sent = wire_messages
-    ket_qua.key_source = credential.key_source
+    """Bước ① → ⑤ của §7.2 ③. Ném `GenerationError` cho mọi ngả không đi tiếp được."""
+    model_meta, wire_messages, user_id, credential = await _prepare(mid)
+    result.model = model_meta
+    result.user_id = user_id
+    result.sent = wire_messages
+    result.key_source = credential.key_source
 
-    # Nhịp tim mở NGAY sau `_chuan_bi` (nơi `mark_streaming` chạy) chứ không
+    # Nhịp tim mở NGAY sau `_prepare` (nơi `mark_streaming` chạy) chứ không
     # đợi chunk đầu: quãng `client.stream(...)` bên dưới chính là TTFT, và đó
-    # đúng là quãng mà bản cũ để trống — xem `_nhip_tim` (B-122).
-    async with _nhip_tim(mid), _turn_client(ctx, credential) as client:
+    # đúng là quãng mà bản cũ để trống — xem `_heartbeat` (B-122).
+    async with _heartbeat(mid), _turn_client(ctx, credential) as client:
         await producer.emit(StartEvent(message_id=str(mid), model_id=model_meta.id))
 
         # Mốc giá của A7: bảng giá dùng để ghi sổ là bảng giá của **lúc gọi**,
         # không phải lúc lượt sinh kết thúc. Đặt ngay trước `await` chứ không
-        # ở đầu `_chay`: quãng `_chuan_bi` có thể mất vài chục mili-giây vì
+        # ở đầu `_chay`: quãng `_prepare` có thể mất vài chục mili-giây vì
         # recursive CTE của §8.3, và mốc giá phải là mốc gửi request.
-        ket_qua.started_at = datetime.now(UTC)
+        result.started_at = datetime.now(UTC)
         try:
             stream = await client.stream(
                 # Alias LiteLLM hay tên gốc của provider — tuỳ credential, và
@@ -360,26 +360,26 @@ async def _chay(
         except Exception as exc:
             # `await` này là chỗ gửi request và nhận header, nên 401/400/429 nổ
             # tại đây chứ không đội lốt stream rỗng (điểm 1 docstring `client.py`).
-            raise LoiSinh(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
+            raise GenerationError(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
 
         so_chunk = 0
         try:
             async for chunk in stream:
                 # `_phat` chạy TRƯỚC phép kiểm: chunk thứ 8 vẫn ra dây và vẫn vào
-                # `ket_qua.chu`. §7.5 đòi "vẫn lưu phần đã sinh", mà phần đã sinh
+                # `result.chu`. §7.5 đòi "vẫn lưu phần đã sinh", mà phần đã sinh
                 # tính tới mẩu cuối cùng provider đã gửi — bỏ nó đi là để màn hình
                 # và `messages.content` nói hai chuyện khác nhau.
-                await _phat(producer, ket_qua, chunk)
+                await _emit(producer, result, chunk)
                 so_chunk += 1
-                if so_chunk % KIEM_HUY_MOI_N_CHUNK == 0 and await _bi_huy(ctx, mid):
-                    _dung_vi_huy(mid, ket_qua, so_chunk)
+                if so_chunk % CANCEL_CHECK_EVERY_N_CHUNKS == 0 and await _is_cancelled(ctx, mid):
+                    _stop_for_cancel(mid, result, so_chunk)
                     break
-        except LoiSinh:
+        except GenerationError:
             raise
         except Exception as exc:
             # Đứt giữa chừng: đây là ca chính của C19. Phần chữ đã gom trong
-            # `ket_qua` vẫn được ghi xuống Postgres ở `_dong_so`.
-            raise LoiSinh(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
+            # `result` vẫn được ghi xuống Postgres ở `_close_ledger`.
+            raise GenerationError(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
 
 
 @asynccontextmanager
@@ -410,7 +410,7 @@ async def _turn_client(ctx: dict[str, Any], credential: Credential) -> AsyncIter
         await adapter.close()
 
 
-async def _chuan_bi(
+async def _prepare(
     mid: uuid.UUID,
 ) -> tuple[ModelEntry, list[dict[str, Any]], uuid.UUID, Credential]:
     """Bước ① → ③ (+ ①.5): đọc message, chọn credential, dựng ngữ cảnh, `streaming`.
@@ -423,7 +423,7 @@ async def _chuan_bi(
 
     Dựng ngữ cảnh **trước** khi đổi trạng thái, đúng thứ tự §7.2: ngữ cảnh
     hỏng (lá không tồn tại, ngân sách không đủ) thì message còn nguyên
-    `queued`, và `_dong_so` sẽ đánh nó `failed` kèm mã — chứ không để lại một
+    `queued`, và `_close_ledger` sẽ đánh nó `failed` kèm mã — chứ không để lại một
     message `streaming` mà không có ai sinh, tức món ăn của reaper §7.6.
     """
     async with session_scope() as session:
@@ -431,11 +431,11 @@ async def _chuan_bi(
 
         owned = await repo.get_message_for_worker(mid)
         if owned is None:
-            raise LoiSinh(ErrorCode.MESSAGE_NOT_FOUND, "message khong con trong DB")
+            raise GenerationError(ErrorCode.MESSAGE_NOT_FOUND, "message khong con trong DB")
 
         model_meta = get_model(owned.message.model_id or "")
         if model_meta is None:
-            raise LoiSinh(
+            raise GenerationError(
                 ErrorCode.MODEL_UNKNOWN,
                 f"model_id={owned.message.model_id!r} khong co trong catalog hoac da tat",
             )
@@ -448,9 +448,9 @@ async def _chuan_bi(
                 session, owned.message.id, model_meta, user_id=owned.user_id
             )
         except context.EmptyPathError as exc:
-            raise LoiSinh(ErrorCode.CONTEXT_EMPTY, str(exc)) from exc
+            raise GenerationError(ErrorCode.CONTEXT_EMPTY, str(exc)) from exc
         except context.BudgetTooSmallError as exc:
-            raise LoiSinh(ErrorCode.CONTEXT_TOO_LARGE, str(exc)) from exc
+            raise GenerationError(ErrorCode.CONTEXT_TOO_LARGE, str(exc)) from exc
 
         # ①.5 §10.5 — ai trả tiền cho lượt này. **Trước** `mark_streaming`
         # chứ không sau: cả hai ngả lùi của nó (khoá bị xoá, khoá không giải
@@ -463,7 +463,7 @@ async def _chuan_bi(
             # Không còn `queued`: một worker khác đã nhận, hoặc message đã
             # `failed`/`cancelled` trong lúc chờ hàng đợi. Bỏ lượt là đúng —
             # sinh tiếp là trả tiền lần hai cho cùng một câu hỏi (B-72).
-            raise LoiSinh(
+            raise GenerationError(
                 ErrorCode.MESSAGE_NOT_FOUND,
                 "message khong con o trang thai queued (worker khac da nhan?)",
             )
@@ -475,7 +475,7 @@ async def _chuan_bi(
     return model_meta, wire_messages, owned.user_id, credential
 
 
-async def _phat(producer: StreamProducer, ket_qua: _KetQua, chunk: Chunk) -> None:
+async def _emit(producer: StreamProducer, result: _Result, chunk: Chunk) -> None:
     """Một `Chunk` của §9.1 → một event của §7.4. Map một-một, không bảng dịch.
 
     `Chunk.kind` cố ý trùng tên `event` của SSE (điểm 2 docstring `client.py`),
@@ -485,16 +485,16 @@ async def _phat(producer: StreamProducer, ket_qua: _KetQua, chunk: Chunk) -> Non
     match chunk.kind:
         case "delta":
             text = chunk.text or ""
-            ket_qua.chu.append(text)
+            result.text.append(text)
             await producer.emit(DeltaEvent(text=text))
         case "reasoning":
             text = chunk.text or ""
-            # KHÔNG vào `ket_qua.chu`: reasoning đi vào cột `messages.reasoning`
+            # KHÔNG vào `result.chu`: reasoning đi vào cột `messages.reasoning`
             # và không bao giờ quay lại ngữ cảnh lượt sau (B-33, `context.py`).
-            ket_qua.reasoning.append(text)
+            result.reasoning.append(text)
             await producer.emit(ReasoningEvent(text=text))
         case "tool_call" if chunk.tool_call is not None:
-            ket_qua.tool_calls.append(chunk.tool_call)
+            result.tool_calls.append(chunk.tool_call)
             await producer.emit(
                 ToolCallEvent(
                     call_id=chunk.tool_call.call_id,
@@ -503,40 +503,40 @@ async def _phat(producer: StreamProducer, ket_qua: _KetQua, chunk: Chunk) -> Non
                 )
             )
         case "usage" if chunk.usage is not None:
-            ket_qua.usage = chunk.usage
+            result.usage = chunk.usage
             await producer.emit(UsageEvent(usage=chunk.usage))
         case "done":
-            # Chỉ NHẶT, không phát. Event `done` ra dây ở `_dong_so`, sau khi
+            # Chỉ NHẶT, không phát. Event `done` ra dây ở `_close_ledger`, sau khi
             # Postgres đã ghi xong (luật 2 ở docstring module).
-            ket_qua.finish_reason = chunk.finish_reason
+            result.finish_reason = chunk.finish_reason
             # Provider gửi `usage` ở chunk riêng **trước** `done` (C40); giữ số
             # cũ nếu `done` không mang gì, thay bằng số mới nếu có.
-            ket_qua.usage = chunk.usage or ket_qua.usage
+            result.usage = chunk.usage or result.usage
         case _:
             logger.warning("generate: bo qua chunk kind=%r khong co du lieu", chunk.kind)
 
 
-async def _bi_huy(ctx: dict[str, Any], mid: uuid.UUID) -> bool:
+async def _is_cancelled(ctx: dict[str, Any], mid: uuid.UUID) -> bool:
     """`EXISTS cancel:{mid}` (§7.5). Hỏng thì **không** làm hỏng lượt sinh.
 
-    Cùng lý lẽ với `_ghi_heartbeat`, nhưng ở đây cái giá của việc không nuốt
+    Cùng lý lẽ với `_write_heartbeat`, nhưng ở đây cái giá của việc không nuốt
     còn rõ hơn: để ngoại lệ thoát ra thì `_chay` bọc nó thành
     `UPSTREAM_ERROR`, tức người dùng đọc được "provider lỗi" cho một sự cố
     hoàn toàn nằm ở phía mình. Mất một lần hỏi nghĩa là nút Dừng ăn muộn
-    `KIEM_HUY_MOI_N_CHUNK` chunk nữa, và cờ vẫn còn đó (`CANCEL_TTL_S`).
+    `CANCEL_CHECK_EVERY_N_CHUNKS` chunk nữa, và cờ vẫn còn đó (`CANCEL_TTL_S`).
     """
     try:
-        return await da_yeu_cau_huy(ctx["redis"], mid)
+        return await is_cancel_requested(ctx["redis"], mid)
     except Exception:  # noqa: BLE001 — xem docstring
         logger.warning("generate: %s khong kiem duoc co huy", mid, exc_info=True)
         return False
 
 
-def _dung_vi_huy(mid: uuid.UUID, ket_qua: _KetQua, so_chunk: int) -> None:
-    """Ghi nhận ngả huỷ vào `ket_qua` — và **dòng log** mà DoD T-1.9 đòi.
+def _stop_for_cancel(mid: uuid.UUID, result: _Result, so_chunk: int) -> None:
+    """Ghi nhận ngả huỷ vào `result` — và **dòng log** mà DoD T-1.9 đòi.
 
     Không `raise`: huỷ không phải lỗi (xem docstring module). Đặt hai trường
-    rồi để `break` ở `_chay` đưa luồng về `_dong_so`, nơi nó ra dây thành
+    rồi để `break` ở `_chay` đưa luồng về `_close_ledger`, nơi nó ra dây thành
     `done` mang `finish_reason='cancelled'` đúng như §7.5 viết.
 
     Dòng log này ra đời ở Phase 1 để thay cho `usage_events` khi chưa ai ghi
@@ -546,19 +546,19 @@ def _dung_vi_huy(mid: uuid.UUID, ket_qua: _KetQua, so_chunk: int) -> None:
     đó là chỗ đọc log so được hai con số: cái provider **không** báo, và cái
     meter đã đếm thay ở dòng `ghi so` ngay sau.
     """
-    ket_qua.bi_huy = True
-    ket_qua.finish_reason = FINISH_REASON_CANCELLED
+    result.cancelled = True
+    result.finish_reason = FINISH_REASON_CANCELLED
     logger.info(
         "generate: %s NGUOI DUNG HUY sau %d chunk · %d ky tu da sinh · "
         "usage tu provider: %s · phan da sinh se duoc ghi so o buoc ⑥.5",
         mid,
         so_chunk,
-        len(ket_qua.content),
-        ket_qua.usage,
+        len(result.content),
+        result.usage,
     )
 
 
-async def _ghi_heartbeat(mid: uuid.UUID) -> None:
+async def _write_heartbeat(mid: uuid.UUID) -> None:
     """Nhịp §7.6. Hỏng thì **không** làm hỏng lượt sinh.
 
     Mất một nhịp tim không phải lý do để vứt một câu trả lời đang chảy: hậu quả
@@ -573,8 +573,8 @@ async def _ghi_heartbeat(mid: uuid.UUID) -> None:
         logger.warning("generate: %s khong ghi duoc heartbeat_at", mid, exc_info=True)
 
 
-async def _dong_so(
-    ctx: dict[str, Any], mid: uuid.UUID, producer: StreamProducer, ket_qua: _KetQua
+async def _close_ledger(
+    ctx: dict[str, Any], mid: uuid.UUID, producer: StreamProducer, result: _Result
 ) -> None:
     """Bước ⑥ → ⑧: ghi Postgres, ghi sổ, `XADD done|error`, `EXPIRE`. C19 + C8.
 
@@ -584,7 +584,7 @@ async def _dong_so(
     được phép làm gì tới event đã phát.
 
     **Ghi sổ (⑥.5) hỏng thì event kết thúc vẫn là `done`, KHÔNG phải `error`.**
-    Khác hẳn ca `_ghi_ket_qua` hỏng ngay trên. Hai hỏng, hai người chịu hậu
+    Khác hẳn ca `_write_result` hỏng ngay trên. Hai hỏng, hai người chịu hậu
     quả: mất `messages.content` là mất **câu trả lời của người dùng** — họ F5
     ra một message rỗng, nên phải nói thẳng bằng `PERSIST_FAILED`. Mất một dòng
     `usage_events` là mất **một khoản trong sổ của mình**: người dùng đã đọc
@@ -593,30 +593,30 @@ async def _dong_so(
     exception` ở `_record_usage` là chỗ khai, và `rebuild_quota` của T-2.13 là
     đường vá.
     """
-    loi = ket_qua.loi
+    error = result.error
     try:
-        await _ghi_ket_qua(mid, ket_qua)
+        await _write_result(mid, result)
     except Exception:  # noqa: BLE001 — xem docstring
         logger.exception("generate: %s khong ghi duoc ket qua xuong Postgres", mid)
-        if loi is None:
+        if error is None:
             # Chữ đã tới người dùng nhưng lịch sử thì không: nói thẳng bằng mã
             # riêng thay vì gửi `done` rồi để họ F5 ra một message rỗng.
-            loi = LoiSinh(ErrorCode.PERSIST_FAILED, "UPDATE messages that bai")
+            error = GenerationError(ErrorCode.PERSIST_FAILED, "UPDATE messages that bai")
 
     # ⑥.5 — §10.2 vế SAU. Chạy TRƯỚC `XADD` vì `cost_usd` đi trên event `done`.
-    await _record_usage(ctx, mid, ket_qua)
+    await _record_usage(ctx, mid, result)
 
-    ket_thuc: Event = (
+    final_event: Event = (
         DoneEvent(
-            finish_reason=ket_qua.finish_reason,
-            usage=ket_qua.usage,
-            cost_usd=ket_qua.cost_usd,
+            finish_reason=result.finish_reason,
+            usage=result.usage,
+            cost_usd=result.cost_usd,
         )
-        if loi is None
-        else ErrorEvent(code=loi.code, message=loi.chi_tiet)
+        if error is None
+        else ErrorEvent(code=error.code, message=error.details)
     )
     try:
-        await producer.emit(ket_thuc)
+        await producer.emit(final_event)
     except Exception:  # noqa: BLE001 — xem docstring
         logger.exception("generate: %s khong XADD duoc event ket thuc (C19)", mid)
 
@@ -628,16 +628,16 @@ async def _dong_so(
     logger.info(
         "generate: xong %s · %s · %d ky tu · finish_reason=%s · usage=%s · cost_usd=%s",
         mid,
-        "loi " + loi.code.value if loi is not None else "ok",
-        len(ket_qua.content),
-        ket_qua.finish_reason,
-        ket_qua.usage,
-        ket_qua.cost_usd,
+        "loi " + error.code.value if error is not None else "ok",
+        len(result.content),
+        result.finish_reason,
+        result.usage,
+        result.cost_usd,
     )
 
 
-async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, ket_qua: _KetQua) -> None:
-    """Bước ⑥.5 — §10.2 vế SAU. Điền `ket_qua.cost_usd`; hỏng thì **không** ném.
+async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, result: _Result) -> None:
+    """Bước ⑥.5 — §10.2 vế SAU. Điền `result.cost_usd`; hỏng thì **không** ném.
 
     Gọi trên **cả ba** ngả khép sổ, vì cả ba đều đã tiêu tiền thật:
 
@@ -655,20 +655,20 @@ async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, ket_qua: _KetQua) -
     `usage_events` có mặt để người dùng tự xem chi tiêu của mình; thứ vắng
     mặt là hai lệnh `ZADD` của §10.3, và chỗ quyết là `quota/meter.py`.
 
-    **Nuốt mọi ngoại lệ**, cùng lý lẽ với `_ghi_heartbeat` và `_bi_huy` nhưng
+    **Nuốt mọi ngoại lệ**, cùng lý lẽ với `_write_heartbeat` và `_is_cancelled` nhưng
     đắt hơn: ở đây cái mất là một khoản trong sổ cái, không phải một nhịp tim.
     Vẫn nuốt, vì thay thế duy nhất là để một lỗi Redis/Postgres biến một câu
     trả lời đã sinh xong thành một lỗi đỏ trên màn hình người dùng — xem
-    docstring `_dong_so`. `logger.exception` là chỗ khai, và nó ghi đủ
+    docstring `_close_ledger`. `logger.exception` là chỗ khai, và nó ghi đủ
     `user_id`/`model` để người đọc log vá lại bằng tay được.
     """
-    if not ket_qua.billable:
+    if not result.billable:
         return
     # `billable` đã khẳng định ba trường này khác `None`; khẳng định lại ở đây
     # cho mypy thay vì `assert`, vì `assert` bị `python -O` xoá mất.
-    model = ket_qua.model
-    user_id = ket_qua.user_id
-    started_at = ket_qua.started_at
+    model = result.model
+    user_id = result.user_id
+    started_at = result.started_at
     if model is None or user_id is None or started_at is None:  # pragma: no cover
         return
 
@@ -682,15 +682,15 @@ async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, ket_qua: _KetQua) -
                 model=model,
                 at=started_at,
                 now=time.time(),
-                usage=ket_qua.usage,
-                sent=ket_qua.sent,
-                content=ket_qua.content,
-                reasoning="".join(ket_qua.reasoning),
-                tool_calls=[tc.to_wire() for tc in ket_qua.tool_calls] or None,
+                usage=result.usage,
+                sent=result.sent,
+                content=result.content,
+                reasoning="".join(result.reasoning),
+                tool_calls=[tc.to_wire() for tc in result.tool_calls] or None,
                 # §10.5 — `byok` thì `record_usage` ghi dòng sổ nhưng KHÔNG
                 # `ZADD` hai cửa sổ quota. Luật nằm ở `quota/meter.py`, chỗ
                 # duy nhất biết cả hai vế; ở đây chỉ chở giá trị (B-157).
-                key_source=ket_qua.key_source,
+                key_source=result.key_source,
             )
             await session.commit()
     except Exception:  # noqa: BLE001 — xem docstring
@@ -703,13 +703,13 @@ async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, ket_qua: _KetQua) -
         )
         return
 
-    ket_qua.cost_usd = record.cost_usd
+    result.cost_usd = record.cost_usd
     logger.info(
         "generate: %s ghi so %s · %s · key_source=%s · in=%d out=%d cached=%d · %s USD · %s",
         mid,
         record.id,
         model.id,
-        ket_qua.key_source.value,
+        result.key_source.value,
         record.spent.prompt_tokens,
         record.spent.completion_tokens,
         record.spent.cached_tokens,
@@ -719,21 +719,21 @@ async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, ket_qua: _KetQua) -
     )
 
 
-def _trang_thai_cuoi(ket_qua: _KetQua) -> MessageStatus:
+def _final_status(result: _Result) -> MessageStatus:
     """Ba ngả của §7.2 ③ + §7.5 → một giá trị của `message_status`.
 
     **Lỗi thắng cờ huỷ.** Trúng cả hai (bấm Dừng rồi Postgres hỏng ngay sau
     đó) thì `failed` là câu đúng hơn: có một sự cố cần người đọc log biết, còn
     `cancelled` sẽ nói rằng mọi thứ đã diễn ra như người dùng muốn.
     """
-    if ket_qua.loi is not None:
+    if result.error is not None:
         return MessageStatus.FAILED
-    if ket_qua.bi_huy:
+    if result.cancelled:
         return MessageStatus.CANCELLED
     return MessageStatus.COMPLETED
 
 
-async def _ghi_ket_qua(mid: uuid.UUID, ket_qua: _KetQua) -> None:
+async def _write_result(mid: uuid.UUID, result: _Result) -> None:
     """`UPDATE messages` — lần ghi DUY NHẤT vào `content` (§17.2, C5).
 
     Đường huỷ (§7.5) đi qua đúng hàm này chứ không có nhánh riêng: nó ghi
@@ -746,17 +746,17 @@ async def _ghi_ket_qua(mid: uuid.UUID, ket_qua: _KetQua) -> None:
     lại **nguyên văn** ở lượt sau; ghi lệch thì lượt sau mới vỡ, và vỡ bằng
     `400 invalid request` không nói lý do.
     """
-    loi = ket_qua.loi
-    usage = ket_qua.usage
+    error = result.error
+    usage = result.usage
     async with session_scope() as session:
         await MessageRepository(session).finish_generation(
             mid,
-            status=_trang_thai_cuoi(ket_qua),
-            content=ket_qua.content,
-            reasoning="".join(ket_qua.reasoning) or None,
-            tool_calls=[tc.to_wire() for tc in ket_qua.tool_calls] or None,
-            finish_reason=ket_qua.finish_reason,
-            error_code=loi.code.value if loi is not None else None,
+            status=_final_status(result),
+            content=result.content,
+            reasoning="".join(result.reasoning) or None,
+            tool_calls=[tc.to_wire() for tc in result.tool_calls] or None,
+            finish_reason=result.finish_reason,
+            error_code=error.code.value if error is not None else None,
             prompt_tokens=usage.prompt_tokens if usage is not None else None,
             completion_tokens=usage.completion_tokens if usage is not None else None,
         )

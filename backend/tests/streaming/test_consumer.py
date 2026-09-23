@@ -2,7 +2,7 @@
 
 KH tham chiếu: §7.2 ②, §7.3, §7.4, C3, C4, C7, C10.
 
-`RedisGia` ở đây **không phải** một stub ghi lại lời gọi như trong
+`FakeRedis` ở đây **không phải** một stub ghi lại lời gọi như trong
 `test_producer.py`. Nó hiện thực đúng ngữ nghĩa của `XRANGE`/`XREAD`/`EXISTS`
 trên Redis Stream, kể cả ba chi tiết mà cả ba cạm bẫy của task này sống nhờ:
 
@@ -29,13 +29,13 @@ import pytest
 
 from app.db.models import MessageStatus
 from app.streaming.consumer import (
-    CURSOR_DAU,
-    KHUNG_PING,
-    CursorKhongHopLe,
+    CURSOR_START,
+    PING_FRAME,
+    InvalidCursor,
     MessageSnapshot,
     StreamConsumer,
-    doc_cursor,
-    khung_sse,
+    parse_cursor,
+    sse_frame,
 )
 from app.streaming.events import DeltaEvent, DoneEvent, ErrorCode
 from app.streaming.producer import FIELD_DATA, FIELD_TYPE, encode_event
@@ -46,7 +46,7 @@ HEARTBEAT_S = 15
 # ───────────────────────── Redis Stream giả, đúng ngữ nghĩa ─────────────────
 
 
-def _khoa_id(raw: str) -> tuple[int, int]:
+def _id_key(raw: str) -> tuple[int, int]:
     """`"1725984000123-4"` → `(1725984000123, 4)`; `"7"` → `(7, 0)`."""
     if "-" in raw:
         ms, seq = raw.split("-", 1)
@@ -54,31 +54,31 @@ def _khoa_id(raw: str) -> tuple[int, int]:
     return int(raw), 0
 
 
-def _can_duoi(start: str) -> tuple[int, int]:
+def _lower_bound(start: str) -> tuple[int, int]:
     """Biên dưới của `XRANGE`. Dấu `(` đẩy nó lên đúng một nấc — đây là C3."""
     if start.startswith("("):
-        ms, seq = _khoa_id(start[1:])
+        ms, seq = _id_key(start[1:])
         return ms, seq + 1
-    return _khoa_id(start)
+    return _id_key(start)
 
 
-class RedisGia:
-    __slots__ = ("streams", "moc_sau_xrange_rong", "xread_da_goi_voi", "so_lan_xread")
+class FakeRedis:
+    __slots__ = ("streams", "after_empty_xrange", "xread_called_with", "xread_calls")
 
     def __init__(self) -> None:
         self.streams: dict[str, list[tuple[str, dict[str, str]]]] = {}
         #: Hàm chạy NGAY SAU khi một `XRANGE` trả rỗng — dựng lại khoảnh khắc
         #: của C4. Xem docstring module.
-        self.moc_sau_xrange_rong: Any = None
-        self.xread_da_goi_voi: list[str] = []
-        self.so_lan_xread = 0
+        self.after_empty_xrange: Any = None
+        self.xread_called_with: list[str] = []
+        self.xread_calls = 0
 
     # ── công cụ của test, không phải API của Redis ──
-    def them(self, key: str, loai: str, data: dict[str, Any]) -> str:
-        ban_ghi = self.streams.setdefault(key, [])
-        entry_id = f"172598400{len(ban_ghi):04d}-0"
-        ban_ghi.append(
-            (entry_id, {FIELD_TYPE: loai, FIELD_DATA: json.dumps(data, ensure_ascii=False)})
+    def add(self, key: str, kind: str, data: dict[str, Any]) -> str:
+        entries = self.streams.setdefault(key, [])
+        entry_id = f"172598400{len(entries):04d}-0"
+        entries.append(
+            (entry_id, {FIELD_TYPE: kind, FIELD_DATA: json.dumps(data, ensure_ascii=False)})
         )
         return entry_id
 
@@ -90,47 +90,47 @@ class RedisGia:
         self, name: str, start: str, end: str, count: int | None = None
     ) -> list[tuple[str, dict[str, str]]]:
         assert end == "+", "consumer phai doc toi cuoi stream"
-        lo = _can_duoi(start)
-        ket_qua = [
-            (eid, fields) for eid, fields in self.streams.get(name, []) if _khoa_id(eid) >= lo
+        low = _lower_bound(start)
+        result = [
+            (eid, fields) for eid, fields in self.streams.get(name, []) if _id_key(eid) >= low
         ]
         if count is not None:
-            ket_qua = ket_qua[:count]
-        if not ket_qua and self.moc_sau_xrange_rong is not None:
-            moc, self.moc_sau_xrange_rong = self.moc_sau_xrange_rong, None
-            moc()
-        return ket_qua
+            result = result[:count]
+        if not result and self.after_empty_xrange is not None:
+            hook, self.after_empty_xrange = self.after_empty_xrange, None
+            hook()
+        return result
 
     async def xread(
         self, streams: dict[str, str], block: int | None = None, count: int | None = None
     ) -> list[tuple[str, list[tuple[str, dict[str, str]]]]] | None:
         assert block == HEARTBEAT_S * 1000, "BLOCK phai bang STREAM_HEARTBEAT_S"
-        self.so_lan_xread += 1
-        ((name, moc),) = streams.items()
-        self.xread_da_goi_voi.append(moc)
-        ban_ghi = self.streams.get(name, [])
+        self.xread_calls += 1
+        ((name, hook),) = streams.items()
+        self.xread_called_with.append(hook)
+        entries = self.streams.get(name, [])
         # `$` giải ra ID lớn nhất TẠI THỜI ĐIỂM GỌI — đây là nửa còn lại của C4.
-        lo = _khoa_id(ban_ghi[-1][0]) if (moc == "$" and ban_ghi) else _khoa_id(moc)
-        moi = [(eid, f) for eid, f in ban_ghi if _khoa_id(eid) > lo]
+        low = _id_key(entries[-1][0]) if (hook == "$" and entries) else _id_key(hook)
+        newer = [(eid, f) for eid, f in entries if _id_key(eid) > low]
         if count is not None:
-            moi = moi[:count]
-        return [(name, moi)] if moi else None
+            newer = newer[:count]
+        return [(name, newer)] if newer else None
 
     async def xrevrange(
         self, name: str, max: str = "+", min: str = "-", count: int | None = None
     ) -> list[tuple[str, dict[str, str]]]:
         """B-84. Chỉ dựng đúng ca consumer cần: toàn stream, đảo ngược, cắt `count`."""
         assert (max, min) == ("+", "-"), "consumer chi hoi ban ghi CUOI cua ca stream"
-        nguoc = list(reversed(self.streams.get(name, [])))
-        return nguoc[:count] if count is not None else nguoc
+        reversed_entries = list(reversed(self.streams.get(name, [])))
+        return reversed_entries[:count] if count is not None else reversed_entries
 
     async def exists(self, name: str) -> int:
         return 1 if name in self.streams else 0
 
-    def __getattr__(self, ten: str) -> Any:
+    def __getattr__(self, name: str) -> Any:
         # C7: consumer group là lỗi thiết kế ở đây, không phải lựa chọn. Chạm
         # vào bất kỳ lệnh nào của group là đỏ ngay, kể cả khi test khác vẫn xanh.
-        raise AssertionError(f"consumer khong duoc goi Redis.{ten} (C7: khong consumer group)")
+        raise AssertionError(f"consumer khong duoc goi Redis.{name} (C7: khong consumer group)")
 
 
 # ──────────────────────────────── công cụ ──────────────────────────────────
@@ -159,305 +159,305 @@ def _snapshot(
     )
 
 
-def _consumer(redis: RedisGia, snapshot: MessageSnapshot) -> StreamConsumer:
+def _consumer(redis: FakeRedis, snapshot: MessageSnapshot) -> StreamConsumer:
     return StreamConsumer(redis, snapshot, heartbeat_s=HEARTBEAT_S)  # type: ignore[arg-type]
 
 
-async def _thu(consumer: StreamConsumer, cursor: str, *, toi_da: int = 50) -> list[str]:
-    """Đọc tối đa `toi_da` khung rồi dừng — stream chưa `done` thì chờ mãi."""
-    khung: list[str] = []
+async def _collect(consumer: StreamConsumer, cursor: str, *, max_frames: int = 50) -> list[str]:
+    """Đọc tối đa `max_frames` khung rồi dừng — stream chưa `done` thì chờ mãi."""
+    frame: list[str] = []
     async for k in consumer.frames(cursor):
-        khung.append(k)
-        if len(khung) >= toi_da:
+        frame.append(k)
+        if len(frame) >= max_frames:
             break
-    return khung
+    return frame
 
 
-def _truong(khung: str, ten: str) -> list[str]:
-    return [d[len(ten) + 2 :] for d in khung.split("\n") if d.startswith(f"{ten}: ")]
+def _field(frame: str, name: str) -> list[str]:
+    return [d[len(name) + 2 :] for d in frame.split("\n") if d.startswith(f"{name}: ")]
 
 
-def _chuoi_chu(khung: list[str]) -> str:
+def _joined_text(frame: list[str]) -> str:
     """Nối mọi `delta` — đúng việc mà `sse.ts` (T-1.14) sẽ làm."""
-    ra = []
-    for k in khung:
-        if _truong(k, "event") == ["delta"]:
-            ra.append(json.loads("\n".join(_truong(k, "data")))["t"])
-    return "".join(ra)
+    out = []
+    for k in frame:
+        if _field(k, "event") == ["delta"]:
+            out.append(json.loads("\n".join(_field(k, "data")))["t"])
+    return "".join(out)
 
 
-def _stream_mau(redis: RedisGia, key: str, so_delta: int = 5, *, done: bool = True) -> None:
-    redis.them(key, "start", {"message_id": "m", "model_id": "mx"})
+def _sample_stream(redis: FakeRedis, key: str, so_delta: int = 5, *, done: bool = True) -> None:
+    redis.add(key, "start", {"message_id": "m", "model_id": "mx"})
     for i in range(so_delta):
-        redis.them(key, "delta", {"t": f"chu{i}"})
+        redis.add(key, "delta", {"t": f"chu{i}"})
     if done:
-        redis.them(key, "done", {"finish_reason": "stop", "usage": None})
+        redis.add(key, "done", {"finish_reason": "stop", "usage": None})
 
 
 # ═══════════════════════════ cursor (§7.2 ②) ═══════════════════════════════
 
 
-def test_mac_dinh_la_0_khi_khong_co_gi() -> None:
-    assert doc_cursor(None, None) == CURSOR_DAU
+def test_defaults_to_0_when_nothing_given() -> None:
+    assert parse_cursor(None, None) == CURSOR_START
 
 
-def test_last_event_id_thang_query_cursor() -> None:
+def test_last_event_id_beats_query_cursor() -> None:
     """EventSource giữ nguyên URL cũ khi reconnect — để query thắng là phát lại từ đầu."""
-    assert doc_cursor("1725984000123-0", "0") == "1725984000123-0"
+    assert parse_cursor("1725984000123-0", "0") == "1725984000123-0"
 
 
-def test_dung_query_cursor_khi_khong_co_header() -> None:
-    assert doc_cursor(None, "1725984000123-4") == "1725984000123-4"
+def test_uses_query_cursor_without_header() -> None:
+    assert parse_cursor(None, "1725984000123-4") == "1725984000123-4"
 
 
-@pytest.mark.parametrize("rong", ["", "   "])
-def test_header_rong_coi_nhu_vang_mat(rong: str) -> None:
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_empty_header_treated_as_missing(blank: str) -> None:
     """Có proxy gửi `Last-Event-ID:` rỗng — 400 ở đây là chặn client đang quay lại."""
-    assert doc_cursor(rong, "77-0") == "77-0"
+    assert parse_cursor(blank, "77-0") == "77-0"
 
 
-@pytest.mark.parametrize("xau", ["abc", "$", "-", "1-2-3", "1725984000123-", "(77", "1e5"])
-def test_cursor_sai_dang_thi_raise_chu_khong_lui_ve_0(xau: str) -> None:
+@pytest.mark.parametrize("bad", ["abc", "$", "-", "1-2-3", "1725984000123-", "(77", "1e5"])
+def test_malformed_cursor_raises_not_rewinds_to_0(bad: str) -> None:
     """Âm thầm lùi về 0 là phát lại từ đầu — đúng triệu chứng C3, mà không ai thấy."""
-    with pytest.raises(CursorKhongHopLe):
-        doc_cursor(xau, None)
+    with pytest.raises(InvalidCursor):
+        parse_cursor(bad, None)
 
 
-def test_cursor_chi_co_mili_giay_van_hop_le() -> None:
-    assert doc_cursor(None, "1725984000123") == "1725984000123"
+def test_millisecond_only_cursor_is_valid() -> None:
+    assert parse_cursor(None, "1725984000123") == "1725984000123"
 
 
 # ═════════════════════════ khung SSE (§7.4, C10) ═══════════════════════════
 
 
-def test_khung_du_ba_truong_va_dong_trong_ket_thuc() -> None:
+def test_frame_has_three_fields_and_blank_line_terminator() -> None:
     assert (
-        khung_sse("delta", '{"t":"a"}', event_id="7-0")
+        sse_frame("delta", '{"t":"a"}', event_id="7-0")
         == 'id: 7-0\nevent: delta\ndata: {"t":"a"}\n\n'
     )
 
 
-def test_khung_khong_co_id_thi_bo_han_dong_id() -> None:
-    assert khung_sse("done", "{}") == "event: done\ndata: {}\n\n"
+def test_frame_without_id_drops_id_line() -> None:
+    assert sse_frame("done", "{}") == "event: done\ndata: {}\n\n"
 
 
-def test_data_nhieu_dong_thanh_nhieu_dong_data() -> None:
+def test_multiline_data_becomes_multiple_data_lines() -> None:
     """Lớp thứ hai của C10: một payload lọt vào stream mà không qua `encode_event`."""
-    khung = khung_sse("delta", "a\nb\r\nc")
-    assert _truong(khung, "data") == ["a", "b", "c"]
-    assert khung.endswith("\n\n")
+    frame = sse_frame("delta", "a\nb\r\nc")
+    assert _field(frame, "data") == ["a", "b", "c"]
+    assert frame.endswith("\n\n")
 
 
-def test_xuong_dong_trong_ten_event_bi_lam_phang() -> None:
+def test_newline_in_event_name_is_flattened() -> None:
     """`event:` là trường MỘT dòng — một `\\n` ở đây cắt đôi mọi khung phía sau."""
-    assert _truong(khung_sse("de\nlta", "{}"), "event") == ["de lta"]
+    assert _field(sse_frame("de\nlta", "{}"), "event") == ["de lta"]
 
 
 # ═══════════════ ① XRANGE (cursor, +] — đuổi kịp, không lặp (C3) ═══════════
 
 
-async def test_cursor_0_nhan_lai_tu_dau_du_so_ban_ghi() -> None:
+async def test_cursor_0_replays_from_start_all_entries() -> None:
     """DoD: chạy lại với `cursor=0` → nhận lại từ đầu, đủ số bản ghi bằng XLEN."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
-    _stream_mau(redis, consumer.key)
+    _sample_stream(redis, consumer.key)
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert len(khung) == len(redis.ids(consumer.key)) == 7
-    assert _chuoi_chu(khung) == "chu0chu1chu2chu3chu4"
+    assert len(frame) == len(redis.ids(consumer.key)) == 7
+    assert _joined_text(frame) == "chu0chu1chu2chu3chu4"
 
 
-async def test_xrange_loai_tru_cursor_khong_gui_lai_ban_ghi_da_nhan() -> None:
+async def test_xrange_excludes_cursor_no_resend_of_received_entry() -> None:
     """C3 — `[cursor` thay vì `(cursor` làm reconnect thấy một đoạn chữ LẶP."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
-    _stream_mau(redis, consumer.key)
+    _sample_stream(redis, consumer.key)
     ids = redis.ids(consumer.key)
 
-    khung = await _thu(consumer, ids[2])  # đã nhận tới delta thứ hai
+    frame = await _collect(consumer, ids[2])  # đã nhận tới delta thứ hai
 
-    assert _truong(khung[0], "id") == [ids[3]], "ban ghi tai cursor KHONG duoc gui lai"
-    assert _chuoi_chu(khung) == "chu2chu3chu4"
+    assert _field(frame[0], "id") == [ids[3]], "ban ghi tai cursor KHONG duoc gui lai"
+    assert _joined_text(frame) == "chu2chu3chu4"
 
 
-async def test_noi_hai_nua_bang_dung_chuoi_goc_khong_thua_khong_thieu() -> None:
+async def test_joining_two_halves_equals_original_no_more_no_less() -> None:
     """Phép đo của S3/T-1.11 thu nhỏ: ngắt ở giữa rồi nối `A + B`."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
-    day_du = _consumer(redis, _snapshot(mid))
-    _stream_mau(redis, day_du.key, so_delta=9)
-    ids = redis.ids(day_du.key)
+    full = _consumer(redis, _snapshot(mid))
+    _sample_stream(redis, full.key, so_delta=9)
+    ids = redis.ids(full.key)
 
-    nua_a = await _thu(day_du, CURSOR_DAU, toi_da=5)
-    id_cuoi = _truong(nua_a[-1], "id")[0]
-    nua_b = await _thu(_consumer(redis, _snapshot(mid)), id_cuoi)
+    half_a = await _collect(full, CURSOR_START, max_frames=5)
+    last_id = _field(half_a[-1], "id")[0]
+    half_b = await _collect(_consumer(redis, _snapshot(mid)), last_id)
 
-    assert _chuoi_chu(nua_a + nua_b) == "".join(f"chu{i}" for i in range(9))
-    assert [i for k in nua_a + nua_b for i in _truong(k, "id")] == ids
+    assert _joined_text(half_a + half_b) == "".join(f"chu{i}" for i in range(9))
+    assert [i for k in half_a + half_b for i in _field(k, "id")] == ids
 
 
 # ═════════ ② XREAD BLOCK từ ID CUỐI CÙNG ĐÃ GỬI — không phải `$` (C4) ══════
 
 
-async def test_xread_moi_bang_id_cuoi_cung_da_gui() -> None:
-    redis = RedisGia()
+async def test_xread_waits_from_last_sent_id() -> None:
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
-    _stream_mau(redis, consumer.key, done=False)
+    _sample_stream(redis, consumer.key, done=False)
     ids = redis.ids(consumer.key)
 
-    await _thu(consumer, CURSOR_DAU, toi_da=len(ids) + 1)
+    await _collect(consumer, CURSOR_START, max_frames=len(ids) + 1)
 
-    assert redis.xread_da_goi_voi == [ids[-1]], "XREAD phai moi bang ID cuoi, khong phai `$`"
+    assert redis.xread_called_with == [ids[-1]], "XREAD phai moi bang ID cuoi, khong phai `$`"
 
 
-async def test_khong_mat_ban_ghi_sinh_ra_giua_xrange_va_xread() -> None:
+async def test_no_entry_lost_between_xrange_and_xread() -> None:
     """C4 — cạm bẫy tinh vi nhất: chỉ sai khi có độ trễ giữa hai lệnh.
 
     `moc_sau_xrange_rong` ghi thêm chữ đúng vào khe đó. Với `XREAD` từ `$`,
     `$` giải ra ID của chính bản ghi vừa thêm nên nó bị bỏ qua vĩnh viễn.
     """
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
-    _stream_mau(redis, consumer.key, so_delta=3, done=False)
+    _sample_stream(redis, consumer.key, so_delta=3, done=False)
 
-    def sinh_tiep() -> None:
-        redis.them(consumer.key, "delta", {"t": "-trong-khe"})
-        redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+    def keep_generating() -> None:
+        redis.add(consumer.key, "delta", {"t": "-trong-khe"})
+        redis.add(consumer.key, "done", {"finish_reason": "stop", "usage": None})
 
-    redis.moc_sau_xrange_rong = sinh_tiep
+    redis.after_empty_xrange = keep_generating
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert _chuoi_chu(khung) == "chu0chu1chu2-trong-khe"
-    assert _truong(khung[-1], "event") == ["done"]
+    assert _joined_text(frame) == "chu0chu1chu2-trong-khe"
+    assert _field(frame[-1], "event") == ["done"]
 
 
-async def test_ping_khi_het_block_va_van_cho_tiep() -> None:
+async def test_pings_when_block_expires_and_keeps_waiting() -> None:
     """DoD: không có event mới trong 20 s → thấy `: ping`, kết nối chưa đứt."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
-    _stream_mau(redis, consumer.key, so_delta=1, done=False)
+    _sample_stream(redis, consumer.key, so_delta=1, done=False)
 
-    khung: list[str] = []
-    async for k in consumer.frames(CURSOR_DAU):
-        khung.append(k)
-        if khung.count(KHUNG_PING) == 3:
+    frame: list[str] = []
+    async for k in consumer.frames(CURSOR_START):
+        frame.append(k)
+        if frame.count(PING_FRAME) == 3:
             # Chữ tới SAU ba nhịp im lặng — đúng hình dạng của một model nghĩ lâu.
-            redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+            redis.add(consumer.key, "done", {"finish_reason": "stop", "usage": None})
 
-    assert khung.count(KHUNG_PING) == 3
-    assert _truong(khung[-1], "event") == ["done"]
-    assert KHUNG_PING.startswith(":"), "ping phai la COMMENT, khong phai event"
+    assert frame.count(PING_FRAME) == 3
+    assert _field(frame[-1], "event") == ["done"]
+    assert PING_FRAME.startswith(":"), "ping phai la COMMENT, khong phai event"
 
 
-@pytest.mark.parametrize("loai_ket_thuc", ["done", "error"])
-async def test_dung_ngay_sau_event_ket_thuc(loai_ket_thuc: str) -> None:
+@pytest.mark.parametrize("terminal_event", ["done", "error"])
+async def test_stops_right_after_terminal_event(terminal_event: str) -> None:
     """§7.4: chỉ `done` hoặc `error` mới đóng stream — và chúng đóng THẬT."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
-    redis.them(consumer.key, "delta", {"t": "a"})
-    redis.them(consumer.key, loai_ket_thuc, {"code": "UPSTREAM_ERROR"})
-    redis.them(consumer.key, "delta", {"t": "khong-duoc-gui"})
+    redis.add(consumer.key, "delta", {"t": "a"})
+    redis.add(consumer.key, terminal_event, {"code": "UPSTREAM_ERROR"})
+    redis.add(consumer.key, "delta", {"t": "khong-duoc-gui"})
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert [_truong(k, "event")[0] for k in khung] == ["delta", loai_ket_thuc]
-    assert redis.so_lan_xread == 0, "da co event ket thuc thi khong duoc BLOCK them"
+    assert [_field(k, "event")[0] for k in frame] == ["delta", terminal_event]
+    assert redis.xread_calls == 0, "da co event ket thuc thi khong duoc BLOCK them"
 
 
 # ═════════ ②bis — cursor đứng sau event kết thúc (B-84) ══════════
 
 
-@pytest.mark.parametrize("loai_ket_thuc", ["done", "error"])
-async def test_cursor_dung_sau_event_ket_thuc_thi_phat_lai_roi_dong(loai_ket_thuc: str) -> None:
+@pytest.mark.parametrize("terminal_event", ["done", "error"])
+async def test_cursor_after_terminal_event_replays_then_closes(terminal_event: str) -> None:
     """B-84: client đã nhận `done` mà vẫn quay lại — **không được** treo.
 
     Không có khối ②bis thì `XRANGE (cursor +` rỗng, stream vẫn còn nên đường
     Postgres không nhận, và `XREAD BLOCK` chờ một bản ghi không bao giờ tới.
     """
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content="a"))
-    redis.them(consumer.key, "delta", {"t": "a"})
-    id_cuoi = redis.them(consumer.key, loai_ket_thuc, {"code": "UPSTREAM_ERROR"})
+    redis.add(consumer.key, "delta", {"t": "a"})
+    last_id = redis.add(consumer.key, terminal_event, {"code": "UPSTREAM_ERROR"})
 
-    khung = await _thu(consumer, id_cuoi)
+    frame = await _collect(consumer, last_id)
 
-    assert [_truong(k, "event")[0] for k in khung] == [loai_ket_thuc]
-    assert _truong(khung[0], "id") == [id_cuoi], "phat lai dung ban ghi cu, khong bia ID"
-    assert redis.so_lan_xread == 0, "khong duoc BLOCK cho mot ban ghi khong bao gio toi"
+    assert [_field(k, "event")[0] for k in frame] == [terminal_event]
+    assert _field(frame[0], "id") == [last_id], "phat lai dung ban ghi cu, khong bia ID"
+    assert redis.xread_calls == 0, "khong duoc BLOCK cho mot ban ghi khong bao gio toi"
 
 
-async def test_phat_lai_event_ket_thuc_khong_them_mot_ky_tu_nao() -> None:
+async def test_replaying_terminal_event_adds_no_characters() -> None:
     """C3 vẫn yên: thứ được phát lại là `done`, mà `done` không mang chữ."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content="chu0"))
-    redis.them(consumer.key, "delta", {"t": "chu0"})
-    id_done = redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+    redis.add(consumer.key, "delta", {"t": "chu0"})
+    id_done = redis.add(consumer.key, "done", {"finish_reason": "stop", "usage": None})
 
-    assert _chuoi_chu(await _thu(consumer, id_done)) == ""
+    assert _joined_text(await _collect(consumer, id_done)) == ""
 
 
-async def test_cursor_dung_sau_ban_ghi_cuoi_MA_CHUA_KET_THUC_thi_van_cho() -> None:
+async def test_cursor_after_last_entry_NOT_FINISHED_keeps_waiting() -> None:
     """Nửa còn lại của B-84: bản ghi cuối là `delta` thì đóng là cắt giữa chừng.
 
     Đây là khe vài mili-giây mà B-84 cảnh báo: worker ghi Postgres TRƯỚC rồi
     `XADD done` SAU, nên `status` đã `completed` trong khi `done` chưa lên dây.
     ②bis hỏi `messages.status` thay vì hỏi chính stream thì test này đỏ.
     """
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content="a"))
-    id_delta = redis.them(consumer.key, "delta", {"t": "a"})
+    id_delta = redis.add(consumer.key, "delta", {"t": "a"})
 
-    def worker_ghi_not() -> None:
-        redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+    def worker_writes_rest() -> None:
+        redis.add(consumer.key, "done", {"finish_reason": "stop", "usage": None})
 
-    redis.moc_sau_xrange_rong = worker_ghi_not
-    khung = await _thu(consumer, id_delta)
+    redis.after_empty_xrange = worker_writes_rest
+    frame = await _collect(consumer, id_delta)
 
-    assert [_truong(k, "event")[0] for k in khung] == ["done"]
-    assert redis.so_lan_xread == 1, "phai di tiep sang XREAD chu khong duoc dong"
+    assert [_field(k, "event")[0] for k in frame] == ["done"]
+    assert redis.xread_calls == 1, "phai di tiep sang XREAD chu khong duoc dong"
 
 
-async def test_ban_ghi_moi_hon_cursor_khong_bi_nuot_boi_nhanh_phat_lai() -> None:
+async def test_entry_newer_than_cursor_not_swallowed_by_replay_branch() -> None:
     """Khe C4 bên trong chính ②bis: worker kịp ghi `delta` RỒI `done`.
 
     `XREVRANGE COUNT 1` chỉ thấy `done`; phát nó rồi đóng là nuốt mất `delta` ở
     giữa. Bỏ phép so `_thu_tu_id(...) <= last_id` thì test này đỏ đúng chỗ đó.
     """
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content="ab"))
-    id_delta = redis.them(consumer.key, "delta", {"t": "a"})
+    id_delta = redis.add(consumer.key, "delta", {"t": "a"})
 
-    def worker_ghi_not() -> None:
-        redis.them(consumer.key, "delta", {"t": "b"})
-        redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+    def worker_writes_rest() -> None:
+        redis.add(consumer.key, "delta", {"t": "b"})
+        redis.add(consumer.key, "done", {"finish_reason": "stop", "usage": None})
 
-    redis.moc_sau_xrange_rong = worker_ghi_not
-    khung = await _thu(consumer, id_delta)
+    redis.after_empty_xrange = worker_writes_rest
+    frame = await _collect(consumer, id_delta)
 
-    assert _chuoi_chu(khung) == "b", "phan sinh ra trong khe KHONG duoc mat"
-    assert [_truong(k, "event")[0] for k in khung] == ["delta", "done"]
+    assert _joined_text(frame) == "b", "phan sinh ra trong khe KHONG duoc mat"
+    assert [_field(k, "event")[0] for k in frame] == ["delta", "done"]
 
 
-async def test_cursor_chi_co_mili_giay_van_nhan_ra_da_qua_event_ket_thuc() -> None:
+async def test_millisecond_only_cursor_still_detects_passed_terminal_event() -> None:
     """`?cursor=1725984000005` (không có `-seq`) vẫn phải bằng `1725984000005-0`.
 
     So hai ID bằng chuỗi thì `"...005-0" <= "...005"` là `False` và client treo
-    đúng ca B-84 mô tả. `doc_cursor` cho phép dạng chỉ-mili-giây này (xem
-    `test_cursor_chi_co_mili_giay_van_hop_le`) nên nó không phải ca giả định.
+    đúng ca B-84 mô tả. `parse_cursor` cho phép dạng chỉ-mili-giây này (xem
+    `test_millisecond_only_cursor_is_valid`) nên nó không phải ca giả định.
     """
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid, status=MessageStatus.COMPLETED, content=""))
     redis.streams[consumer.key] = [
@@ -467,95 +467,95 @@ async def test_cursor_chi_co_mili_giay_van_nhan_ra_da_qua_event_ket_thuc() -> No
         )
     ]
 
-    khung = await _thu(consumer, "1725984000005")
+    frame = await _collect(consumer, "1725984000005")
 
-    assert [_truong(k, "event")[0] for k in khung] == ["done"]
-    assert redis.so_lan_xread == 0
+    assert [_field(k, "event")[0] for k in frame] == ["done"]
+    assert redis.xread_calls == 0
 
 
 # ════════════════════════ ③ hai client song song (C7) ══════════════════════
 
 
-async def test_hai_client_cung_luc_deu_nhan_du_moi_event() -> None:
+async def test_two_concurrent_clients_both_get_every_event() -> None:
     """DoD: hai `curl -N` song song cùng một message → cả hai nhận đủ.
 
-    `RedisGia.__getattr__` đã chặn mọi lệnh consumer group; test này kiểm nửa
+    `FakeRedis.__getattr__` đã chặn mọi lệnh consumer group; test này kiểm nửa
     còn lại của C7 — đọc không làm bản ghi biến mất với người đọc kia.
     """
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     tab_a = _consumer(redis, _snapshot(mid))
     tab_b = _consumer(redis, _snapshot(mid))
-    _stream_mau(redis, tab_a.key)
+    _sample_stream(redis, tab_a.key)
 
-    khung_a = await _thu(tab_a, CURSOR_DAU)
-    khung_b = await _thu(tab_b, CURSOR_DAU)
+    frames_a = await _collect(tab_a, CURSOR_START)
+    frames_b = await _collect(tab_b, CURSOR_START)
 
-    assert _chuoi_chu(khung_a) == _chuoi_chu(khung_b) == "chu0chu1chu2chu3chu4"
-    assert khung_a == khung_b
+    assert _joined_text(frames_a) == _joined_text(frames_b) == "chu0chu1chu2chu3chu4"
+    assert frames_a == frames_b
 
 
 # ═══════════════════ mỗi event mang `id:` là Redis Stream ID ═══════════════
 
 
-async def test_moi_event_mang_dung_id_cua_redis() -> None:
-    redis = RedisGia()
+async def test_every_event_carries_its_redis_id() -> None:
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
-    _stream_mau(redis, consumer.key)
+    _sample_stream(redis, consumer.key)
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert [_truong(k, "id")[0] for k in khung] == redis.ids(consumer.key)
+    assert [_field(k, "id")[0] for k in frame] == redis.ids(consumer.key)
 
 
-async def test_chep_nguyen_van_data_khong_parse_lai() -> None:
+async def test_copies_data_verbatim_without_reparsing() -> None:
     """Parse rồi dumps lại có thể đổi thứ tự khoá — consumer không đụng payload."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
-    tho = '{"z":1,"a":2}'
-    redis.streams[consumer.key] = [("1-0", {FIELD_TYPE: "delta", FIELD_DATA: tho})]
-    redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+    raw = '{"z":1,"a":2}'
+    redis.streams[consumer.key] = [("1-0", {FIELD_TYPE: "delta", FIELD_DATA: raw})]
+    redis.add(consumer.key, "done", {"finish_reason": "stop", "usage": None})
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert _truong(khung[0], "data") == [tho]
+    assert _field(frame[0], "data") == [raw]
 
 
-async def test_tieng_viet_va_emoji_di_qua_nguyen_ven() -> None:
+async def test_vietnamese_and_emoji_pass_through_intact() -> None:
     """C9/C10 — nối lại phải bằng chuỗi gốc, kể cả emoji và dấu xuống dòng."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
-    chu = "Mùa thu 🍂\nlá rụng ☕"
-    redis.them(consumer.key, "delta", {"t": chu})
-    redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+    text = "Mùa thu 🍂\nlá rụng ☕"
+    redis.add(consumer.key, "delta", {"t": text})
+    redis.add(consumer.key, "done", {"finish_reason": "stop", "usage": None})
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert _chuoi_chu(khung) == chu
-    assert len(_truong(khung[0], "data")) == 1, "json.dumps phai escape xuong dong (C10)"
+    assert _joined_text(frame) == text
+    assert len(_field(frame[0], "data")) == 1, "json.dumps phai escape xuong dong (C10)"
 
 
-async def test_ban_ghi_thieu_truong_bi_bo_qua_chu_khong_lam_hong_khung() -> None:
-    redis = RedisGia()
+async def test_entry_missing_fields_skipped_not_breaking_frame() -> None:
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(redis, _snapshot(mid))
     redis.streams[consumer.key] = [("1-0", {FIELD_TYPE: "delta"})]
-    redis.them(consumer.key, "done", {"finish_reason": "stop", "usage": None})
+    redis.add(consumer.key, "done", {"finish_reason": "stop", "usage": None})
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert [_truong(k, "event")[0] for k in khung] == ["done"]
+    assert [_field(k, "event")[0] for k in frame] == ["done"]
 
 
 # ══════════ stream hết TTL, message đã khép → dựng lại từ Postgres ═════════
 
 
-async def test_stream_het_ttl_message_completed_tra_content_roi_done() -> None:
+async def test_expired_stream_completed_message_sends_content_then_done() -> None:
     """DoD: message `completed` từ 2 giờ trước → vẫn trả content đầy đủ + `done`."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(
         redis,
@@ -569,42 +569,42 @@ async def test_stream_het_ttl_message_completed_tra_content_roi_done() -> None:
         ),
     )
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert [_truong(k, "event")[0] for k in khung] == ["start", "delta", "done"]
-    assert _chuoi_chu(khung) == "câu trả lời của hôm qua"
-    cuoi = json.loads(_truong(khung[-1], "data")[0])
-    assert cuoi == {"finish_reason": "stop", "usage": {"in": 297, "out": 298}}
-    assert redis.so_lan_xread == 0, "khong duoc BLOCK khi da tra loi xong tu Postgres"
+    assert [_field(k, "event")[0] for k in frame] == ["start", "delta", "done"]
+    assert _joined_text(frame) == "câu trả lời của hôm qua"
+    last = json.loads(_field(frame[-1], "data")[0])
+    assert last == {"finish_reason": "stop", "usage": {"in": 297, "out": 298}}
+    assert redis.xread_calls == 0, "khong duoc BLOCK khi da tra loi xong tu Postgres"
 
 
-async def test_duong_postgres_khong_mang_id() -> None:
+async def test_postgres_path_carries_no_id() -> None:
     """Không còn stream nào để trỏ tới — bịa một ID là phát ra cursor vô nghĩa."""
-    redis = RedisGia()
+    redis = FakeRedis()
     consumer = _consumer(
         redis, _snapshot(uuid.uuid4(), status=MessageStatus.COMPLETED, content="x")
     )
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert all(_truong(k, "id") == [] for k in khung)
+    assert all(_field(k, "id") == [] for k in frame)
 
 
-async def test_duong_postgres_dung_chung_encode_event_voi_producer() -> None:
+async def test_postgres_path_shares_encode_event_with_producer() -> None:
     """Hai đường phải ra cùng một chuỗi `data:`, nếu không FE cần hai parser."""
-    redis = RedisGia()
+    redis = FakeRedis()
     consumer = _consumer(
         redis, _snapshot(uuid.uuid4(), status=MessageStatus.COMPLETED, content="xin chào")
     )
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert _truong(khung[1], "data") == [encode_event(DeltaEvent(text="xin chào"))[1]]
-    assert _truong(khung[2], "data") == [encode_event(DoneEvent(finish_reason=None, usage=None))[1]]
+    assert _field(frame[1], "data") == [encode_event(DeltaEvent(text="xin chào"))[1]]
+    assert _field(frame[2], "data") == [encode_event(DoneEvent(finish_reason=None, usage=None))[1]]
 
 
-async def test_stream_het_ttl_message_failed_tra_error_co_ma() -> None:
-    redis = RedisGia()
+async def test_expired_stream_failed_message_sends_error_with_code() -> None:
+    redis = FakeRedis()
     consumer = _consumer(
         redis,
         _snapshot(
@@ -615,27 +615,29 @@ async def test_stream_het_ttl_message_failed_tra_error_co_ma() -> None:
         ),
     )
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert [_truong(k, "event")[0] for k in khung] == ["start", "delta", "error"]
+    assert [_field(k, "event")[0] for k in frame] == ["start", "delta", "error"]
     # Phần chữ đã sinh vẫn tới người dùng: `finish_generation` giữ nó cho cả đường lỗi.
-    assert _chuoi_chu(khung) == "phần đã sinh được"
-    assert json.loads(_truong(khung[-1], "data")[0])["code"] == "UPSTREAM_ERROR"
+    assert _joined_text(frame) == "phần đã sinh được"
+    assert json.loads(_field(frame[-1], "data")[0])["code"] == "UPSTREAM_ERROR"
 
 
-@pytest.mark.parametrize("ma", [None, "MA_KHONG_CO_THAT"])
-async def test_error_code_la_null_hoac_ma_la_thi_thanh_internal_error(ma: str | None) -> None:
-    redis = RedisGia()
-    consumer = _consumer(redis, _snapshot(uuid.uuid4(), status=MessageStatus.FAILED, error_code=ma))
+@pytest.mark.parametrize("code", [None, "MA_KHONG_CO_THAT"])
+async def test_null_or_unknown_error_code_becomes_internal_error(code: str | None) -> None:
+    redis = FakeRedis()
+    consumer = _consumer(
+        redis, _snapshot(uuid.uuid4(), status=MessageStatus.FAILED, error_code=code)
+    )
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert json.loads(_truong(khung[-1], "data")[0])["code"] == "INTERNAL_ERROR"
+    assert json.loads(_field(frame[-1], "data")[0])["code"] == "INTERNAL_ERROR"
 
 
-async def test_message_cancelled_di_duong_done_chu_khong_phai_error() -> None:
+async def test_cancelled_message_takes_done_path_not_error() -> None:
     """§7.5: huỷ vẫn là một lượt sinh khép lại bình thường, chỉ khác `finish_reason`."""
-    redis = RedisGia()
+    redis = FakeRedis()
     consumer = _consumer(
         redis,
         _snapshot(
@@ -646,60 +648,60 @@ async def test_message_cancelled_di_duong_done_chu_khong_phai_error() -> None:
         ),
     )
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert _truong(khung[-1], "event") == ["done"]
-    assert json.loads(_truong(khung[-1], "data")[0])["finish_reason"] == "cancelled"
+    assert _field(frame[-1], "event") == ["done"]
+    assert json.loads(_field(frame[-1], "data")[0])["finish_reason"] == "cancelled"
 
 
-async def test_khong_co_model_id_thi_bo_han_event_start() -> None:
+async def test_without_model_id_start_event_is_dropped() -> None:
     """Chết trước khi kịp chọn model thì không có gì để khai báo — `""` là sai."""
-    redis = RedisGia()
+    redis = FakeRedis()
     consumer = _consumer(redis, _snapshot(uuid.uuid4(), status=MessageStatus.FAILED, model_id=None))
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert [_truong(k, "event")[0] for k in khung] == ["error"]
+    assert [_field(k, "event")[0] for k in frame] == ["error"]
 
 
-async def test_content_rong_thi_khong_co_delta_rong() -> None:
-    redis = RedisGia()
+async def test_empty_content_yields_no_empty_delta() -> None:
+    redis = FakeRedis()
     consumer = _consumer(redis, _snapshot(uuid.uuid4(), status=MessageStatus.COMPLETED, content=""))
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert [_truong(k, "event")[0] for k in khung] == ["start", "done"]
+    assert [_field(k, "event")[0] for k in frame] == ["start", "done"]
 
 
-@pytest.mark.parametrize("chua_xong", [MessageStatus.QUEUED, MessageStatus.STREAMING])
-async def test_message_chua_khep_thi_KHONG_di_duong_postgres(chua_xong: MessageStatus) -> None:
+@pytest.mark.parametrize("unfinished", [MessageStatus.QUEUED, MessageStatus.STREAMING])
+async def test_open_message_does_NOT_take_postgres_path(unfinished: MessageStatus) -> None:
     """`queued`/`streaming` nghĩa là chữ vẫn sẽ tới — trả câu rỗng lúc đó là nói dối."""
-    redis = RedisGia()
-    consumer = _consumer(redis, _snapshot(uuid.uuid4(), status=chua_xong, content=""))
+    redis = FakeRedis()
+    consumer = _consumer(redis, _snapshot(uuid.uuid4(), status=unfinished, content=""))
 
-    khung = await _thu(consumer, CURSOR_DAU, toi_da=2)
+    frame = await _collect(consumer, CURSOR_START, max_frames=2)
 
-    assert khung == [KHUNG_PING, KHUNG_PING]
+    assert frame == [PING_FRAME, PING_FRAME]
 
 
-async def test_stream_con_song_thi_doc_redis_chu_khong_doc_postgres() -> None:
+async def test_live_stream_reads_redis_not_postgres() -> None:
     """Redis là nguồn của phần đang bay; Postgres chỉ vào cuộc khi stream đã mất."""
-    redis = RedisGia()
+    redis = FakeRedis()
     mid = uuid.uuid4()
     consumer = _consumer(
         redis, _snapshot(mid, status=MessageStatus.COMPLETED, content="BAN-CUA-POSTGRES")
     )
-    _stream_mau(redis, consumer.key, so_delta=2)
+    _sample_stream(redis, consumer.key, so_delta=2)
 
-    khung = await _thu(consumer, CURSOR_DAU)
+    frame = await _collect(consumer, CURSOR_START)
 
-    assert _chuoi_chu(khung) == "chu0chu1"
+    assert _joined_text(frame) == "chu0chu1"
 
 
 # ═══════════════════════════ MessageSnapshot.usage ═════════════════════════
 
 
-def test_usage_dung_khi_co_ca_hai_cot() -> None:
+def test_usage_correct_when_both_columns_present() -> None:
     usage = _snapshot(uuid.uuid4(), prompt_tokens=10, completion_tokens=4).usage()
     assert usage is not None
     assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (10, 4, 14)
@@ -708,7 +710,7 @@ def test_usage_dung_khi_co_ca_hai_cot() -> None:
     assert usage.cached_prompt_tokens is None
 
 
-@pytest.mark.parametrize(("vao", "ra"), [(None, 4), (10, None), (None, None)])
-def test_thieu_mot_cot_thi_usage_la_None_chu_khong_phai_0(vao: int | None, ra: int | None) -> None:
+@pytest.mark.parametrize(("entry", "out"), [(None, 4), (10, None), (None, None)])
+def test_missing_one_column_usage_is_None_not_0(entry: int | None, out: int | None) -> None:
     """Điền 0 vào chỗ vắng biến một lượt chat thành miễn phí trong sổ sách (C40)."""
-    assert _snapshot(uuid.uuid4(), prompt_tokens=vao, completion_tokens=ra).usage() is None
+    assert _snapshot(uuid.uuid4(), prompt_tokens=entry, completion_tokens=out).usage() is None

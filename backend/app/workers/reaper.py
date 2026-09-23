@@ -40,7 +40,7 @@ là *độ phân giải* của phép quét: giới hạn thật là `REAPER_STAL
 riêng và là thứ quyết định "bao lâu thì coi như chết". Thêm nữa, cron của arq
 nhận một **tập giây trong phút**, nên chỉ các ước của 60 mới ra nhịp đều — một
 biến môi trường nhận `REAPER_MOI_N_GIAY=7` sẽ tạo ra một lịch quét lệch mà
-không ai báo. Cùng loại với `KIEM_HUY_MOI_N_CHUNK` của `generate.py`.
+không ai báo. Cùng loại với `CANCEL_CHECK_EVERY_N_CHUNKS` của `generate.py`.
 
 **Cửa sổ phát hiện thật, tính được từ ba con số** (và đây là chỗ S4 của
 KE-HOACH §2.3 nói "query DB sau 120 s" chứ không phải 90 s):
@@ -79,12 +79,12 @@ REAPER_JOB_NAME = "reaper"
 #: §7.6 viết thẳng "Cron arq mỗi 30 s". arq nhận **tập giây trong phút**, nên
 #: 30 s là `{0, 30}`. Xem docstring module cho lý do đây không phải biến
 #: `Settings`.
-REAPER_MOI_N_GIAY = 30
-REAPER_GIAY_TRONG_PHUT = frozenset(range(0, 60, REAPER_MOI_N_GIAY))
+REAPER_EVERY_N_SECONDS = 30
+REAPER_SECONDS_IN_MINUTE = frozenset(range(0, 60, REAPER_EVERY_N_SECONDS))
 
 #: Chữ đi kèm event `error`. Chỉ cho người đọc log — §7.4 nói FE phân nhánh
 #: theo `code`, không theo câu này; và §20 cấm nó mang nội dung message.
-LY_DO_THEO_MA = {
+REASON_BY_CODE = {
     ErrorCode.WORKER_LOST: "worker dung giua chung, khong con nhip tim",
     ErrorCode.JOB_LOST: "khong worker nao nhan job nay, message ket o hang doi",
 }
@@ -98,12 +98,12 @@ async def reaper(ctx: dict[str, Any]) -> None:
     không mua thêm gì. Đổi lại, mọi ngả thoát đều để lại một dòng log.
     """
     try:
-        mat_nhip_tim, mo_coi_hang_doi = await _don_postgres()
+        lost_heartbeat, orphaned_queued = await _sweep_postgres()
     except Exception:  # noqa: BLE001 — xem docstring
         logger.exception("reaper: khong chay duoc cau UPDATE cua §7.6")
         return
 
-    if not mat_nhip_tim and not mo_coi_hang_doi:
+    if not lost_heartbeat and not orphaned_queued:
         # Đường chạy thường ngày. `debug` chứ không `info`: 2880 dòng/ngày ở
         # mức `info` sẽ dìm chết log của `generate` trong chính file log ấy.
         logger.debug(
@@ -122,25 +122,25 @@ async def reaper(ctx: dict[str, Any]) -> None:
     # nhau với người vận hành. `streaming` quá hạn nghĩa là worker chết giữa
     # lúc sinh; `queued` quá hạn nghĩa là **không ai nhận job** — ca thứ hai
     # chỉ về hàng đợi hoặc về việc worker không chạy, không về model.
-    for ids, nguong, ma, mo_ta in (
-        (mat_nhip_tim, settings.REAPER_STALE_S, ErrorCode.WORKER_LOST, "streaming"),
-        (mo_coi_hang_doi, settings.REAPER_QUEUED_STALE_S, ErrorCode.JOB_LOST, "queued"),
+    for ids, threshold, code, description in (
+        (lost_heartbeat, settings.REAPER_STALE_S, ErrorCode.WORKER_LOST, "streaming"),
+        (orphaned_queued, settings.REAPER_QUEUED_STALE_S, ErrorCode.JOB_LOST, "queued"),
     ):
         if not ids:
             continue
         for mid in ids:
-            await _bao_cho_client(ctx["redis"], mid, ma)
+            await _notify_client(ctx["redis"], mid, code)
         logger.warning(
             "reaper: %d message ket o %s qua %ds -> failed/%s: %s",
             len(ids),
-            mo_ta,
-            nguong,
-            ma.value,
+            description,
+            threshold,
+            code.value,
             ", ".join(str(mid) for mid in ids),
         )
 
 
-async def _don_postgres() -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+async def _sweep_postgres() -> tuple[list[uuid.UUID], list[uuid.UUID]]:
     """Bước ①. MỘT transaction cho cả hai nhánh, mốc thời gian do Postgres cấp.
 
     Cùng một session nên cùng một `now()` (= `transaction_timestamp()`): hai
@@ -149,23 +149,23 @@ async def _don_postgres() -> tuple[list[uuid.UUID], list[uuid.UUID]]:
     """
     async with session_scope() as session:
         repo = MessageRepository(session)
-        mat_nhip_tim = await repo.reap_stale_streaming(
+        lost_heartbeat = await repo.reap_stale_streaming(
             stale_after_s=settings.REAPER_STALE_S,
             error_code=ErrorCode.WORKER_LOST.value,
         )
-        mo_coi_hang_doi = await repo.reap_stale_queued(
+        orphaned_queued = await repo.reap_stale_queued(
             stale_after_s=settings.REAPER_QUEUED_STALE_S,
             error_code=ErrorCode.JOB_LOST.value,
         )
         await session.commit()
-        return list(mat_nhip_tim), list(mo_coi_hang_doi)
+        return list(lost_heartbeat), list(orphaned_queued)
 
 
-async def _bao_cho_client(redis: Any, mid: uuid.UUID, ma: ErrorCode) -> None:
+async def _notify_client(redis: Any, mid: uuid.UUID, code: ErrorCode) -> None:
     """Bước ②. Một message hỏng KHÔNG được làm hỏng những message còn lại.
 
     `EXPIRE` đi kèm `XADD` vì đây là ca duy nhất mà không ai khác đặt được TTL
-    cho stream: `generate` đặt nó ở `_dong_so`, mà `_dong_so` chính là thứ đã
+    cho stream: `generate` đặt nó ở `_close_ledger`, mà `_close_ledger` chính là thứ đã
     không chạy (worker bị giết). Bỏ qua thì khoá `stream:{id}` sống **mãi** và
     `maxmemory-policy volatile-lru` không đụng tới được khoá không có TTL —
     đúng C8, chỉ khác là ở đây chỗ quên nằm ở một tiến trình đã chết.
@@ -177,7 +177,7 @@ async def _bao_cho_client(redis: Any, mid: uuid.UUID, ma: ErrorCode) -> None:
     """
     producer = StreamProducer(redis, mid, ttl_s=settings.STREAM_TTL_S)
     try:
-        await producer.emit(ErrorEvent(code=ma, message=LY_DO_THEO_MA[ma]))
+        await producer.emit(ErrorEvent(code=code, message=REASON_BY_CODE[code]))
         await producer.expire()
     except Exception:  # noqa: BLE001 — xem docstring
         logger.exception("reaper: %s da danh failed nhung khong XADD duoc error", mid)

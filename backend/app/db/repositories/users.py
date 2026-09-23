@@ -122,7 +122,7 @@ class UserRepository:
         stmt = select(User).where(User.email == email, User.deleted_at.is_(None))
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
-    async def dat_mat_khau_moi(self, user_id: uuid.UUID, password_hash: str) -> bool:
+    async def set_new_password(self, user_id: uuid.UUID, password_hash: str) -> bool:
         """Ghi hash mật khẩu mới + `password_changed_at` (§11.3, T-2.5).
 
         `deleted_at IS NULL` **trong câu SQL** (§20, cùng lối `get_by_id`): một
@@ -185,7 +185,7 @@ class UserRepository:
         người dùng. Repository nói chuyện với Postgres, không với người.
 
         `deleted_at IS NULL` **trong câu SQL** (§20, cùng lối `get_by_id` và
-        `dat_mat_khau_moi`): một access token còn hạn của tài khoản vừa xoá
+        `set_new_password`): một access token còn hạn của tài khoản vừa xoá
         không được phép ghi tiếp vào hàng đó.
 
         Trả `False` khi không có hàng nào khớp — router quyết định câu trả lời,
@@ -203,7 +203,7 @@ class UserRepository:
     # ═════════════ ba câu của admin panel (§16.3, §18.5) — T-2.16 ═════════════
 
     async def list_for_admin(
-        self, *, spend_since: datetime, trang_thai: UserStatus | None = None
+        self, *, spend_since: datetime, status: UserStatus | None = None
     ) -> Sequence[AdminUserRow]:
         """Danh sách user cho `GET /admin/users`, mới nhất trước — §16.3.
 
@@ -253,13 +253,13 @@ class UserRepository:
         Hội thoại đã xoá mềm **không** đếm: người dùng đã bỏ nó, và §8 coi nó
         như không còn trong mọi truy vấn mặc định.
         """
-        so_hoi_thoai = (
+        conversation_counts = (
             select(Conversation.user_id, func.count().label("n"))
             .where(Conversation.deleted_at.is_(None))
             .group_by(Conversation.user_id)
             .subquery()
         )
-        chi_tieu = (
+        spend = (
             select(UsageEvent.user_id, func.sum(UsageEvent.cost_usd).label("usd"))
             .where(
                 UsageEvent.created_at >= spend_since,
@@ -271,15 +271,15 @@ class UserRepository:
         stmt = (
             select(
                 User,
-                func.coalesce(so_hoi_thoai.c.n, 0),
-                cast(func.coalesce(chi_tieu.c.usd, 0), Numeric(12, 6)),
+                func.coalesce(conversation_counts.c.n, 0),
+                cast(func.coalesce(spend.c.usd, 0), Numeric(12, 6)),
             )
-            .outerjoin(so_hoi_thoai, so_hoi_thoai.c.user_id == User.id)
-            .outerjoin(chi_tieu, chi_tieu.c.user_id == User.id)
+            .outerjoin(conversation_counts, conversation_counts.c.user_id == User.id)
+            .outerjoin(spend, spend.c.user_id == User.id)
             .where(User.deleted_at.is_(None))
         )
-        if trang_thai is not None:
-            stmt = stmt.where(User.status == trang_thai)
+        if status is not None:
+            stmt = stmt.where(User.status == status)
         rows = (await self._session.execute(stmt.order_by(User.created_at.desc()))).all()
         return [
             AdminUserRow(user=row[0], conversation_count=int(row[1]), spend_7d_usd=row[2])
@@ -290,8 +290,8 @@ class UserRepository:
         self,
         user_id: uuid.UUID,
         *,
-        tu: UserStatus,
-        sang: UserStatus,
+        from_status: UserStatus,
+        to_status: UserStatus,
         approved_by: uuid.UUID | None = None,
     ) -> User | None:
         """Đổi trạng thái tài khoản, **có điều kiện trên trạng thái cũ** — §11.1.
@@ -308,23 +308,23 @@ class UserRepository:
         và ghi chúng cho một lần từ chối là làm hỏng câu trả lời đó.
 
         `func.now()` (mốc mở transaction) chứ không `clock_timestamp()`, cùng
-        lý do đã ghi ở `dat_mat_khau_moi`: không ai so cột này với thời gian
+        lý do đã ghi ở `set_new_password`: không ai so cột này với thời gian
         thực để quyết định điều gì.
         """
-        gia_tri: dict[str, Any] = {"status": sang}
+        value: dict[str, Any] = {"status": to_status}
         if approved_by is not None:
-            gia_tri["approved_at"] = func.now()
-            gia_tri["approved_by"] = approved_by
+            value["approved_at"] = func.now()
+            value["approved_by"] = approved_by
         stmt = (
             update(User)
-            .where(User.id == user_id, User.deleted_at.is_(None), User.status == tu)
-            .values(**gia_tri)
+            .where(User.id == user_id, User.deleted_at.is_(None), User.status == from_status)
+            .values(**value)
             .returning(User)
             .execution_options(synchronize_session="fetch")
         )
         return (await self._session.execute(stmt)).scalars().one_or_none()
 
-    async def update_by_admin(self, user_id: uuid.UUID, *, thay_doi: dict[str, Any]) -> User | None:
+    async def update_by_admin(self, user_id: uuid.UUID, *, changes: dict[str, Any]) -> User | None:
         """Đổi `tier_name` / `limit_override_json` cho một user — §10.4, §16.3.
 
         Hai cột, không hơn: §10.4 nói *"đổi tier"* là sửa `users.tier_name`, và
@@ -337,16 +337,16 @@ class UserRepository:
         `invalidate()`: TTL 60 s là luật duy nhất và nó chạy kể cả khi không ai
         nhớ tới nó (§10.4 — "có hiệu lực ≤ 60 s", AC của UC-07).
 
-        `thay_doi` rỗng thì **không** chạy câu UPDATE nào — nhưng vẫn trả về
+        `changes` rỗng thì **không** chạy câu UPDATE nào — nhưng vẫn trả về
         hàng hiện tại, để `PATCH` với body rỗng cư xử như `GET` (cùng lối
         `update_conversation`).
         """
-        if not thay_doi:
+        if not changes:
             return await self.get_by_id(user_id)
         stmt = (
             update(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
-            .values(**thay_doi)
+            .values(**changes)
             .returning(User)
             .execution_options(synchronize_session="fetch")
         )

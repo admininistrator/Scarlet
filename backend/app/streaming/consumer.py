@@ -77,26 +77,26 @@ logger = logging.getLogger(__name__)
 #: Cursor mặc định của §7.2 ②. `0` với `XRANGE (0 +` nghĩa là "từ đầu, tất cả":
 #: Redis hiểu `0` là `0-0`, và dấu `(` đẩy nó thành `0-1` — không bản ghi thật
 #: nào có ID nhỏ hơn thế.
-CURSOR_DAU = "0"
+CURSOR_START = "0"
 
 #: Redis Stream ID: `<ms>` hoặc `<ms>-<seq>`. Cursor tới từ người dùng (header
 #: `Last-Event-ID` hoặc `?cursor=`) nên nó phải được KIỂM trước khi ghép vào
 #: `(...`: một chuỗi lạ làm Redis trả lỗi giữa chừng, tức là một `500` xảy ra
 #: sau khi header `200 text/event-stream` đã ra dây — lỗi mà client không đọc
 #: nổi, vì với nó kết nối đã thành công rồi.
-_DANG_CURSOR = re.compile(r"\A\d{1,20}(-\d{1,20})?\Z")
+_CURSOR_FORMAT = re.compile(r"\A\d{1,20}(-\d{1,20})?\Z")
 
-#: SSE tách trường bằng CRLF, CR hoặc LF (WHATWG). Xem `khung_sse`.
-_XUONG_DONG = re.compile(r"\r\n|\r|\n")
+#: SSE tách trường bằng CRLF, CR hoặc LF (WHATWG). Xem `sse_frame`.
+_NEWLINE = re.compile(r"\r\n|\r|\n")
 
 #: Hai loại event đóng stream (§7.4). FE **không được** suy ra "đã xong" từ
 #: việc stream im lặng, nên đây là danh sách đầy đủ và duy nhất.
-LOAI_KET_THUC = frozenset({"done", "error"})
+TERMINAL_EVENTS = frozenset({"done", "error"})
 
 #: Trạng thái message mà lượt sinh đã khép — điều kiện để đi đường Postgres.
 #: `queued`/`streaming` KHÔNG nằm ở đây: chúng nghĩa là "vẫn còn chữ sẽ tới",
 #: và trả về một câu trả lời rỗng lúc đó là nói dối.
-TRANG_THAI_KET_THUC = frozenset(
+TERMINAL_STATUSES = frozenset(
     {MessageStatus.COMPLETED, MessageStatus.FAILED, MessageStatus.CANCELLED}
 )
 
@@ -104,11 +104,11 @@ TRANG_THAI_KET_THUC = frozenset(
 #: nên lấy từng cái một là ~4300 vòng round-trip chỉ để đuổi kịp một client vừa
 #: reconnect. Cũng không lấy tất cả trong một lệnh: bộ nhớ của tiến trình `api`
 #: sẽ tăng theo độ dài câu trả lời nhân số client.
-SO_BAN_GHI_MOI_LAN = 500
+ENTRIES_PER_READ = 500
 
 #: Comment SSE. Dòng mở đầu bằng dấu hai chấm bị client bỏ qua — nó không phải
 #: event, nên nó không đụng tới `Last-Event-ID` và FE không phải xử lý gì.
-KHUNG_PING = ": ping\n\n"
+PING_FRAME = ": ping\n\n"
 
 #: `X-Accel-Buffering: no` là lớp thứ hai của C1: kể cả khi ai đó lỡ tay xoá
 #: `proxy_buffering off` khỏi `config/nginx/nginx.conf`, header này vẫn bảo
@@ -119,15 +119,15 @@ SSE_HEADERS = {
 }
 
 
-class CursorKhongHopLe(ValueError):
+class InvalidCursor(ValueError):
     """`Last-Event-ID` hoặc `?cursor=` không phải một Redis Stream ID."""
 
-    def __init__(self, gia_tri: str) -> None:
-        super().__init__(f"cursor khong phai Redis Stream ID: {gia_tri!r}")
-        self.gia_tri = gia_tri
+    def __init__(self, value: str) -> None:
+        super().__init__(f"cursor khong phai Redis Stream ID: {value!r}")
+        self.value = value
 
 
-def doc_cursor(last_event_id: str | None, cursor: str | None) -> str:
+def parse_cursor(last_event_id: str | None, cursor: str | None) -> str:
     """§7.2 ②: `Last-Event-ID`, rồi `?cursor=`, mặc định `0`.
 
     Header đi TRƯỚC query có chủ ý: `EventSource` của trình duyệt tự gửi lại
@@ -143,36 +143,36 @@ def doc_cursor(last_event_id: str | None, cursor: str | None) -> str:
             `0` — phát lại từ đầu khi client xin phần giữa chính là triệu chứng
             của C3, và im lặng thì không ai lần ra nguyên nhân.
     """
-    for nguon in (last_event_id, cursor):
-        if nguon is None:
+    for source in (last_event_id, cursor):
+        if source is None:
             continue
-        gia_tri = nguon.strip()
-        if not gia_tri:
+        value = source.strip()
+        if not value:
             continue
-        if not _DANG_CURSOR.match(gia_tri):
-            raise CursorKhongHopLe(gia_tri)
-        return gia_tri
-    return CURSOR_DAU
+        if not _CURSOR_FORMAT.match(value):
+            raise InvalidCursor(value)
+        return value
+    return CURSOR_START
 
 
-def _thu_tu_id(raw: str) -> tuple[int, int]:
+def _id_order(raw: str) -> tuple[int, int]:
     """`"1725984000123-4"` → `(1725984000123, 4)`; `"7"` → `(7, 0)`.
 
     Redis Stream ID so sánh theo **số**, không theo chuỗi: `"100-0" < "99-0"`
     đúng với `str` và sai với Redis. Phần `-seq` vắng mặt được Redis hiểu là
-    `-0`, và `doc_cursor` cho phép cursor chỉ có mili-giây — nên hai dạng phải
+    `-0`, và `parse_cursor` cho phép cursor chỉ có mili-giây — nên hai dạng phải
     quy về cùng một khóa trước khi so.
     """
     ms, _, seq = raw.partition("-")
     return int(ms), int(seq or 0)
 
 
-def _mot_dong(gia_tri: str) -> str:
+def _single_line(value: str) -> str:
     """Bỏ mọi ký tự xuống dòng khỏi một trường SSE một-dòng (`id:`, `event:`)."""
-    return _XUONG_DONG.sub(" ", gia_tri)
+    return _NEWLINE.sub(" ", value)
 
 
-def khung_sse(loai: str, data: str, *, event_id: str | None = None) -> str:
+def sse_frame(kind: str, data: str, *, event_id: str | None = None) -> str:
     """Một khung SSE hoàn chỉnh, kể cả dòng trống kết thúc.
 
     `data` được tách theo ký tự xuống dòng thành **nhiều** dòng `data:` đúng
@@ -184,17 +184,17 @@ def khung_sse(loai: str, data: str, *, event_id: str | None = None) -> str:
 
     `event_id` là Redis Stream ID và là thứ trình duyệt gửi lại trong
     `Last-Event-ID` (§7.4). `None` dành cho những event **không có chỗ trên
-    stream** — xem `StreamConsumer._tu_postgres`.
+    stream** — xem `StreamConsumer._from_postgres`.
     """
-    dong: list[str] = []
+    lines: list[str] = []
     if event_id is not None:
-        dong.append(f"id: {_mot_dong(event_id)}")
-    dong.append(f"event: {_mot_dong(loai)}")
-    dong.extend(f"data: {phan}" for phan in _XUONG_DONG.split(data))
-    return "\n".join(dong) + "\n\n"
+        lines.append(f"id: {_single_line(event_id)}")
+    lines.append(f"event: {_single_line(kind)}")
+    lines.extend(f"data: {part}" for part in _NEWLINE.split(data))
+    return "\n".join(lines) + "\n\n"
 
 
-def _ma_loi(raw: str | None) -> ErrorCode:
+def _error_code(raw: str | None) -> ErrorCode:
     """`messages.error_code` (TEXT) → `ErrorCode`. Mã lạ hoặc NULL → `INTERNAL_ERROR`.
 
     `NULL` cùng đường với "mã lạ" chứ không phải một ca riêng: một message
@@ -216,7 +216,7 @@ class MessageSnapshot:
     Cố ý **không** giữ `Message` của ORM: một lượt sinh kéo mười phút, và một
     object còn gắn với session nghĩa là một kết nối Postgres nằm không suốt
     thời gian đó — cách nhanh nhất làm cạn pool khi vài người cùng chat. Cùng
-    lý lẽ với `_chuan_bi` trong `workers/generate.py`.
+    lý lẽ với `_prepare` trong `workers/generate.py`.
     """
 
     message_id: uuid.UUID
@@ -283,25 +283,25 @@ class StreamConsumer:
     async def frames(self, cursor: str) -> AsyncIterator[str]:
         """Khung SSE, từ `cursor` (loại trừ) tới hết — xem bốn luật ở đầu file."""
         last_id = cursor
-        co_ban_ghi = False
+        has_entries = False
 
         # ① Đuổi kịp: XRANGE (cursor, +]. Dấu mở ngoặc đơn là C3.
         while True:
-            ban_ghi = await self._redis.xrange(
-                self._key, f"({last_id}", "+", count=SO_BAN_GHI_MOI_LAN
+            entries = await self._redis.xrange(
+                self._key, f"({last_id}", "+", count=ENTRIES_PER_READ
             )
-            if not ban_ghi:
+            if not entries:
                 break
-            co_ban_ghi = True
-            for entry_id, fields in ban_ghi:
-                khung = self._khung_ban_ghi(entry_id, fields)
-                if khung is not None:
-                    yield khung
+            has_entries = True
+            for entry_id, fields in entries:
+                frame = self._entry_frame(entry_id, fields)
+                if frame is not None:
+                    yield frame
                 # Cursor tiến CẢ KHI bản ghi bị bỏ qua: một bản ghi hỏng không
                 # đọc được thì cũng không gửi lại được, và giữ nguyên cursor ở
                 # đó là một vòng lặp vô hạn.
                 last_id = entry_id
-                if fields.get(FIELD_TYPE) in LOAI_KET_THUC:
+                if fields.get(FIELD_TYPE) in TERMINAL_EVENTS:
                     return
 
         # ② Stream đã hết TTL nhưng lượt sinh đã khép → dựng lại từ Postgres.
@@ -312,12 +312,12 @@ class StreamConsumer:
         #    trước vòng round-trip tới Redis, nên một message đang `streaming`
         #    không tốn thêm lệnh nào cho nhánh này.
         if (
-            not co_ban_ghi
-            and self._snapshot.status in TRANG_THAI_KET_THUC
+            not has_entries
+            and self._snapshot.status in TERMINAL_STATUSES
             and not await self._redis.exists(self._key)
         ):
-            for khung in self._tu_postgres():
-                yield khung
+            for frame in self._from_postgres():
+                yield frame
             return
 
         # ②bis (B-84) — CURSOR ĐỨNG SAU EVENT KẾT THÚC: phát lại event đó rồi đóng.
@@ -352,52 +352,52 @@ class StreamConsumer:
         #      đúng loại mất chữ mà cả §7.3 dựng ra để chống. Bản ghi cuối mới hơn
         #      cursor nghĩa là có thứ client chưa thấy ⇒ không đi đường này, để ③
         #      đọc từ `last_id` và lấy đủ cả hai bản ghi.
-        if not co_ban_ghi:
-            cuoi = await self._redis.xrevrange(self._key, "+", "-", count=1)
+        if not has_entries:
+            last = await self._redis.xrevrange(self._key, "+", "-", count=1)
             if (
-                cuoi
-                and cuoi[0][1].get(FIELD_TYPE) in LOAI_KET_THUC
-                and _thu_tu_id(cuoi[0][0]) <= _thu_tu_id(last_id)
+                last
+                and last[0][1].get(FIELD_TYPE) in TERMINAL_EVENTS
+                and _id_order(last[0][0]) <= _id_order(last_id)
             ):
-                entry_id, fields = cuoi[0]
+                entry_id, fields = last[0]
                 logger.info(
                     "consumer: %s cursor dung sau event %s — phat lai roi dong (B-84)",
                     self._key,
                     fields.get(FIELD_TYPE),
                 )
-                khung = self._khung_ban_ghi(entry_id, fields)
-                if khung is not None:
-                    yield khung
+                frame = self._entry_frame(entry_id, fields)
+                if frame is not None:
+                    yield frame
                 return
 
         # ③ XREAD BLOCK từ ID CUỐI CÙNG ĐÃ GỬI — không phải `$` (C4).
         while True:
-            goi = await self._redis.xread(
-                {self._key: last_id}, block=self._block_ms, count=SO_BAN_GHI_MOI_LAN
+            batch = await self._redis.xread(
+                {self._key: last_id}, block=self._block_ms, count=ENTRIES_PER_READ
             )
-            if not goi:
+            if not batch:
                 # Hết BLOCK mà chưa có gì: im lặng là ĐANG CHỜ, không phải xong.
-                yield KHUNG_PING
+                yield PING_FRAME
                 continue
-            for _, ban_ghi in goi:
-                for entry_id, fields in ban_ghi:
-                    khung = self._khung_ban_ghi(entry_id, fields)
-                    if khung is not None:
-                        yield khung
+            for _, entries in batch:
+                for entry_id, fields in entries:
+                    frame = self._entry_frame(entry_id, fields)
+                    if frame is not None:
+                        yield frame
                     last_id = entry_id
-                    if fields.get(FIELD_TYPE) in LOAI_KET_THUC:
+                    if fields.get(FIELD_TYPE) in TERMINAL_EVENTS:
                         return
 
-    def _khung_ban_ghi(self, entry_id: str, fields: dict[str, str]) -> str | None:
+    def _entry_frame(self, entry_id: str, fields: dict[str, str]) -> str | None:
         """Một bản ghi Redis → một khung SSE. `None` khi bản ghi không đọc được.
 
         Chép thẳng `type` và `data`, **không** parse lại JSON: parse rồi dumps
         lại có thể đổi thứ tự khoá, và consumer không có việc gì phải hiểu nội
         dung payload (xem docstring `events.py`).
         """
-        loai = fields.get(FIELD_TYPE)
+        kind = fields.get(FIELD_TYPE)
         data = fields.get(FIELD_DATA)
-        if loai is None or data is None:
+        if kind is None or data is None:
             logger.warning(
                 "consumer: %s bo qua ban ghi %s thieu truong %s/%s",
                 self._key,
@@ -406,9 +406,9 @@ class StreamConsumer:
                 FIELD_DATA,
             )
             return None
-        return khung_sse(loai, data, event_id=entry_id)
+        return sse_frame(kind, data, event_id=entry_id)
 
-    def _tu_postgres(self) -> Iterator[str]:
+    def _from_postgres(self) -> Iterator[str]:
         """Dựng lại câu trả lời đã khép từ `messages`, khi stream đã hết TTL.
 
         Phát đúng hình dạng event của §7.4 qua `encode_event()` — cùng hàm mà
@@ -435,21 +435,19 @@ class StreamConsumer:
             len(snap.content),
         )
         if snap.model_id is not None:
-            yield self._khung_su_kien(
+            yield self._event_frame(
                 StartEvent(message_id=str(snap.message_id), model_id=snap.model_id)
             )
         if snap.content:
-            yield self._khung_su_kien(DeltaEvent(text=snap.content))
+            yield self._event_frame(DeltaEvent(text=snap.content))
         if snap.status is MessageStatus.FAILED:
             # Phần chữ đã sinh được vẫn gửi ở trên: `finish_generation` giữ nó
             # lại cho cả đường lỗi, và người dùng đã nhìn thấy nó trên màn hình.
-            yield self._khung_su_kien(ErrorEvent(code=_ma_loi(snap.error_code)))
+            yield self._event_frame(ErrorEvent(code=_error_code(snap.error_code)))
         else:
-            yield self._khung_su_kien(
-                DoneEvent(finish_reason=snap.finish_reason, usage=snap.usage())
-            )
+            yield self._event_frame(DoneEvent(finish_reason=snap.finish_reason, usage=snap.usage()))
 
     @staticmethod
-    def _khung_su_kien(event: Event) -> str:
-        loai, data = encode_event(event)
-        return khung_sse(loai, data)
+    def _event_frame(event: Event) -> str:
+        kind, data = encode_event(event)
+        return sse_frame(kind, data)

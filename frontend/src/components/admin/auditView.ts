@@ -18,8 +18,8 @@
  *      duoc chon giup nghia nao — nhan noi ca hai.
  */
 
-import type { AuditActionName, AuditEntry, TrangThaiUser } from "../../lib/api";
-import type { KhoaChu } from "../../lib/i18n";
+import type { AuditActionName, AuditEntry, UserStatus } from "../../lib/api";
+import type { TextKey } from "../../lib/i18n";
 import { shortId } from "./format";
 import { STATUS_LABEL } from "./usersView";
 
@@ -28,7 +28,7 @@ const TARGET_USERS = "users";
 const TARGET_TIERS = "tiers";
 const TARGET_CATALOG = "catalog";
 
-export const ACTION_LABEL: Record<AuditActionName, KhoaChu> = {
+export const ACTION_LABEL: Record<AuditActionName, TextKey> = {
   "user.approve": "admin.auditAction.user.approve",
   "user.reject": "admin.auditAction.user.reject",
   "user.suspend": "admin.auditAction.user.suspend",
@@ -37,7 +37,7 @@ export const ACTION_LABEL: Record<AuditActionName, KhoaChu> = {
   "catalog.reload": "admin.auditAction.catalog.reload",
 };
 
-const FIELD_LABEL: Record<string, KhoaChu> = {
+const FIELD_LABEL: Record<string, TextKey> = {
   status: "admin.field.status",
   tier_name: "admin.field.tier_name",
   limit_override_json: "admin.field.limit_override_json",
@@ -68,13 +68,13 @@ export type AuditTarget =
  * truong tho — mot truong moi o backend van hien duoc, chi chua co nhan dep.
  */
 export interface AuditChange {
-  label: { key: KhoaChu } | { raw: string };
+  label: { key: TextKey } | { raw: string };
   from?: AuditValue;
   to: AuditValue;
 }
 
 /** Gia tri da san sang de hien — `text` nguyen van, hoac mot khoa `vi.json`. */
-export type AuditValue = { text: string } | { key: KhoaChu } | { empty: true };
+export type AuditValue = { text: string } | { key: TextKey } | { empty: true };
 
 export function describeActor(entry: AuditEntry): AuditActor {
   if (entry.actor_email === null) {
@@ -107,7 +107,7 @@ export function describeTarget(entry: AuditEntry): AuditTarget {
   }
 }
 
-function isStatus(value: unknown): value is TrangThaiUser {
+function isStatus(value: unknown): value is UserStatus {
   return typeof value === "string" && value in STATUS_LABEL;
 }
 

@@ -213,7 +213,7 @@ def cost_of(rates: catalog.PricingRates | None, spent: Spent) -> Decimal:
 
     `rates is None` ⇒ **0 USD**, không phải một ngoại lệ: model chưa ai điền
     giá (`manual_pricing` còn trống, B-65) vẫn chạy được và vẫn sinh ra một
-    dòng sổ, chỉ là dòng ấy ghi 0. `_canh_bao_model_khong_co_gia` của catalog
+    dòng sổ, chỉ là dòng ấy ghi 0. `_warn_model_without_price` của catalog
     là chỗ gọi tên những model như vậy lúc nạp.
 
     `cached_input_per_1m is None` ⇒ tính phần trúng cache theo **giá thường**:
@@ -366,7 +366,7 @@ def _count_prompt(model: catalog.ModelEntry, sent: list[dict[str, Any]]) -> int:
     """Token của ngữ cảnh đã gửi lên, theo đúng phép đếm của `llm/tokens.py`.
 
     Tách ra một hàm vì `sent` rỗng là một ca có thật — lượt sinh chết trước khi
-    `_chuan_bi` kịp dựng ngữ cảnh — và `count_messages` trên danh sách rỗng vẫn
+    `_prepare` kịp dựng ngữ cảnh — và `count_messages` trên danh sách rỗng vẫn
     trả `TOKENS_REPLY_PRIMING`, tức một con số khác 0 cho một request chưa từng
     được gửi.
     """

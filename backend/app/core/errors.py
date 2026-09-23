@@ -297,7 +297,7 @@ class ApiErrorCode(StrEnum):
 #: là lưới đỡ: mọi chỗ raise trong `app/` nên dùng `ApiError` với một mã nói
 #: đúng chuyện gì đã xảy ra. Bảng này tồn tại cho 404-không-có-route và 405
 #: của Starlette, hai thứ không đi qua code của mình.
-_THEO_STATUS: dict[int, ApiErrorCode] = {
+_BY_STATUS: dict[int, ApiErrorCode] = {
     400: ApiErrorCode.BAD_REQUEST,
     401: ApiErrorCode.UNAUTHENTICATED,
     403: ApiErrorCode.FORBIDDEN,
@@ -310,7 +310,7 @@ _THEO_STATUS: dict[int, ApiErrorCode] = {
 }
 
 #: Câu trả cho lỗi 500. Cố định, không nội suy `str(exc)` — xem docstring module.
-LOI_500 = "loi noi bo, xem log cua server"
+INTERNAL_ERROR_MSG = "loi noi bo, xem log cua server"
 
 
 class ErrorBody(BaseModel):
@@ -355,7 +355,7 @@ class ApiError(StarletteHTTPException):
         self.details = details or {}
 
 
-def _tra_ve(status_code: int, body: ErrorBody, headers: Mapping[str, str] | None) -> JSONResponse:
+def _respond(status_code: int, body: ErrorBody, headers: Mapping[str, str] | None) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content=ErrorEnvelope(error=body).model_dump(mode="json"),
@@ -374,9 +374,9 @@ async def http_exception_handler(request: Request, exc: Exception) -> Response:
     if isinstance(exc, ApiError):
         code, details = exc.code, exc.details
     else:
-        code = _THEO_STATUS.get(exc.status_code, ApiErrorCode.INTERNAL_ERROR)
+        code = _BY_STATUS.get(exc.status_code, ApiErrorCode.INTERNAL_ERROR)
         details = {}
-    return _tra_ve(
+    return _respond(
         exc.status_code,
         ErrorBody(code=code, message=str(exc.detail), details=details),
         exc.headers,
@@ -397,13 +397,13 @@ async def validation_exception_handler(request: Request, exc: Exception) -> Resp
         raise exc
     fields = [
         {
-            "loc": [str(phan) for phan in loi.get("loc", ())],
-            "msg": loi.get("msg", ""),
-            "type": loi.get("type", ""),
+            "loc": [str(part) for part in err.get("loc", ())],
+            "msg": err.get("msg", ""),
+            "type": err.get("type", ""),
         }
-        for loi in exc.errors()
+        for err in exc.errors()
     ]
-    return _tra_ve(
+    return _respond(
         422,
         ErrorBody(
             code=ApiErrorCode.VALIDATION_ERROR,
@@ -422,7 +422,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> Respo
     hiện là một mã để bấm Retry.
     """
     logger.exception("loi khong bat duoc tai %s %s", request.method, request.url.path)
-    return _tra_ve(500, ErrorBody(code=ApiErrorCode.INTERNAL_ERROR, message=LOI_500), None)
+    return _respond(
+        500, ErrorBody(code=ApiErrorCode.INTERNAL_ERROR, message=INTERNAL_ERROR_MSG), None
+    )
 
 
 def register(app: FastAPI) -> None:

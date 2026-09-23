@@ -1,11 +1,11 @@
 import { useRef, useState, type ReactNode } from "react";
 
-import type { KetQuaGui } from "../../features/chat/useChat";
+import type { SendResult } from "../../features/chat/useChat";
 import { t } from "../../lib/i18n";
-// `khoaMoi` roi khoi file nay o T-3.7 (B-231): nut Thu lai nay cung phai sinh
+// `newKey` roi khoi file nay o T-3.7 (B-231): nut Thu lai nay cung phai sinh
 // khoa, va mot ban chep thu hai cua duong lui "khong co secure context" la
 // mot ban chep se chi duoc sua mot nua. Xem `lib/idempotency.ts`.
-import { khoaMoi } from "../../lib/idempotency";
+import { newKey } from "../../lib/idempotency";
 
 /**
  * O nhap — gui, Dung, dem ky tu, `Idempotency-Key` theo lan soan thao (T-3.4).
@@ -63,7 +63,7 @@ import { khoaMoi } from "../../lib/idempotency";
  * │  TRAN KY TU DEN TU SERVER (A3/L4, B-205/NQ-78)                       │
  * └──────────────────────────────────────────────────────────────────────┘
  *
- * `tranKyTu` la `message_max_chars` cua `GET /auth/me`. Khong co mot con so
+ * `maxChars` la `message_max_chars` cua `GET /auth/me`. Khong co mot con so
  * nao viet tay trong file nay: doi `MESSAGE_MAX_CHARS` trong `.env` phai lam
  * doi bo dem tren man hinh ma khong ai cham vao `.tsx`.
  *
@@ -89,7 +89,7 @@ import { khoaMoi } from "../../lib/idempotency";
  * │  "DANG CHAY" DEN TU `done`/`error` CUA §7.4 (Cam bay ③)              │
  * └──────────────────────────────────────────────────────────────────────┘
  *
- * `dangChay` di vao nhu mot prop; file nay khong co mot bo dem thoi gian nao
+ * `running` di vao nhu mot prop; file nay khong co mot bo dem thoi gian nao
  * va khong duoc co. Nut Gui ⇄ Dung doi chu theo dung no.
  *
  * ┌──────────────────────────────────────────────────────────────────────┐
@@ -105,21 +105,21 @@ import { khoaMoi } from "../../lib/idempotency";
  */
 
 export function Composer({
-  dangChay,
-  moDuoc,
-  tranKyTu,
-  onGui,
-  onDung,
+  running,
+  enabled,
+  maxChars,
+  onSend,
+  onStop,
   modelPicker,
   quotaBar,
   quotaBlocked = false,
 }: {
-  dangChay: boolean;
-  moDuoc: boolean;
+  running: boolean;
+  enabled: boolean;
   /** `message_max_chars` cua `GET /auth/me`; `null` = chua biet. */
-  tranKyTu: number | null;
-  onGui: (noiDung: string, khoa: string) => Promise<KetQuaGui>;
-  onDung: () => void;
+  maxChars: number | null;
+  onSend: (content: string, key: string) => Promise<SendResult>;
+  onStop: () => void;
   /** Nut mo Model Picker, dat o dau thanh cong cu duoi o nhap (B-242). */
   modelPicker?: ReactNode;
   /** T-3.11 — thanh quota, dat ngay tren o nhap. */
@@ -131,56 +131,56 @@ export function Composer({
    */
   quotaBlocked?: boolean;
 }) {
-  const [ban, setBan] = useState("");
-  const [ketKhoa, setKetKhoa] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [keyLocked, setKeyLocked] = useState(false);
   //: Luat 1–3 cua C22. `ref` chu khong `useState`: hai lan bam trong cung mot
   //: luot render phai doc duoc CUNG mot gia tri, ma state thi chi doi o lan
   //: render sau — dung cai bay S5 dang do.
-  const khoaRef = useRef<string | null>(null);
+  const keyRef = useRef<string | null>(null);
 
-  const soKyTu = [...ban].length;
-  const vuotTran = tranKyTu !== null && soKyTu > tranKyTu;
-  const guiDuoc = moDuoc && ban.trim() !== "" && !vuotTran && !quotaBlocked;
+  const charCount = [...draft].length;
+  const overLimit = maxChars !== null && charCount > maxChars;
+  const canSend = enabled && draft.trim() !== "" && !overLimit && !quotaBlocked;
 
-  function doiBan(moi: string): void {
-    setBan(moi);
+  function changeDraft(next: string): void {
+    setDraft(next);
     // Luat 1 — rong ⇒ co chu la luc mot lan soan thao bat dau.
-    if (moi !== "" && khoaRef.current === null) {
-      khoaRef.current = khoaMoi();
+    if (next !== "" && keyRef.current === null) {
+      keyRef.current = newKey();
     }
     // Xoa sach o nhap la bo han lan soan thao ay: cau sau la mot cau khac.
-    if (moi === "") {
-      khoaRef.current = null;
-      setKetKhoa(false);
+    if (next === "") {
+      keyRef.current = null;
+      setKeyLocked(false);
     }
   }
 
-  async function gui(): Promise<void> {
-    if (!guiDuoc) {
+  async function send(): Promise<void> {
+    if (!canSend) {
       return;
     }
-    // `??=` chu khong gan thang: `doiBan` gan nhu luon da sinh khoa roi, va
+    // `??=` chu khong gan thang: `changeDraft` gan nhu luon da sinh khoa roi, va
     // ghi de o day chinh la cai bay C22 ta. Dong nay chi do ca dan chu vao o
     // nhap bang mot duong khong sinh ra `change` nao.
-    khoaRef.current ??= khoaMoi();
-    const ketQua = await onGui(ban, khoaRef.current);
-    if (ketQua === "da-gui") {
+    keyRef.current ??= newKey();
+    const result = await onSend(draft, keyRef.current);
+    if (result === "da-gui") {
       // Luat 3 — va chi o day.
-      khoaRef.current = null;
-      setKetKhoa(false);
-      setBan("");
+      keyRef.current = null;
+      setKeyLocked(false);
+      setDraft("");
       return;
     }
-    // Luat 2: `ban` va `khoaRef` deu o nguyen. Nguoi dung bam Gui lan nua la
+    // Luat 2: `ban` va `keyRef` deu o nguyen. Nguoi dung bam Gui lan nua la
     // dung khoa ay.
-    setKetKhoa(ketQua === "ket-khoa");
+    setKeyLocked(result === "ket-khoa");
   }
 
   /** Duong thoat cua B-143 — nguoi dung tu quyet dinh bo mot khoa da ket. */
-  function guiBangKhoaMoi(): void {
-    khoaRef.current = khoaMoi();
-    setKetKhoa(false);
-    void gui();
+  function sendWithNewKey(): void {
+    keyRef.current = newKey();
+    setKeyLocked(false);
+    void send();
   }
 
   return (
@@ -189,7 +189,7 @@ export function Composer({
         className="mx-auto flex max-w-measure flex-col gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          void gui();
+          void send();
         }}
       >
         {quotaBar}
@@ -197,19 +197,19 @@ export function Composer({
           <label className="min-w-0">
             <span className="sr-only">{t("chat.oNhap")}</span>
             <textarea
-              value={ban}
-              onChange={(e) => doiBan(e.target.value)}
+              value={draft}
+              onChange={(e) => changeDraft(e.target.value)}
               onKeyDown={(e) => {
                 // Bo go tieng Viet dung Enter de chot tu — xem docstring.
                 if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
                   return;
                 }
                 e.preventDefault();
-                void gui();
+                void send();
               }}
               rows={3}
-              disabled={!moDuoc}
-              aria-invalid={vuotTran}
+              disabled={!enabled}
+              aria-invalid={overLimit}
               placeholder={t("chat.oNhap")}
               className="block min-h-touch w-full resize-none rounded-t-lg bg-transparent px-3 pt-3 pb-1 text-body text-foreground placeholder:text-muted focus-visible:outline-none disabled:opacity-50"
             />
@@ -218,10 +218,10 @@ export function Composer({
           <div className="flex items-center gap-2 px-2 pb-2">
             <div className="min-w-0 flex-1">{modelPicker}</div>
 
-            {dangChay ? (
+            {running ? (
               <button
                 type="button"
-                onClick={onDung}
+                onClick={onStop}
                 className="motion-press grid size-touch shrink-0 place-items-center rounded-lg border border-border-strong text-danger-text hover:bg-surface-hover"
               >
                 <StopIcon />
@@ -230,7 +230,7 @@ export function Composer({
             ) : (
               <button
                 type="submit"
-                disabled={!guiDuoc}
+                disabled={!canSend}
                 title={quotaBlocked ? t("quota.sendBlocked") : undefined}
                 className="motion-press grid size-touch shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
               >
@@ -243,7 +243,7 @@ export function Composer({
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
           <span>{t("chat.phimGui")}</span>
-          {tranKyTu !== null && (
+          {maxChars !== null && (
             <span
               /*
                 `role="status"` chu khong mot `<span>` cam: nguoi dung trinh
@@ -252,15 +252,15 @@ export function Composer({
               */
               role="status"
               className={
-                vuotTran ? "tabular ml-auto text-danger-text" : "tabular ml-auto text-muted"
+                overLimit ? "tabular ml-auto text-danger-text" : "tabular ml-auto text-muted"
               }
             >
-              {soKyTu} / {tranKyTu}
+              {charCount} / {maxChars}
             </span>
           )}
         </div>
 
-        {ketKhoa && (
+        {keyLocked && (
           <div
             role="alert"
             className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-warning-subtle px-3 py-2 text-sm text-warning-text"
@@ -268,7 +268,7 @@ export function Composer({
             <span>{t("chat.khoaKet")}</span>
             <button
               type="button"
-              onClick={guiBangKhoaMoi}
+              onClick={sendWithNewKey}
               className="motion-press h-touch rounded-md border border-border-strong px-3 text-base font-medium text-foreground hover:bg-surface-hover"
             >
               {t("chat.guiKhoaMoi")}

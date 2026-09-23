@@ -8,9 +8,9 @@ import {
   type AdminUserListItem,
   type AdminUserPatch,
   type TierRow,
-  type TrangThaiUser,
+  type UserStatus,
 } from "../../lib/api";
-import { t, type KhoaChu } from "../../lib/i18n";
+import { t, type TextKey } from "../../lib/i18n";
 import { TableScroll } from "../ui/TableScroll";
 import { AdminDialog, DialogButtons } from "./AdminDialog";
 import {
@@ -67,17 +67,17 @@ import {
  * Ban ve: *"mot quan tri vien, 20 nguoi"*. Menu ⋯ moi hang, khong checkbox.
  */
 
-const LIMIT_LABEL: Record<LimitKey, KhoaChu> = {
+const LIMIT_LABEL: Record<LimitKey, TextKey> = {
   limit_5h_usd: "admin.quota.label5h",
   limit_7d_usd: "admin.quota.label7d",
 };
-const LIMIT_SHORT: Record<LimitKey, KhoaChu> = {
+const LIMIT_SHORT: Record<LimitKey, TextKey> = {
   limit_5h_usd: "admin.limit.5h",
   limit_7d_usd: "admin.limit.7d",
 };
 
 /** Hanh dong trang thai cua menu ⋯ — dung mui ten §11.1 ma backend cho phep. */
-function statusAction(status: TrangThaiUser): { action: "suspend" | "approve"; label: KhoaChu } | null {
+function statusAction(status: UserStatus): { action: "suspend" | "approve"; label: TextKey } | null {
   switch (status) {
     case "active":
       return { action: "suspend", label: "admin.action.lock" };
@@ -92,7 +92,7 @@ function statusAction(status: TrangThaiUser): { action: "suspend" | "approve"; l
 }
 
 export function UsersScreen({ currentUserId }: { currentUserId: string | null }) {
-  const loadUsers = useCallback(async () => (await api.quanTriDanhSachUser()).users, []);
+  const loadUsers = useCallback(async () => (await api.adminListUsers()).users, []);
   const users = useResource(loadUsers);
   const tiers = useResource(api.adminListTiers);
 
@@ -114,14 +114,14 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
     if (ttl === null) {
       return;
     }
-    const conCho = Object.values(savedAt)
-      .map((luc) => luc + ttl * 1000)
-      .filter((het) => het > now);
-    if (conCho.length === 0) {
+    const pendingUntil = Object.values(savedAt)
+      .map((at) => at + ttl * 1000)
+      .filter((expiresAt) => expiresAt > now);
+    if (pendingUntil.length === 0) {
       return;
     }
-    const hen = setTimeout(() => setNow(Date.now()), Math.min(...conCho) - now + 50);
-    return () => clearTimeout(hen);
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(...pendingUntil) - now + 50);
+    return () => clearTimeout(timer);
   }, [savedAt, ttl, now]);
 
   const patchUser = useCallback(
@@ -130,10 +130,10 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
       setActionError(null);
       try {
         await api.adminUpdateUser(userId, patch);
-        const luc = Date.now();
-        setSavedAt((cu) => ({ ...cu, [userId]: luc }));
-        setLastSavedAt(luc);
-        setNow(luc);
+        const at = Date.now();
+        setSavedAt((prev) => ({ ...prev, [userId]: at }));
+        setLastSavedAt(at);
+        setNow(at);
         await users.reload();
         return true;
       } catch (e) {
@@ -152,7 +152,7 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
       setBusyId(userId);
       setActionError(null);
       try {
-        await api.quanTriDoiTrangThai(userId, action);
+        await api.adminChangeStatus(userId, action);
         await users.reload();
       } catch (e) {
         setActionError(toApiError(e));
@@ -311,14 +311,14 @@ function UserRow({
   onOverride: () => void;
   onSetStatus: (action: "suspend" | "approve") => void;
 }) {
-  const hanhDong = isSelf ? null : statusAction(user.status);
-  const ghiDe = LIMIT_KEYS.filter((k) => overrideLimit(user.limit_override_json, k) !== "");
-  const ten = user.display_name ?? user.email;
+  const action = isSelf ? null : statusAction(user.status);
+  const overridden = LIMIT_KEYS.filter((k) => overrideLimit(user.limit_override_json, k) !== "");
+  const name = user.display_name ?? user.email;
 
   return (
     <tr>
       <th scope="row" className={`${TD} sticky-col w-sticky-col max-w-sticky-col text-left font-normal`}>
-        <span className="block truncate font-semibold">{ten}</span>
+        <span className="block truncate font-semibold">{name}</span>
         {user.display_name !== null && (
           <span className="block truncate text-xs text-muted">{user.email}</span>
         )}
@@ -340,10 +340,10 @@ function UserRow({
         <span className="flex flex-col items-start gap-1">
           <span className="rounded-sm border border-border px-1.5 font-mono text-xs">{user.tier_name}</span>
           {pendingSince !== null && <PendingBadge savedAtLabel={formatClock(pendingSince)} />}
-          {ghiDe.length > 0 && (
+          {overridden.length > 0 && (
             <span className="text-2xs text-muted">
               {t("admin.override.label")}
-              {ghiDe.map((k) => (
+              {overridden.map((k) => (
                 <span key={k}>
                   {" · "}
                   {t(LIMIT_SHORT[k])}{" "}
@@ -361,7 +361,7 @@ function UserRow({
       <td className={TD}>
         <Switch
           checked={effectiveSkills(user, tiers)}
-          label={`${t("admin.col.skills")} — ${ten}`}
+          label={`${t("admin.col.skills")} — ${name}`}
           disabled={busy}
           onChange={onToggleSkills}
         />
@@ -371,7 +371,7 @@ function UserRow({
           <Popover.Trigger asChild>
             <button
               type="button"
-              aria-label={`${t("admin.action.more")} — ${ten}`}
+              aria-label={`${t("admin.action.more")} — ${name}`}
               aria-haspopup="menu"
               disabled={busy}
               className="motion-press flex size-touch items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
@@ -406,20 +406,20 @@ function UserRow({
               >
                 {t("admin.action.overrideQuota")}
               </button>
-              {hanhDong !== null && (
+              {action !== null && (
                 <>
                   <span role="separator" className="my-1 h-px bg-border" />
                   <button
                     type="button"
                     role="menuitem"
-                    onClick={() => onSetStatus(hanhDong.action)}
+                    onClick={() => onSetStatus(action.action)}
                     className={
-                      hanhDong.action === "suspend"
+                      action.action === "suspend"
                         ? "flex min-h-touch items-center rounded-md px-2.5 text-left font-medium text-danger-text hover:bg-surface-hover"
                         : "flex min-h-touch items-center rounded-md px-2.5 text-left text-foreground hover:bg-surface-hover"
                     }
                   >
-                    {t(hanhDong.label)}
+                    {t(action.label)}
                   </button>
                 </>
               )}
@@ -529,7 +529,7 @@ function QuotaOverrideDialog({
             inputMode="decimal"
             autoComplete="off"
             value={values[key]}
-            onChange={(e) => setValues((cu) => ({ ...cu, [key]: e.target.value }))}
+            onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
             className="motion-control min-h-touch rounded-md border border-border-strong bg-background px-3 text-right text-base tabular text-foreground"
           />
           {tier !== null && (

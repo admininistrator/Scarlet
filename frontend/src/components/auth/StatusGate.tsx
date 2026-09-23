@@ -23,7 +23,7 @@ import { pathForStatus } from "./statusRoute";
  *
  * ── BON NHANH, VA NHANH DAU LA CUA `AdminOnly` ────────────────────────────
  *
- * `dangTai` la nhanh RIENG, cung ly le `AdminOnly` da ghi: roi thang xuong
+ * `loading` la nhanh RIENG, cung ly le `AdminOnly` da ghi: roi thang xuong
  * nhanh duoi se nhap nhay mot lan chuyen huong trong moi lan mo trang.
  *
  * ── `nguoiDung === null` ⇒ `/dang-nhap` (T-3.1c) ──────────────────────────
@@ -45,30 +45,30 @@ import { pathForStatus } from "./statusRoute";
  * chuyen huong tu dong de lai dau chan trong lich su la mot cai bay khong
  * thoat duoc bang Back.
  *
- * ── `biKhoa` khong phai mot `status` ──────────────────────────────────────
+ * ── `locked` khong phai mot `status` ──────────────────────────────────────
  *
  * `rejected`/`suspended` khong bao gio ve toi FE duoi dang mot `status`: ca
  * `/auth/login` lan `/auth/me` tra `403 ACCOUNT_DISABLED` cho chung
  * (`STATUSES_CAN_VIEW_APP`). Vi vay chung di theo mot duong rieng —
- * `usePhien` ghi lai ma loi ay — va o day chung duoc ve chu khong duoc chuyen
+ * `useSessionState` ghi lai ma loi ay — va o day chung duoc ve chu khong duoc chuyen
  * huong: khong co dia chi nao de chuyen toi, va mot lan day ve `/dang-nhap`
  * chi moi ho go lai mat khau dung de gap lai dung buc tuong ay.
  */
 export function StatusGate({ children }: { children: ReactNode }) {
   const session = useSession();
 
-  if (session.dangTai) {
+  if (session.loading) {
     return <p className="px-6 py-4 text-sm text-muted">{t("admin.dangTai")}</p>;
   }
-  if (session.biKhoa) {
+  if (session.locked) {
     return <AccountDisabledScreen />;
   }
-  if (session.nguoiDung === null) {
+  if (session.user === null) {
     return <Navigate to={PATHS.login} replace />;
   }
-  const dich = pathForStatus(session.nguoiDung.status);
-  if (dich !== null) {
-    return <Navigate to={dich} replace />;
+  const target = pathForStatus(session.user.status);
+  if (target !== null) {
+    return <Navigate to={target} replace />;
   }
   return <>{children}</>;
 }

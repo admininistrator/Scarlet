@@ -2,7 +2,7 @@ import { Link, Outlet, useLocation, useNavigate, useOutletContext } from "react-
 
 import { SidebarToggle } from "../components/sidebar/SidebarToggle";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
-import { usePhien, type Phien } from "../features/auth/usePhien";
+import { useSessionState, type SessionState } from "../features/auth/useSessionState";
 import { t } from "../lib/i18n";
 import { PATHS } from "./paths";
 
@@ -15,7 +15,7 @@ import { PATHS } from "./paths";
  * ║  PHIEN DUOC HOI MOT LAN, O DAY                                         ║
  * ╚════════════════════════════════════════════════════════════════════════╝
  *
- * `usePhien()` goi `GET /auth/me` luc mount. Goi no trong tung man hinh se
+ * `useSessionState()` goi `GET /auth/me` luc mount. Goi no trong tung man hinh se
  * cho N loi goi cho mot cau hoi, va te hon: hai man hinh co the doc hai cau
  * tra loi khac nhau trong cung mot lan xem. Nen no duoc hoi MOT lan o day
  * roi day xuong qua `Outlet context`, va cac route con lay lai bang
@@ -28,16 +28,16 @@ import { PATHS } from "./paths";
  * T-3.11), luc do hay dung mot Context that — va doi ca cum mot lan, chu
  * dung de hai duong cung song.
  */
-export function useSession(): Phien {
-  return useOutletContext<Phien>();
+export function useSession(): SessionState {
+  return useOutletContext<SessionState>();
 }
 
 export function Layout() {
-  const session = usePhien();
+  const session = useSessionState();
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
-  const isAdmin = session.nguoiDung?.role === "admin";
+  const isAdmin = session.user?.role === "admin";
   /*
     T-3.3 / T-HD2 — nut bat/tat sidebar song o HEADER, khong trong sidebar
     ("sidebar dong = 0 px, khong co dai icon"). Nhung header nay boc ca
@@ -45,7 +45,7 @@ export function Layout() {
     chi hien tren duong co sidebar. T-3.10: duoi 1024 px cung nut nay mo
     drawer thay vi day cot — xem `SidebarToggle`.
   */
-  const coSidebar = pathname === PATHS.home;
+  const hasSidebar = pathname === PATHS.home;
 
   return (
     /*
@@ -66,7 +66,7 @@ export function Layout() {
       */}
       <header className="flex h-header shrink-0 items-center justify-between gap-2 border-b border-border px-gutter lg:px-gutter-lg">
         <div className="flex min-w-0 items-center gap-2 sm:gap-4">
-          {coSidebar && <SidebarToggle />}
+          {hasSidebar && <SidebarToggle />}
           <h1 className="text-lg font-semibold">
             <Link to={PATHS.home} className="inline-flex min-h-touch items-center">
               {t("app.title")}
@@ -89,7 +89,7 @@ export function Layout() {
         </div>
 
         <div className="flex shrink-0 items-center gap-2 text-sm sm:gap-3">
-          {session.nguoiDung === null ? (
+          {session.user === null ? (
             <Link
               to={PATHS.login}
               className="motion-press inline-flex min-h-touch items-center rounded-md border border-border px-3 hover:bg-accent hover:text-accent-foreground"
@@ -110,12 +110,12 @@ export function Layout() {
                 className="hidden min-h-touch min-w-0 items-center truncate rounded-md px-2 text-muted hover:bg-surface-hover hover:text-foreground sm:inline-flex"
               >
                 <span className="sr-only">{t("nav.settings")}: </span>
-                {session.nguoiDung.email}
+                {session.user.email}
               </Link>
               <button
                 type="button"
                 onClick={() => {
-                  void session.dangXuat().then(() => navigate(PATHS.home));
+                  void session.logout().then(() => navigate(PATHS.home));
                 }}
                 className="motion-press min-h-touch whitespace-nowrap rounded-md border border-border px-2 sm:px-3 hover:bg-accent hover:text-accent-foreground"
               >

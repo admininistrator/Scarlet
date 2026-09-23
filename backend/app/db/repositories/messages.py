@@ -373,8 +373,8 @@ class MessageRepository:
         in_flight: set[uuid.UUID] = set()
         for mid, mstatus, message_deleted_at, conversation_deleted_at in rows:
             known.add(mid)
-            da_xoa = message_deleted_at is not None or conversation_deleted_at is not None
-            if not da_xoa and mstatus in IN_FLIGHT_STATUSES:
+            deleted = message_deleted_at is not None or conversation_deleted_at is not None
+            if not deleted and mstatus in IN_FLIGHT_STATUSES:
                 in_flight.add(mid)
         return GenerationStates(known=frozenset(known), in_flight=frozenset(in_flight))
 
@@ -632,10 +632,10 @@ class MessageRepository:
         NQ-18 đã dùng cho `get_siblings`, vì một con trỏ nhánh nhảy qua nhảy lại
         giữa hai lần bấm cũng khó tìm y như một `sibling_index` nhảy.
         """
-        cay = _subtree_cte(message_id, user_id=user_id)
+        tree = _subtree_cte(message_id, user_id=user_id)
         stmt = (
-            select(cay.c.id)
-            .order_by(cay.c.depth.desc(), cay.c.created_at.desc(), cay.c.id.desc())
+            select(tree.c.id)
+            .order_by(tree.c.depth.desc(), tree.c.created_at.desc(), tree.c.id.desc())
             .limit(1)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none()
@@ -816,13 +816,13 @@ def _sibling_stats(path: CTE) -> LateralFromClause:
     cả hai con số ra trong một lần quét.
     """
     sibling = aliased(Message, name="sibling")
-    dung_truoc = or_(
+    comes_before = or_(
         sibling.created_at < path.c.created_at,
         and_(sibling.created_at == path.c.created_at, sibling.id < path.c.id),
     )
     return (
         select(
-            func.count().filter(dung_truoc).label("sibling_index"),
+            func.count().filter(comes_before).label("sibling_index"),
             # Đếm cả chính nó: gốc có 3 anh em ⇒ `sibling_count == 3`, khớp
             # `‹ 1/3 ›` mà người dùng nhìn thấy.
             func.count().label("sibling_count"),

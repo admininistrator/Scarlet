@@ -33,7 +33,7 @@ import { Markdown } from "./Markdown";
 import { safeUrl } from "./markdownPolicy";
 
 /** Nam chuoi tan cong ma DoD dong 1 goi ten. */
-const TAN_CONG = {
+const ATTACKS = {
   imgOnerror: '<img src=x onerror=alert(1)>',
   script: "<script>alert(1)</script>",
   javascriptUrl: "[bam vao day](javascript:alert(1))",
@@ -41,7 +41,7 @@ const TAN_CONG = {
   iframe: '<iframe src="https://ke-tan-cong.example/x"></iframe>',
 } as const;
 
-function veXong(text: string) {
+function renderSettled(text: string) {
   return render(<Markdown text={text} streaming={false} />);
 }
 
@@ -49,29 +49,29 @@ function veXong(text: string) {
 
 describe("markdown", () => {
   it("1 — dung <strong> va <em>", () => {
-    const { container } = veXong("Mot cau **dam** va mot cau *nghieng*.");
+    const { container } = renderSettled("Mot cau **dam** va mot cau *nghieng*.");
     expect(container.querySelector("strong")).toHaveTextContent("dam");
     expect(container.querySelector("em")).toHaveTextContent("nghieng");
   });
 
   it("2 — dung tieu de", () => {
-    veXong("## Han muc thang nay");
+    renderSettled("## Han muc thang nay");
     expect(screen.getByRole("heading", { name: "Han muc thang nay" })).toBeInTheDocument();
   });
 
   it("3 — dung danh sach", () => {
-    const { container } = veXong("- mot\n- hai\n- ba");
+    const { container } = renderSettled("- mot\n- hai\n- ba");
     expect(container.querySelectorAll("li")).toHaveLength(3);
   });
 
   it("4 — dung <table> khi bang DA DU hang phan cach (remark-gfm)", () => {
-    const { container } = veXong("| Ten | Han muc |\n| --- | --- |\n| Bob | 100 |");
+    const { container } = renderSettled("| Ten | Han muc |\n| --- | --- |\n| Bob | 100 |");
     expect(container.querySelector("table")).not.toBeNull();
     expect(container.querySelectorAll("th")).toHaveLength(2);
   });
 
   it("5 — lien ket https mo tab moi va mang rel day du", () => {
-    veXong("[trang chu](https://scarlet.example/tai-lieu)");
+    renderSettled("[trang chu](https://scarlet.example/tai-lieu)");
     const a = screen.getByRole("link", { name: "trang chu" });
     expect(a).toHaveAttribute("href", "https://scarlet.example/tai-lieu");
     expect(a).toHaveAttribute("target", "_blank");
@@ -79,18 +79,18 @@ describe("markdown", () => {
   });
 
   it("6 — code noi dong khong bien thanh khoi code", () => {
-    const { container } = veXong("Chay lenh `docker compose up -d` truoc.");
+    const { container } = renderSettled("Chay lenh `docker compose up -d` truoc.");
     expect(container.querySelector("code")).toHaveTextContent("docker compose up -d");
     expect(container.querySelector("figure")).toBeNull();
   });
 
   it("7 — giu nguyen tieng Viet co dau va emoji", () => {
-    const { container } = veXong("Đã lưu hạn mức của người dùng 🎉");
+    const { container } = renderSettled("Đã lưu hạn mức của người dùng 🎉");
     expect(container.textContent).toContain("Đã lưu hạn mức của người dùng 🎉");
   });
 
   it("8 — blockquote", () => {
-    const { container } = veXong("> mot trich dan");
+    const { container } = renderSettled("> mot trich dan");
     expect(container.querySelector("blockquote")).toHaveTextContent("mot trich dan");
   });
 });
@@ -99,26 +99,26 @@ describe("markdown", () => {
 
 describe("khoi code", () => {
   it("9 — nhan ngon ngu, so dong khong nam trong DOM text, co nut Copy", () => {
-    const { container } = veXong("```typescript\nconst a = 1;\nconst b = 2;\n```");
+    const { container } = renderSettled("```typescript\nconst a = 1;\nconst b = 2;\n```");
     expect(screen.getByText("typescript")).toBeInTheDocument();
 
-    const dong = container.querySelectorAll(".code-line");
-    expect(dong).toHaveLength(2);
+    const lines = container.querySelectorAll(".code-line");
+    expect(lines).toHaveLength(2);
     // So dong den tu counter() trong ::before — khong mot chu so nao o DOM.
-    expect(dong[0].textContent).toBe("const a = 1;\n");
-    expect(dong[1].textContent).toBe("const b = 2;");
+    expect(lines[0].textContent).toBe("const a = 1;\n");
+    expect(lines[1].textContent).toBe("const b = 2;");
 
     expect(screen.getByRole("button", { name: "Sao chép code" })).toBeInTheDocument();
   });
 
   it("10 — to mau cu phap: khoi da dong co lop .tk-*", () => {
-    const { container } = veXong("```typescript\nconst a = 1;\n```");
+    const { container } = renderSettled("```typescript\nconst a = 1;\n```");
     expect(container.querySelector(".tk-keyword")).toHaveTextContent("const");
     expect(container.querySelector(".tk-number")).toHaveTextContent("1");
   });
 
   it("11 — ngon ngu khong biet van co so dong, chi la khong co mau", () => {
-    const { container } = veXong("```khongtontai\nabc\n```");
+    const { container } = renderSettled("```khongtontai\nabc\n```");
     expect(container.querySelectorAll(".code-line")).toHaveLength(1);
     expect(container.querySelector(".tk-keyword")).toBeNull();
   });
@@ -160,50 +160,50 @@ describe("markdown chua dong", () => {
 // ─────────────────────────── nam ca tan cong (§20) ──────────────────────────
 
 /** Hai khang dinh ma DoD dong 1 doi cho MOI ca. */
-function khongCoKichBan(container: HTMLElement): void {
+function assertNoScript(container: HTMLElement): void {
   expect(container.querySelector("script")).toBeNull();
   expect(container.innerHTML).not.toContain("onerror");
 }
 
 describe("XSS — nam ca tan cong", () => {
   it("15 — <img src=x onerror=alert(1)>", () => {
-    const { container } = veXong(TAN_CONG.imgOnerror);
-    khongCoKichBan(container);
+    const { container } = renderSettled(ATTACKS.imgOnerror);
+    assertNoScript(container);
     expect(container.querySelector("img")).toBeNull();
   });
 
   it("16 — <script>alert(1)</script>", () => {
-    const { container } = veXong(TAN_CONG.script);
-    khongCoKichBan(container);
+    const { container } = renderSettled(ATTACKS.script);
+    assertNoScript(container);
   });
 
   it("17 — [x](javascript:alert(1))", () => {
-    const { container } = veXong(TAN_CONG.javascriptUrl);
-    khongCoKichBan(container);
+    const { container } = renderSettled(ATTACKS.javascriptUrl);
+    assertNoScript(container);
     const a = container.querySelector("a");
     expect(a?.getAttribute("href") ?? "").not.toContain("javascript:");
   });
 
   it('18 — <a href="data:text/html,…">', () => {
-    const { container } = veXong(TAN_CONG.dataUrl);
-    khongCoKichBan(container);
+    const { container } = renderSettled(ATTACKS.dataUrl);
+    assertNoScript(container);
     expect(container.innerHTML).not.toContain("data:text/html");
   });
 
   it("19 — <iframe src=…>", () => {
-    const { container } = veXong(TAN_CONG.iframe);
-    khongCoKichBan(container);
+    const { container } = renderSettled(ATTACKS.iframe);
+    assertNoScript(container);
     expect(container.querySelector("iframe")).toBeNull();
   });
 
   it("20 — bien the: JaVaScRiPt: co ky tu dieu khien chen giua", () => {
-    const { container } = veXong("[bam](java\u0000script:alert(1))");
-    khongCoKichBan(container);
+    const { container } = renderSettled("[bam](java\u0000script:alert(1))");
+    assertNoScript(container);
     expect(container.querySelector("a")?.getAttribute("href") ?? "").not.toMatch(/javascript/i);
   });
 
   it("21 — thuoc tinh su kien tren the DUOC PHEP cung bi go", () => {
-    const { container } = veXong('<p onclick="alert(1)">chu</p>');
+    const { container } = renderSettled('<p onclick="alert(1)">chu</p>');
     expect(container.innerHTML).not.toContain("onclick");
   });
 
@@ -226,7 +226,7 @@ describe("nut Copy cua khoi code", () => {
     Object.assign(navigator, { clipboard: { writeText } });
 
     const code = "def cong(a, b):\n    return a + b\n\nprint(cong(1, 2))";
-    veXong("```python\n" + code + "\n```");
+    renderSettled("```python\n" + code + "\n```");
 
     await userEvent.click(screen.getByRole("button", { name: "Sao chép code" }));
 
@@ -247,7 +247,7 @@ describe("nut Copy cua khoi code", () => {
  * nao chay duoc" thi nam ca o tren khong con do phong thu cua Scarlet nua —
  * chung dang do mot thay doi nao do cua thu vien, va phai viet lai.
  */
-function veKhongPhongThu(text: string) {
+function renderUnguarded(text: string) {
   return render(
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -261,7 +261,7 @@ function veKhongPhongThu(text: string) {
 
 describe("ca am — nam chuoi tren THAT SU la tan cong", () => {
   it("24 — khong phong thu thi <script> vao duoc DOM", () => {
-    const { container } = veKhongPhongThu(TAN_CONG.script);
+    const { container } = renderUnguarded(ATTACKS.script);
     expect(container.querySelector("script")).not.toBeNull();
   });
 
@@ -278,22 +278,22 @@ describe("ca am — nam chuoi tren THAT SU la tan cong", () => {
     khong (ca 15). Khac biet ay moi la thu do allowlist cua Scarlet.
   */
   it("25 — khong phong thu thi the <img> vao duoc DOM", () => {
-    const { container } = veKhongPhongThu(TAN_CONG.imgOnerror);
+    const { container } = renderUnguarded(ATTACKS.imgOnerror);
     expect(container.querySelector("img")).not.toBeNull();
   });
 
   it("26 — khong phong thu thi href javascript: con nguyen", () => {
-    const { container } = veKhongPhongThu(TAN_CONG.javascriptUrl);
+    const { container } = renderUnguarded(ATTACKS.javascriptUrl);
     expect(container.querySelector("a")?.getAttribute("href")).toContain("javascript:");
   });
 
   it("27 — khong phong thu thi href data:text/html con nguyen", () => {
-    const { container } = veKhongPhongThu(TAN_CONG.dataUrl);
+    const { container } = renderUnguarded(ATTACKS.dataUrl);
     expect(container.innerHTML).toContain("data:text/html");
   });
 
   it("28 — khong phong thu thi <iframe> vao duoc DOM", () => {
-    const { container } = veKhongPhongThu(TAN_CONG.iframe);
+    const { container } = renderUnguarded(ATTACKS.iframe);
     expect(container.querySelector("iframe")).not.toBeNull();
   });
 });

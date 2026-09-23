@@ -73,16 +73,16 @@ declare global {
 }
 
 /** Mot lan nap script cho ca trang, du co bao nhieu widget. */
-let dangNap: Promise<void> | null = null;
+let scriptLoading: Promise<void> | null = null;
 
-function napScript(): Promise<void> {
+function loadScript(): Promise<void> {
   if (window.turnstile !== undefined) {
     return Promise.resolve();
   }
-  if (dangNap !== null) {
-    return dangNap;
+  if (scriptLoading !== null) {
+    return scriptLoading;
   }
-  dangNap = new Promise((resolve, reject) => {
+  scriptLoading = new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = SCRIPT_URL;
     script.async = true;
@@ -91,12 +91,12 @@ function napScript(): Promise<void> {
     script.onerror = () => {
       // Xoa promise da hong: khong xoa thi moi lan mount sau deu nhan lai dung
       // that bai cu, ke ca khi mang da co lai.
-      dangNap = null;
+      scriptLoading = null;
       reject(new Error("khong nap duoc script Turnstile"));
     };
     document.head.appendChild(script);
   });
-  return dangNap;
+  return scriptLoading;
 }
 
 export interface TurnstileHandle {
@@ -112,14 +112,14 @@ interface Props {
 }
 
 /** Turnstile co bat khong — dung de an ca khoi captcha trong form. */
-export function turnstileDaBat(): boolean {
+export function turnstileEnabled(): boolean {
   return SITE_KEY.trim() !== "";
 }
 
 export function Turnstile({ onToken, ref, className }: Props) {
   const oRef = useRef<HTMLDivElement | null>(null);
   const widgetRef = useRef<string | null>(null);
-  const [loi, setLoi] = useState(false);
+  const [error, setError] = useState(false);
 
   // `onToken` giu trong ref: caller thuong truyen mot arrow function moi o moi
   // lan render, va de no vao mang phu thuoc cua useEffect se thao/dung lai
@@ -139,18 +139,18 @@ export function Turnstile({ onToken, ref, className }: Props) {
   useImperativeHandle(ref, () => ({ reset }), [reset]);
 
   useEffect(() => {
-    if (!turnstileDaBat()) {
+    if (!turnstileEnabled()) {
       onTokenRef.current(null);
       return;
     }
 
-    let conSong = true;
-    napScript()
+    let alive = true;
+    loadScript()
       .then(() => {
         // StrictMode cua dev mount/unmount hai lan: khong co co nay thi lan
         // nap xong cua vong doi DA CHET van render mot widget vao mot the div
         // khong con trong cay.
-        if (!conSong || oRef.current === null || window.turnstile === undefined) {
+        if (!alive || oRef.current === null || window.turnstile === undefined) {
           return;
         }
         widgetRef.current = window.turnstile.render(oRef.current, {
@@ -162,14 +162,14 @@ export function Turnstile({ onToken, ref, className }: Props) {
         });
       })
       .catch(() => {
-        if (conSong) {
-          setLoi(true);
+        if (alive) {
+          setError(true);
           onTokenRef.current(null);
         }
       });
 
     return () => {
-      conSong = false;
+      alive = false;
       if (widgetRef.current !== null && window.turnstile !== undefined) {
         window.turnstile.remove(widgetRef.current);
         widgetRef.current = null;
@@ -177,10 +177,10 @@ export function Turnstile({ onToken, ref, className }: Props) {
     };
   }, []);
 
-  if (!turnstileDaBat()) {
+  if (!turnstileEnabled()) {
     return null;
   }
-  if (loi) {
+  if (error) {
     return (
       <p className={className} role="alert">
         {t("auth.turnstileLoi")}

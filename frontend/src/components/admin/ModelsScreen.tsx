@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { toApiError, useResource } from "../../features/admin/useResource";
-import { ApiError, api, type ModelRa, type NapCatalogRa } from "../../lib/api";
+import { ApiError, api, type ModelOut, type ReloadCatalogOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { TableScroll } from "../ui/TableScroll";
 import { ErrorNotice, FailureReason, HealthDot, LoadingNote, ScreenTitle, TD, TH } from "./adminUi";
@@ -35,30 +35,30 @@ interface ProviderCard {
 }
 
 /** Gom `GET /models` theo provider — provider hong khi CO model cua no bi xam. */
-export function providerCards(models: readonly ModelRa[]): ProviderCard[] {
-  const theo = new Map<string, ProviderCard>();
+export function providerCards(models: readonly ModelOut[]): ProviderCard[] {
+  const byProvider = new Map<string, ProviderCard>();
   for (const m of models) {
-    const cu = theo.get(m.provider_id) ?? { label: m.provider, ok: true, reason: null };
+    const existing = byProvider.get(m.provider_id) ?? { label: m.provider, ok: true, reason: null };
     if (!m.available) {
-      cu.ok = false;
-      cu.reason = cu.reason ?? m.unavailable_reason;
+      existing.ok = false;
+      existing.reason = existing.reason ?? m.unavailable_reason;
     }
-    theo.set(m.provider_id, cu);
+    byProvider.set(m.provider_id, existing);
   }
-  return [...theo.values()];
+  return [...byProvider.values()];
 }
 
 export function ModelsScreen() {
-  const models = useResource(api.danhSachModel);
+  const models = useResource(api.listModels);
   const [reloading, setReloading] = useState(false);
-  const [lastReload, setLastReload] = useState<{ at: number; result: NapCatalogRa } | null>(null);
+  const [lastReload, setLastReload] = useState<{ at: number; result: ReloadCatalogOut } | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
 
   const reload = async () => {
     setReloading(true);
     setActionError(null);
     try {
-      const result = await api.quanTriNapCatalog();
+      const result = await api.adminReloadCatalog();
       setLastReload({ at: Date.now(), result });
       await models.reload();
     } catch (e) {

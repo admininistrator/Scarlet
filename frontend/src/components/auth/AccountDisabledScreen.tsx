@@ -14,11 +14,11 @@ import { t } from "../../lib/i18n";
  * ╚════════════════════════════════════════════════════════════════════════╝
  *
  * "Viec can lam" cua T-3.1b ghi: *"`suspended` -> man giai thich. **Khong**
- * roi ve man chat"*. Truoc task nay, `usePhien` bat moi loi cua `GET
+ * roi ve man chat"*. Truoc task nay, `useSessionState` bat moi loi cua `GET
  * /auth/me` thanh mot ket cuc duy nhat (`nguoiDung = null`) — mot lua chon
  * dung o T-2.19 va docstring cua no noi ro ly do: *"401 (chua dang nhap) va
  * 403 (tai khoan bi khoa) deu dan toi cung mot man hinh"*. Ke tu hom nay thi
- * KHONG con dan toi cung mot man hinh nua, va do la toan bo ly do `biKhoa`
+ * KHONG con dan toi cung mot man hinh nua, va do la toan bo ly do `locked`
  * ra doi.
  *
  * He qua neu bo qua: admin bam Suspend giua mot phien (§11.3 thu hoi trong

@@ -40,7 +40,7 @@ from pathlib import Path
 PYPROJECT_PATH = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 
-def _doc_phien_ban() -> str:
+def _read_version() -> str:
     if not PYPROJECT_PATH.is_file():
         raise RuntimeError(
             f"khong tim thay {PYPROJECT_PATH} — image thieu dong COPY pyproject.toml "
@@ -50,4 +50,4 @@ def _doc_phien_ban() -> str:
 
 
 #: Phiên bản đang chạy. `GET /admin/system` trả về đúng chuỗi này.
-APP_VERSION = _doc_phien_ban()
+APP_VERSION = _read_version()

@@ -32,7 +32,7 @@
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
 
 /** Khung loi duy nhat cua §18: `{ "error": { code, message, details } }`. */
-interface KhungLoi {
+interface ErrorEnvelope {
   error: { code: string; message: string; details?: unknown };
 }
 
@@ -59,29 +59,29 @@ export class ApiError extends Error {
 }
 
 /** Ma loi FE co phan nhanh theo. Chuoi khop `ApiErrorCode` cua backend. */
-export const MA_LOI = {
-  CHUA_XAC_THUC: "UNAUTHENTICATED",
-  DANG_SINH: "GENERATION_IN_PROGRESS",
+export const ERROR_CODES = {
+  UNAUTHENTICATED: "UNAUTHENTICATED",
+  GENERATING: "GENERATION_IN_PROGRESS",
   /**
    * `409` cua §11.4 — mot request KHAC mang cung `Idempotency-Key` con dang
-   * chay. **Khac** `DANG_SINH` o tren: cai kia noi ve mot MESSAGE dang sinh
+   * chay. **Khac** `GENERATING` o tren: cai kia noi ve mot MESSAGE dang sinh
    * (409 cua `retry`), cai nay noi ve mot KHOA dang bi giu. Hai ma, hai cau
    * tra loi cho nguoi dung — xem `backend/app/core/errors.py`.
    */
-  KHOA_DANG_GIU: "IN_PROGRESS",
-  SAI_MAT_KHAU: "INVALID_CREDENTIALS",
-  TAI_KHOAN_BI_KHOA: "ACCOUNT_DISABLED",
-  DOI_QUAN_TRI: "ADMIN_REQUIRED",
+  KEY_IN_USE: "IN_PROGRESS",
+  WRONG_PASSWORD: "INVALID_CREDENTIALS",
+  ACCOUNT_DISABLED: "ACCOUNT_DISABLED",
+  ADMIN_REQUIRED: "ADMIN_REQUIRED",
 
   // T-3.1b — sau ma loi cua sau man auth. Tat ca deu la ma ma NGUOI DUNG phai
   // doc duoc mot cau khac nhau, khong phai ma de log: `message` cua backend
   // viet bang tieng Viet khong dau (`mat khau qua pho bien, hay chon mat khau
   // khac`) nen no khong dat len man hinh duoc.
-  TURNSTILE_HONG: "TURNSTILE_FAILED",
-  MAT_KHAU_QUA_NGAN: "PASSWORD_TOO_SHORT",
-  MAT_KHAU_QUA_YEU: "PASSWORD_TOO_WEAK",
-  TOKEN_HONG: "TOKEN_INVALID",
-  QUA_NHIEU_LAN: "RATE_LIMITED",
+  TURNSTILE_FAILED: "TURNSTILE_FAILED",
+  PASSWORD_TOO_SHORT: "PASSWORD_TOO_SHORT",
+  PASSWORD_TOO_WEAK: "PASSWORD_TOO_WEAK",
+  TOKEN_INVALID: "TOKEN_INVALID",
+  TOO_MANY_ATTEMPTS: "RATE_LIMITED",
 
   /**
    * T-3.11 — `429` cua cua chan §10.2 (UC-07 dong 3). `details` mang
@@ -105,7 +105,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    throw await docLoi(res);
+    throw await parseError(res);
   }
   if (res.status === 204) {
     return undefined as T;
@@ -120,9 +120,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * `502`/`504` bang HTML cua chinh no, va mot `res.json()` that bai o do se
  * nem `SyntaxError` — tuc loi that bi thay bang mot loi khac han.
  */
-async function docLoi(res: Response): Promise<ApiError> {
+async function parseError(res: Response): Promise<ApiError> {
   try {
-    const body = (await res.json()) as Partial<KhungLoi>;
+    const body = (await res.json()) as Partial<ErrorEnvelope>;
     if (body.error?.code) {
       return new ApiError(res.status, body.error.code, body.error.message, body.error.details);
     }
@@ -134,8 +134,8 @@ async function docLoi(res: Response): Promise<ApiError> {
 
 // ─────────────────────────── kieu tra ve cua §18.2 ───────────────────────────
 
-export type VaiTro = "system" | "user" | "assistant" | "tool";
-export type TrangThaiMessage = "queued" | "streaming" | "completed" | "failed" | "cancelled";
+export type Role = "system" | "user" | "assistant" | "tool";
+export type MessageStatus = "queued" | "streaming" | "completed" | "failed" | "cancelled";
 
 /**
  * Hai gia tri cua enum `message_feedback` (§18.2, T-3.7a).
@@ -144,14 +144,14 @@ export type TrangThaiMessage = "queued" | "streaming" | "completed" | "failed" |
  * Postgres la `NULL`, va cung `null` ay la cach GO mot danh gia da bam. Mot
  * nhan `"none"` se cho hai cach viet cung mot su that.
  */
-export type DanhGia = "like" | "dislike";
+export type Feedback = "like" | "dislike";
 
-/** Mot node tren duong di hien tai — `MessageTrenDuongDi` cua backend. */
-export interface MessageRa {
+/** Mot node tren duong di hien tai — `PathMessage` cua backend. */
+export interface MessageOut {
   id: string;
   parent_id: string | null;
-  role: VaiTro;
-  status: TrangThaiMessage;
+  role: Role;
+  status: MessageStatus;
   content: string;
   reasoning: string | null;
   model_id: string | null;
@@ -171,10 +171,10 @@ export interface MessageRa {
    * di (mot truong tu do 2000 ky tu tren bang ma moi lan mo hoi thoai deu keo
    * ca hang ve). Xem B-244.
    */
-  feedback: DanhGia | null;
+  feedback: Feedback | null;
 }
 
-export interface HoiThoaiRa {
+export interface ConversationOut {
   id: string;
   title: string | null;
   default_model: string | null;
@@ -185,20 +185,20 @@ export interface HoiThoaiRa {
   updated_at: string;
 }
 
-export interface HoiThoaiChiTiet extends HoiThoaiRa {
+export interface ConversationDetail extends ConversationOut {
   /** Goc truoc, la sau. Rong khi `active_leaf_id` la NULL. */
-  path: MessageRa[];
+  path: MessageOut[];
 }
 
-export interface DanhSachHoiThoai {
-  items: HoiThoaiRa[];
+export interface ConversationList {
+  items: ConversationOut[];
   next_cursor: string | null;
 }
 
 /**
  * `QuotaWarning` cua backend — UC-07 dong 1, trong body `202` (T-2.11).
  *
- * NGUON THU HAI cua cung con so ma `CuaSoQuota` cua `/auth/me` mang (T-3.11):
+ * NGUON THU HAI cua cung con so ma `QuotaWindow` cua `/auth/me` mang (T-3.11):
  * cung nam truong dau, cung luat tien-la-chuoi. Khong co `retry_after` vi mot
  * `202` nghia la luot nay da qua cua chan — chua co gi de cho.
  *
@@ -206,14 +206,14 @@ export interface DanhSachHoiThoai {
  * khong tru quota nen khong co gi de canh bao.
  */
 export interface QuotaWarning {
-  limit_type: LoaiHanMuc;
+  limit_type: LimitType;
   limit_usd: string;
   spent_usd: string;
   remaining_usd: string;
   remaining_pct: number;
 }
 
-export interface TaoMessageRa {
+export interface CreateMessageOut {
   user_message_id: string;
   assistant_message_id: string;
   /** Duong dan TUONG DOI, da co san tien to `/api/v1`. Khong noi BASE_URL. */
@@ -223,7 +223,7 @@ export interface TaoMessageRa {
   quota_warning: QuotaWarning | null;
 }
 
-export interface ThuLaiRa {
+export interface RetryOut {
   assistant_message_id: string;
   stream_url: string;
   model_id: string;
@@ -233,39 +233,39 @@ export interface ThuLaiRa {
 /**
  * `POST /messages/{id}/feedback` — trang thai SAU khi ghi (§18.2, T-3.7a).
  *
- * `feedback_reason` co mat o day va CHI o day: `MessageRa` khong mang no (xem
+ * `feedback_reason` co mat o day va CHI o day: `MessageOut` khong mang no (xem
  * docstring cua truong `feedback`), nen ai vua go mot ly do thi nhan lai
  * nguyen van trong chinh response nay — va khong o dau khac (B-244).
  */
-export interface DanhGiaRa {
+export interface FeedbackOut {
   message_id: string;
-  feedback: DanhGia | null;
+  feedback: Feedback | null;
   feedback_reason: string | null;
 }
 
-export interface SuaMessageRa {
-  /** Message MOI, khong phai id tren duong dan — xem `SuaMessageResponse`. */
+export interface EditMessageOut {
+  /** Message MOI, khong phai id tren duong dan — xem `EditMessageResponse`. */
   user_message_id: string;
   assistant_message_id: string;
   stream_url: string;
   quota_warning: QuotaWarning | null;
 }
 
-export interface AnhEmRa {
+export interface SiblingsOut {
   message_id: string;
   parent_id: string | null;
   sibling_index: number;
   sibling_count: number;
-  items: MessageRa[];
+  items: MessageOut[];
 }
 
-export interface HuyRa {
+export interface CancelOut {
   message_id: string;
-  status: TrangThaiMessage;
+  status: MessageStatus;
   cancel_requested: boolean;
 }
 
-export interface ModelRa {
+export interface ModelOut {
   id: string;
   display_name: string;
   /** NHAN de hien (`DeepSeek AI`) — khong dung de so voi thu gi. */
@@ -298,29 +298,29 @@ export interface ModelRa {
 }
 
 /** `PUT /settings` — §18.4, B-206/NQ-79. Cung hinh dang voi body gui di. */
-export interface CaiDatRa {
+export interface SettingsOut {
   default_model: string | null;
 }
 
 // ─────────────────── kieu cua §11.2 (auth) va §16.3 (admin) ──────────────────
 
 /** Nam trang thai cua §11.1. */
-export type TrangThaiUser =
+export type UserStatus =
   | "pending_email"
   | "pending_approval"
   | "active"
   | "rejected"
   | "suspended";
 
-export type VaiTroUser = "user" | "admin";
+export type UserRole = "user" | "admin";
 
-/** `NguoiDungRa` cua backend — hinh dang chung cua `/login`, `/refresh`, `/me`. */
-export interface NguoiDungRa {
+/** `UserOut` cua backend — hinh dang chung cua `/login`, `/refresh`, `/me`. */
+export interface UserOut {
   id: string;
   email: string;
   display_name: string | null;
-  status: TrangThaiUser;
-  role: VaiTroUser;
+  status: UserStatus;
+  role: UserRole;
   tier_name: string;
   /**
    * Model mac dinh cua nguoi nay (§18.4, B-206) — `null` = chua chon, FE roi
@@ -331,17 +331,17 @@ export interface NguoiDungRa {
 }
 
 /** Hai gia tri cua `limit_type` (§10.3, UC-07) — `5h` va `weekly`. */
-export type LoaiHanMuc = "5h" | "weekly";
+export type LimitType = "5h" | "weekly";
 
 /**
  * Mot cua so truot cua §10.3 — `WindowSnapshot` cua backend.
  *
  * Bon con so tien la CHUOI, khong `number`: backend tra `Decimal` va pydantic
  * tuan tu hoa no thanh chuoi — cung luat da dua `cost_usd` tu Postgres toi FE
- * o `SoTien`. Doi sang so mot lan de HIEN, khong de cong.
+ * o `UsageAmount`. Doi sang so mot lan de HIEN, khong de cong.
  */
-export interface CuaSoQuota {
-  limit_type: LoaiHanMuc;
+export interface QuotaWindow {
+  limit_type: LimitType;
   limit_usd: string;
   spent_usd: string;
   remaining_usd: string;
@@ -352,7 +352,7 @@ export interface CuaSoQuota {
 }
 
 /**
- * `HoSoRa` — rieng `GET /auth/me`, rong hon `NguoiDungRa` dung hai truong.
+ * `ProfileOut` — rieng `GET /auth/me`, rong hon `UserOut` dung hai truong.
  *
  * B-213/NQ-81: ba task cua Phase 3 doc BA nhom khac nhau cua CUNG mot
  * response — T-3.4 lay `message_max_chars`, T-3.6 lay `default_model`, T-3.11
@@ -361,12 +361,12 @@ export interface CuaSoQuota {
  * mot truong thieu trong interface khong sinh loi nao, no chi im lang bien
  * mat truoc khi component kip doc.
  */
-export interface HoSoRa extends NguoiDungRa {
+export interface ProfileOut extends UserOut {
   /**
    * `null` = khong do duoc luc nay (Redis khong tra loi), **khong** phai
    * "khong co han muc". FE an thanh quota di chu dung ve mot thanh rong.
    */
-  quota: CuaSoQuota[] | null;
+  quota: QuotaWindow[] | null;
   /** Tran do dai mot message, tinh bang ky tu (B-205, NQ-78) — A3: khong literal o FE. */
   message_max_chars: number;
   /**
@@ -400,7 +400,7 @@ export interface ProviderKey {
  * nhanh (email co that / khong) tra ve **cung mot chuoi**. Man hinh tu viet
  * cau cua no tu `vi.json`.
  */
-export interface ThongBaoRa {
+export interface NoticeOut {
   message: string;
 }
 
@@ -412,24 +412,24 @@ export interface ThongBaoRa {
  * `/dang-nhap` chu khong phai mot loi. Hai chuoi tach nhau tu T-3.1b, xem
  * docstring `VerifyEmailResponse.status` cua backend.
  */
-export interface XacThucEmailRa {
+export interface VerifyEmailOut {
   status: "verified" | "already_verified" | "expired";
 }
 
-export interface DatLaiMatKhauRa {
+export interface ResetPasswordOut {
   status: "reset";
 }
 
 /** Ba nut cua man "Duyet user" (§16.3) — khop `hanh_dong` cua backend. */
-export type HanhDongUser = "approve" | "reject" | "suspend";
+export type UserAction = "approve" | "reject" | "suspend";
 
 /** Mot hang cua bang "Nguoi dung" (§16.3). KHONG co truong nao suy ra mat khau. */
-export interface AdminUserRa {
+export interface AdminUserOut {
   id: string;
   email: string;
   display_name: string | null;
-  status: TrangThaiUser;
-  role: VaiTroUser;
+  status: UserStatus;
+  role: UserRole;
   tier_name: string;
   limit_override_json: Record<string, unknown> | null;
   email_verified_at: string | null;
@@ -440,11 +440,11 @@ export interface AdminUserRa {
 }
 
 /**
- * Mot hang cua DANH SACH `GET /admin/users` — `AdminUserRa` + hai cot NQ-66
+ * Mot hang cua DANH SACH `GET /admin/users` — `AdminUserOut` + hai cot NQ-66
  * (T-3.12). Chi danh sach co hai cot nay: `approve`/`PATCH` tra mot hang vua
  * doi, khong chay cau gom nhom nao.
  */
-export interface AdminUserListItem extends AdminUserRa {
+export interface AdminUserListItem extends AdminUserOut {
   /** Hoi thoai chua xoa mem. `0` khi chua co — khong bao gio `null`. */
   conversation_count: number;
   /**
@@ -454,7 +454,7 @@ export interface AdminUserListItem extends AdminUserRa {
   spend_7d_usd: string;
 }
 
-export interface AdminUserListRa {
+export interface AdminUserListOut {
   users: AdminUserListItem[];
 }
 
@@ -572,7 +572,7 @@ export interface ProviderKeyList {
  * duy nhat duoc phep doi sang so la ham dinh dang, va no doi mot lan de HIEN,
  * khong de cong.
  */
-export interface SoTien {
+export interface UsageAmount {
   cost_usd: string;
   prompt_tokens: number;
   completion_tokens: number;
@@ -582,36 +582,36 @@ export interface SoTien {
 /**
  * Hai cot tach rieng cua C16 — khong bao gio co truong `tong`.
  *
- * Hinh dang nay chep dung `HaiCot` cua backend, ke ca cho no thieu: mot phep
+ * Hinh dang nay chep dung `MeteredSplit` cua backend, ke ca cho no thieu: mot phep
  * cong `metered + unmetered` o FE se dung lai chinh con so ma §9.5 cam tron.
  */
-export interface HaiCot {
-  metered: SoTien;
-  unmetered: SoTien;
+export interface MeteredSplit {
+  metered: UsageAmount;
+  unmetered: UsageAmount;
 }
 
-export interface HangChiPhi extends HaiCot {
+export interface CostRow extends MeteredSplit {
   key: string;
   label: string | null;
 }
 
 /** `system` = tien cua nguoi van hanh, `byok` = tien cua nguoi dung (§10.5). */
-export type NguonKhoa = "system" | "byok";
+export type KeySource = "system" | "byok";
 
-export interface ChiPhiRa {
+export interface CostsOut {
   since: string;
   until: string;
   /** Bo loc dang ap cho `totals`/`by_day`/`by_user`/`by_model`. `null` = moi nguon. */
-  key_source: NguonKhoa | null;
-  totals: HaiCot;
-  by_day: HangChiPhi[];
-  by_user: HangChiPhi[];
-  by_model: HangChiPhi[];
+  key_source: KeySource | null;
+  totals: MeteredSplit;
+  by_day: CostRow[];
+  by_user: CostRow[];
+  by_model: CostRow[];
   /** LUON du ca hai nguon, ke ca khi `key_source` khac `null` — xem `admin_usage`. */
-  by_key_source: HangChiPhi[];
+  by_key_source: CostRow[];
 }
 
-export interface NapCatalogRa {
+export interface ReloadCatalogOut {
   models: number;
   version: number;
 }
@@ -619,7 +619,7 @@ export interface NapCatalogRa {
 // ────────────────────────────── cac loi goi ──────────────────────────────
 
 export const api = {
-  danhSachModel: () => request<ModelRa[]>("/models"),
+  listModels: () => request<ModelOut[]>("/models"),
 
   /**
    * §18.2 — mot TRANG cua sidebar. `updatedBefore` la `next_cursor` cua trang
@@ -634,17 +634,17 @@ export const api = {
    * (`CONVERSATION_PAGE_SIZE`, A3). FE gui mot con so o day la chep mot han
    * muc sang phia khong so huu no.
    */
-  danhSachHoiThoai: (updatedBefore?: string | null) =>
-    request<DanhSachHoiThoai>(
+  listConversations: (updatedBefore?: string | null) =>
+    request<ConversationList>(
       updatedBefore === undefined || updatedBefore === null
         ? "/conversations"
         : `/conversations?${new URLSearchParams({ updated_before: updatedBefore }).toString()}`,
     ),
 
-  taoHoiThoai: (body: { title?: string | null; default_model?: string | null } = {}) =>
-    request<HoiThoaiRa>("/conversations", { method: "POST", body: JSON.stringify(body) }),
+  createConversation: (body: { title?: string | null; default_model?: string | null } = {}) =>
+    request<ConversationOut>("/conversations", { method: "POST", body: JSON.stringify(body) }),
 
-  docHoiThoai: (id: string) => request<HoiThoaiChiTiet>(`/conversations/${id}`),
+  getConversation: (id: string) => request<ConversationDetail>(`/conversations/${id}`),
 
   /**
    * §18.2 — BON truong: tieu de, model mac dinh, ghim, va con tro nhanh.
@@ -658,21 +658,21 @@ export const api = {
    * kieu o day la `boolean` chu khong `boolean | null`: mot lan `pinned: null`
    * phai la loi luc `tsc` chay, khong phai mot `400` luc nguoi dung bam nut.
    *
-   * Tra ve **ca duong di** (`HoiThoaiChiTiet`) chu khong chi metadata, vi
+   * Tra ve **ca duong di** (`ConversationDetail`) chu khong chi metadata, vi
    * `active_leaf_id` la mot trong bon truong — xem docstring cua handler.
    */
-  suaHoiThoai: (
+  updateConversation: (
     id: string,
-    thayDoi: {
+    overrides: {
       active_leaf_id?: string | null;
       title?: string | null;
       pinned?: boolean;
       default_model?: string | null;
     },
   ) =>
-    request<HoiThoaiChiTiet>(`/conversations/${id}`, {
+    request<ConversationDetail>(`/conversations/${id}`, {
       method: "PATCH",
-      body: JSON.stringify(thayDoi),
+      body: JSON.stringify(overrides),
     }),
 
   /**
@@ -682,7 +682,7 @@ export const api = {
    * Tra `204` (khong body), nen `request` tra `undefined` — dung nhanh 204 da
    * co san o tren. Xoa lan thu hai la `404` chu khong `204`.
    */
-  xoaHoiThoai: (id: string) =>
+  deleteConversation: (id: string) =>
     request<void>(`/conversations/${id}`, { method: "DELETE" }),
 
   /**
@@ -694,41 +694,41 @@ export const api = {
    * ve loi goi HTTP. Sinh o day nghia la moi lan thu lai la mot khoa moi, va
    * middleware cua T-2.8 se vo dung truoc ca khi no ra doi (C22).
    */
-  guiTinNhan: (
+  sendMessage: (
     conversationId: string,
     body: { content: string; parent_id?: string | null; model_id?: string | null },
     idempotencyKey: string,
   ) =>
-    request<TaoMessageRa>(`/conversations/${conversationId}/messages`, {
+    request<CreateMessageOut>(`/conversations/${conversationId}/messages`, {
       method: "POST",
       body: JSON.stringify(body),
       headers: { "Idempotency-Key": idempotencyKey },
     }),
 
-  huy: (messageId: string) => request<HuyRa>(`/messages/${messageId}/cancel`, { method: "POST" }),
+  cancel: (messageId: string) => request<CancelOut>(`/messages/${messageId}/cancel`, { method: "POST" }),
 
   /**
    * §8.2 — sinh lai mot cau tra loi thanh ANH EM cua no. `202` + `stream_url`.
    *
    * `idempotencyKey` la tham so **bat buoc** tu NQ-93/B-231: route nay nay
-   * nam trong `ROUTE_BAT_BUOC_IDEMPOTENCY`, thieu header ⇒ `400`. Cung ly le
-   * `guiTinNhan`: moi lan bam sinh mot `assistant_message_id` moi nen bam hai
+   * nam trong `IDEMPOTENCY_REQUIRED_ROUTES`, thieu header ⇒ `400`. Cung ly le
+   * `sendMessage`: moi lan bam sinh mot `assistant_message_id` moi nen bam hai
    * lan la hai hoa don, va lop `_job_id` cua B-92 khong do duoc chieu nay.
    *
    * Khoa do NGUOI GOI cam, khong sinh tai cho (C22) — sinh o day nghia la hai
    * lan bam nhanh mang hai khoa khac nhau, tuc luat §11.4 vo dung dung luc no
-   * can chay. Chu so huu khoa la `useChat.thuLai`.
+   * can chay. Chu so huu khoa la `useChat.retry`.
    *
    * `model_id` vang mat ⇒ backend dung lai `messages.model_id` cua chinh cau
-   * tra loi dang thu lai (xem `_chon_model`), tuc nut "Thu lai" tron. Nut
+   * tra loi dang thu lai (xem `_pick_model`), tuc nut "Thu lai" tron. Nut
    * "Doi model & thu lai" la cho duy nhat truyen mot `model_id` khac.
    */
-  thuLai: (
+  retry: (
     messageId: string,
     body: { model_id?: string | null },
     idempotencyKey: string,
   ) =>
-    request<ThuLaiRa>(`/messages/${messageId}/retry`, {
+    request<RetryOut>(`/messages/${messageId}/retry`, {
       method: "POST",
       body: JSON.stringify(body),
       headers: { "Idempotency-Key": idempotencyKey },
@@ -741,7 +741,7 @@ export const api = {
    * tuong minh: backend khai `value` la truong BAT BUOC ke ca khi gia tri la
    * `null`, nen mot body rong la `422` chu khong phai mot lan go am tham.
    *
-   * `lyDo` chi gui khi co chu: `{value: null, reason: "..."}` la `422` (mot ly
+   * `reason` chi gui khi co chu: `{value: null, reason: "..."}` la `422` (mot ly
    * do khong kem danh gia la mot hang khong doc duoc), va `reason` vang mat
    * doc thanh `NULL` chu khong phai "giu nguyen cai cu".
    *
@@ -749,28 +749,28 @@ export const api = {
    * co, bam hai lan ra dung mot trang thai — cung ly le `api/v1/__init__.py`
    * dung cho moi POST cua `/admin/*` (A8 noi ve POST **tao tai nguyen**).
    */
-  danhGia: (messageId: string, gia: DanhGia | null, lyDo?: string) =>
-    request<DanhGiaRa>(`/messages/${messageId}/feedback`, {
+  sendFeedback: (messageId: string, value: Feedback | null, reason?: string) =>
+    request<FeedbackOut>(`/messages/${messageId}/feedback`, {
       method: "POST",
       body: JSON.stringify(
-        lyDo === undefined || lyDo === "" ? { value: gia } : { value: gia, reason: lyDo },
+        reason === undefined || reason === "" ? { value: value } : { value: value, reason: reason },
       ),
     }),
 
-  suaCauHoi: (messageId: string, content: string) =>
-    request<SuaMessageRa>(`/messages/${messageId}`, {
+  editQuestion: (messageId: string, content: string) =>
+    request<EditMessageOut>(`/messages/${messageId}`, {
       method: "PATCH",
       body: JSON.stringify({ content }),
     }),
 
-  anhEm: (messageId: string) => request<AnhEmRa>(`/messages/${messageId}/siblings`),
+  siblings: (messageId: string) => request<SiblingsOut>(`/messages/${messageId}/siblings`),
 
   // ───────────────────────────── §11.2 — phien ──────────────────────────────
   //
   // Khong mot loi goi nao duoi day cham toi JWT: ca access token lan refresh
   // token deu nam trong cookie `HttpOnly` do server dat (NQ-36), tuc JS cua
   // trang KHONG doc duoc chung — va do la ca diem cua NQ-36. FE chi biet "da
-  // dang nhap hay chua" qua `toiLaAi()`, khong qua mot bien trong bo nho.
+  // dang nhap hay chua" qua `me()`, khong qua mot bien trong bo nho.
 
   /**
    * §11.6 — `turnstile_token` la `null` khi widget tat (`VITE_TURNSTILE_SITE_KEY`
@@ -779,51 +779,51 @@ export const api = {
    * gia tri, va hai hinh dang body khac nhau cho cung mot form la mot cho de
    * lech them.
    */
-  dangKy: (email: string, password: string, turnstileToken: string | null) =>
-    request<ThongBaoRa>("/auth/register", {
+  register: (email: string, password: string, turnstileToken: string | null) =>
+    request<NoticeOut>("/auth/register", {
       method: "POST",
       body: JSON.stringify({ email, password, turnstile_token: turnstileToken }),
     }),
 
-  xacThucEmail: (token: string) =>
-    request<XacThucEmailRa>("/auth/verify-email", {
+  verifyEmail: (token: string) =>
+    request<VerifyEmailOut>("/auth/verify-email", {
       method: "POST",
       body: JSON.stringify({ token }),
     }),
 
   /** Han muc 3/gio (§18.1) — nut goi no phai noi ra dieu do khi bi tu choi. */
-  guiLaiXacThuc: (email: string) =>
-    request<ThongBaoRa>("/auth/resend-verification", {
+  resendVerification: (email: string) =>
+    request<NoticeOut>("/auth/resend-verification", {
       method: "POST",
       body: JSON.stringify({ email }),
     }),
 
-  quenMatKhau: (email: string, turnstileToken: string | null) =>
-    request<ThongBaoRa>("/auth/forgot-password", {
+  forgotPassword: (email: string, turnstileToken: string | null) =>
+    request<NoticeOut>("/auth/forgot-password", {
       method: "POST",
       body: JSON.stringify({ email, turnstile_token: turnstileToken }),
     }),
 
   /** KHONG dang nhap ai ca (NQ-44) — no con xoa hai cookie phien dang co. */
-  datLaiMatKhau: (token: string, password: string) =>
-    request<DatLaiMatKhauRa>("/auth/reset-password", {
+  resetPassword: (token: string, password: string) =>
+    request<ResetPasswordOut>("/auth/reset-password", {
       method: "POST",
       body: JSON.stringify({ token, password }),
     }),
 
-  dangNhap: (email: string, password: string) =>
-    request<NguoiDungRa>("/auth/login", {
+  login: (email: string, password: string) =>
+    request<UserOut>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
 
-  dangXuat: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
+  logout: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
 
   /**
-   * §18.1 — *"User + tier + quota con lai + trang thai"*. Tra `HoSoRa`, tuc
+   * §18.1 — *"User + tier + quota con lai + trang thai"*. Tra `ProfileOut`, tuc
    * rong hon `/login` va `/refresh` dung hai truong (B-213).
    */
-  toiLaAi: () => request<HoSoRa>("/auth/me"),
+  me: () => request<ProfileOut>("/auth/me"),
 
   // ──────────────────────────── §16.3 — quan tri ────────────────────────────
   //
@@ -832,40 +832,40 @@ export const api = {
   // nut hay khong KHONG phai mot lop bao ve, va man `/admin` co dua ai do vao
   // duoc thi cung khong doi duoc cau tra loi cua bay endpoint nay.
 
-  quanTriDanhSachUser: (trangThai?: TrangThaiUser) =>
-    request<AdminUserListRa>(
-      trangThai === undefined ? "/admin/users" : `/admin/users?status=${trangThai}`,
+  adminListUsers: (status?: UserStatus) =>
+    request<AdminUserListOut>(
+      status === undefined ? "/admin/users" : `/admin/users?status=${status}`,
     ),
 
-  quanTriDoiTrangThai: (userId: string, hanhDong: HanhDongUser) =>
-    request<AdminUserRa>(`/admin/users/${userId}/${hanhDong}`, { method: "POST" }),
+  adminChangeStatus: (userId: string, action: UserAction) =>
+    request<AdminUserOut>(`/admin/users/${userId}/${action}`, { method: "POST" }),
 
   /**
-   * `nguon === null` la "moi nguon" — xem `ChiPhiRa.key_source`.
+   * `nguon === null` la "moi nguon" — xem `CostsOut.key_source`.
    *
    * T-3.12 them `since` (ISO): man "Chi phi" hoi 7 hoac 30 ngay. Vang mat thi
    * server dung `QUOTA_WINDOW_LONG_S` (7 ngay). Cua so dai qua
    * `ADMIN_USAGE_MAX_WINDOW_DAYS` la `400` (B-175).
    */
-  quanTriChiPhi: (nguon: NguonKhoa | null, since?: string) => {
-    const thamSo = new URLSearchParams();
-    if (nguon !== null) {
-      thamSo.set("key_source", nguon);
+  adminCosts: (keySource: KeySource | null, since?: string) => {
+    const params = new URLSearchParams();
+    if (keySource !== null) {
+      params.set("key_source", keySource);
     }
     if (since !== undefined) {
-      thamSo.set("since", since);
+      params.set("since", since);
     }
-    const chuoi = thamSo.toString();
-    return request<ChiPhiRa>(chuoi === "" ? "/admin/usage" : `/admin/usage?${chuoi}`);
+    const query = params.toString();
+    return request<CostsOut>(query === "" ? "/admin/usage" : `/admin/usage?${query}`);
   },
 
-  quanTriNapCatalog: () =>
-    request<NapCatalogRa>("/admin/catalog/reload", { method: "POST" }),
+  adminReloadCatalog: () =>
+    request<ReloadCatalogOut>("/admin/catalog/reload", { method: "POST" }),
 
   // ── T-3.12 — bon endpoint cua T-2.20 + `PATCH /admin/users/{id}` ────────
 
   adminUpdateUser: (userId: string, patch: AdminUserPatch) =>
-    request<AdminUserRa>(`/admin/users/${userId}`, {
+    request<AdminUserOut>(`/admin/users/${userId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
@@ -904,7 +904,7 @@ export const api = {
         // 503 cua Nginx la HTML — roi xuong nhanh loi.
       }
     }
-    throw await docLoi(res);
+    throw await parseError(res);
   },
 
   // ────────────────────── §18.4 — cai dat ca nhan (T-3.0) ───────────────────
@@ -927,8 +927,8 @@ export const api = {
    * (`default_model` da di ra trong `GET /auth/me`) — xem docstring cua
    * `backend/app/api/v1/settings.py`.
    */
-  capNhatCaiDat: (defaultModel: string | null) =>
-    request<CaiDatRa>("/settings", {
+  updateSettings: (defaultModel: string | null) =>
+    request<SettingsOut>("/settings", {
       method: "PUT",
       body: JSON.stringify({ default_model: defaultModel }),
     }),

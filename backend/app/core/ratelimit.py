@@ -109,18 +109,18 @@ logger = logging.getLogger(__name__)
 RL_IP_PREFIX = "rl:ip:"
 
 #: Header do Nginx đặt (`$remote_addr`) — xem docstring module.
-HEADER_IP_THAT = "X-Real-IP"
+REAL_IP_HEADER = "X-Real-IP"
 
 #: Xô chung cho request không có IP nào đọc được. Một chuỗi cố định chứ không
 #: bỏ qua phép đếm: "không biết anh là ai" không phải lý do để được gọi vô hạn.
-IP_KHONG_RO = "unknown"
+UNKNOWN_IP = "unknown"
 
 #: Quy đổi đơn vị của chính tên biến `..._PER_HOUR` / `..._PER_MIN` trong
 #: `Settings`, **không** phải một nút vặn thứ hai: đổi cửa sổ mà giữ nguyên tên
 #: biến là để lại một cái tên nói dối. Vì vậy hai con số này nằm ở đây, còn
 #: *hạn mức* (3, 5) — thứ A3 gọi là "giới hạn" — nằm trong `.env`.
-CUA_SO_GIO_S = 3600
-CUA_SO_PHUT_S = 60
+HOUR_WINDOW_S = 3600
+MINUTE_WINDOW_S = 60
 
 #: Tên nhóm của lớp theo IP — **là tên route**, xem `ip_key`. Thành hằng ở
 #: B-188 chứ không còn là năm chuỗi gõ tay trong `api/v1/auth.py`, vì từ nay có
@@ -138,7 +138,7 @@ ROUTE_LOGOUT = "logout"
 #: Mọi nhóm hợp lệ của trục IP. `app/cli.py` dùng nó để từ chối một tên gõ sai
 #: **trước** khi chạm tới Redis; `tests/core/test_ratelimit.py` dùng nó để canh
 #: rằng `api/v1/auth.py` không thêm một route thứ sáu bằng chuỗi gõ tay.
-NHOM_THEO_IP: Final[tuple[str, ...]] = (
+IP_GROUPS: Final[tuple[str, ...]] = (
     ROUTE_REGISTER,
     ROUTE_RESEND_VERIFICATION,
     ROUTE_FORGOT_PASSWORD,
@@ -147,7 +147,7 @@ NHOM_THEO_IP: Final[tuple[str, ...]] = (
 )
 
 
-def ip_key(nhom: str, ip: str) -> str:
+def ip_key(group: str, ip: str) -> str:
     """Khoá đếm của một (nhóm route, IP).
 
     `nhom` là **tên route**, không phải tên chính sách: §10.6 cho đăng ký và
@@ -155,10 +155,10 @@ def ip_key(nhom: str, ip: str) -> str:
     chung một xô cho mọi route cùng chính sách sẽ làm một người vừa xin gửi lại
     thư xác thực không xin được link đặt lại mật khẩu.
     """
-    return f"{RL_IP_PREFIX}{nhom}:{ip}"
+    return f"{RL_IP_PREFIX}{group}:{ip}"
 
 
-def mau_khoa_ip(nhom: str) -> str:
+def ip_key_pattern(group: str) -> str:
     """Mẫu `SCAN` phủ **mọi** IP của một nhóm — `rl:ip:register:*` (B-188).
 
     Tồn tại vì đường vận hành thật thiếu đúng một mẩu dữ liệu: người chạy DoD
@@ -170,66 +170,66 @@ def mau_khoa_ip(nhom: str) -> str:
     Là một hàm chứ không một chuỗi nối tại chỗ, cùng luật với `ip_key`: chỗ
     duy nhất biết hình dạng khoá vẫn là file này.
     """
-    return f"{RL_IP_PREFIX}{nhom}:*"
+    return f"{RL_IP_PREFIX}{group}:*"
 
 
-def dia_chi_ip(request: Request) -> str:
+def client_ip(request: Request) -> str:
     """IP của người gọi — `X-Real-IP` (Nginx) → `request.client` → `unknown`."""
-    header = request.headers.get(HEADER_IP_THAT)
+    header = request.headers.get(REAL_IP_HEADER)
     if header and header.strip():
         return header.strip()
     if request.client is not None and request.client.host:
         return request.client.host
-    return IP_KHONG_RO
+    return UNKNOWN_IP
 
 
 @dataclass(frozen=True, slots=True)
-class KetQuaDem:
+class CountResult:
     """Kết quả một lượt đếm. `retry_after_s` chỉ có nghĩa khi `vuot` là `True`."""
 
-    so_lan: int
-    vuot: bool
+    count: int
+    exceeded: bool
     retry_after_s: int
 
 
-async def dem_va_kiem(redis: Redis, key: str, *, gioi_han: int, cua_so_s: int) -> KetQuaDem:
+async def count_and_check(redis: Redis, key: str, *, limit: int, window_s: int) -> CountResult:
     """Đếm lượt gọi này rồi trả lời "đã vượt hạn mức chưa".
 
     Đếm **trước**, không phải sau khi handler chạy xong: thứ cần chặn là *lượt
     thử*, và một lần dò email thất bại cũng là một lần dò.
 
     Ngoại lệ của Redis **không** bị nuốt ở đây — chỗ gọi mới biết phải trả lời
-    người dùng thế nào (cùng lối `bi_chan` của `core/blacklist.py`).
+    người dùng thế nào (cùng lối `is_blocked` của `core/blacklist.py`).
     """
-    so_lan = int(await redis.incr(key))
+    count = int(await redis.incr(key))
     # Đặt TTL ở MỌI lượt, không chỉ lượt đầu (`nx=True` lo phần "chỉ khi chưa
     # có") — xem docstring module, mục EXPIRE NX.
-    await redis.expire(key, cua_so_s, nx=True)
-    if so_lan <= gioi_han:
-        return KetQuaDem(so_lan=so_lan, vuot=False, retry_after_s=0)
+    await redis.expire(key, window_s, nx=True)
+    if count <= limit:
+        return CountResult(count=count, exceeded=False, retry_after_s=0)
 
-    con_lai = int(await redis.ttl(key))
+    remaining = int(await redis.ttl(key))
     # `ttl` trả `-1` (khoá không TTL) hoặc `-2` (khoá vừa hết hạn giữa hai
     # lệnh). Cả hai đều không phải một khoảng chờ hợp lệ để đưa cho client.
-    return KetQuaDem(so_lan=so_lan, vuot=True, retry_after_s=max(1, con_lai))
+    return CountResult(count=count, exceeded=True, retry_after_s=max(1, remaining))
 
 
-def _dung_dependency(
-    nhom: str, *, cua_so_s: int, doc_gioi_han: Callable[[], int]
+def _build_dependency(
+    group: str, *, window_s: int, read_limit: Callable[[], int]
 ) -> Callable[[Request], Awaitable[None]]:
     """Dựng một dependency FastAPI cho một (route, chính sách).
 
-    `doc_gioi_han` là một hàm chứ không phải một số vì `Settings` được đọc lúc
+    `read_limit` là một hàm chứ không phải một số vì `Settings` được đọc lúc
     **gọi**, không phải lúc import: hạn mức là cấu hình (A3), và một test hạ
     hạn mức xuống 1 phải thấy hiệu lực mà không cần nạp lại module.
     """
 
-    async def kiem_han_muc(request: Request) -> None:
-        gioi_han = doc_gioi_han()
-        key = ip_key(nhom, dia_chi_ip(request))
+    async def check_limit(request: Request) -> None:
+        limit = read_limit()
+        key = ip_key(group, client_ip(request))
         try:
-            ket_qua = await dem_va_kiem(get_redis(), key, gioi_han=gioi_han, cua_so_s=cua_so_s)
-        except Exception as loi:
+            result = await count_and_check(get_redis(), key, limit=limit, window_s=window_s)
+        except Exception as exc:
             logger.exception("khong dem duoc rate limit cho %s", key)
             # Cùng lý lẽ với blacklist (`core/deps.py`): không hỏi được Redis
             # nghĩa là KHÔNG BIẾT IP này đã gọi mấy lần, và cho qua là gỡ đúng
@@ -239,45 +239,45 @@ def _dung_dependency(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 ApiErrorCode.SERVICE_UNAVAILABLE,
                 "khong kiem duoc han muc goi, hay thu lai",
-            ) from loi
+            ) from exc
 
-        if ket_qua.vuot:
+        if result.exceeded:
             logger.warning(
                 "rate limit: %s da goi %d lan, tran %d moi %d giay",
                 key,
-                ket_qua.so_lan,
-                gioi_han,
-                cua_so_s,
+                result.count,
+                limit,
+                window_s,
             )
             raise ApiError(
                 status.HTTP_429_TOO_MANY_REQUESTS,
                 ApiErrorCode.RATE_LIMITED,
                 "goi qua nhieu lan, hay thu lai sau",
-                details={"retry_after": ket_qua.retry_after_s},
+                details={"retry_after": result.retry_after_s},
                 # Header chuẩn của 429 — `core/errors.py` giữ nguyên `headers`
                 # của `ApiError` đúng vì hai ca này (401 `WWW-Authenticate`,
                 # 429 `Retry-After`).
-                headers={"Retry-After": str(ket_qua.retry_after_s)},
+                headers={"Retry-After": str(result.retry_after_s)},
             )
 
-    return kiem_han_muc
+    return check_limit
 
 
-def gioi_han_gui_email(nhom: str) -> Callable[[Request], Awaitable[None]]:
+def email_send_limit(group: str) -> Callable[[Request], Awaitable[None]]:
     """3/giờ theo IP — route **gửi thư** cho một email người gọi tự nhập.
 
     §10.6 ("quên mật khẩu: 3/giờ") và §18.1 ("`/auth/resend-verification` —
     Rate limit 3/giờ"). Hai thứ bị chặn ở đây: dò xem email nào đã đăng ký, và
     biến endpoint thành máy gửi thư tới một hộp thư bất kỳ (B-127).
     """
-    return _dung_dependency(
-        nhom,
-        cua_so_s=CUA_SO_GIO_S,
-        doc_gioi_han=lambda: settings.RATE_LIMIT_EMAIL_IP_PER_HOUR,
+    return _build_dependency(
+        group,
+        window_s=HOUR_WINDOW_S,
+        read_limit=lambda: settings.RATE_LIMIT_EMAIL_IP_PER_HOUR,
     )
 
 
-def gioi_han_auth(nhom: str) -> Callable[[Request], Awaitable[None]]:
+def auth_limit(group: str) -> Callable[[Request], Awaitable[None]]:
     """5/phút theo IP — route `/auth/*` **không** gửi thư.
 
     Con số lấy từ nhóm `auth` của §10.6 ("auth: 5/phút"), đổi trục đếm từ user
@@ -288,10 +288,10 @@ def gioi_han_auth(nhom: str) -> Callable[[Request], Awaitable[None]]:
     sửa rồi gửi lại), nên một hạn mức tính bằng giờ sẽ khoá **nạn nhân** ra
     khỏi tài khoản của họ trong một tiếng vì họ gõ sai mật khẩu ba lần.
     """
-    return _dung_dependency(
-        nhom,
-        cua_so_s=CUA_SO_PHUT_S,
-        doc_gioi_han=lambda: settings.RATE_LIMIT_AUTH_IP_PER_MIN,
+    return _build_dependency(
+        group,
+        window_s=MINUTE_WINDOW_S,
+        read_limit=lambda: settings.RATE_LIMIT_AUTH_IP_PER_MIN,
     )
 
 
@@ -334,7 +334,7 @@ HEADER_RETRY_AFTER = "Retry-After"
 #: Giá một request. Một hằng có tên chứ không một số 1 rải trong lời gọi: §10.2
 #: đã có một đường "request đắt hơn request khác" (quota theo USD), và nếu có
 #: ngày rate limit cũng cần thế thì chỗ sửa phải là một chỗ.
-COST_MOI_REQUEST = 1
+COST_PER_REQUEST = 1
 
 #: Token bucket, chạy **nguyên tử** trong Redis — không có khe nào giữa đọc và
 #: ghi cho một request thứ hai chen vào (DoD T-2.9 dòng 2).
@@ -399,16 +399,16 @@ def user_key(group: str, user_id: uuid.UUID) -> str:
     return f"{RL_USER_PREFIX}{group}:{user_id}"
 
 
-def mau_khoa_user(group: str) -> str:
+def user_key_pattern(group: str) -> str:
     """Mẫu `SCAN` phủ mọi user của một nhóm — `rl:user:chat:*` (B-188).
 
-    Cặp với `mau_khoa_ip`; xem docstring bên ấy cho lý do tồn tại.
+    Cặp với `ip_key_pattern`; xem docstring bên ấy cho lý do tồn tại.
     """
     return f"{RL_USER_PREFIX}{group}:*"
 
 
 @dataclass(frozen=True, slots=True)
-class KetQuaXo:
+class BucketResult:
     """Một lượt lấy token. `retry_after_s` chỉ có nghĩa khi `allowed` là `False`."""
 
     allowed: bool
@@ -419,16 +419,16 @@ class KetQuaXo:
 
     def headers(self) -> dict[str, str]:
         """Ba header `X-RateLimit-*`, cộng `Retry-After` khi đã bị chặn."""
-        them = {HEADER_RETRY_AFTER: str(self.retry_after_s)} if not self.allowed else {}
+        extra = {HEADER_RETRY_AFTER: str(self.retry_after_s)} if not self.allowed else {}
         return {
             HEADER_LIMIT: str(self.limit),
             HEADER_REMAINING: str(self.remaining),
             HEADER_RESET: str(self.reset_s),
-            **them,
+            **extra,
         }
 
 
-def _giay_len(milli: int) -> int:
+def _ceil_seconds(milli: int) -> int:
     """ms -> giây, làm tròn **lên**, tối thiểu 1.
 
     `Retry-After` của HTTP là số giây nguyên. Làm tròn xuống là mời client thử
@@ -440,10 +440,10 @@ def _giay_len(milli: int) -> int:
 
 async def take_token(
     redis: Redis, key: str, *, capacity: int, window_s: int, now: float
-) -> KetQuaXo:
+) -> BucketResult:
     """Lấy một token khỏi xô `key`. Ngoại lệ của Redis **không** bị nuốt ở đây.
 
-    Cùng lối `dem_va_kiem` của lớp theo IP: chỗ gọi mới biết phải trả lời người
+    Cùng lối `count_and_check` của lớp theo IP: chỗ gọi mới biết phải trả lời người
     dùng thế nào.
     """
     # Mọi ARGV đi bằng **chuỗi**: đó là thứ duy nhất giao thức Redis mang
@@ -457,24 +457,22 @@ async def take_token(
         str(capacity),
         str(window_s),
         repr(now),
-        str(COST_MOI_REQUEST),
+        str(COST_PER_REQUEST),
     )
-    return KetQuaXo(
+    return BucketResult(
         allowed=bool(allowed),
         limit=capacity,
         remaining=int(remaining),
-        retry_after_s=_giay_len(int(retry_after_ms)) if not allowed else 0,
-        reset_s=_giay_len(int(reset_ms)),
+        retry_after_s=_ceil_seconds(int(retry_after_ms)) if not allowed else 0,
+        reset_s=_ceil_seconds(int(reset_ms)),
     )
 
 
-def gioi_han_theo_user(
-    group: str, *, doc_gioi_han: Callable[[], int]
-) -> Callable[..., Awaitable[None]]:
+def per_user_limit(group: str, *, read_limit: Callable[[], int]) -> Callable[..., Awaitable[None]]:
     """Dựng dependency token bucket cho một nhóm route của §10.6.
 
-    `doc_gioi_han` là một hàm chứ không phải một số — cùng lý do đã ghi ở
-    `_dung_dependency` của lớp theo IP: hạn mức là cấu hình (A3), đọc lúc
+    `read_limit` là một hàm chứ không phải một số — cùng lý do đã ghi ở
+    `_build_dependency` của lớp theo IP: hạn mức là cấu hình (A3), đọc lúc
     **gọi**, nên một test hạ nó xuống 1 thấy hiệu lực ngay.
 
     Gắn ở **từng route sinh chữ** (`api/v1/messages.py`), không ở
@@ -485,21 +483,21 @@ def gioi_han_theo_user(
     nhau không phải tình cờ: chúng bảo vệ đúng một tập ba route.
     """
 
-    async def kiem_han_muc(
+    async def check_limit(
         response: Response,
         user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     ) -> None:
-        gioi_han = doc_gioi_han()
+        limit = read_limit()
         key = user_key(group, user_id)
         try:
-            ket_qua = await take_token(
+            result = await take_token(
                 get_redis(),
                 key,
-                capacity=gioi_han,
-                window_s=CUA_SO_PHUT_S,
+                capacity=limit,
+                window_s=MINUTE_WINDOW_S,
                 now=time.time(),
             )
-        except Exception as loi:
+        except Exception as exc:
             logger.exception("khong chay duoc token bucket cho %s", key)
             # Cùng lý lẽ đã chốt bốn lần (`core/deps.py`, `core/blacklist.py`,
             # `core/idempotency.py`, và lớp theo IP ngay trên): không hỏi được
@@ -509,21 +507,21 @@ def gioi_han_theo_user(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 ApiErrorCode.SERVICE_UNAVAILABLE,
                 "khong kiem duoc han muc goi, hay thu lai",
-            ) from loi
+            ) from exc
 
-        if not ket_qua.allowed:
+        if not result.allowed:
             logger.warning(
                 "rate limit theo user: %s het token, tran %d moi %d giay",
                 key,
-                gioi_han,
-                CUA_SO_PHUT_S,
+                limit,
+                MINUTE_WINDOW_S,
             )
             raise ApiError(
                 status.HTTP_429_TOO_MANY_REQUESTS,
                 ApiErrorCode.RATE_LIMITED,
                 "goi qua nhieu lan, hay thu lai sau",
-                details={"retry_after": ket_qua.retry_after_s, "limit": gioi_han},
-                headers=ket_qua.headers(),
+                details={"retry_after": result.retry_after_s, "limit": limit},
+                headers=result.headers(),
             )
 
         # Header trên response THÀNH CÔNG: `Response` do FastAPI tiêm vào
@@ -532,14 +530,14 @@ def gioi_han_theo_user(
         # đúng hình dạng của cả ba route sinh chữ (§18.2 trả `202` + JSON).
         # Không có phần này thì FE chỉ biết mình sắp hết hạn mức vào đúng lúc
         # đã hết.
-        response.headers.update(ket_qua.headers())
+        response.headers.update(result.headers())
 
-    return kiem_han_muc
+    return check_limit
 
 
-def gioi_han_chat() -> Callable[..., Awaitable[None]]:
+def chat_limit() -> Callable[..., Awaitable[None]]:
     """20/phút theo user cho ba route SINH CHỮ (§10.6, nhóm `chat`)."""
-    return gioi_han_theo_user(GROUP_CHAT, doc_gioi_han=lambda: settings.RATE_LIMIT_CHAT_PER_MIN)
+    return per_user_limit(GROUP_CHAT, read_limit=lambda: settings.RATE_LIMIT_CHAT_PER_MIN)
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
@@ -618,13 +616,13 @@ RL_STREAMS_PREFIX = "rl:streams:"
 #: Bao lâu thì một ghế trỏ vào `message_id` Postgres chưa từng thấy bị coi là
 #: rác. Đây **không** phải một nút vặn vận hành mà là biên an toàn của một
 #: transaction — cùng loại `CLAIM_ATTEMPTS` (`core/idempotency.py`) và
-#: `KIEM_HUY_MOI_N_CHUNK` (`workers/generate.py`), nên nó ở đây chứ không
+#: `CANCEL_CHECK_EVERY_N_CHUNKS` (`workers/generate.py`), nên nó ở đây chứ không
 #: trong `.env`. 60 giây: một `INSERT` + `enqueue` + `commit` lành mạnh mất
 #: mili-giây, nên biên này rộng gấp hàng nghìn lần thứ nó phải phủ.
 PHANTOM_GRACE_S = 60
 
 
-def _tuoi_toi_da_ghe() -> int:
+def _seat_max_age() -> int:
     """Trần tuổi tuyệt đối của một ghế, và cũng là TTL của khoá.
 
     **Suy ra** từ hai giới hạn đã có chứ không phải một biến `.env` thứ ba:
@@ -644,7 +642,7 @@ def _tuoi_toi_da_ghe() -> int:
 #: `ZSCORE` trước khi cấp: cùng một `message_id` xin ghế hai lần (một lần thử
 #: lại sau khi transaction cũ rollback) phải là **cùng một ghế**, không phải
 #: hai — nếu không, ba lần thử lại là hết ghế của chính mình.
-LUA_GIU_GHE = """
+LUA_ACQUIRE_SEAT = """
 local key     = KEYS[1]
 local limit   = tonumber(ARGV[1])
 local now     = tonumber(ARGV[2])
@@ -677,14 +675,14 @@ def stream_slot_key(user_id: uuid.UUID) -> str:
     return f"{RL_STREAMS_PREFIX}{user_id}"
 
 
-def _uuid_hoac_none(raw: str) -> uuid.UUID | None:
+def _uuid_or_none(raw: str) -> uuid.UUID | None:
     try:
         return uuid.UUID(raw)
     except ValueError:
         return None
 
 
-async def _ghe_can_nha(
+async def _seats_to_release(
     messages: MessageRepository,
     *,
     user_id: uuid.UUID,
@@ -695,25 +693,25 @@ async def _ghe_can_nha(
 
     `members` là `(member, score)` lấy từ ZSET; score là lúc nhận ghế.
     """
-    theo_uuid = {raw: _uuid_hoac_none(raw) for raw, _ in members}
-    hop_le = [mid for mid in theo_uuid.values() if mid is not None]
-    trang_thai = await messages.generation_states(hop_le, user_id=user_id)
+    by_uuid = {raw: _uuid_or_none(raw) for raw, _ in members}
+    valid = [mid for mid in by_uuid.values() if mid is not None]
+    states = await messages.generation_states(valid, user_id=user_id)
 
-    can_nha: list[str] = []
+    to_release: list[str] = []
     for raw, score in members:
-        mid = theo_uuid[raw]
+        mid = by_uuid[raw]
         if mid is None:
             # Không phải UUID ⇒ không thể là một `message_id`. Chưa đường nào
             # ghi được thứ như vậy, nên nếu có thì đó là rác — nhả ngay.
-            can_nha.append(raw)
-        elif mid in trang_thai.in_flight:
+            to_release.append(raw)
+        elif mid in states.in_flight:
             continue
-        elif mid in trang_thai.known or (now - score) >= PHANTOM_GRACE_S:
-            can_nha.append(raw)
-    return can_nha
+        elif mid in states.known or (now - score) >= PHANTOM_GRACE_S:
+            to_release.append(raw)
+    return to_release
 
 
-def _redis_khong_hoi_duoc(key: str) -> ApiError:
+def _redis_unreachable(key: str) -> ApiError:
     logger.exception("khong hoi duoc redis cho tran dong thoi %s", key)
     return ApiError(
         status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -722,7 +720,7 @@ def _redis_khong_hoi_duoc(key: str) -> ApiError:
     )
 
 
-async def nhan_ghe_sinh(
+async def acquire_generation_seat(
     messages: MessageRepository, *, user_id: uuid.UUID, message_id: uuid.UUID
 ) -> None:
     """Giữ một ghế cho lượt sinh `message_id`, hoặc `429 TOO_MANY_STREAMS`.
@@ -737,54 +735,54 @@ async def nhan_ghe_sinh(
     """
     redis = get_redis()
     key = stream_slot_key(user_id)
-    gioi_han = settings.MAX_CONCURRENT_STREAMS
-    max_age = _tuoi_toi_da_ghe()
+    limit = settings.MAX_CONCURRENT_STREAMS
+    max_age = _seat_max_age()
     now = time.time()
 
     try:
-        dang_ban: Sequence[tuple[str, float]] = await redis.zrange(key, 0, -1, withscores=True)
-    except Exception as loi:
-        raise _redis_khong_hoi_duoc(key) from loi
+        occupied: Sequence[tuple[str, float]] = await redis.zrange(key, 0, -1, withscores=True)
+    except Exception as exc:
+        raise _redis_unreachable(key) from exc
 
     # Chỉ hỏi Postgres khi ghế đã đầy. Đường đi thường không tốn truy vấn nào,
     # và một ghế đã khép nằm lại thêm một lượt là vô hại: lượt nào chạm trần
     # cũng dọn nó trước khi trả lời.
-    can_nha = (
-        await _ghe_can_nha(messages, user_id=user_id, members=dang_ban, now=now)
-        if len(dang_ban) >= gioi_han
+    to_release = (
+        await _seats_to_release(messages, user_id=user_id, members=occupied, now=now)
+        if len(occupied) >= limit
         else []
     )
 
     try:
-        cho_phep, dang_chay = await redis.eval(  # type: ignore[misc]
-            LUA_GIU_GHE,
+        allowed, running = await redis.eval(  # type: ignore[misc]
+            LUA_ACQUIRE_SEAT,
             1,
             key,
-            str(gioi_han),
+            str(limit),
             repr(now),
             str(max_age),
             str(message_id),
-            *can_nha,
+            *to_release,
         )
-    except Exception as loi:
-        raise _redis_khong_hoi_duoc(key) from loi
+    except Exception as exc:
+        raise _redis_unreachable(key) from exc
 
-    if not cho_phep:
+    if not allowed:
         logger.warning(
             "tran dong thoi: user %s dang co %d luot sinh chua khep (tran %d)",
             user_id,
-            int(dang_chay),
-            gioi_han,
+            int(running),
+            limit,
         )
         raise ApiError(
             status.HTTP_429_TOO_MANY_REQUESTS,
             ApiErrorCode.TOO_MANY_STREAMS,
             "dang co qua nhieu cau tra loi cung luc, hay doi mot cai xong",
-            details={"limit": gioi_han, "active": int(dang_chay)},
+            details={"limit": limit, "active": int(running)},
         )
 
 
-async def nha_ghe_sinh(*, user_id: uuid.UUID, message_id: uuid.UUID) -> None:
+async def release_generation_seat(*, user_id: uuid.UUID, message_id: uuid.UUID) -> None:
     """Trả ghế ngay — dùng khi transaction vừa giữ ghế sẽ rollback.
 
     Nuốt mọi lỗi và chỉ ghi log: đây là đường **dọn dẹp**, và ném ở đây sẽ

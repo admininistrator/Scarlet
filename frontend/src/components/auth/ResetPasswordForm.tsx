@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { PATHS } from "../../app/paths";
-import { ApiError, MA_LOI, api } from "../../lib/api";
+import { ApiError, ERROR_CODES, api } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { authErrorText } from "./authErrors";
 
@@ -25,7 +25,7 @@ import { authErrorText } from "./authErrors";
  * ── `TOKEN_INVALID` khong phai mot loi form ────────────────────────────────
  *
  * Ba kieu token hong (khong ton tai / da dung / het han) deu ra mot cau tra
- * loi o backend (`_LOI_TOKEN_RESET`), va ca ba deu co cung duong di tiep: xin
+ * loi o backend (`_RESET_TOKEN_MSG`), va ca ba deu co cung duong di tiep: xin
  * mot lien ket moi. Nen no duoc ve thanh mot man hinh co LOI THOAT, khong
  * phai mot dong do duoi o mat khau — go lai mat khau khong sua duoc mot lien
  * ket het han, va de nguoi dung go them lan nua la de ho tu tim ra dieu do.
@@ -35,12 +35,12 @@ export function ResetPasswordForm() {
   const token = searchParams.get("token");
 
   const [password, setPassword] = useState("");
-  const [dangGui, setDangGui] = useState(false);
-  const [loi, setLoi] = useState<string | null>(null);
-  const [tokenHong, setTokenHong] = useState(false);
-  const [xong, setXong] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tokenInvalid, setTokenInvalid] = useState(false);
+  const [done, setDone] = useState(false);
 
-  if (token === null || tokenHong) {
+  if (token === null || tokenInvalid) {
     return (
       <main className="mx-auto w-full max-w-sm px-6 py-12">
         <h2 className="text-lg font-semibold">{t("datLai.tieuDe")}</h2>
@@ -57,7 +57,7 @@ export function ResetPasswordForm() {
     );
   }
 
-  if (xong) {
+  if (done) {
     return (
       <main className="mx-auto w-full max-w-sm px-6 py-12">
         <h2 className="text-lg font-semibold">{t("datLai.xong.tieuDe")}</h2>
@@ -72,22 +72,22 @@ export function ResetPasswordForm() {
     );
   }
 
-  async function gui() {
-    setLoi(null);
-    setDangGui(true);
+  async function submit() {
+    setError(null);
+    setSending(true);
     try {
-      await api.datLaiMatKhau(token as string, password);
-      setXong(true);
+      await api.resetPassword(token as string, password);
+      setDone(true);
     } catch (e) {
       // Token hong -> doi ca man hinh; mat khau qua ngan/yeu -> mot dong do
       // canh o nhap, vi do la thu go lai duoc.
-      if (e instanceof ApiError && e.code === MA_LOI.TOKEN_HONG) {
-        setTokenHong(true);
+      if (e instanceof ApiError && e.code === ERROR_CODES.TOKEN_INVALID) {
+        setTokenInvalid(true);
       } else {
-        setLoi(authErrorText(e));
+        setError(authErrorText(e));
       }
     } finally {
-      setDangGui(false);
+      setSending(false);
     }
   }
 
@@ -99,7 +99,7 @@ export function ResetPasswordForm() {
         className="flex flex-col gap-3"
         onSubmit={(e) => {
           e.preventDefault();
-          void gui();
+          void submit();
         }}
       >
         <label className="flex flex-col gap-1 text-sm">
@@ -122,18 +122,18 @@ export function ResetPasswordForm() {
         */}
         <span className="-mt-2 text-xs text-muted">{t("auth.matKhauGoiY")}</span>
 
-        {loi !== null && (
+        {error !== null && (
           <p role="alert" className="text-sm text-danger-text">
-            {loi}
+            {error}
           </p>
         )}
 
         <button
           type="submit"
-          disabled={dangGui}
+          disabled={sending}
           className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
         >
-          {dangGui ? t("auth.dangXuLy") : t("datLai.dat")}
+          {sending ? t("auth.dangXuLy") : t("datLai.dat")}
         </button>
       </form>
     </main>

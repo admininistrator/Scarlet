@@ -55,7 +55,7 @@ SSE_HEADERS = {
 }
 
 
-async def _phat_tick(duration_s: int, gap_s: int) -> AsyncIterator[str]:
+async def _emit_ticks(duration_s: int, gap_s: int) -> AsyncIterator[str]:
     """Sinh ``duration_s / TICK_INTERVAL_S`` event ``delta`` rồi một event ``done``.
 
     Mỗi payload mang mốc thời gian đã trôi tính bằng ms, đo ngay lúc sinh. Nhờ
@@ -64,7 +64,7 @@ async def _phat_tick(duration_s: int, gap_s: int) -> AsyncIterator[str]:
     proxy gom lại (mốc cũng cách nhau ~200 ms nhưng chữ ra cùng một lúc).
     """
     loop = asyncio.get_running_loop()
-    bat_dau = loop.time()
+    started = loop.time()
     so_tick = max(1, round(duration_s / TICK_INTERVAL_S))
 
     # Im lặng trước dòng đầu — đây là phần duy nhất chạm được vào C2. Không gửi
@@ -73,22 +73,22 @@ async def _phat_tick(duration_s: int, gap_s: int) -> AsyncIterator[str]:
         await asyncio.sleep(gap_s)
 
     for seq in range(so_tick):
-        troi_ms = int((loop.time() - bat_dau) * 1000)
-        payload = json.dumps({"t": f"tick {seq} +{troi_ms}ms"}, ensure_ascii=False)
+        elapsed_ms = int((loop.time() - started) * 1000)
+        payload = json.dumps({"t": f"tick {seq} +{elapsed_ms}ms"}, ensure_ascii=False)
         yield f"id: {seq}\nevent: delta\ndata: {payload}\n\n"
         await asyncio.sleep(TICK_INTERVAL_S)
 
-    ket = json.dumps(
+    closing = json.dumps(
         {
             "finish_reason": "stop",
             "ticks": so_tick,
             "seconds": duration_s,
             "gap_s": gap_s,
-            "elapsed_ms": int((loop.time() - bat_dau) * 1000),
+            "elapsed_ms": int((loop.time() - started) * 1000),
         },
         ensure_ascii=False,
     )
-    yield f"id: {so_tick}\nevent: done\ndata: {ket}\n\n"
+    yield f"id: {so_tick}\nevent: done\ndata: {closing}\n\n"
 
 
 @router.get("/sse")
@@ -102,7 +102,7 @@ async def debug_sse(
     - ``?gap_s=75`` — phép đo C2: kết nối sống qua khoảng im lặng 75 giây.
     """
     return StreamingResponse(
-        _phat_tick(seconds, gap_s),
+        _emit_ticks(seconds, gap_s),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )

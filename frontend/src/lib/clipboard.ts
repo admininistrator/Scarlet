@@ -26,16 +26,16 @@
  * Khong `alert`, khong `console.error`: ben goi quyet dinh noi gi voi nguoi
  * dung, vi hai nut hien hai cho khac nhau.
  */
-export async function saoChep(chu: string): Promise<boolean> {
+export async function copyText(text: string): Promise<boolean> {
   if (typeof navigator !== "undefined" && navigator.clipboard !== undefined) {
     try {
-      await navigator.clipboard.writeText(chu);
+      await navigator.clipboard.writeText(text);
       return true;
     } catch {
       // Quyen bi tu choi, hoac tab khong con focus. Roi xuong duong lui.
     }
   }
-  return saoChepKieuCu(chu);
+  return legacyCopy(text);
 }
 
 /**
@@ -46,12 +46,12 @@ export async function saoChep(chu: string): Promise<boolean> {
  * ra chuoi rong. Va `fixed` chu khong `absolute` de trang khong bi keo lech
  * mot khung hinh khi phan tu tam nay xuat hien.
  */
-function saoChepKieuCu(chu: string): boolean {
+function legacyCopy(text: string): boolean {
   if (typeof document === "undefined" || typeof document.execCommand !== "function") {
     return false;
   }
   const o = document.createElement("textarea");
-  o.value = chu;
+  o.value = text;
   o.setAttribute("readonly", "");
   o.style.position = "fixed";
   o.style.top = "0";

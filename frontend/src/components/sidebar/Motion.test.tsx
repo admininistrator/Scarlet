@@ -30,9 +30,9 @@ vi.mock("../../lib/api", async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
-      danhSachHoiThoai: vi.fn(),
-      suaHoiThoai: vi.fn(),
-      xoaHoiThoai: vi.fn(),
+      listConversations: vi.fn(),
+      updateConversation: vi.fn(),
+      deleteConversation: vi.fn(),
     },
   };
 });
@@ -124,7 +124,7 @@ function applyNormalToken(): void {
 beforeEach(() => {
   localStorage.clear();
   resetSidebarOpenForTest();
-  vi.mocked(api.danhSachHoiThoai).mockResolvedValue({ items: [], next_cursor: null });
+  vi.mocked(api.listConversations).mockResolvedValue({ items: [], next_cursor: null });
 });
 
 afterEach(() => {

@@ -41,121 +41,123 @@ MASTER_A = "a" * 63 + "1"
 MASTER_B = "a" * 63 + "2"
 
 #: Bản rõ mẫu — cố ý mang tiền tố `sk-` và đủ dài để `mask_secret` giữ tiền tố.
-KHOA_MAU = "sk-khong-phai-khoa-that-cua-ai-4f2a"
+SAMPLE_KEY = "sk-khong-phai-khoa-that-cua-ai-4f2a"
 
 
 @pytest.fixture(autouse=True)
-def master_key_cua_test(monkeypatch: pytest.MonkeyPatch) -> None:
+def master_key_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "MASTER_ENCRYPTION_KEY", SecretStr(MASTER_A))
 
 
-def _doi_master_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def _swap_master_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "MASTER_ENCRYPTION_KEY", SecretStr(MASTER_B))
 
 
 # ═════════════════════════════ 1. Nonce ═════════════════════════════════════
 
 
-def test_moi_lan_seal_mot_nonce_khac() -> None:
+def test_each_seal_uses_different_nonce() -> None:
     """Cạm bẫy T-2.14. Mười lần seal ⇒ mười nonce khác nhau."""
-    nonces = {seal(KHOA_MAU).nonce for _ in range(10)}
+    nonces = {seal(SAMPLE_KEY).nonce for _ in range(10)}
     assert len(nonces) == 10
 
 
-def test_cung_ban_ro_cho_hai_ban_ma_khac_nhau() -> None:
+def test_same_plaintext_gives_two_different_ciphertexts() -> None:
     """DoD dòng 2: hai user lưu **cùng** một key ⇒ hai `key_cipher` khác nhau.
 
     Đây là tính chất mà nonce riêng sinh ra để có. Dùng chung nonce thì hai
     bản mã sẽ khớp nhau từng byte và phép kiểm này đỏ.
     """
-    a, b = seal(KHOA_MAU), seal(KHOA_MAU)
+    a, b = seal(SAMPLE_KEY), seal(SAMPLE_KEY)
     assert a.cipher != b.cipher
     assert a.nonce != b.nonce
 
 
-def test_nonce_dai_dung_12_byte() -> None:
+def test_nonce_is_exactly_12_bytes() -> None:
     """96 bit — kích thước GCM được thiết kế quanh nó."""
-    assert len(seal(KHOA_MAU).nonce) == NONCE_BYTES == 12
+    assert len(seal(SAMPLE_KEY).nonce) == NONCE_BYTES == 12
 
 
-def test_ban_ma_dai_hon_ban_ro_dung_16_byte_tag() -> None:
+def test_ciphertext_longer_than_plaintext_by_16_byte_tag() -> None:
     """GCM nối tag 16 byte vào cuối — đó là hình dạng `key_cipher` trong DB."""
-    assert len(seal(KHOA_MAU).cipher) == len(KHOA_MAU.encode()) + 16
+    assert len(seal(SAMPLE_KEY).cipher) == len(SAMPLE_KEY.encode()) + 16
 
 
 # ═══════════════════════════ 2. Vòng đời ════════════════════════════════════
 
 
-def test_seal_roi_unseal_ra_dung_ban_ro() -> None:
-    assert unseal(seal(KHOA_MAU)) == KHOA_MAU
+def test_seal_then_unseal_yields_plaintext() -> None:
+    assert unseal(seal(SAMPLE_KEY)) == SAMPLE_KEY
 
 
-def test_ban_ma_khong_chua_ban_ro() -> None:
+def test_ciphertext_has_no_plaintext() -> None:
     """DoD dòng 1, đo ở tầng thấp nhất: bản mã không mang lại chuỗi gốc."""
-    assert KHOA_MAU.encode() not in seal(KHOA_MAU).cipher
+    assert SAMPLE_KEY.encode() not in seal(SAMPLE_KEY).cipher
 
 
-def test_ky_tu_ngoai_ascii_di_ve_nguyen_ven() -> None:
+def test_non_ascii_chars_round_trip_intact() -> None:
     """Khoá là do provider sinh, nhưng `seal` không được phép giả định ASCII:
     một lần ai đó dán nhầm vào ô nhập cũng không được thành `UnicodeDecodeError`
     ở đường giải mã."""
-    ban_ro = "khoa-có-dấu-và-emoji-🔑"
-    assert unseal(seal(ban_ro)) == ban_ro
+    plaintext = "khoa-có-dấu-và-emoji-🔑"
+    assert unseal(seal(plaintext)) == plaintext
 
 
-def test_master_key_dai_hon_32_byte_van_ra_khoa_32_byte() -> None:
+def test_master_key_over_32_bytes_still_yields_32_byte_key() -> None:
     """`openssl rand -hex 32` cho 64 ký tự; AES-256 đòi đúng 32 byte.
 
     Đo gián tiếp qua HKDF: seal/unseal chạy được nghĩa là `_data_key()` đã trả
     đúng độ dài — `AESGCM` từ chối mọi độ dài khác.
     """
     assert len(settings.MASTER_ENCRYPTION_KEY.get_secret_value()) > KEY_BYTES
-    assert unseal(seal(KHOA_MAU)) == KHOA_MAU
+    assert unseal(seal(SAMPLE_KEY)) == SAMPLE_KEY
 
 
 # ═══════════════════ 3. Hỏng CÓ KIỂM SOÁT (DoD dòng 6) ══════════════════════
 
 
-def test_doi_master_key_thi_DecryptionError_chu_khong_crash(
+def test_master_key_change_gives_DecryptionError_not_crash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """DoD dòng 6 — và `DecryptionError` là kiểu của **mình**, để tầng HTTP
     bắt được mà không phải import `cryptography`."""
-    da_seal = seal(KHOA_MAU)
-    _doi_master_key(monkeypatch)
+    sealed = seal(SAMPLE_KEY)
+    _swap_master_key(monkeypatch)
     with pytest.raises(DecryptionError):
-        unseal(da_seal)
+        unseal(sealed)
 
 
-def test_thong_diep_loi_khong_chua_ban_ro(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_error_message_has_no_plaintext(monkeypatch: pytest.MonkeyPatch) -> None:
     """C20: một exception là thứ đi thẳng vào log."""
-    da_seal = seal(KHOA_MAU)
-    _doi_master_key(monkeypatch)
-    with pytest.raises(DecryptionError) as loi:
-        unseal(da_seal)
-    assert KHOA_MAU not in str(loi.value)
+    sealed = seal(SAMPLE_KEY)
+    _swap_master_key(monkeypatch)
+    with pytest.raises(DecryptionError) as error:
+        unseal(sealed)
+    assert SAMPLE_KEY not in str(error.value)
 
 
-def test_sua_mot_byte_ban_ma_thi_DecryptionError() -> None:
+def test_flipping_one_ciphertext_byte_gives_DecryptionError() -> None:
     """GCM xác thực cả bản mã: một hàng DB bị sửa tay không ra chuỗi rác."""
-    goc = seal(KHOA_MAU)
-    hong = Sealed(cipher=bytes([goc.cipher[0] ^ 0x01]) + goc.cipher[1:], nonce=goc.nonce)
+    original = seal(SAMPLE_KEY)
+    broken = Sealed(
+        cipher=bytes([original.cipher[0] ^ 0x01]) + original.cipher[1:], nonce=original.nonce
+    )
     with pytest.raises(DecryptionError):
-        unseal(hong)
+        unseal(broken)
 
 
-def test_nonce_sai_do_dai_thi_DecryptionError() -> None:
+def test_wrong_nonce_length_gives_DecryptionError() -> None:
     """`AESGCM` ném `ValueError` chứ không `InvalidTag` cho ca này — nếu
     `unseal` chỉ bắt `InvalidTag` thì một hàng hỏng thành `500`."""
-    goc = seal(KHOA_MAU)
+    original = seal(SAMPLE_KEY)
     with pytest.raises(DecryptionError):
-        unseal(Sealed(cipher=goc.cipher, nonce=b"ngan"))
+        unseal(Sealed(cipher=original.cipher, nonce=b"ngan"))
 
 
-def test_nonce_khac_thi_DecryptionError() -> None:
+def test_other_nonce_gives_DecryptionError() -> None:
     """Ghi đè `key_cipher` mà quên `key_nonce` (hoặc ngược lại) phải hỏng
     to chứ không im lặng — đó là lý do `upsert` ghi cả hai cột cùng lúc."""
-    a, b = seal(KHOA_MAU), seal(KHOA_MAU)
+    a, b = seal(SAMPLE_KEY), seal(SAMPLE_KEY)
     with pytest.raises(DecryptionError):
         unseal(Sealed(cipher=a.cipher, nonce=b.nonce))
 
@@ -163,15 +165,15 @@ def test_nonce_khac_thi_DecryptionError() -> None:
 # ═════════════════════════ 4. Chuỗi che (§10.5) ═════════════════════════════
 
 
-def test_mask_giu_ba_ky_tu_dau_va_bon_ky_tu_cuoi() -> None:
+def test_mask_keeps_first_three_and_last_four_chars() -> None:
     """§10.5 viết thẳng hình dạng này: `sk-...4f2a`."""
-    assert mask_secret(KHOA_MAU) == "sk-...4f2a"
+    assert mask_secret(SAMPLE_KEY) == "sk-...4f2a"
 
 
-def test_mask_khong_chua_ban_ro() -> None:
-    assert KHOA_MAU not in mask_secret(KHOA_MAU)
+def test_mask_has_no_plaintext() -> None:
+    assert SAMPLE_KEY not in mask_secret(SAMPLE_KEY)
 
 
-def test_mask_khoa_ngan_thi_bo_tien_to() -> None:
+def test_mask_of_short_key_drops_prefix() -> None:
     """Với chuỗi ngắn, giữ cả tiền tố lẫn hậu tố là lộ gần hết."""
     assert mask_secret("abcdefgh") == "...efgh"
