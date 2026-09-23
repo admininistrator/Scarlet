@@ -4,6 +4,9 @@ import type { TrangThaiKetNoi } from "../../lib/sse";
 import { useChat } from "../../features/chat/useChat";
 import { ModelPicker } from "../../features/models/ModelPicker";
 import { useModels } from "../../features/models/useModels";
+import { QuotaBar } from "../../features/quota/ThanhQuota";
+import { byokCovers, isSendBlocked } from "../../features/quota/quotaView";
+import { useQuota } from "../../features/quota/useQuota";
 import { Sidebar } from "../sidebar/Sidebar";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
@@ -66,9 +69,18 @@ export function ChatScreen() {
   */
   const danhMuc = useModels();
   const phien = useSession();
+  /*
+    T-3.11 — thanh quota doc `/auth/me` cua `Layout` (khong mot luot goi nao
+    them) va nghe hai nhip tu `useChat`: `quota_warning` cua `202`, va "mot
+    luot vua khep / vua bi `429`" de hoi lai `/auth/me`. Khong co bo dem thoi
+    gian lam tuoi nao (B-209).
+  */
+  const quota = useQuota(phien);
   const chat = useChat({
     models: danhMuc.models,
     modelMacDinhTaiKhoan: phien.hoSo?.default_model ?? null,
+    onQuotaWarning: quota.noteWarning,
+    onQuotaStale: () => void phien.refreshProfile(),
   });
   const { cay } = chat;
   /*
@@ -118,6 +130,14 @@ export function ChatScreen() {
       onChon={(id) => void chonModel(id)}
     />
   );
+  /*
+    Provider cua model SE GUI — quyet dinh luot ay tru quota hay di bang khoa
+    rieng (Cam bay ①). Cung `modelHieuLuc` ma `gui()` dat vao `model_id`.
+  */
+  const providerDangChon =
+    danhMuc.models.find((m) => m.id === chat.modelHieuLuc)?.provider ?? null;
+  const quotaBlocked = isSendBlocked(quota.block, quota.byokProviders, providerDangChon);
+
   const coThanhTrangThai =
     cay.conversationId !== null || chat.ketNoi !== null || chat.usage !== null;
 
@@ -215,6 +235,15 @@ export function ChatScreen() {
           onGui={chat.gui}
           onDung={() => void chat.dung()}
           modelPicker={modelPicker}
+          quotaBlocked={quotaBlocked}
+          quotaBar={
+            <QuotaBar
+              readings={quota.readings}
+              warnPct={quota.warnPct}
+              block={quota.block}
+              byokCovered={byokCovers(quota.byokProviders, providerDangChon)}
+            />
+          }
         />
       </div>
     </div>

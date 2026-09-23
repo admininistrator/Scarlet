@@ -82,6 +82,13 @@ export const MA_LOI = {
   MAT_KHAU_QUA_YEU: "PASSWORD_TOO_WEAK",
   TOKEN_HONG: "TOKEN_INVALID",
   QUA_NHIEU_LAN: "RATE_LIMITED",
+
+  /**
+   * T-3.11 — `429` cua cua chan §10.2 (UC-07 dong 3). `details` mang
+   * `limit_type` + `retry_after`, nhung FE KHONG doc chung o day: thanh quota
+   * doc lai `/auth/me` de chi co MOT nguon cho thoi diem hoan lai.
+   */
+  QUOTA_EXCEEDED: "QUOTA_EXCEEDED",
 } as const;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -188,6 +195,24 @@ export interface DanhSachHoiThoai {
   next_cursor: string | null;
 }
 
+/**
+ * `QuotaWarning` cua backend — UC-07 dong 1, trong body `202` (T-2.11).
+ *
+ * NGUON THU HAI cua cung con so ma `CuaSoQuota` cua `/auth/me` mang (T-3.11):
+ * cung nam truong dau, cung luat tien-la-chuoi. Khong co `retry_after` vi mot
+ * `202` nghia la luot nay da qua cua chan — chua co gi de cho.
+ *
+ * `null` khi con tren nguong, va LUON `null` cho luot BYOK (§10.5): luot ay
+ * khong tru quota nen khong co gi de canh bao.
+ */
+export interface QuotaWarning {
+  limit_type: LoaiHanMuc;
+  limit_usd: string;
+  spent_usd: string;
+  remaining_usd: string;
+  remaining_pct: number;
+}
+
 export interface TaoMessageRa {
   user_message_id: string;
   assistant_message_id: string;
@@ -195,12 +220,14 @@ export interface TaoMessageRa {
   stream_url: string;
   /** C14 — `parent_id` client gui khac la hien tai, tuc vua mo mot nhanh. */
   branched: boolean;
+  quota_warning: QuotaWarning | null;
 }
 
 export interface ThuLaiRa {
   assistant_message_id: string;
   stream_url: string;
   model_id: string;
+  quota_warning: QuotaWarning | null;
 }
 
 /**
@@ -221,6 +248,7 @@ export interface SuaMessageRa {
   user_message_id: string;
   assistant_message_id: string;
   stream_url: string;
+  quota_warning: QuotaWarning | null;
 }
 
 export interface AnhEmRa {
@@ -334,6 +362,26 @@ export interface HoSoRa extends NguoiDungRa {
   quota: CuaSoQuota[] | null;
   /** Tran do dai mot message, tinh bang ky tu (B-205, NQ-78) — A3: khong literal o FE. */
   message_max_chars: number;
+  /**
+   * T-3.11 — nguong "con <= N%" cua UC-07 dong 1. Cung bien `.env` voi
+   * `quota_warning` cua `202`, nen thanh quota khong co nguong rieng de lech.
+   */
+  quota_warn_remaining_pct: number;
+}
+
+/**
+ * Mot khoa BYOK da luu — `ProviderKeyOut` cua backend (§10.5, T-2.14).
+ *
+ * T-3.11 chi doc `provider` + `usable`: hai truong du de biet model dang chon
+ * co di bang tien cua chinh nguoi dung hay khong (Cam bay ① — BYOK van gui
+ * duoc khi het quota system key).
+ */
+export interface ProviderKey {
+  provider: string;
+  masked_key: string;
+  verified_at: string | null;
+  created_at: string;
+  usable: boolean;
 }
 
 /**
@@ -696,4 +744,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ default_model: defaultModel }),
     }),
+
+  /** §10.5 — khoa BYOK cua CHINH MINH, chi phan che (T-2.14). */
+  listProviderKeys: () => request<{ keys: ProviderKey[] }>("/settings/keys"),
 };

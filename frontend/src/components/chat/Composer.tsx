@@ -111,6 +111,8 @@ export function Composer({
   onGui,
   onDung,
   modelPicker,
+  quotaBar,
+  quotaBlocked = false,
 }: {
   dangChay: boolean;
   moDuoc: boolean;
@@ -120,6 +122,14 @@ export function Composer({
   onDung: () => void;
   /** Nut mo Model Picker, dat o dau thanh cong cu duoi o nhap (B-242). */
   modelPicker?: ReactNode;
+  /** T-3.11 — thanh quota, dat ngay tren o nhap. */
+  quotaBar?: ReactNode;
+  /**
+   * T-3.11 — het quota system key va model dang chon KHONG di bang BYOK
+   * (`quotaView.isSendBlocked`). Chi khoa nut GUI: chu van go duoc, va nut
+   * Dung cua mot luot dang chay khong bao gio bi khoa vi quota.
+   */
+  quotaBlocked?: boolean;
 }) {
   const [ban, setBan] = useState("");
   const [ketKhoa, setKetKhoa] = useState(false);
@@ -130,7 +140,7 @@ export function Composer({
 
   const soKyTu = [...ban].length;
   const vuotTran = tranKyTu !== null && soKyTu > tranKyTu;
-  const guiDuoc = moDuoc && ban.trim() !== "" && !vuotTran;
+  const guiDuoc = moDuoc && ban.trim() !== "" && !vuotTran && !quotaBlocked;
 
   function doiBan(moi: string): void {
     setBan(moi);
@@ -182,6 +192,7 @@ export function Composer({
           void gui();
         }}
       >
+        {quotaBar}
         <div className="motion-control flex flex-col rounded-lg border border-border-strong bg-surface-panel focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring">
           <label className="min-w-0">
             <span className="sr-only">{t("chat.oNhap")}</span>
@@ -220,6 +231,7 @@ export function Composer({
               <button
                 type="submit"
                 disabled={!guiDuoc}
+                title={quotaBlocked ? t("quota.sendBlocked") : undefined}
                 className="motion-press grid size-touch shrink-0 place-items-center rounded-lg bg-accent text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
               >
                 <SendIcon />

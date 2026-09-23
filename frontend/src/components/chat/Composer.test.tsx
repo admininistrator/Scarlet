@@ -323,6 +323,7 @@ const DA_TAO: TaoMessageRa = {
   assistant_message_id: "33333333-3333-4333-8333-333333333333",
   stream_url: "/api/v1/messages/33333333-3333-4333-8333-333333333333/stream",
   branched: false,
+  quota_warning: null,
 };
 
 /** Dung `useChat` that, nhu `ChatScreen` dung no. */

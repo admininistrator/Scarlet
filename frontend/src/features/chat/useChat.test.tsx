@@ -96,6 +96,7 @@ beforeEach(() => {
     assistant_message_id: "msg-moi",
     stream_url: "/api/v1/messages/msg-moi/stream",
     model_id: "model-cu",
+    quota_warning: null,
   });
 });
 
@@ -116,6 +117,7 @@ function giuLaiMotLanGoi(): { nha: () => void } {
             assistant_message_id: "msg-moi",
             stream_url: "/api/v1/messages/msg-moi/stream",
             model_id: "model-cu",
+            quota_warning: null,
           });
       }),
   );

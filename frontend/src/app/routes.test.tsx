@@ -50,6 +50,7 @@ const ADMIN: HoSoRa = {
   default_model: null,
   quota: null,
   message_max_chars: 24000,
+  quota_warn_remaining_pct: 20,
 };
 
 const KHONG_TIEN = { cost_usd: "0", prompt_tokens: 0, completion_tokens: 0, events: 0 };

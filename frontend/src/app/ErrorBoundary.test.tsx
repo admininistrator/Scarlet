@@ -64,6 +64,7 @@ const NGUOI_DUNG: HoSoRa = {
   default_model: null,
   quota: null,
   message_max_chars: 24000,
+  quota_warn_remaining_pct: 20,
 };
 
 beforeEach(() => {

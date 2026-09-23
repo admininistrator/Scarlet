@@ -200,5 +200,19 @@
   "model.tierAccount": "Mặc định tài khoản",
   "model.tierCatalog": "Mặc định catalog",
   "model.tierOrder": "Thứ tự thắng: hội thoại › tài khoản › catalog",
-  "model.trong": "Chưa có mô hình nào"
+  "model.trong": "Chưa có mô hình nào",
+
+  "quota.label": "Hạn mức sử dụng",
+  "quota.window.5h": "5 giờ",
+  "quota.window.weekly": "7 ngày",
+  "quota.and": "và",
+  "quota.warning": "Sắp hết hạn mức",
+  "quota.remaining": "còn",
+  "quota.stillSend": "Bạn vẫn gửi được.",
+  "quota.exhausted": "Đã dùng hết hạn mức",
+  "quota.resetAt": "Gửi lại được lúc",
+  "quota.resetUnknown": "Chưa xác định được lúc hạn mức được hoàn lại.",
+  "quota.byok": "Model đang chọn dùng khoá API riêng của bạn nên vẫn gửi được và không trừ hạn mức.",
+  "quota.readAt": "Số liệu lúc",
+  "quota.sendBlocked": "Đã hết hạn mức — xem thời điểm hoàn lại phía trên"
 }

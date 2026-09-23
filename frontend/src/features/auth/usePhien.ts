@@ -38,6 +38,15 @@ export interface Phien {
    * dem duoc", khong phai "khong co tran" — tran that o `422` cua server.
    */
   hoSo: HoSoRa | null;
+  /**
+   * T-3.11 — `Date.now()` luc cau tra loi `/auth/me` dang nam trong `hoSo`
+   * VE TOI trinh duyet. `retry_after` la so giay TINH TU LUC DO, nen doi no
+   * thanh mot moc gio can dung moc nay chu khong `Date.now()` luc render.
+   *
+   * Mot truong rieng chu khong suy tu danh tinh object `hoSo`: `datModelMacDinh`
+   * cung thay `hoSo` bang mot object moi ma khong doc lai quota nao.
+   */
+  profileReadAt: number | null;
   /** Lan hoi `GET /auth/me` dau tien con dang chay hay khong. */
   dangTai: boolean;
   /**
@@ -64,11 +73,21 @@ export interface Phien {
    * (catalog sua nong — Cam bay ③ cua T-3.0) va man hinh phai noi duoc.
    */
   datModelMacDinh: (modelId: string | null) => Promise<void>;
+  /**
+   * T-3.11 — hoi lai `GET /auth/me` de lam tuoi thanh quota.
+   *
+   * Goi SAU moi luot sinh (`done`/`error`) va sau mot `429 QUOTA_EXCEEDED`,
+   * khong theo mot bo dem thoi gian: quota chi doi khi `usage_events` co dong
+   * moi (B-209). Loi o day giu nguyen `hoSo` cu — mot lan lam tuoi hong khong
+   * phai la "da dang xuat", va dinh tuyen van la viec cua lan hoi luc mount.
+   */
+  refreshProfile: () => Promise<void>;
 }
 
 export function usePhien(): Phien {
   const [nguoiDung, setNguoiDung] = useState<NguoiDungRa | null>(null);
   const [hoSo, setHoSo] = useState<HoSoRa | null>(null);
+  const [profileReadAt, setProfileReadAt] = useState<number | null>(null);
   const [dangTai, setDangTai] = useState(true);
   const [biKhoa, setBiKhoa] = useState(false);
   const [loi, setLoi] = useState<ApiError | null>(null);
@@ -81,6 +100,7 @@ export function usePhien(): Phien {
         if (conGan) {
           setNguoiDung(ra);
           setHoSo(ra);
+          setProfileReadAt(Date.now());
           setBiKhoa(false);
         }
       } catch (e) {
@@ -132,7 +152,10 @@ export function usePhien(): Phien {
         */
         void api
           .toiLaAi()
-          .then(setHoSo)
+          .then((hoSoMoi) => {
+            setHoSo(hoSoMoi);
+            setProfileReadAt(Date.now());
+          })
           .catch(() => setHoSo(null));
         // Tra `ra` chu khong `true`: caller phai dinh tuyen theo `status`
         // (§11.1) NGAY trong cung mot nhip, va `nguoiDung` cua state thi chua
@@ -176,5 +199,26 @@ export function usePhien(): Phien {
     setNguoiDung((cu) => (cu === null ? cu : { ...cu, default_model: ra.default_model }));
   }, []);
 
-  return { nguoiDung, hoSo, dangTai, biKhoa, loi, dangNhap, dangXuat, datModelMacDinh };
+  const refreshProfile = useCallback(async (): Promise<void> => {
+    try {
+      const ra = await api.toiLaAi();
+      setHoSo(ra);
+      setProfileReadAt(Date.now());
+    } catch {
+      // Giu `hoSo` cu — xem docstring `Phien.refreshProfile`.
+    }
+  }, []);
+
+  return {
+    nguoiDung,
+    hoSo,
+    profileReadAt,
+    dangTai,
+    biKhoa,
+    loi,
+    dangNhap,
+    dangXuat,
+    datModelMacDinh,
+    refreshProfile,
+  };
 }

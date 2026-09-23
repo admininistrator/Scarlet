@@ -1,0 +1,167 @@
+/**
+ * Thanh quota cua UC-07 — phan THUAN tinh toan (T-3.11).
+ *
+ * KH tham chieu: UC-07, §10.3, §10.5 · tasks.md T-3.0, T-3.11, B-209.
+ *
+ * Khong React, khong fetch: moi luat "hien gi, chan gi" nam o day de kiem
+ * duoc bang mot bang so, va `QuotaBar` + `ChatScreen` doc CUNG mot ham — nut
+ * gui va thanh quota khong the tu nghi ra hai dinh nghia "het" khac nhau.
+ *
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║  HAI NGUON, MOT CON SO MOI CUA SO (Cam bay ④)                          ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ *
+ * `/auth/me` (`quota`) va `202` (`quota_warning`) doc cua so o hai thoi diem
+ * khac nhau, nen chung LECH — va lech la dung. Thu phai tranh la hien hai con
+ * so cua cung mot cua so canh nhau. Luat o day: moi cua so giu DUNG MOT lan
+ * doc, lan doc MOI HON thang, va man hinh ghi ro "so lieu luc ...".
+ *
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║  TIEN LA CHUOI (Cam bay ③)                                             ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ *
+ * File nay KHONG cong, tru hay so sanh mot con so tien nao. Moi quyet dinh di
+ * bang `remaining_pct` (so nguyen server da lam tron XUONG) va `retry_after`
+ * (so giay nguyen). `formatUsd` la cho duy nhat doi chuoi sang so, va no doi
+ * de HIEN.
+ */
+
+import type { CuaSoQuota, LoaiHanMuc, QuotaWarning } from "../../lib/api";
+
+/** Ba muc cua ban Design System muc 05 — moi muc mot token `--color-quota-*`. */
+export type QuotaLevel = "normal" | "warning" | "empty";
+
+/** Mot lan doc mot cua so, kem thoi diem no ve toi trinh duyet. */
+export interface QuotaReading {
+  window: CuaSoQuota;
+  /** `Date.now()` luc response ve — moc cua `retry_after`. */
+  readAt: number;
+}
+
+/**
+ * Cua so nao dang chan nut gui, va luc nao het chan.
+ *
+ * `resetAt === null` = biet la het nhung KHONG biet luc nao hoan lai (tier
+ * co han muc 0, hoac `remaining_pct` da tron ve 0 ma chi tieu chua vuot tran).
+ * Man hinh noi dung nhu vay, khong bia mot moc gio.
+ */
+export interface QuotaBlock {
+  windows: LoaiHanMuc[];
+  resetAt: number | null;
+}
+
+/**
+ * UC-07 dong 1 + dong 2 tren MOT truc: `0` ⇒ het, `<= warnPct` ⇒ canh bao.
+ *
+ * `<=` chu khong `<`: chu cua UC-07 la *"con ≤ 20%"*, va `estimator._warning`
+ * cua backend bo qua cua so khi `phan_tram > nguong` — tuc 20 dung bang nguong
+ * LA canh bao o ca hai phia.
+ */
+export function quotaLevel(remainingPct: number, warnPct: number): QuotaLevel {
+  if (remainingPct <= 0) {
+    return "empty";
+  }
+  return remainingPct <= warnPct ? "warning" : "normal";
+}
+
+/**
+ * Ghep hai nguon thanh MOT lan doc moi cua so — lan doc moi hon thang.
+ *
+ * `warnings` la cac `quota_warning` cua `202` ke tu khi mo man hinh. Mot canh
+ * bao cu hon lan doc `/auth/me` hien tai bi bo qua: sau `done` FE doc lai
+ * `/auth/me`, va con so ay da tinh ca luot vua sinh.
+ *
+ * `retry_after: null` cho ban lay tu `202`: mot `202` nghia la luot do da QUA
+ * cua chan, tuc chua co gi de cho.
+ */
+export function mergeReadings(
+  snapshot: CuaSoQuota[] | null,
+  snapshotReadAt: number | null,
+  warnings: Partial<Record<LoaiHanMuc, { warning: QuotaWarning; readAt: number }>>,
+): QuotaReading[] {
+  if (snapshot === null || snapshotReadAt === null) {
+    return [];
+  }
+  return snapshot.map((window) => {
+    const moi = warnings[window.limit_type];
+    if (moi === undefined || moi.readAt <= snapshotReadAt) {
+      return { window, readAt: snapshotReadAt };
+    }
+    return { window: { ...moi.warning, retry_after: null }, readAt: moi.readAt };
+  });
+}
+
+/** `retry_after` (giay, tinh tu `readAt`) → moc gio tuyet doi, hoac `null`. */
+export function resetAt(reading: QuotaReading): number | null {
+  const giay = reading.window.retry_after;
+  return giay === null ? null : reading.readAt + giay * 1000;
+}
+
+/**
+ * Cac cua so da het, va moc hoan lai MUON NHAT trong so chung.
+ *
+ * Muon nhat chu khong som nhat: het ca 5 gio lan 7 ngay thi 5 gio hoan lai
+ * truoc van chua gui duoc — nut chi mo khi CA HAI da nha.
+ */
+export function quotaBlock(readings: QuotaReading[]): QuotaBlock | null {
+  const het = readings.filter((r) => r.window.remaining_pct <= 0);
+  if (het.length === 0) {
+    return null;
+  }
+  const moc = het.map(resetAt);
+  const biet = moc.every((m): m is number => m !== null);
+  return {
+    windows: het.map((r) => r.window.limit_type),
+    resetAt: biet ? Math.max(...moc) : null,
+  };
+}
+
+/**
+ * Nut gui co bi khoa vi quota khong — Cam bay ① cua T-3.11.
+ *
+ * BYOK van gui duoc khi het quota system key (UC-07 dong 4, §10.5): backend
+ * bo qua han cua chan khi model thuoc mot provider ma nguoi nay co khoa rieng
+ * giai ma duoc. `byokProviders === null` = chua biet (dang tai hoac loi) ⇒
+ * KHONG khoa. Khoa nham mot nguoi dang tu tra tien la hong that; mo nham mot
+ * nut thi server van tra `429` va man hinh noi ly do.
+ */
+export function isSendBlocked(
+  block: QuotaBlock | null,
+  byokProviders: ReadonlySet<string> | null,
+  provider: string | null,
+): boolean {
+  if (block === null) {
+    return false;
+  }
+  if (byokProviders === null) {
+    return false;
+  }
+  return !byokCovers(byokProviders, provider);
+}
+
+/** Model dang chon co di bang khoa rieng cua nguoi dung khong. */
+export function byokCovers(byokProviders: ReadonlySet<string> | null, provider: string | null) {
+  return byokProviders !== null && provider !== null && byokProviders.has(provider);
+}
+
+/**
+ * Cua so can canh bao (UC-07 dong 1): cua so con IT phan tram nhat trong
+ * so nhung cua so o muc `warning` — cung luat chon `min` cua
+ * `estimator._warning`, vi do la cua so se chan nguoi dung truoc.
+ */
+export function warningReading(readings: QuotaReading[], warnPct: number): QuotaReading | null {
+  const ung = readings.filter((r) => quotaLevel(r.window.remaining_pct, warnPct) === "warning");
+  if (ung.length === 0) {
+    return null;
+  }
+  return ung.reduce((a, b) => (b.window.remaining_pct < a.window.remaining_pct ? b : a));
+}
+
+/** `Decimal` cua backend la CHUOI — doi sang so DUNG MOT LAN, de hien. */
+export function formatUsd(amount: string): string {
+  return Number(amount).toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 4,
+  });
+}

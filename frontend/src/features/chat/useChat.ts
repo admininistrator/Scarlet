@@ -75,6 +75,7 @@ import {
   type DanhGia,
   type MessageRa,
   type ModelRa,
+  type QuotaWarning,
 } from "../../lib/api";
 import { khoaMoi } from "../../lib/idempotency";
 import { chonMacDinh, type KetQuaMacDinh } from "../models/macDinh";
@@ -228,6 +229,17 @@ export interface TuyChonChat {
   models: ModelRa[];
   /** TANG 2: `users.default_model` tu `GET /auth/me`. */
   modelMacDinhTaiKhoan: string | null;
+  /**
+   * T-3.11 — `quota_warning` cua mot `202` (gui, thu lai, sua). Nguon THU HAI
+   * cua con so thanh quota dang hien; nguoi nghe quyet dinh ghep the nao.
+   */
+  onQuotaWarning?: (warning: QuotaWarning) => void;
+  /**
+   * T-3.11 — con so quota vua co the doi: mot luot sinh vua khep (`done`/
+   * `error`) hoac server vua tra `429 QUOTA_EXCEEDED`. Day la nhip lam tuoi
+   * DUY NHAT cua thanh quota — khong co bo dem thoi gian nao (B-209).
+   */
+  onQuotaStale?: () => void;
 }
 
 /**
@@ -240,6 +252,33 @@ const TUY_CHON_RONG: TuyChonChat = { models: [], modelMacDinhTaiKhoan: null };
 
 export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
   const { models, modelMacDinhTaiKhoan } = tuyChon;
+  /*
+    Hai callback quota di qua `ref`: `ChatScreen` truyen chung la closure moi
+    moi lan render, va dua chung vao phu thuoc cua `moStreamCho`/`gui` se dung
+    lai ca chuoi `useCallback` o moi khung hinh.
+  */
+  const quotaHooksRef = useRef({
+    onQuotaWarning: tuyChon.onQuotaWarning,
+    onQuotaStale: tuyChon.onQuotaStale,
+  });
+  useEffect(() => {
+    quotaHooksRef.current = {
+      onQuotaWarning: tuyChon.onQuotaWarning,
+      onQuotaStale: tuyChon.onQuotaStale,
+    };
+  });
+  /** `202` vua ve — chuyen `quota_warning` (neu co) cho nguoi nghe. */
+  const baoCanhBaoQuota = useCallback((warning: QuotaWarning | null | undefined) => {
+    if (warning !== null && warning !== undefined) {
+      quotaHooksRef.current.onQuotaWarning?.(warning);
+    }
+  }, []);
+  /** Loi cua mot lan tao luot sinh — `429 QUOTA_EXCEEDED` thi quota da doi. */
+  const baoLoiQuota = useCallback((loi: unknown) => {
+    if (loi instanceof ApiError && loi.code === MA_LOI.QUOTA_EXCEEDED) {
+      quotaHooksRef.current.onQuotaStale?.();
+    }
+  }, []);
   const [cay, setCay] = useState<TrangThaiCay>(cayRong);
   const [modelHoiThoai, setModelHoiThoai] = useState<string | null>(null);
   const [ketNoi, setKetNoi] = useState<TrangThaiKetNoi | null>(null);
@@ -466,12 +505,16 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
               }
               setDangChay(null);
               void lamTuoi(conversationId);
+              quotaHooksRef.current.onQuotaStale?.();
               break;
             case "error":
               flushDeltas();
               setLoi(`${suKien.data.code}: ${suKien.data.message}`);
               setDangChay(null);
               void lamTuoi(conversationId);
+              // Mot luot hong giua chung van co the da tieu tien (worker ghi
+              // `usage_events` cho phan da sinh), nen `error` cung lam tuoi.
+              quotaHooksRef.current.onQuotaStale?.();
               break;
           }
         },
@@ -649,11 +692,13 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
         if (ra.branched) {
           setLoi("da mo mot nhanh moi (parent_id khac la hien tai) — C14");
         }
+        baoCanhBaoQuota(ra.quota_warning);
         moStreamCho(ra.stream_url, ra.assistant_message_id, conversationId);
         await lamTuoi(conversationId);
         return "da-gui";
       } catch (e) {
         setLoi(loiThanhChu(e));
+        baoLoiQuota(e);
         // `IN_PROGRESS` (khoa dang bi giu) chu khong `GENERATION_IN_PROGRESS`
         // (message dang sinh) — hai ma, xem `MA_LOI`.
         return e instanceof ApiError && e.code === MA_LOI.KHOA_DANG_GIU ? "ket-khoa" : "hong";
@@ -661,7 +706,7 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
         setDangBan(false);
       }
     },
-    [lamTuoi, modelHieuLuc, moStreamCho],
+    [baoCanhBaoQuota, baoLoiQuota, lamTuoi, modelHieuLuc, moStreamCho],
   );
 
   /**
@@ -712,17 +757,19 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
         // Luat 3 cua C22: bo khoa KHI VA CHI KHI `202` ve. Lan bam sau tren
         // cung cau tra loi la mot y dinh moi, tuc mot anh em that.
         khoaThuLaiRef.current.delete(dinhDanh);
+        baoCanhBaoQuota(ra.quota_warning);
         moStreamCho(ra.stream_url, ra.assistant_message_id, conversationId);
         await lamTuoi(conversationId);
       } catch (e) {
         // Luat 2: GIU khoa. Mang rot hay `503` thi lan bam sau van la cung
         // mot y dinh, va §11.4 chi lam viec duoc khi hai lan ay cung khoa.
         setLoi(loiThanhChu(e));
+        baoLoiQuota(e);
       } finally {
         setDangBan(false);
       }
     },
-    [lamTuoi, moStreamCho],
+    [baoCanhBaoQuota, baoLoiQuota, lamTuoi, moStreamCho],
   );
 
   /**
@@ -762,15 +809,17 @@ export function useChat(tuyChon: TuyChonChat = TUY_CHON_RONG): ChatDangDung {
       setDangBan(true);
       try {
         const ra = await api.suaCauHoi(messageId, noiDungMoi);
+        baoCanhBaoQuota(ra.quota_warning);
         moStreamCho(ra.stream_url, ra.assistant_message_id, conversationId);
         await lamTuoi(conversationId);
       } catch (e) {
         setLoi(loiThanhChu(e));
+        baoLoiQuota(e);
       } finally {
         setDangBan(false);
       }
     },
-    [lamTuoi, moStreamCho],
+    [baoCanhBaoQuota, baoLoiQuota, lamTuoi, moStreamCho],
   );
 
   /**
