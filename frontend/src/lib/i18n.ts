@@ -17,6 +17,13 @@ type Key = KhoaChu;
 
 const currentLocale: Locale = "vi";
 
+/**
+ * Locale cua `Intl.*` khi dinh dang so va gio (T-3.12, ban T-HD7: *"so nguyen,
+ * dinh dang vi-VN"*). Mot hang canh `currentLocale` chu khong rai trong tung
+ * component: them ngon ngu (B-07) la doi dung hai dong nay.
+ */
+export const DISPLAY_LOCALE = "vi-VN";
+
 export function t(key: Key): string {
   return locales[currentLocale][key] ?? key;
 }

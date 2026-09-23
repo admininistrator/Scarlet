@@ -30,10 +30,11 @@ from datetime import datetime
 from ipaddress import IPv4Address, IPv6Address
 from typing import Any, NamedTuple
 
-from sqlalchemy import select
+from sqlalchemy import Text, and_, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
-from app.db.models import AuditAction, AuditLog, User
+from app.db.models import TARGET_USER, AuditAction, AuditLog, User
 
 
 class AuditLogRow(NamedTuple):
@@ -54,6 +55,15 @@ class AuditLogRow(NamedTuple):
 
     log: AuditLog
     email: str | None
+    #: `users.display_name` của người làm — `None` khi chưa đặt tên, hoặc cùng
+    #: hai ca của `email` ở trên.
+    actor_display_name: str | None = None
+    #: B-191 (T-3.12) — phần **"với ai"** đọc được, khi `target_type` là
+    #: `users`. `None` ở ba ca: đích không phải một người (tier, catalog), người
+    #: ấy đã xoá tài khoản (xoá mềm cũng tính — một tài khoản đã xoá không còn
+    #: hiện email ở bất cứ màn hình nào), hoặc `target_id` không khớp hàng nào.
+    target_email: str | None = None
+    target_display_name: str | None = None
 
 
 def _ip_hop_le(ip: str | None) -> IPv4Address | IPv6Address | None:
@@ -137,10 +147,32 @@ class AuditLogRepository:
         `[since, until)` nửa mở: hai trang liền nhau chia theo ngày không đếm
         hai lần dòng nằm đúng ở mốc giao.
         """
+        # B-191: "với ai" cũng đi bằng JOIN, không phải FE tra `GET
+        # /admin/users` rồi ghép — cùng hướng NQ-66. Chỉ MỘT nhánh cần JOIN:
+        # `tiers` đã có tên đọc được ngay trong `target_id`, `catalog` không có
+        # `target_id`. `target_id` là `TEXT` (Phụ lục A), nên so với `id::text`
+        # chứ không ép `target_id::uuid` — một `target_id` không phải UUID (tên
+        # tier) mà bị ép kiểu sẽ làm cả câu nổ, không chỉ hàng ấy.
+        actor = aliased(User)
+        target = aliased(User)
         stmt = (
-            select(AuditLog, User.email)
+            select(
+                AuditLog,
+                actor.email,
+                actor.display_name,
+                target.email,
+                target.display_name,
+            )
             .select_from(AuditLog)
-            .outerjoin(User, User.id == AuditLog.actor_id)
+            .outerjoin(actor, actor.id == AuditLog.actor_id)
+            .outerjoin(
+                target,
+                and_(
+                    AuditLog.target_type == TARGET_USER,
+                    cast(target.id, Text) == AuditLog.target_id,
+                    target.deleted_at.is_(None),
+                ),
+            )
             .order_by(AuditLog.id.desc())
             .limit(limit)
         )
@@ -156,4 +188,13 @@ class AuditLogRepository:
             stmt = stmt.where(AuditLog.created_at < until)
 
         rows = (await self._session.execute(stmt)).all()
-        return [AuditLogRow(log=row[0], email=row[1]) for row in rows]
+        return [
+            AuditLogRow(
+                log=row[0],
+                email=row[1],
+                actor_display_name=row[2],
+                target_email=row[3],
+                target_display_name=row[4],
+            )
+            for row in rows
+        ]

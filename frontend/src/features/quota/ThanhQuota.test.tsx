@@ -357,7 +357,7 @@ describe("nhip lam tuoi", () => {
     refreshSpy.mockClear();
     window.history.replaceState(null, "", `/?c=${ID_HOI_THOAI}`);
     vi.mocked(api.docHoiThoai).mockResolvedValue(HOI_THOAI);
-    vi.mocked(api.listProviderKeys).mockResolvedValue({ keys: [] });
+    vi.mocked(api.listProviderKeys).mockResolvedValue({ keys: [], byok_providers: [] });
     vi.mocked(api.guiTinNhan).mockReset();
     render(<ManChatCoQuota dau={hoSo([cuaSo({ remaining_pct: 60 })])} />);
     await waitFor(() => {

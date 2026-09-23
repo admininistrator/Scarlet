@@ -1,5 +1,13 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { ApiError, api, type HoiThoaiRa } from "../../lib/api";
 import { t } from "../../lib/i18n";
@@ -108,6 +116,11 @@ export interface SidebarProps {
   onNewChat: () => void;
   /** Hoi thoai **dang mo** vua bi xoa: man chat phai roi khoi no. */
   onOpenConversationDeleted: () => void;
+  /**
+   * T-3.12 — dong cuoi cua sidebar (loi vao trang Cai dat). Nguoi goi dua vao
+   * vi sidebar khong biet bang route; bam vao no trong drawer cung dong drawer.
+   */
+  footer?: ReactNode;
 }
 
 // ───────────────────────────── ham thuan ──────────────────────────────────
@@ -211,6 +224,7 @@ export function Sidebar({
   onSelect,
   onNewChat,
   onOpenConversationDeleted,
+  footer,
 }: SidebarProps) {
   const searchId = useId();
   const open = useSidebarOpen();
@@ -476,6 +490,13 @@ export function Sidebar({
       </div>
 
       <p className="mt-2 shrink-0 text-xs text-muted">{t("sidebar.pinScopeNote")}</p>
+
+      {footer !== undefined && (
+        // Bam vao dong cuoi trong drawer cung dong drawer, nhu chon mot hoi thoai.
+        <div className="mt-2 shrink-0" onClickCapture={() => setDrawerOpen(false)}>
+          {footer}
+        </div>
+      )}
     </nav>
   );
 

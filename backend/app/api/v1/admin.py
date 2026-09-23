@@ -18,7 +18,10 @@ B-177 (NQ-67).
 
 Bảy endpoint đầu là T-2.16; bốn endpoint cuối là T-2.20, và chúng đóng nốt ba
 màn hình của §16.3 mà T-2.16/T-2.19 cố ý để lại ("Hệ thống", "Audit log", và
-nửa "đổi" của hạn mức). Màn "Người dùng" đầy đủ vẫn là T-3.12 (NQ-66).
+nửa "đổi" của hạn mức). T-3.12 (giao diện đầy đủ) thêm năm thứ, không thêm
+endpoint nào: hai cột NQ-66 của `GET /admin/users`, trần cửa sổ của
+`GET /admin/usage` (B-175), "với ai" đọc được của sổ audit (B-191), bộ nhớ
+healthcheck của màn Hệ thống (B-192), và TTL hạn mức trong `GET /admin/tiers`.
 
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  QUYỀN GẮN Ở ROUTER, KHÔNG Ở TỪNG ENDPOINT                               ║
@@ -163,7 +166,7 @@ from app.config.version import APP_VERSION
 from app.core.blacklist import dat_moc_user, thu_hoi_moi_phien
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
-from app.core.health_checks import CheckResult, run_checks
+from app.core.health_checks import CachedChecks, CheckResult, run_checks
 from app.core.queue import queue_depth
 from app.core.ratelimit import dia_chi_ip
 from app.core.redis import get_redis
@@ -185,7 +188,7 @@ from app.db.repositories import (
     UsageEventRepository,
 )
 from app.db.repositories.tiers import TierRepository
-from app.db.repositories.users import UserRepository
+from app.db.repositories.users import AdminUserRow, UserRepository
 from app.db.session import session_scope
 from app.quota.tiers import OVERRIDABLE_FIELDS, EffectiveLimits
 
@@ -255,8 +258,35 @@ class AdminUserOut(BaseModel):
     created_at: datetime
 
 
+class AdminUserRowOut(AdminUserOut):
+    """Một hàng của `GET /admin/users` — `AdminUserOut` + hai cột NQ-66.
+
+    Tách lớp chứ không thêm hai trường vào `AdminUserOut`: ba endpoint đổi
+    trạng thái/`PATCH` trả về **một** hàng vừa đổi, và hai con số này là kết
+    quả của một câu gom nhóm mà các endpoint ấy không có lý do để chạy. Cho
+    chúng hai trường tuỳ chọn là để FE đọc được `null` ở một chỗ và `0` ở chỗ
+    khác cho cùng một câu hỏi.
+    """
+
+    #: Số hội thoại chưa xoá mềm. `0` khi chưa có — **không** `null` (DoD).
+    conversation_count: int
+    #: Tiền HỆ THỐNG (`key_source='system'`) trong cửa sổ quota dài
+    #: (`QUOTA_WINDOW_LONG_S`) — đúng tập mà quota 7 ngày của người ấy cộng.
+    #: Chuỗi sáu chữ số thập phân từ `NUMERIC(12,6)`, như mọi `cost_usd`.
+    spend_7d_usd: Decimal
+
+    @classmethod
+    def from_row(cls, row: AdminUserRow) -> AdminUserRowOut:
+        base = AdminUserOut.model_validate(row.user).model_dump()
+        return cls(
+            **base,
+            conversation_count=row.conversation_count,
+            spend_7d_usd=row.spend_7d_usd,
+        )
+
+
 class AdminUserListOut(BaseModel):
-    users: list[AdminUserOut]
+    users: list[AdminUserRowOut]
 
 
 class SuaUserRequest(BaseModel):
@@ -363,6 +393,11 @@ class TierOut(BaseModel):
 
 class AdminTierListOut(BaseModel):
     tiers: list[TierOut]
+    #: `TIER_CACHE_TTL_S` — sau khi đổi tier / hạn mức / ghi đè, thay đổi có
+    #: hiệu lực trong **tối đa** ngần này giây (§10.4, NQ-51: không gỡ cache).
+    #: Đi ra đây để màn hình nói đúng con số của `.env` thay vì chép tay `60`
+    #: vào `vi.json` (A3, cùng lý lẽ `message_max_chars` của T-3.0).
+    limits_cache_ttl_s: int
 
 
 class UpdateTierRequest(BaseModel):
@@ -435,6 +470,10 @@ class AdminSystemOut(BaseModel):
     #: Năm mục của `GET /health/deep` (§18.6) — cùng một `run_checks()`, nên
     #: hai màn hình không bao giờ nói hai chuyện khác nhau về cùng hạ tầng.
     health: dict[str, CheckResult]
+    #: Lúc `health` được ĐO (B-192) — có thể cũ tới `ADMIN_HEALTH_CACHE_TTL_S`
+    #: giây. Màn hình in mốc này ra ("Kiểm lúc …"); `queue_depth` và
+    #: `streams_dang_chay` thì luôn đọc tươi, chúng rẻ.
+    health_checked_at: datetime
 
 
 # ────────────────────── T-2.20 · §16.3 màn "Audit log" ──────────────────────
@@ -448,11 +487,14 @@ class AuditLogOut(BaseModel):
     NQ-66 đã chốt đúng hình dạng ấy cho bảng Người dùng, và một trang 50 dòng
     không được biến thành 51 lượt đi Postgres.
 
-    Phần **"với ai"** ở lại dạng `(target_type, target_id)` thô, **không**
-    JOIN: `target_id` là `TEXT` trỏ được sang nhiều bảng (`users.id` là UUID,
-    `tiers.name` là chuỗi), nên một câu JOIN cho nó phải rẽ nhánh theo
-    `target_type` — tức một câu SQL mọc thêm một nhánh mỗi lần schema mọc thêm
-    một bảng. `target_type` đã nói rõ phải `SELECT` ở đâu; FE tra tên khi cần.
+    Phần **"với ai"** (B-191, chốt ở T-3.12): `target_email` +
+    `target_display_name` từ một `LEFT JOIN users` **chỉ** cho `target_type =
+    'users'` — nhánh duy nhất mà `target_id` không tự đọc được (tier đã là một
+    cái tên, catalog không có id). Ngả "FE tra `GET /admin/users` rồi ghép" bị
+    loại vì cùng lý do NQ-66 loại nó cho bảng Người dùng: hai response ghép ở
+    FE là hai thời điểm đọc, và người đã xoá tài khoản sẽ không có trong danh
+    sách ấy để mà ghép. Cả hai trường là `null` khi người ấy đã xoá — màn hình
+    khi ấy chỉ còn 8 ký tự đầu của `target_id` (T-HD7).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -463,9 +505,12 @@ class AuditLogOut(BaseModel):
     #: `None` khi hành động không có người (cron) **hoặc** khi tài khoản ấy đã
     #: bị xoá — `ON DELETE SET NULL` giữ dòng sổ, bỏ con trỏ về người.
     actor_email: str | None
+    actor_display_name: str | None
     action: AuditAction
     target_type: str | None
     target_id: str | None
+    target_email: str | None
+    target_display_name: str | None
     details: dict[str, Any] | None
     ip: IPv4Address | IPv6Address | None
 
@@ -484,6 +529,10 @@ class AuditLogListOut(BaseModel):
 # ═══════════════════════════════ phần dùng chung ════════════════════════════
 
 _KHONG = UsageAmount(cost_usd=Decimal(0), prompt_tokens=0, completion_tokens=0, events=0)
+
+#: B-192 — một lượt `run_checks()` dùng lại trong `ADMIN_HEALTH_CACHE_TTL_S`
+#: giây cho màn "Hệ thống". Xem `CachedChecks` cho lý do nhớ ở server.
+_system_health = CachedChecks()
 
 
 def _gop(buckets: list[UsageBucket]) -> list[UsageRow]:
@@ -596,10 +645,17 @@ async def list_users(
     Giá trị lạ (`?status=abc`) ra `422` từ chính `UserStatus` chứ không phải
     một danh sách rỗng im lặng: một bộ lọc gõ sai mà trả `[]` sẽ đọc y hệt
     "không còn ai chờ duyệt".
+
+    Hai cột NQ-66 (`conversation_count`, `spend_7d_usd`) đi trong **cùng**
+    câu `SELECT` — xem `UserRepository.list_for_admin`. Cửa sổ chi tiêu là
+    `QUOTA_WINDOW_LONG_S`, cùng con số của quota 7 ngày (A3).
     """
+    spend_since = datetime.now(UTC) - timedelta(seconds=settings.QUOTA_WINDOW_LONG_S)
     async with session_scope() as session:
-        hang = await UserRepository(session).list_for_admin(trang_thai=trang_thai)
-        return AdminUserListOut(users=[AdminUserOut.model_validate(u) for u in hang])
+        hang = await UserRepository(session).list_for_admin(
+            spend_since=spend_since, trang_thai=trang_thai
+        )
+        return AdminUserListOut(users=[AdminUserRowOut.from_row(h) for h in hang])
 
 
 @router.post(
@@ -858,8 +914,14 @@ async def admin_usage(
     từ chính enum, cùng lối `?status=abc` của `list_users` ở trên — một bộ lọc
     gõ sai mà im lặng trả về "mọi nguồn" sẽ đọc y hệt một hoá đơn phình to.
 
+    **Có trần độ dài cửa sổ** (B-175, chốt ở T-3.12):
+    `ADMIN_USAGE_MAX_WINDOW_DAYS`. Số hàng của trục "theo ngày" tỉ lệ với số
+    ngày, không bị R1 chặn như `GET /admin/users`. Trần chứ không phân trang:
+    `totals` là tổng của CẢ cửa sổ, và một tổng không chia trang được — trang 2
+    của một báo cáo tổng hợp là một câu hỏi không có nghĩa.
+
     Raises:
-        ApiError 400 `BAD_REQUEST`: `since >= until`.
+        ApiError 400 `BAD_REQUEST`: `since >= until`, hoặc cửa sổ dài quá trần.
     """
     bay_gio = datetime.now(UTC)
     tu = since or bay_gio - timedelta(seconds=settings.QUOTA_WINDOW_LONG_S)
@@ -870,6 +932,18 @@ async def admin_usage(
             ApiErrorCode.BAD_REQUEST,
             "since phai truoc until",
             details={"since": tu.isoformat(), "until": den.isoformat()},
+        )
+    tran = timedelta(days=settings.ADMIN_USAGE_MAX_WINDOW_DAYS)
+    if den - tu > tran:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ApiErrorCode.BAD_REQUEST,
+            "cua so dai qua tran ADMIN_USAGE_MAX_WINDOW_DAYS",
+            details={
+                "since": tu.isoformat(),
+                "until": den.isoformat(),
+                "max_days": settings.ADMIN_USAGE_MAX_WINDOW_DAYS,
+            },
         )
 
     async with session_scope() as session:
@@ -942,7 +1016,10 @@ async def list_tiers() -> AdminTierListOut:
     """
     async with session_scope() as session:
         rows = await TierRepository(session).list_all()
-        return AdminTierListOut(tiers=[TierOut.model_validate(t) for t in rows])
+        return AdminTierListOut(
+            tiers=[TierOut.model_validate(t) for t in rows],
+            limits_cache_ttl_s=settings.TIER_CACHE_TTL_S,
+        )
 
 
 @router.patch(
@@ -1048,8 +1125,12 @@ async def admin_system() -> AdminSystemOut:
     (`app/core/health_checks.py`). Dùng lại đúng hàm ấy chứ không viết một bộ
     kiểm thứ hai: hai màn hình nói hai chuyện khác nhau về cùng một hạ tầng là
     cách chắc nhất để không ai còn tin màn nào.
+
+    B-192 (T-3.12): kết quả `run_checks()` được nhớ `ADMIN_HEALTH_CACHE_TTL_S`
+    giây và trả kèm `health_checked_at`. `run_checks` được tra ở **lúc gọi**
+    (tên toàn cục của module này), nên test thay được hàm đo như trước.
     """
-    health = await run_checks()
+    snapshot = await _system_health.get(run_checks, ttl_s=settings.ADMIN_HEALTH_CACHE_TTL_S)
 
     try:
         depth: int | None = await queue_depth()
@@ -1068,7 +1149,8 @@ async def admin_system() -> AdminSystemOut:
         version=APP_VERSION,
         queue_depth=depth,
         streams_dang_chay=streams,
-        health=health,
+        health=snapshot.checks,
+        health_checked_at=snapshot.checked_at,
     )
 
 
@@ -1139,9 +1221,12 @@ async def list_audit_logs(
                 created_at=row.log.created_at,
                 actor_id=row.log.actor_id,
                 actor_email=row.email,
+                actor_display_name=row.actor_display_name,
                 action=row.log.action,
                 target_type=row.log.target_type,
                 target_id=row.log.target_id,
+                target_email=row.target_email,
+                target_display_name=row.target_display_name,
                 details=row.log.details,
                 ip=row.log.ip,
             )

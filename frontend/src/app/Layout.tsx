@@ -98,9 +98,20 @@ export function Layout() {
             </Link>
           ) : (
             <>
-              <span className="hidden truncate text-muted sm:inline">
+              {/*
+                T-3.12 — email la loi vao trang Cai dat tu `sm` tro len. Duoi
+                `sm` header 375 px da kin (do o T-3.10: nut cuoi ket thuc o
+                359 px khi la admin), nen tren dien thoai loi vao nam o chan
+                sidebar (drawer) thay vi mot nut thu sau o day.
+              */}
+              <Link
+                to={PATHS.settings}
+                title={t("nav.settings")}
+                className="hidden min-h-touch min-w-0 items-center truncate rounded-md px-2 text-muted hover:bg-surface-hover hover:text-foreground sm:inline-flex"
+              >
+                <span className="sr-only">{t("nav.settings")}: </span>
                 {session.nguoiDung.email}
-              </span>
+              </Link>
               <button
                 type="button"
                 onClick={() => {

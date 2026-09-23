@@ -8,14 +8,14 @@ import { ResetPasswordForm } from "../components/auth/ResetPasswordForm";
 import { StatusGate } from "../components/auth/StatusGate";
 import { VerifyEmailScreen } from "../components/auth/VerifyEmailScreen";
 import { ChatScreen } from "../components/chat/ChatScreen";
-import { t } from "../lib/i18n";
+import { SettingsScreen } from "../components/settings/SettingsScreen";
 import { AdminOnly } from "./AdminOnly";
 import { Layout } from "./Layout";
 import { LoginRoute } from "./LoginRoute";
 import { NotFoundPage } from "./pages/NotFoundPage";
-import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { RouteErrorPage } from "./pages/ServerErrorPage";
 import { PATHS } from "./paths";
+import { SignedInOnly } from "./SignedInOnly";
 
 /**
  * Bang route — 11 duong cua T-3.1a.
@@ -49,13 +49,13 @@ import { PATHS } from "./paths";
  * `errorElement` la duong thu 11 (trang 500). Dat o route GOC de mot ngoai
  * le tu bat ky man hinh nao cung roi vao no — xem `pages/ServerErrorPage`.
  *
- * ── Sau man auth da vao cho (T-3.1b), mot cho trong con lai la T-3.12 ─────
+ * ── Sau cho trong CO TEN cua T-3.1a nay deu da co man hinh ───────────────
  *
- * T-3.1a khai san sau cho trong CO TEN cho `/dang-ky`, `/verify-email`,
- * `/quen-mat-khau`, `/dat-lai-mat-khau`, `/cho-duyet` de T-3.1b *"chi phai
- * dien, khong phai dung lai cau hinh router"* — va do dung la thu da xay ra:
- * task ay thay nam `element`, khong doi mot dong cau hinh nao. `/cai-dat` van
- * la trang tam; chu no la T-3.12.
+ * T-3.1a khai san sau cho trong cho `/dang-ky`, `/verify-email`,
+ * `/quen-mat-khau`, `/dat-lai-mat-khau`, `/cho-duyet`, `/cai-dat` de task sau
+ * *"chi phai dien, khong phai dung lai cau hinh router"*. T-3.1b dien nam cho
+ * dau, T-3.12 dien `/cai-dat` — `PlaceholderPage` het nguoi dung va bi xoa.
+ * `/cai-dat` boc `SignedInOnly` (chi hoi "da dang nhap chua", xem B-216).
  *
  * ── `StatusGate` boc man chat, `AdminOnly` boc man quan tri ────────────────
  *
@@ -86,7 +86,14 @@ export const routes: RouteObject[] = [
           </AdminOnly>
         ),
       },
-      { path: PATHS.settings, element: <PlaceholderPage title={t("trang.caiDat")} /> },
+      {
+        path: PATHS.settings,
+        element: (
+          <SignedInOnly>
+            <SettingsScreen />
+          </SignedInOnly>
+        ),
+      },
       { path: PATHS.login, element: <LoginRoute /> },
       { path: PATHS.register, element: <RegisterForm /> },
       { path: PATHS.forgotPassword, element: <ForgotPasswordForm /> },

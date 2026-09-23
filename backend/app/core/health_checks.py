@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -110,13 +112,31 @@ async def _check_ninerouter() -> None:
     await probe_provider(get_catalog().providers[NINEROUTER])
 
 
+#: Trần độ dài của `CheckResult.error` — một traceback của asyncpg dài vài KB.
+ERROR_MAX_CHARS = 200
+
+
+def describe_error(exc: BaseException) -> str:
+    """Lý do hỏng đọc được — **không bao giờ là chuỗi rỗng** (B-193).
+
+    `asyncio.wait_for` hết giờ ném `TimeoutError` với `str()` rỗng, và vài
+    exception của `redis-py` cũng vậy: `str(exc)` trần cho ra `"error": ""`
+    đúng lúc Redis chết — màn "Hệ thống" nói "hỏng" mà không nói hỏng vì gì,
+    tức đúng thứ người ta mở nó ra để đọc. Tên kiểu exception luôn có mặt,
+    thông điệp đi kèm khi có.
+    """
+    message = str(exc).strip()
+    name = type(exc).__name__
+    return (f"{name}: {message}" if message else name)[:ERROR_MAX_CHARS]
+
+
 async def _timed(name: str, check: Coroutine[Any, Any, None]) -> tuple[str, CheckResult]:
     start = time.monotonic()
     try:
         await asyncio.wait_for(check, timeout=CHECK_TIMEOUT_S)
         ok, error = True, None
     except Exception as exc:  # noqa: BLE001 — mỗi mục kiểm phải tự chứa lỗi của nó
-        ok, error = False, str(exc)[:200]
+        ok, error = False, describe_error(exc)
     latency_ms = int((time.monotonic() - start) * 1000)
     return name, CheckResult(ok=ok, latency_ms=latency_ms, error=error)
 
@@ -131,3 +151,63 @@ async def run_checks() -> dict[str, CheckResult]:
         _timed(NINEROUTER, _check_ninerouter()),
     )
     return dict(pairs)
+
+
+@dataclass(frozen=True, slots=True)
+class HealthSnapshot:
+    """Một lượt `run_checks()` cùng **thời điểm nó chạy**."""
+
+    checked_at: datetime
+    checks: dict[str, CheckResult]
+
+
+class CachedChecks:
+    """Nhớ một lượt `run_checks()` trong `ttl_s` giây — màn "Hệ thống" (B-192).
+
+    B-192 đo `GET /admin/system` ba lần liên tiếp: 9Router 854 / 806 / 941 ms,
+    mỗi lần năm lượt đi mạng. Một màn hình chẩn đoán mà mỗi F5 là một loạt
+    request tới nhà cung cấp là một màn hình tự làm nặng thêm sự cố nó báo.
+
+    Nhớ **ở server** chứ không để FE tự giãn nhịp: FE chỉ giãn được trong một
+    tab — hai tab, hai admin, hay một chuỗi F5 vẫn đi thẳng ra mạng. Cái giá
+    là con số có thể cũ tới `ttl_s` giây, và `checked_at` đi cùng response để
+    màn hình **nói ra** điều đó ("Kiểm lúc …") thay vì giấu nó.
+
+    Một khoá `asyncio.Lock` gộp các lượt hỏi trùng lúc bộ nhớ vừa hết hạn làm
+    một lượt đo — cùng lối `core/provider_health.py`. Bộ nhớ sống trong tiến
+    trình, không trong Redis: nó phải còn dùng được đúng lúc Redis là thứ đang
+    hỏng.
+
+    `run` truyền vào lúc gọi chứ không gắn cứng `run_checks`: test thay được
+    hàm đo mà không phải thay cả bộ nhớ.
+
+    `GET /health/deep` **không** đi qua đây — máy hỏi (Docker, người vận hành
+    gõ `curl`) thì luôn đo tươi.
+    """
+
+    def __init__(self) -> None:
+        self._snapshot: HealthSnapshot | None = None
+        self._expires_at = 0.0
+        self._lock = asyncio.Lock()
+
+    async def get(
+        self,
+        run: Callable[[], Awaitable[dict[str, CheckResult]]],
+        *,
+        ttl_s: float,
+    ) -> HealthSnapshot:
+        if self._snapshot is not None and time.monotonic() < self._expires_at:
+            return self._snapshot
+        async with self._lock:
+            # Người khác vừa đo xong trong lúc mình chờ khoá.
+            if self._snapshot is not None and time.monotonic() < self._expires_at:
+                return self._snapshot
+            checks = await run()
+            self._snapshot = HealthSnapshot(checked_at=datetime.now(UTC), checks=checks)
+            self._expires_at = time.monotonic() + ttl_s
+            return self._snapshot
+
+    def clear(self) -> None:
+        """Vứt bộ nhớ — cho test, và cho một lượt đo lại tường minh."""
+        self._snapshot = None
+        self._expires_at = 0.0

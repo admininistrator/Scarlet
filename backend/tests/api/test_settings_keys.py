@@ -290,7 +290,28 @@ async def test_get_khi_chua_co_khoa_nao_tra_danh_sach_rong(
 ) -> None:
     resp = await client.get(DUONG_DAN_DS)
     assert resp.status_code == 200
-    assert resp.json() == {"keys": []}
+    assert resp.json()["keys"] == []
+
+
+async def test_get_liet_ke_moi_provider_nhan_khoa_rieng_theo_catalog(
+    client: AsyncClient, user_da_dang_nhap: uuid.UUID
+) -> None:
+    """T-3.12 — trang Cài đặt chọn provider từ `byok_providers`, không từ một
+    mảng gõ sẵn ở FE (A3). Đúng tập `byok_supported` của catalog, kể cả khi
+    người này chưa có khoá nào; provider không nhận khoá riêng thì vắng mặt.
+    `provider` là KHOÁ catalog — thứ `PUT /settings/keys/{provider}` nhận."""
+    cat = catalog.get_catalog()
+
+    body = (await client.get(DUONG_DAN_DS)).json()
+
+    assert {p["provider"] for p in body["byok_providers"]} == {
+        ten for ten, p in cat.providers.items() if p.byok_supported
+    }
+    for p in body["byok_providers"]:
+        assert p["label"] == cat.providers[p["provider"]].label
+    khong = provider_khong_byok()
+    if khong is not None:
+        assert khong not in {p["provider"] for p in body["byok_providers"]}
 
 
 # ═══════════ 3. Khoá sai ⇒ 400, thông điệp KHÔNG chứa khoá (DoD 4) ══════════
@@ -403,7 +424,7 @@ async def test_khoa_cua_nguoi_khac_khong_hien_ra(
 
     nguoi_b = await tao_user(session_factory)
     dang_nhap(client, nguoi_b)
-    assert (await client.get(DUONG_DAN_DS)).json() == {"keys": []}
+    assert (await client.get(DUONG_DAN_DS)).json()["keys"] == []
 
 
 async def test_khong_xoa_duoc_khoa_cua_nguoi_khac(

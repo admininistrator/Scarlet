@@ -439,8 +439,129 @@ export interface AdminUserRa {
   created_at: string;
 }
 
+/**
+ * Mot hang cua DANH SACH `GET /admin/users` — `AdminUserRa` + hai cot NQ-66
+ * (T-3.12). Chi danh sach co hai cot nay: `approve`/`PATCH` tra mot hang vua
+ * doi, khong chay cau gom nhom nao.
+ */
+export interface AdminUserListItem extends AdminUserRa {
+  /** Hoi thoai chua xoa mem. `0` khi chua co — khong bao gio `null`. */
+  conversation_count: number;
+  /**
+   * Tien HE THONG trong cua so quota dai — CHUOI sau chu so thap phan
+   * (`"0.300000"`), cung tap ma quota 7 ngay cua nguoi ay cong.
+   */
+  spend_7d_usd: string;
+}
+
 export interface AdminUserListRa {
-  users: AdminUserRa[];
+  users: AdminUserListItem[];
+}
+
+/** Body cua `PATCH /admin/users/{id}` — vang mat khac `null` (model_fields_set). */
+export interface AdminUserPatch {
+  tier_name?: string;
+  /** `null` = xoa het ghi de, quay ve dung han muc cua tier. */
+  limit_override?: Record<string, unknown> | null;
+}
+
+/** Mot hang `tiers` — `TierOut` (§10.4). Tien la CHUOI. */
+export interface TierRow {
+  name: string;
+  limit_5h_usd: string;
+  limit_7d_usd: string;
+  can_execute_skills: boolean;
+  can_use_web: boolean;
+  web_searches_per_day: number;
+  max_upload_mb: number;
+  max_attachments: number;
+  allowed_model_tags: string[];
+  /** Doc duoc, KHONG sua duoc (B-152) — man hinh khong ve cong tac cho no. */
+  is_default: boolean;
+}
+
+export interface TierList {
+  tiers: TierRow[];
+  /**
+   * `TIER_CACHE_TTL_S` — doi tier/han muc co hieu luc trong TOI DA ngan nay
+   * giay (NQ-51). Con so cua cau "Co hieu luc trong vong N giay" den tu day,
+   * khong chep tay vao `vi.json` (A3).
+   */
+  limits_cache_ttl_s: number;
+}
+
+/** Tam truong sua duoc cua mot tier — bang dung `OVERRIDABLE_FIELDS`. */
+export type TierPatch = Partial<Omit<TierRow, "name" | "is_default">>;
+
+/** Mot muc kiem cua `run_checks()` — `CheckResult` cua backend. */
+export interface HealthCheck {
+  ok: boolean;
+  latency_ms: number;
+  /** Ly do hong. Tu B-193 khong bao gio rong khi `ok=false`, nhung FE van phong. */
+  error: string | null;
+}
+
+/** `GET /admin/system` (§16.3, T-2.20 + B-192). */
+export interface SystemStatus {
+  version: string;
+  /** `null` = khong hoi duoc Redis — KHONG phai "hang doi rong". */
+  queue_depth: number | null;
+  /** Ten khoa tieng Viet khong dau CO Y (NQ-70 ②) — doc dung ten ay. */
+  streams_dang_chay: number | null;
+  health: Record<string, HealthCheck>;
+  /** Luc `health` duoc DO — co the cu toi `ADMIN_HEALTH_CACHE_TTL_S` giay. */
+  health_checked_at: string;
+}
+
+/** `GET /health/deep` (§18.6) — cong khai, tra `503` khi ha tang loi da hong. */
+export interface DeepHealth {
+  status: "ok" | "degraded" | "down";
+  checks: Record<string, HealthCheck>;
+}
+
+/** Sau gia tri cua `audit_logs.action` — `AuditAction` cua backend. */
+export type AuditActionName =
+  | "user.approve"
+  | "user.reject"
+  | "user.suspend"
+  | "user.update"
+  | "tier.update"
+  | "catalog.reload";
+
+/** Mot dong so — "ai, luc nao, lam gi, voi ai" (§16.3, B-191). */
+export interface AuditEntry {
+  id: number;
+  created_at: string;
+  actor_id: string | null;
+  actor_email: string | null;
+  actor_display_name: string | null;
+  action: AuditActionName;
+  /** Ten BANG (`users`, `tiers`, `catalog`) — xem `TARGET_*` cua backend. */
+  target_type: string | null;
+  target_id: string | null;
+  /** B-191 — `null` khi dich khong phai nguoi, hoac nguoi ay da xoa. */
+  target_email: string | null;
+  target_display_name: string | null;
+  details: Record<string, unknown> | null;
+  ip: string | null;
+}
+
+export interface AuditPage {
+  items: AuditEntry[];
+  /** Gui lai vao `?before_id=` de lay trang ke; `null` = het. */
+  next_cursor: number | null;
+}
+
+/** Mot provider nhan khoa rieng — o chon cua trang Cai dat (T-3.12). */
+export interface ByokProvider {
+  /** KHOA catalog (`deepseek`) — thu `PUT /settings/keys/{provider}` nhan. */
+  provider: string;
+  label: string;
+}
+
+export interface ProviderKeyList {
+  keys: ProviderKey[];
+  byok_providers: ByokProvider[];
 }
 
 /**
@@ -719,12 +840,72 @@ export const api = {
   quanTriDoiTrangThai: (userId: string, hanhDong: HanhDongUser) =>
     request<AdminUserRa>(`/admin/users/${userId}/${hanhDong}`, { method: "POST" }),
 
-  /** `nguon === null` la "moi nguon" — xem `ChiPhiRa.key_source`. */
-  quanTriChiPhi: (nguon: NguonKhoa | null) =>
-    request<ChiPhiRa>(nguon === null ? "/admin/usage" : `/admin/usage?key_source=${nguon}`),
+  /**
+   * `nguon === null` la "moi nguon" — xem `ChiPhiRa.key_source`.
+   *
+   * T-3.12 them `since` (ISO): man "Chi phi" hoi 7 hoac 30 ngay. Vang mat thi
+   * server dung `QUOTA_WINDOW_LONG_S` (7 ngay). Cua so dai qua
+   * `ADMIN_USAGE_MAX_WINDOW_DAYS` la `400` (B-175).
+   */
+  quanTriChiPhi: (nguon: NguonKhoa | null, since?: string) => {
+    const thamSo = new URLSearchParams();
+    if (nguon !== null) {
+      thamSo.set("key_source", nguon);
+    }
+    if (since !== undefined) {
+      thamSo.set("since", since);
+    }
+    const chuoi = thamSo.toString();
+    return request<ChiPhiRa>(chuoi === "" ? "/admin/usage" : `/admin/usage?${chuoi}`);
+  },
 
   quanTriNapCatalog: () =>
     request<NapCatalogRa>("/admin/catalog/reload", { method: "POST" }),
+
+  // ── T-3.12 — bon endpoint cua T-2.20 + `PATCH /admin/users/{id}` ────────
+
+  adminUpdateUser: (userId: string, patch: AdminUserPatch) =>
+    request<AdminUserRa>(`/admin/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  adminListTiers: () => request<TierList>("/admin/tiers"),
+
+  adminUpdateTier: (name: string, patch: TierPatch) =>
+    request<TierRow>(`/admin/tiers/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  adminSystem: () => request<SystemStatus>("/admin/system"),
+
+  /** Mot TRANG so, moi nhat truoc. `beforeId` = `next_cursor` cua trang truoc. */
+  adminAuditLogs: (beforeId?: number | null) =>
+    request<AuditPage>(
+      beforeId === undefined || beforeId === null
+        ? "/admin/audit-logs"
+        : `/admin/audit-logs?${new URLSearchParams({ before_id: String(beforeId) }).toString()}`,
+    ),
+
+  /**
+   * `GET /health/deep` — duong lui cua man "He thong" khi chinh API quan tri
+   * khong tra loi (B-190: Redis chet ⇒ `require_app_access` tra `503` truoc
+   * khi `/admin/system` kip chay, C21). Endpoint nay cong khai va tra `503`
+   * KEM than day du khi mot ha tang loi da hong — nen `503` o day la mot cau
+   * tra loi doc duoc, khong phai mot loi. Moi ma khac van la loi.
+   */
+  healthDeep: async (): Promise<DeepHealth> => {
+    const res = await fetch(`${BASE_URL}/health/deep`, { credentials: "same-origin" });
+    if (res.ok || res.status === 503) {
+      try {
+        return (await res.json()) as DeepHealth;
+      } catch {
+        // 503 cua Nginx la HTML — roi xuong nhanh loi.
+      }
+    }
+    throw await docLoi(res);
+  },
 
   // ────────────────────── §18.4 — cai dat ca nhan (T-3.0) ───────────────────
 
@@ -752,6 +933,23 @@ export const api = {
       body: JSON.stringify({ default_model: defaultModel }),
     }),
 
-  /** §10.5 — khoa BYOK cua CHINH MINH, chi phan che (T-2.14). */
-  listProviderKeys: () => request<{ keys: ProviderKey[] }>("/settings/keys"),
+  /**
+   * §10.5 — khoa BYOK cua CHINH MINH, chi phan che (T-2.14). T-3.12: kem
+   * `byok_providers` (moi provider catalog nhan khoa rieng).
+   */
+  listProviderKeys: () => request<ProviderKeyList>("/settings/keys"),
+
+  /**
+   * Them / thay khoa BYOK (§10.5). Ban ro di MOT lan, trong body nay; server
+   * kiem voi provider roi chi tra ban che (`sk-...4f2a`). Ben goi phai xoa o
+   * nhap ngay sau khi goi — thanh cong hay khong.
+   */
+  putProviderKey: (provider: string, key: string) =>
+    request<ProviderKey>(`/settings/keys/${encodeURIComponent(provider)}`, {
+      method: "PUT",
+      body: JSON.stringify({ key }),
+    }),
+
+  deleteProviderKey: (provider: string) =>
+    request<void>(`/settings/keys/${encodeURIComponent(provider)}`, { method: "DELETE" }),
 };

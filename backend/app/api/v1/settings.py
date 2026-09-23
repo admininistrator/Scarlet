@@ -114,8 +114,23 @@ class ProviderKeyOut(BaseModel):
     usable: bool
 
 
+class ByokProviderOut(BaseModel):
+    """Một provider nhận khoá riêng — ô chọn của trang Cài đặt (T-3.12).
+
+    `provider` là **khoá** catalog (thứ `PUT /settings/keys/{provider}` nhận),
+    `label` là tên để hiện. Danh sách đến từ `byok_supported` trong catalog
+    (§9.2), không từ một mảng gõ sẵn ở FE (A3): thêm một provider BYOK là sửa
+    `model_catalog.json`, không phải sửa giao diện.
+    """
+
+    provider: str
+    label: str
+
+
 class ProviderKeyListOut(BaseModel):
     keys: list[ProviderKeyOut]
+    #: Mọi provider `byok_supported` của catalog hiện tại, kể cả chưa có khoá.
+    byok_providers: list[ByokProviderOut]
 
 
 class ProviderKeyIn(BaseModel):
@@ -189,10 +204,18 @@ async def list_provider_keys(
 
     Không có tham số nào cho phép xem của người khác: `user_id` đến từ
     dependency và đi thẳng vào `WHERE` của câu SQL (§20).
+
+    T-3.12 thêm `byok_providers` — xem `ByokProviderOut`.
     """
+    cat = catalog.get_catalog()
+    byok_providers = [
+        ByokProviderOut(provider=khoa, label=p.label)
+        for khoa, p in cat.providers.items()
+        if p.byok_supported
+    ]
     async with session_scope() as session:
         hang = await ProviderKeyRepository(session).list_for_user(user_id)
-        return ProviderKeyListOut(keys=[_ra(h) for h in hang])
+        return ProviderKeyListOut(keys=[_ra(h) for h in hang], byok_providers=byok_providers)
 
 
 @router.put(

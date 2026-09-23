@@ -201,6 +201,20 @@ class Settings(BaseSettings):
     #: không. 50 là con số §16.3 không viết ra, nên nó là một *giới hạn* và
     #: thuộc về đây chứ không phải `api/v1/admin.py` (A3, §19.2 L4).
     AUDIT_LOG_PAGE_SIZE: int = Field(default=50, gt=0)
+    #: Tuổi thọ kết quả healthcheck mà `GET /admin/system` dùng lại (T-3.12,
+    #: B-192). Không có nó thì mỗi lần mở màn "Hệ thống" là năm lượt đi mạng,
+    #: trong đó 9Router ~850 ms — một màn hình chẩn đoán biến thành máy phát
+    #: request tới nhà cung cấp mỗi lần ai đó bấm F5. Màn hình ghi "Kiểm lúc …"
+    #: theo mốc server trả về, nên con số cũ tới ngần này giây là con số người
+    #: đọc NHÌN THẤY là cũ. Là một *giới hạn* ⇒ ở đây (A3, §19.2 L4).
+    #: `GET /health/deep` **không** đọc nó: máy hỏi thì luôn đo tươi.
+    ADMIN_HEALTH_CACHE_TTL_S: int = Field(default=10, gt=0)
+    #: Trần độ dài cửa sổ của `GET /admin/usage`, tính bằng ngày (T-3.12,
+    #: B-175). Số hàng của báo cáo tỉ lệ với số NGÀY trong cửa sổ, không bị R1
+    #: chặn như `GET /admin/users`; một `since=2020-01-01` là vài nghìn hàng.
+    #: Trần chứ không phân trang: báo cáo là TỔNG HỢP (`totals`, theo ngày/user/
+    #: model), và một tổng không chia trang được. Màn "Chi phí" hỏi 7 và 30.
+    ADMIN_USAGE_MAX_WINDOW_DAYS: int = Field(default=92, gt=0)
     #: Tuổi thọ bản ghi `idem:{user_id}:{route}:{key}` của §11.4 — dùng cho cả
     #: hai trạng thái (`in_progress` lúc `SET NX`, `done` lúc ghi response).
     #: Giá trị 86400 là con số §11.4/ADR-15 viết ra ("Redis `SET NX` TTL 24h").

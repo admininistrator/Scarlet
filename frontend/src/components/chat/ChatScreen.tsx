@@ -1,4 +1,7 @@
+import { Link } from "react-router";
+
 import { useSession } from "../../app/Layout";
+import { PATHS } from "../../app/paths";
 import { t } from "../../lib/i18n";
 import type { TrangThaiKetNoi } from "../../lib/sse";
 import { useChat } from "../../features/chat/useChat";
@@ -159,6 +162,18 @@ export function ChatScreen() {
         onSelect={(id) => void chat.moHoiThoai(id)}
         onNewChat={() => void chat.hoiThoaiMoi()}
         onOpenConversationDeleted={chat.dongHoiThoai}
+        footer={
+          /*
+            T-3.12 — loi vao trang Cai dat o chan sidebar: tren dien thoai day
+            la loi DUY NHAT (header 375 px khong con cho, xem `Layout`).
+          */
+          <Link
+            to={PATHS.settings}
+            className="motion-press flex h-touch items-center rounded-md px-3 text-base text-foreground hover:bg-surface-hover"
+          >
+            {t("nav.settings")}
+          </Link>
+        }
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">

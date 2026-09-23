@@ -16,14 +16,36 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import bindparam, func, select, text, update
+from sqlalchemy import Numeric, bindparam, cast, func, select, text, update
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import User, UserRole, UserStatus
+from app.db.models import (
+    Conversation,
+    KeySource,
+    UsageEvent,
+    User,
+    UserRole,
+    UserStatus,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AdminUserRow:
+    """Một hàng của bảng "Người dùng" (§16.3) — hàng `users` + hai cột NQ-66."""
+
+    user: User
+    #: Số hội thoại chưa xoá mềm. `0` khi chưa có — không bao giờ `None`.
+    conversation_count: int
+    #: `SUM(cost_usd)` của tiền hệ thống trong cửa sổ quota dài. `0.000000`
+    #: khi chưa tiêu — không bao giờ `None`.
+    spend_7d_usd: Decimal
 
 
 class UserRepository:
@@ -180,7 +202,9 @@ class UserRepository:
 
     # ═════════════ ba câu của admin panel (§16.3, §18.5) — T-2.16 ═════════════
 
-    async def list_for_admin(self, *, trang_thai: UserStatus | None = None) -> Sequence[User]:
+    async def list_for_admin(
+        self, *, spend_since: datetime, trang_thai: UserStatus | None = None
+    ) -> Sequence[AdminUserRow]:
         """Danh sách user cho `GET /admin/users`, mới nhất trước — §16.3.
 
         **Câu duy nhất của file này KHÔNG có `WHERE user_id`**, vì câu hỏi ở
@@ -196,15 +220,71 @@ class UserRepository:
         Python — §20 viết luật đó cho `user_id`, nhưng lý do của nó (dữ liệu
         không rời khỏi DB nhiều hơn mức cần) không đổi khi cột đổi tên.
 
-        **Không phân trang.** R1 chốt 15–20 người dùng; một `LIMIT/OFFSET` ở
-        đây là một tham số mà không màn hình nào của §16.3 truyền vào, và mỗi
-        tham số không ai dùng là một nhánh không ai kiểm. Xem Backlog cho ngày
-        con số R1 đổi.
+        **Không phân trang** (B-175, chốt ở T-3.12): R1 chốt 15–20 người dùng,
+        và một `LIMIT/OFFSET` mà không màn hình nào truyền vào là một nhánh
+        không ai kiểm. `GET /admin/usage` thì khác — xem `admin_usage`.
+
+        ╔══════════════════════════════════════════════════════════════════╗
+        ║  NQ-66: HAI CỘT MỚI ĐI BẰNG **MỘT** CÂU, KHÔNG N+1                ║
+        ╚══════════════════════════════════════════════════════════════════╝
+
+        Bảng "Người dùng" có hai cột mà hàng `users` không có: *số hội thoại*
+        và *chi tiêu 7 ngày*. Cả hai đến từ **hai subquery gom nhóm** được
+        `LEFT JOIN` vào đúng câu `SELECT` này — Postgres nhận MỘT câu lệnh,
+        dù có bao nhiêu người. Hai ngả đã loại (B-176): FE ghép hai response
+        (và vẫn thiếu một câu đếm hội thoại), hoặc một vòng lặp gọi thêm hai
+        câu cho mỗi người.
+
+        `LEFT JOIN` + `COALESCE`: người chưa có hội thoại (hay chưa tiêu gì)
+        vẫn ở trong danh sách và cột của họ là `0`, **không** `NULL` — một ô
+        trống đọc như "không đo được", còn sự thật là "chưa dùng".
+
+        *Chi tiêu 7 ngày* là `SUM(cost_usd)` của `key_source='system'` từ
+        `spend_since` — **đúng tập** mà quota 7 ngày của người đó cộng
+        (`UsageEventRepository.list_since`, §10.5): con số admin đọc ở đây là
+        con số đang đẩy thanh quota của người ấy, không phải một con số thứ
+        hai tính khác đi. `spend_since` do router truyền (A3: độ dài cửa sổ là
+        `QUOTA_WINDOW_LONG_S`, không phải một hằng ở đây).
+
+        `CAST(... AS NUMERIC(12,6))` cho ra đủ sáu chữ số thập phân kể cả khi
+        tổng là `0` — cùng kiểu cột `cost_usd`, nên cột tiền trên màn hình
+        thẳng hàng dấu chấm (T-HD7) mà FE không phải định dạng lại số tiền.
+
+        Hội thoại đã xoá mềm **không** đếm: người dùng đã bỏ nó, và §8 coi nó
+        như không còn trong mọi truy vấn mặc định.
         """
-        stmt = select(User).where(User.deleted_at.is_(None))
+        so_hoi_thoai = (
+            select(Conversation.user_id, func.count().label("n"))
+            .where(Conversation.deleted_at.is_(None))
+            .group_by(Conversation.user_id)
+            .subquery()
+        )
+        chi_tieu = (
+            select(UsageEvent.user_id, func.sum(UsageEvent.cost_usd).label("usd"))
+            .where(
+                UsageEvent.created_at >= spend_since,
+                UsageEvent.key_source == KeySource.SYSTEM,
+            )
+            .group_by(UsageEvent.user_id)
+            .subquery()
+        )
+        stmt = (
+            select(
+                User,
+                func.coalesce(so_hoi_thoai.c.n, 0),
+                cast(func.coalesce(chi_tieu.c.usd, 0), Numeric(12, 6)),
+            )
+            .outerjoin(so_hoi_thoai, so_hoi_thoai.c.user_id == User.id)
+            .outerjoin(chi_tieu, chi_tieu.c.user_id == User.id)
+            .where(User.deleted_at.is_(None))
+        )
         if trang_thai is not None:
             stmt = stmt.where(User.status == trang_thai)
-        return list((await self._session.execute(stmt.order_by(User.created_at.desc()))).scalars())
+        rows = (await self._session.execute(stmt.order_by(User.created_at.desc()))).all()
+        return [
+            AdminUserRow(user=row[0], conversation_count=int(row[1]), spend_7d_usd=row[2])
+            for row in rows
+        ]
 
     async def set_status(
         self,

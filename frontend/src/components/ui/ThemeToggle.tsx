@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { t } from "../../lib/i18n";
 
 /**
@@ -34,9 +34,16 @@ import { t } from "../../lib/i18n";
  * thieu mot thu", va ca hai deu phai roi ve `light` chu khong lam vo app.
  */
 
-type Theme = "light" | "dark";
+export type Theme = "light" | "dark";
 
 const KHOA_LUU = "scarlet-theme";
+/**
+ * T-3.12 — trang Cai dat co o chon theme THU HAI canh nut o header. Hai noi
+ * giu hai `useState` thi bam mot ben xong ben kia noi sai ("Toi" trong luc
+ * trang da toi). Moi lan DOI theme phat su kien nay; moi `useTheme()` dang
+ * song nghe no va theo. Khong doc `data-theme` — xem khoi ngay tren.
+ */
+const THEME_EVENT = "scarlet:theme";
 const TRUY_VAN_TOI = "(prefers-color-scheme: dark)";
 
 function themeDaLuu(): Theme | null {
@@ -59,8 +66,9 @@ export function themeBanDau(): Theme {
   return themeDaLuu() ?? themeHeDieuHanh();
 }
 
-export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(themeBanDau);
+/** Theme hien tai + ham doi — dung chung cho nut header va trang Cai dat. */
+export function useTheme(): [Theme, (next: Theme) => void] {
+  const [theme, setThemeState] = useState<Theme>(themeBanDau);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -71,13 +79,35 @@ export function ThemeToggle() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    const theo = (e: Event) => {
+      const next = (e as CustomEvent<Theme>).detail;
+      if (next === "light" || next === "dark") {
+        setThemeState(next);
+      }
+    };
+    window.addEventListener(THEME_EVENT, theo);
+    return () => window.removeEventListener(THEME_EVENT, theo);
+  }, []);
+
+  const setTheme = useCallback((next: Theme) => {
+    setThemeState(next);
+    window.dispatchEvent(new CustomEvent<Theme>(THEME_EVENT, { detail: next }));
+  }, []);
+
+  return [theme, setTheme];
+}
+
+export function ThemeToggle() {
+  const [theme, setTheme] = useTheme();
+
   const nextLabel = theme === "dark" ? t("theme.light") : t("theme.dark");
 
   return (
     <button
       type="button"
       aria-label={t("theme.toggleLabel")}
-      onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
       className="motion-press min-h-touch shrink-0 rounded-md border border-border bg-background px-2 text-sm sm:px-3 text-foreground hover:bg-accent hover:text-accent-foreground"
     >
       {nextLabel}

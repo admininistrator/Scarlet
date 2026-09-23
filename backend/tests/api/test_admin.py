@@ -28,7 +28,7 @@ những gì bị `SET` thay vì chỉ trả `None` — B-141 và §11.3 là hai 
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from ipaddress import ip_address
@@ -37,10 +37,12 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import event, func, select, update
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
+from app.api.v1 import admin as admin_api
 from app.api.v1.admin import UpdateTierRequest
+from app.config.settings import settings
 from app.config.version import APP_VERSION
 from app.core.access_token import encode_access_token
 from app.core.blacklist import user_key
@@ -59,6 +61,7 @@ from app.db.models import (
     MessageRole,
     MessageStatus,
     RefreshToken,
+    UsageEvent,
     User,
     UserRole,
     UserStatus,
@@ -131,6 +134,19 @@ def _db_cua_test(
 ) -> None:
     """`session_scope()` trong handler trỏ vào ĐÚNG kết nối của test (NQ-17)."""
     monkeypatch.setattr("app.db.session.get_sessionmaker", lambda: session_factory)
+
+
+@pytest.fixture(autouse=True)
+def _quen_bo_nho_he_thong() -> Iterator[None]:
+    """B-192 (T-3.12): `GET /admin/system` nhớ kết quả healthcheck vài giây.
+
+    Bộ nhớ ấy sống ở tầm module, nên không dọn thì một ca thay `run_checks`
+    bằng "Redis chết" sẽ đọc lại kết quả "mọi thứ sống" của ca chạy trước nó
+    — một ca xanh vì lý do hoàn toàn khác với lý do nó tưởng.
+    """
+    admin_api._system_health.clear()
+    yield
+    admin_api._system_health.clear()
 
 
 @pytest_asyncio.fixture
@@ -1376,14 +1392,24 @@ async def test_man_he_thong_tra_du_bon_o(
     session_factory: async_sessionmaker[AsyncSession],
     he_thong_gia: None,
 ) -> None:
-    """DoD dòng 4: `queue_depth`, `streams_dang_chay`, `version`, `health`."""
+    """DoD dòng 4: `queue_depth`, `streams_dang_chay`, `version`, `health`.
+
+    T-3.12 (B-192) thêm ô thứ năm, `health_checked_at`: kết quả healthcheck
+    nay có thể cũ vài giây, và màn hình phải in ra nó cũ tới đâu.
+    """
     await _admin(client, session_factory)
 
     resp = await client.get(DUONG_DAN_SYSTEM)
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert set(body) == {"queue_depth", "streams_dang_chay", "version", "health"}
+    assert set(body) == {
+        "queue_depth",
+        "streams_dang_chay",
+        "version",
+        "health",
+        "health_checked_at",
+    }
     assert body["queue_depth"] == 3
     assert body["version"] == APP_VERSION
     assert set(body["health"]) == {"postgres", "redis", "minio", "litellm", "ninerouter"}
@@ -1654,3 +1680,283 @@ async def test_doc_so_khong_ghi_them_dong_nao(
     await client.get(DUONG_DAN_AUDIT)
 
     assert await _audit(session_factory) == []
+
+
+# ═══════════ T-3.12 — mảnh backend của giao diện quản trị đầy đủ ═══════════
+#
+# Năm thứ, không endpoint mới nào: hai cột NQ-66 của `GET /admin/users`, trần
+# cửa sổ của `GET /admin/usage` (B-175), "với ai" đọc được của sổ audit
+# (B-191), bộ nhớ healthcheck của màn Hệ thống (B-192), và TTL hạn mức đi ra
+# `GET /admin/tiers` để màn hình nói đúng con số của `.env`.
+
+
+async def _hoi_thoai(
+    session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID, *, da_xoa: bool = False
+) -> None:
+    async with session_factory() as session:
+        conv = Conversation(user_id=user_id)
+        if da_xoa:
+            conv.deleted_at = datetime.now(UTC)
+        session.add(conv)
+        await session.commit()
+
+
+def _hang(body: dict[str, Any], user_id: uuid.UUID) -> dict[str, Any]:
+    return next(u for u in body["users"] if u["id"] == str(user_id))
+
+
+async def test_nguoi_chua_co_hoi_thoai_thi_cot_la_0_khong_null(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD dòng 2 của T-3.12: *"user chưa có hội thoại ⇒ cột trả `0`, không
+    `null`"*. Một ô trống đọc như "không đo được"; sự thật là "chưa dùng".
+    Chi tiêu cũng vậy — và đủ sáu chữ số thập phân như mọi `cost_usd`."""
+    await _admin(client, session_factory)
+    moi = await _tao_user(session_factory, UserStatus.ACTIVE)
+
+    resp = await client.get(DUONG_DAN_USERS)
+
+    assert resp.status_code == 200, resp.text
+    hang = _hang(resp.json(), moi)
+    assert hang["conversation_count"] == 0
+    assert hang["spend_7d_usd"] == "0.000000"
+
+
+async def test_so_hoi_thoai_va_chi_tieu_7_ngay_dem_dung_tap(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """NQ-66 — hai cột đếm ĐÚNG tập, không chỉ "có một con số".
+
+    * hội thoại xoá mềm **không** đếm;
+    * chi tiêu là tiền **hệ thống** trong cửa sổ quota dài — BYOK (tiền của
+      người dùng, §10.5) và dòng ngoài cửa sổ đều không cộng: đúng tập mà
+      quota 7 ngày của người ấy đang cộng;
+    * con số của người khác không lọt sang (GROUP BY đúng cột).
+    """
+    await _admin(client, session_factory)
+    nguoi = await _tao_user(session_factory, UserStatus.ACTIVE)
+    ben_canh = await _tao_user(session_factory, UserStatus.ACTIVE)
+    await _hoi_thoai(session_factory, nguoi)
+    await _hoi_thoai(session_factory, nguoi)
+    await _hoi_thoai(session_factory, nguoi, da_xoa=True)
+    await _hoi_thoai(session_factory, ben_canh)
+
+    for cost, nguon in (
+        ("0.1", KeySource.SYSTEM),
+        ("0.2", KeySource.SYSTEM),
+        ("5", KeySource.BYOK),
+    ):
+        await _ghi_so(
+            session_factory,
+            user_id=nguoi,
+            model_id="m",
+            cost=cost,
+            confidence=CostConfidence.EXACT,
+            key_source=nguon,
+        )
+    await _ghi_so(
+        session_factory, user_id=nguoi, model_id="m", cost="9", confidence=CostConfidence.LOW
+    )
+    async with session_factory() as session:
+        await session.execute(
+            update(UsageEvent)
+            .where(UsageEvent.user_id == nguoi, UsageEvent.cost_usd == Decimal("9"))
+            .values(created_at=datetime.now(UTC) - timedelta(days=8))
+        )
+        await session.commit()
+    await _ghi_so(
+        session_factory, user_id=ben_canh, model_id="m", cost="0.7", confidence=CostConfidence.EXACT
+    )
+
+    body = (await client.get(DUONG_DAN_USERS)).json()
+
+    assert _hang(body, nguoi)["conversation_count"] == 2
+    assert _hang(body, nguoi)["spend_7d_usd"] == "0.300000"
+    assert _hang(body, ben_canh)["conversation_count"] == 1
+    assert _hang(body, ben_canh)["spend_7d_usd"] == "0.700000"
+
+
+async def test_danh_sach_nguoi_dung_la_MOT_cau_lenh_du_bao_nhieu_nguoi(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    connection: AsyncConnection,
+) -> None:
+    """DoD dòng 1 của T-3.12 ở tầng test: số câu lệnh chạm `conversations`/
+    `usage_events` khi đọc bảng Người dùng là **1**, không phải 1 + 2N.
+
+    Bốn người, mỗi người có dữ liệu ở cả hai bảng — một vòng lặp N+1 sẽ cho
+    ra 8 câu ở đây. Đếm bằng sự kiện `before_cursor_execute` của chính kết
+    nối mà handler dùng (xem `_db_cua_test`), tức đếm thứ Postgres NHẬN, không
+    phải thứ Python định gửi.
+    """
+    await _admin(client, session_factory)
+    for _ in range(4):
+        uid = await _tao_user(session_factory, UserStatus.ACTIVE)
+        await _hoi_thoai(session_factory, uid)
+        await _ghi_so(
+            session_factory, user_id=uid, model_id="m", cost="0.1", confidence=CostConfidence.EXACT
+        )
+
+    cau_lenh: list[str] = []
+
+    def ghi(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        cau_lenh.append(statement)
+
+    event.listen(connection.sync_connection, "before_cursor_execute", ghi)
+    try:
+        resp = await client.get(DUONG_DAN_USERS)
+    finally:
+        event.remove(connection.sync_connection, "before_cursor_execute", ghi)
+
+    assert resp.status_code == 200, resp.text
+    cham = [c for c in cau_lenh if "conversations" in c or "usage_events" in c]
+    assert len(cham) == 1, cham
+    assert "conversations" in cham[0]
+    assert "usage_events" in cham[0]
+
+
+async def test_endpoint_doi_trang_thai_khong_mang_hai_cot_gom_nhom(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Hai cột NQ-66 chỉ có ở DANH SÁCH — `approve`/`PATCH` trả một hàng vừa
+    đổi và không chạy câu gom nhóm nào (xem `AdminUserRowOut`)."""
+    await _admin(client, session_factory)
+    user_id = await _tao_user(session_factory, UserStatus.PENDING_APPROVAL)
+
+    body = (await client.post(DUONG_DAN_HANH_DONG.format(user_id, "approve"))).json()
+
+    assert "conversation_count" not in body
+    assert "spend_7d_usd" not in body
+
+
+async def test_usage_cua_so_dai_qua_tran_thi_400(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """B-175 — trần `ADMIN_USAGE_MAX_WINDOW_DAYS`. Đúng trần thì qua, quá một
+    giây thì `400` — hai ca ở hai bên biên, không phải một ca ở giữa."""
+    await _admin(client, session_factory)
+    until = datetime.now(UTC)
+    tran = timedelta(days=settings.ADMIN_USAGE_MAX_WINDOW_DAYS)
+
+    dung_tran = await client.get(
+        DUONG_DAN_USAGE,
+        params={"since": (until - tran).isoformat(), "until": until.isoformat()},
+    )
+    qua_tran = await client.get(
+        DUONG_DAN_USAGE,
+        params={
+            "since": (until - tran - timedelta(seconds=1)).isoformat(),
+            "until": until.isoformat(),
+        },
+    )
+
+    assert dung_tran.status_code == 200, dung_tran.text
+    assert qua_tran.status_code == 400, qua_tran.text
+    assert qua_tran.json()["error"]["details"]["max_days"] == settings.ADMIN_USAGE_MAX_WINDOW_DAYS
+
+
+async def test_danh_sach_tier_mang_ttl_han_muc_cua_env(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """ "Có hiệu lực trong vòng N giây" — N là `TIER_CACHE_TTL_S`, đọc từ server
+    chứ không chép tay vào `vi.json` (A3)."""
+    await _admin(client, session_factory)
+
+    body = (await client.get(DUONG_DAN_TIERS)).json()
+
+    assert body["limits_cache_ttl_s"] == settings.TIER_CACHE_TTL_S
+
+
+async def test_man_he_thong_hai_lan_lien_tiep_chi_do_mot_lan(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B-192 — mở màn Hệ thống hai lần liên tiếp: HAI response, MỘT lượt đo,
+    cùng một `health_checked_at`. `queue_depth` thì vẫn đọc tươi mỗi lần."""
+    await _admin(client, session_factory)
+    luot_do: list[int] = []
+    do_sau: list[int] = []
+
+    async def dem() -> dict[str, CheckResult]:
+        luot_do.append(1)
+        return _health_gia()
+
+    async def do_dai() -> int:
+        do_sau.append(1)
+        return len(do_sau)
+
+    monkeypatch.setattr("app.api.v1.admin.run_checks", dem)
+    monkeypatch.setattr("app.api.v1.admin.queue_depth", do_dai)
+
+    dau = (await client.get(DUONG_DAN_SYSTEM)).json()
+    lai = (await client.get(DUONG_DAN_SYSTEM)).json()
+
+    assert len(luot_do) == 1
+    assert lai["health_checked_at"] == dau["health_checked_at"]
+    assert (dau["queue_depth"], lai["queue_depth"]) == (1, 2)
+
+
+async def test_audit_noi_duoc_voi_ai_bang_email(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """B-191 / DoD dòng 3 của T-3.12 ở tầng API: sau khi Duyệt, dòng sổ nói
+    được cả "ai" lẫn "với ai" bằng chữ, không phải UUID."""
+    admin_id = await _admin(client, session_factory)
+    user_id = await _tao_user(session_factory, UserStatus.PENDING_APPROVAL)
+    async with session_factory() as session:
+        await session.execute(
+            update(User).where(User.id == user_id).values(display_name="Người Được Duyệt")
+        )
+        await session.commit()
+        emails = dict(
+            (
+                await session.execute(
+                    select(User.id, User.email).where(User.id.in_([admin_id, user_id]))
+                )
+            ).all()
+        )
+    await client.post(DUONG_DAN_HANH_DONG.format(user_id, "approve"))
+
+    dong = (await client.get(DUONG_DAN_AUDIT)).json()["items"][0]
+
+    assert dong["actor_email"] == emails[admin_id]
+    assert dong["target_type"] == TARGET_USER
+    assert dong["target_email"] == emails[user_id]
+    assert dong["target_display_name"] == "Người Được Duyệt"
+
+
+async def test_audit_voi_tier_khong_join_nguoi_nao(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Nhánh JOIN chỉ mở cho `target_type='users'` — tên tier đã đọc được, và
+    một tên tier KHÔNG được thử ép kiểu sang UUID (câu sẽ nổ cả trang)."""
+    await _admin(client, session_factory)
+    await client.patch(DUONG_DAN_TIER.format("free"), json={"limit_5h_usd": "2.0000"})
+
+    resp = await client.get(DUONG_DAN_AUDIT)
+
+    assert resp.status_code == 200, resp.text
+    dong = resp.json()["items"][0]
+    assert dong["target_id"] == "free"
+    assert dong["target_email"] is None
+    assert dong["target_display_name"] is None
+
+
+async def test_audit_nguoi_da_xoa_khong_con_hien_email(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """T-HD7: *"Người đã xoá không còn tên"* — xoá mềm cũng tính. `target_id`
+    vẫn còn nguyên để màn hình in 8 ký tự đầu mà tra log."""
+    await _admin(client, session_factory)
+    user_id = await _tao_user(session_factory, UserStatus.PENDING_APPROVAL)
+    await client.post(DUONG_DAN_HANH_DONG.format(user_id, "approve"))
+    async with session_factory() as session:
+        await session.execute(update(User).where(User.id == user_id).values(deleted_at=func.now()))
+        await session.commit()
+
+    dong = (await client.get(DUONG_DAN_AUDIT)).json()["items"][0]
+
+    assert dong["target_id"] == str(user_id)
+    assert dong["target_email"] is None
+    assert dong["target_display_name"] is None

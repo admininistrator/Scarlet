@@ -31,6 +31,7 @@ vi.mock("../lib/api", async (importOriginal) => {
       danhSachModel: vi.fn(),
       quanTriDanhSachUser: vi.fn(),
       quanTriChiPhi: vi.fn(),
+      listProviderKeys: vi.fn(),
     },
   };
 });
@@ -75,6 +76,7 @@ beforeEach(() => {
   vi.mocked(api.danhSachModel).mockResolvedValue([]);
   vi.mocked(api.quanTriDanhSachUser).mockResolvedValue({ users: [] });
   vi.mocked(api.quanTriChiPhi).mockResolvedValue(CHI_PHI_RONG);
+  vi.mocked(api.listProviderKeys).mockResolvedValue({ keys: [], byok_providers: [] });
 });
 
 describe("bang route", () => {
@@ -98,8 +100,13 @@ describe("bang route", () => {
   it("/admin ra man quan tri", async () => {
     moTai(PATHS.admin);
 
-    expect(await screen.findByRole("heading", { name: "Quản trị" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Nạp lại catalog" })).toBeInTheDocument();
+    // T-3.12 — sau muc dieu huong cua ban T-HD7; man mac dinh la "Duyet".
+    const dieuHuong = await screen.findByRole("navigation", { name: "Mục quản trị" });
+    expect(dieuHuong).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Chờ duyệt" })).toBeInTheDocument();
+    for (const muc of ["Duyệt người dùng", "Người dùng", "Chi phí", "Model", "Hệ thống", "Nhật ký"]) {
+      expect(screen.getByRole("button", { name: muc })).toBeInTheDocument();
+    }
   });
 
   it("/ ra man chat", async () => {
@@ -118,8 +125,8 @@ describe("bang route", () => {
     expect(screen.queryByText("404")).toBeNull();
   });
 
-  // T-3.1b thay nam trong sau cho trong nay bang man hinh that. `/cai-dat`
-  // con lai mot minh — chu no la T-3.12.
+  // T-3.1b thay nam trong sau cho trong nay bang man hinh that; T-3.12 thay
+  // not `/cai-dat`.
   it.each([
     [PATHS.settings, "Cài đặt"],
     [PATHS.register, "Đăng ký"],
@@ -134,13 +141,31 @@ describe("bang route", () => {
     expect(screen.queryByText("404")).toBeNull();
   });
 
-  it("chi con /cai-dat la trang tam — nam duong auth da co man hinh that", async () => {
-    // Phep do cua *"T-3.1b chi phai dien"*: neu mot `element` bi bo quen thi
-    // `PlaceholderPage` van ve mot man hinh co ten va moi khang dinh ben tren
-    // van xanh. Cau "Man hinh nay chua duoc dung" la thu phan biet duoc.
-    moTai(PATHS.register);
-    expect(await screen.findByRole("heading", { name: "Đăng ký" })).toBeInTheDocument();
-    expect(screen.queryByText("Màn hình này chưa được dựng.")).toBeNull();
+  it("/cai-dat la man that: ba muc giao dien, model mac dinh, khoa rieng (T-3.12)", async () => {
+    // Truoc T-3.12 `/cai-dat` la `PlaceholderPage` — mot man co TEN nen ca
+    // `it.each` ben tren van xanh. Ba tieu de muc la thu trang tam khong co.
+    moTai(PATHS.settings);
+
+    expect(await screen.findByRole("heading", { name: "Giao diện" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model mặc định" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Khoá API riêng (BYOK)" })).toBeInTheDocument();
+  });
+
+  it("chua dang nhap thi /cai-dat day toi /dang-nhap", async () => {
+    vi.mocked(api.toiLaAi).mockRejectedValue(new Error("401"));
+
+    moTai(PATHS.settings);
+
+    expect(await screen.findByLabelText("Mật khẩu")).toBeInTheDocument();
+  });
+
+  it("B-216 (de mo): `pending_approval` VAO duoc /cai-dat, khong bi day ve /cho-duyet", async () => {
+    vi.mocked(api.toiLaAi).mockResolvedValue({ ...ADMIN, role: "user", status: "pending_approval" });
+
+    moTai(PATHS.settings);
+
+    expect(await screen.findByRole("heading", { name: "Khoá API riêng (BYOK)" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Đang chờ quản trị duyệt" })).toBeNull();
   });
 
   it("nguoi khong phai admin bi day khoi /admin ve man chat", async () => {
@@ -149,7 +174,7 @@ describe("bang route", () => {
     moTai(PATHS.admin);
 
     expect(await screen.findByRole("button", { name: "Hội thoại mới" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Quản trị" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Mục quản trị" })).toBeNull();
   });
 
   it("nguoi chua dang nhap bi day khoi /admin toi /dang-nhap", async () => {

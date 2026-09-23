@@ -67,6 +67,13 @@
   --spacing-rail: 0.1875rem;        /* 3px — rail tầng mặc định bên trái hàng */
   --spacing-grabber: 2.25rem;       /* 36px — tay nắm của sheet (T-3.6) */
 
+  /* Admin (T-HD7 — file thiết kế tự ghi nhãn "T-HD6") */
+  --spacing-admin-nav: 13.5rem;     /* 216px — cột điều hướng admin, ≥ 1024px */
+  --spacing-sticky-col: 10rem;      /* 160px — cột đầu dính trong bảng cuộn ngang */
+  --spacing-scroll-shadow: 0.875rem;/* 14px — bóng mép phải khung cuộn */
+  --spacing-dialog: 28rem;          /* 448px — dialog ghi đè hạn mức */
+  --spacing-chart: 12rem;           /* 192px — chiều cao vùng vẽ biểu đồ chi phí */
+
   /* Bong bóng tin nhắn (T-HD3) */
   --spacing-code-gutter: 2.5rem;     /* 40px — cột số dòng, cố định tới 999 dòng */
   --spacing-caret: 0.5rem;           /* 8px — bề ngang con trỏ stream */
@@ -171,6 +178,9 @@
   /* Lệch độ sáng 2.4:1 giữa hai màu → vẫn tách bạch khi in trắng đen. */
   --color-chart-1: #8e1f17;             /* metered */
   --color-chart-2: #4a8ab8;             /* unmetered */
+  --color-chart-pattern: #1b1917;       /* vạch chéo trên cột unmetered — đọc được khi in trắng đen */
+  --color-chart-grid: #ded9d3;          /* đường lưới biểu đồ */
+  --color-scroll-shadow: rgb(24 18 16 / 0.16); /* bóng mép khung bảng cuộn ngang */
 
   /* ---------- TÔ MÀU CÚ PHÁP (T-3.5 · Prism) ----------------------------------- */
   /* Sáu lớp, không hơn. Prism sinh ra hàng chục tên token; `mauCuPhap()` trong
@@ -241,6 +251,9 @@
   /* BIỂU ĐỒ */
   --color-chart-1: #e0584a;
   --color-chart-2: #a8cdea;
+  --color-chart-pattern: #171514;
+  --color-chart-grid: #332f2b;
+  --color-scroll-shadow: rgb(0 0 0 / 0.55);
 
   /* TÔ MÀU CÚ PHÁP */
   --color-code-keyword: #c4a2ff;
@@ -499,6 +512,40 @@
 }
 @utility motion-pulse {
   animation: scarlet-pulse var(--duration-slow) var(--ease-move) infinite alternate;
+}
+/* ---- Admin (T-HD7) ------------------------------------------------------ */
+/* Khung bảng cuộn ngang. Trang KHÔNG cuộn ngang: chỉ khung này cuộn.
+ * Bóng mép phải: lớp "local" (màu nền) trượt theo nội dung và che bóng khi
+ * đã cuộn tới cuối; lớp "scroll" (bóng) đứng yên ở mép khung. Không cần JS. */
+@utility scroll-frame {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  background:
+    linear-gradient(to left, var(--color-surface-panel) 40%, transparent) right center / calc(var(--spacing-scroll-shadow) * 3) 100% no-repeat local,
+    linear-gradient(to left, var(--color-scroll-shadow), transparent) right center / var(--spacing-scroll-shadow) 100% no-repeat scroll,
+    var(--color-surface-panel);
+}
+/* Cột đầu dính (tên người dùng / tên model). Nền đặc để che các cột trượt qua. */
+@utility sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--color-surface-panel);
+  box-shadow: 1px 0 0 var(--color-border), var(--spacing-scroll-shadow) 0 var(--spacing-scroll-shadow) calc(var(--spacing-scroll-shadow) * -1) var(--color-scroll-shadow);
+}
+/* Ô tiền: chuỗi nguyên văn từ DB, căn phải, chữ số cùng bề rộng, không xuống dòng. */
+@utility money {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Biểu đồ: giữ màu khi in (mặc định trình duyệt bỏ nền khi in). */
+@utility print-exact {
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
 }
 @utility tabular {
   font-variant-numeric: tabular-nums;
