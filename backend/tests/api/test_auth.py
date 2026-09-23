@@ -646,6 +646,9 @@ async def test_me_tra_du_bon_nhom_cua_18_1(
     assert body["tier_name"] == "free"
     assert body["status"] == UserStatus.PENDING_EMAIL.value
     assert body["message_max_chars"] == settings.MESSAGE_MAX_CHARS
+    assert body["quota_warn_remaining_pct"] == settings.QUOTA_WARN_REMAINING_PCT, (
+        "T-3.11: FE doc nguong canh bao tu day, cung bien voi quota_warning cua 202"
+    )
     assert body["default_model"] is None, "chua ai chon gi ⇒ FE roi ve default cua catalog"
 
     assert [w["limit_type"] for w in body["quota"]] == ["5h", "weekly"], "du HAI cua so (§10.3)"
@@ -703,6 +706,7 @@ async def test_login_va_refresh_khong_tra_quota(
         assert resp.status_code == 200, resp.text
         assert "quota" not in resp.json()
         assert "message_max_chars" not in resp.json()
+        assert "quota_warn_remaining_pct" not in resp.json()
         assert resp.json()["default_model"] is None, "cot cua chinh hang users ⇒ co o ca ba"
 
 

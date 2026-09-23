@@ -520,8 +520,9 @@ class NguoiDungRa(BaseModel):
 class HoSoRa(NguoiDungRa):
     """`GET /auth/me` — *"User + tier + quota còn lại + trạng thái"* (§18.1).
 
-    Rộng hơn `NguoiDungRa` đúng hai trường, và đứng riêng vì hai trường ấy
-    **không** miễn phí: `quota` là hai lượt đọc Redis (và có thể một lượt dựng
+    Rộng hơn `NguoiDungRa` đúng ba trường (hai của T-3.0, `quota_warn_remaining_pct`
+    của T-3.11), và đứng riêng vì chúng thuộc về thanh quota và ô nhập — còn
+    `quota` thì **không** miễn phí: `quota` là hai lượt đọc Redis (và có thể một lượt dựng
     lại từ Postgres, RR-7). `login`/`refresh` không có việc gì phải trả giá đó
     — chúng trả lời "anh là ai", còn câu "anh còn bao nhiêu tiền" là câu FE hỏi
     lại nhiều lần sau đó.
@@ -538,6 +539,10 @@ class HoSoRa(NguoiDungRa):
     #: Trần độ dài một message, tính bằng ký tự (B-205, NQ-78). Ô nhập của
     #: T-3.4 đếm ngược về đúng con số này; không literal nào ở FE (A3/L4).
     message_max_chars: int
+    #: Ngưỡng "còn ≤ N%" của UC-07 dòng 1 (T-3.11). Cùng một biến `.env` với
+    #: `quota_warning` của `202` (`estimator._warning`), nên thanh quota của FE
+    #: và khối cảnh báo của backend không thể dùng hai ngưỡng khác nhau (A3).
+    quota_warn_remaining_pct: int
 
 
 def _dat_cookie_phien(response: Response, nguoi_dung: NguoiDungRa) -> None:
@@ -1074,4 +1079,5 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> HoSoRa:
         **ho_so.model_dump(),
         quota=quota,
         message_max_chars=settings.MESSAGE_MAX_CHARS,
+        quota_warn_remaining_pct=settings.QUOTA_WARN_REMAINING_PCT,
     )
