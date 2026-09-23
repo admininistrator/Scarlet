@@ -1,5 +1,22 @@
 # Design Progress — Scarlet
 
+## v2 — Phase S (Standardize)
+
+| Task | Link Claude Design | Ngày chốt |
+|---|---|---|
+| T-HD1-v2 |  |  |
+| T-HD2-v2 |  |  |
+| T-HD3-v2 |  |  |
+| T-HD4-v2 |  |  |
+| T-HD5-v2 |  |  |
+| T-HD7-v2 |  |  |
+| T-HD8 |  |  |
+| T-HD9 |  |  |
+
+Mốc code của v1: `79da45ac01d357ad0ebac9ad4af93eccd340d86e` — T-S.18 so từ mốc này.
+
+## v1 — Phase 3 (bản gốc)
+
 | Task | Artifact Link | Ngày chốt |
 |---|---|---|
 | T-HD1 | [Design System Scarlet] https://claude.ai/artifact/91nTKKUNZdW7VdSrSVGv6E | 2026-09-21 |

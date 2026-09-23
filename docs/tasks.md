@@ -1424,17 +1424,18 @@ Prompt đầy đủ cho từng bước nằm ở `docs/standardize-tutorial.md`.
 ---
 
 ### T-S.0 — Mở phase: mục v2 trong `design/README.md`
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-3.12 ✅ · **Ước lượng:** 0.5h
+- **Trạng thái:** ✅ (2026-09-23) · **Phụ thuộc:** T-3.12 ✅ · **Ước lượng:** 0.5h → **thực tế ~0.3 h**
 - **KH:** §24.2b·S1, S13 · NQ-108
 - **Việc:**
-  - [ ] Thêm tiêu đề `## v1 — Phase 3 (bản gốc)` phía trên bảng hiện có của `design/README.md` — **không** sửa một dòng nào của bảng ấy
-  - [ ] Thêm mục `## v2 — Phase S (Standardize)`: bảng tám hàng T-HD1-v2, T-HD2-v2, T-HD3-v2, T-HD4-v2, T-HD5-v2, T-HD7-v2, T-HD8, T-HD9; ba cột `Task · Link Claude Design · Ngày chốt`, hai cột sau để trống cho người dùng điền
-  - [ ] Ghi dưới bảng v2 hash commit hiện tại — **mốc code của v1**; T-S.18 so từ mốc này
+  - [x] Thêm tiêu đề `## v1 — Phase 3 (bản gốc)` phía trên bảng hiện có của `design/README.md` — **không** sửa một dòng nào của bảng ấy
+  - [x] Thêm mục `## v2 — Phase S (Standardize)`: bảng tám hàng T-HD1-v2, T-HD2-v2, T-HD3-v2, T-HD4-v2, T-HD5-v2, T-HD7-v2, T-HD8, T-HD9; ba cột `Task · Link Claude Design · Ngày chốt`, hai cột sau để trống cho người dùng điền  — *đặt **trên** mục v1, xem Ghi nhận*
+  - [x] Ghi dưới bảng v2 hash commit hiện tại — **mốc code của v1**; T-S.18 so từ mốc này  — *`79da45ac01d357ad0ebac9ad4af93eccd340d86e`*
 - **Xong khi (DoD):**
-  - [ ] `git diff --stat` chỉ có `design/README.md`
-  - [ ] `git diff design/README.md` chỉ có dòng **thêm** — bảng v1 không đổi một byte
+  - [x] `git diff --stat` chỉ có `design/README.md`  — *`design/README.md | 17 +++++++++++++++++` · `1 file changed, 17 insertions(+)`*
+  - [x] `git diff design/README.md` chỉ có dòng **thêm** — bảng v1 không đổi một byte  — *0 dòng `-`; so byte bảng v1 với `HEAD`: 2530 = 2530, `identical: True`*
 - **Cạm bẫy:**
   - ① `design/README.md` có thể đang mang thay đổi chưa commit của người dùng (có, ngày 2026-09-23). **Hỏi trước khi chạm**; không stash, không ghi đè.
+- **Ghi nhận:** **Cạm bẫy ① gỡ theo lệnh người dùng trước task:** commit riêng `79da45a` `chore(B-269)` trên `phase-3` gom toàn bộ thay đổi dở (`design/README.md`, `morphicons` trong `package.json` + `pnpm-lock.yaml`, tài liệu Phase S), xoá `frontend/package-lock.json` và chặn nó ở `.gitignore` gốc (đóng B-269); hai `scripts/test_*.sh` bị rớt bit thực thi `755 → 644` trong working tree được trả lại `755`, không commit sự rớt ấy. `docs/account-test.txt` (email + mật khẩu tài khoản test) **cố ý để ngoài commit**. Mốc v1 = chính `79da45a`, tức P3 cộng tài liệu Phase S, chưa một dòng code nào của Phase S. **Mục v2 đặt TRÊN mục v1**, không dưới: file kết thúc không có dấu xuống dòng ở hàng T-HD7, nên chèn bất cứ gì sau nó buộc git tính hàng ấy là "sửa" — trái DoD dòng 2. Nhánh mới `phase-s` tách từ `phase-3`.
 
 ---
 
@@ -2211,7 +2212,7 @@ P1 **nghiêng hẳn về nhóm B** (Redis stream, SSE qua Nginx, trình duyệt,
 | B-266 | **Suy luận phải được gửi lại khi có tool call — trái B-33.** Tài liệu DeepSeek (thinking mode) ghi `reasoning_content` bắt buộc gửi lại trong các lượt có tool; Anthropic cũng đòi giữ khối thinking qua tool use. B-33 hôm nay cố ý không bao giờ gửi lại suy luận. P6 (T-6.x) và P7 (T-7.7) sẽ va vào đây đầu tiên — cần chốt trước khi P6 bật tool đầu tiên | §24.2b·S4, S15 (tra cứu 2026-09-23) |
 | B-267 | **Đường BYOK của Anthropic không trả chữ suy luận.** `ByokAdapter` gọi `api.anthropic.com/v1` qua lớp tương thích OpenAI: tài liệu ghi `reasoning_effort` bị bỏ qua và chữ thinking không được trả về, nên khối "Suy luận" rỗng với Claude dùng khoá riêng. Cách chữa thật là một adapter gọi Messages API gốc (A9 cho phép khác biệt nằm ở adapter) — cần quyết | T-S.2 Cạm bẫy ②, §24.2b·S3b |
 | B-268 | **Dòng "Tổng" của bảng §2 chưa cộng Phase S.** Người dùng chỉ cho chèn Phase S, không cho sửa dòng khác (NQ-107). Tổng đúng sau khi chèn: **130 task · 353 h** (+ T-S.19 chưa ước lượng). Cần người dùng cho phép một lần sửa dòng ấy | Lập Phase S (2026-09-23) |
-| B-269 | **`frontend/package-lock.json` (npm) chưa track trong working tree ngày 2026-09-23**, cạnh `pnpm-lock.yaml`. `CLAUDE.md` chỉ cho `pnpm`; hai file lock cho hai trình quản lý gói là hai đáp án khác nhau cho "đã cài bản nào". Đề xuất: xoá file ấy và thêm `package-lock.json` vào `.gitignore` của `frontend/` | Lập Phase S |
+| ~~B-269~~ | **ĐÃ ĐÓNG 2026-09-23, trước T-S.0 (commit `79da45a`).** File đã xoá; chặn bằng dòng `frontend/package-lock.json` ở `.gitignore` **gốc** (`frontend/` chưa có `.gitignore` riêng, và gốc đã giữ `frontend/dist/`). Nội dung gốc: **`frontend/package-lock.json` (npm) chưa track trong working tree ngày 2026-09-23**, cạnh `pnpm-lock.yaml`. `CLAUDE.md` chỉ cho `pnpm`; hai file lock cho hai trình quản lý gói là hai đáp án khác nhau cho "đã cài bản nào". Đề xuất: xoá file ấy và thêm `package-lock.json` vào `.gitignore` của `frontend/` | Lập Phase S |
 
 **Ghi chú lệch nhỏ:** B-28 ghi "chưa nghiệm thu được vì `ANTHROPIC_API_KEY` rỗng" — **đã cũ**, key nay có giá trị (kiểm hôm nay, không in giá trị). T-1.3 không còn bị chặn vì lý do đó.
 
