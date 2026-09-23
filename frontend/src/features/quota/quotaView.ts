@@ -26,7 +26,7 @@
  * de HIEN.
  */
 
-import type { CuaSoQuota, LoaiHanMuc, QuotaWarning } from "../../lib/api";
+import type { CuaSoQuota, LoaiHanMuc, ModelRa, QuotaWarning } from "../../lib/api";
 
 /** Ba muc cua ban Design System muc 05 — moi muc mot token `--color-quota-*`. */
 export type QuotaLevel = "normal" | "warning" | "empty";
@@ -142,6 +142,21 @@ export function isSendBlocked(
 /** Model dang chon co di bang khoa rieng cua nguoi dung khong. */
 export function byokCovers(byokProviders: ReadonlySet<string> | null, provider: string | null) {
   return byokProviders !== null && provider !== null && byokProviders.has(provider);
+}
+
+/**
+ * Khoa provider cua model SE GUI — ve thu hai cua `byokCovers`/`isSendBlocked`.
+ *
+ * B-257: `provider_id` (khoa catalog, `deepseek`), KHONG phai `provider` (nhan,
+ * `DeepSeek AI`). Tap `byokProviders` den tu `ProviderKey.provider`, tuc la
+ * khoa; so voi nhan thi khong bao gio khop va nguoi co khoa rieng bi khoa nut
+ * gui dung luc Cam bay ① cua T-3.11 hua la khong.
+ */
+export function selectedProviderId(
+  models: readonly Pick<ModelRa, "id" | "provider_id">[],
+  modelId: string | null,
+): string | null {
+  return models.find((m) => m.id === modelId)?.provider_id ?? null;
 }
 
 /**

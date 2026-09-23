@@ -277,3 +277,37 @@ def test_get_models_khong_lo_base_url_khi_provider_tat(
     for m in body:
         assert "host.docker.internal" not in (m["unavailable_reason"] or "")
         assert "20128" not in (m["unavailable_reason"] or "")
+
+
+# ═══════════════ B-257 — `provider_id`: khoá để so, tách khỏi nhãn để hiện ══════
+
+
+def test_provider_id_la_khoa_catalog_chu_khong_phai_nhan() -> None:
+    """B-257 — `provider` là NHÃN (`DeepSeek AI`), `provider_id` là KHOÁ
+    (`deepseek`). FE so khoá BYOK của người dùng với `provider_id`; so với
+    nhãn thì không bao giờ khớp.
+
+    Ca này chỉ có nghĩa khi catalog thật có ít nhất một provider mà nhãn khác
+    khoá — nếu mọi nhãn trùng khoá thì một FE so nhầm trường vẫn chạy đúng, và
+    ca này phải nói ra điều đó thay vì xanh vô nghĩa.
+    """
+    cat = catalog.get_catalog()
+    body = client.get("/api/v1/models").json()
+
+    assert body
+    for m in body:
+        entry = next(e for e in cat.models if e.id == m["id"])
+        assert m["provider_id"] == entry.provider
+        assert m["provider"] == cat.providers[entry.provider].label
+    assert any(m["provider"] != m["provider_id"] for m in body), (
+        "catalog thật không có provider nào có nhãn khác khoá — ca B-257 mất ý nghĩa"
+    )
+
+
+def test_provider_id_trung_khoa_ma_settings_keys_nhan() -> None:
+    """B-257 — `provider_id` phải là chuỗi mà `PUT /settings/keys/{provider}`
+    tra trong `providers` của catalog: đó là hai đầu của cùng một phép so."""
+    cat = catalog.get_catalog()
+    body = client.get("/api/v1/models").json()
+
+    assert {m["provider_id"] for m in body} <= set(cat.providers)

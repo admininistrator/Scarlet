@@ -32,6 +32,7 @@ function model(p: Partial<ModelRa> & Pick<ModelRa, "id">): ModelRa {
   return {
     display_name: p.id,
     provider: "nha cung cap",
+    provider_id: "nha-cung-cap",
     capabilities: [],
     context_window: 1000,
     max_output: 100,

@@ -268,7 +268,14 @@ export interface HuyRa {
 export interface ModelRa {
   id: string;
   display_name: string;
+  /** NHAN de hien (`DeepSeek AI`) — khong dung de so voi thu gi. */
   provider: string;
+  /**
+   * Khoa provider trong catalog (`deepseek`) — dung chuoi ma
+   * `ProviderKey.provider` mang. B-257: so khoa BYOK voi `provider` (nhan) o
+   * tren thi khong bao gio khop.
+   */
+  provider_id: string;
   capabilities: string[];
   context_window: number;
   max_output: number;

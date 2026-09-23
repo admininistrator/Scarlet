@@ -5,7 +5,7 @@ import { useChat } from "../../features/chat/useChat";
 import { ModelPicker } from "../../features/models/ModelPicker";
 import { useModels } from "../../features/models/useModels";
 import { QuotaBar } from "../../features/quota/ThanhQuota";
-import { byokCovers, isSendBlocked } from "../../features/quota/quotaView";
+import { byokCovers, isSendBlocked, selectedProviderId } from "../../features/quota/quotaView";
 import { useQuota } from "../../features/quota/useQuota";
 import { Sidebar } from "../sidebar/Sidebar";
 import { Composer } from "./Composer";
@@ -133,9 +133,9 @@ export function ChatScreen() {
   /*
     Provider cua model SE GUI — quyet dinh luot ay tru quota hay di bang khoa
     rieng (Cam bay ①). Cung `modelHieuLuc` ma `gui()` dat vao `model_id`.
+    KHOA provider, khong phai nhan — B-257, xem `selectedProviderId`.
   */
-  const providerDangChon =
-    danhMuc.models.find((m) => m.id === chat.modelHieuLuc)?.provider ?? null;
+  const providerDangChon = selectedProviderId(danhMuc.models, chat.modelHieuLuc);
   const quotaBlocked = isSendBlocked(quota.block, quota.byokProviders, providerDangChon);
 
   const coThanhTrangThai =

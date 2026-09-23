@@ -35,7 +35,16 @@ _KHA_DUNG = ProviderStatus(available=True, reason=None)
 class PublicModel(BaseModel):
     id: str
     display_name: str
+    #: NHÃN để hiện (`DeepSeek AI`) — **không** dùng để so với thứ gì.
     provider: str
+    #: Khoá provider trong catalog (`deepseek`) — đúng chuỗi mà
+    #: `/settings/keys/{provider}` nhận và `ProviderKeyOut.provider` trả về.
+    #:
+    #: B-257: T-3.11 so khoá BYOK của người dùng với `provider` ở trên — một
+    #: NHÃN — nên phép so không bao giờ khớp và người tự trả tiền bằng khoá
+    #: riêng vẫn bị khoá nút gửi khi hết quota hệ thống. Nhãn để đọc, khoá để
+    #: so; hai vai trò thì hai trường.
+    provider_id: str
     capabilities: list[str]
     context_window: int
     max_output: int
@@ -57,6 +66,7 @@ async def list_models() -> list[PublicModel]:
             id=m.id,
             display_name=m.display_name,
             provider=cat.providers[m.provider].label,
+            provider_id=m.provider,
             capabilities=m.capabilities,
             context_window=m.context_window,
             max_output=m.max_output,

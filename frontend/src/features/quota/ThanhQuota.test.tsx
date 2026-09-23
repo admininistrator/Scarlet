@@ -68,6 +68,7 @@ import {
   isSendBlocked,
   mergeReadings,
   quotaBlock,
+  selectedProviderId,
   type QuotaReading,
 } from "./quotaView";
 import { useQuota } from "./useQuota";
@@ -203,6 +204,31 @@ describe("BYOK", () => {
     await ve(docTai(cuaSo({ remaining_pct: 0, retry_after: 60 })), null);
 
     expect(nutGui()).toBeEnabled();
+  });
+
+  /*
+    B-257 — ba ca tren dua THANG `PROVIDER` vao `isSendBlocked`, nen chung khong
+    do duoc cho `ChatScreen` lay provider tu dau. Ca nay di dung duong ay: mot
+    `ModelRa` hinh dang that cua `GET /models` (nhan KHAC khoa) va mot tap
+    khoa BYOK hinh dang that cua `GET /settings/keys` (khoa catalog).
+  */
+  it("8b. provider cua model lay theo KHOA catalog, khong theo nhan (B-257)", () => {
+    const models = [
+      { id: "deepseek-flash", provider: "DeepSeek AI", provider_id: "deepseek" },
+      { id: "claude-haiku", provider: "Anthropic", provider_id: "anthropic" },
+    ];
+    const khoaRieng = new Set(["deepseek"]);
+    const block = quotaBlock(docTai(cuaSo({ remaining_pct: 0, retry_after: 60 })));
+
+    const provider = selectedProviderId(models, "deepseek-flash");
+
+    expect(provider).toBe("deepseek");
+    expect(isSendBlocked(block, khoaRieng, provider)).toBe(false);
+    expect(byokCovers(khoaRieng, provider)).toBe(true);
+    // Doi chung: model cua provider KHONG co khoa rieng thi van khoa.
+    expect(isSendBlocked(block, khoaRieng, selectedProviderId(models, "claude-haiku"))).toBe(true);
+    // Model khong co trong danh muc ⇒ khong biet provider ⇒ khoa (server se `429`).
+    expect(selectedProviderId(models, "khong-co")).toBeNull();
   });
 });
 
