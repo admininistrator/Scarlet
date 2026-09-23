@@ -64,6 +64,7 @@ Hai file, hai vai trò. **Đừng gộp, đừng chép nội dung của file kia
 | **P1** ⭐ | Chat lõi + resume | 14 | 39 h | ☐ |
 | **P2** | Auth, quota, admin | 20 | 44 h | ☐ |
 | **P3** | Giao diện | 16 | 53.5 h | ☐ |
+| **PS** | Standardize *(chèn giữa P3 và P4 — §7b)* | 20 | 64 h *(+ T-S.19 chưa ước lượng)* | ☐ |
 | **P4** | Ảnh & vision | 7 | 15 h | ☐ |
 | **P5** | Artifacts | 9 | 26 h | ☐ |
 | **P6** | Web tools | 8 | 20 h | ☐ |
@@ -83,6 +84,7 @@ Hai file, hai vai trò. **Đừng gộp, đừng chép nội dung của file kia
 | **M3 — Bạn tự dùng được** ⭐ | T-1.14 | Chat được, F5 không mất chữ. Từ đây trở đi bạn dùng thật hằng ngày |
 | **M4 — Mời người khác được** | T-2.19 | Auth + quota + duyệt đầy đủ. **Trước mốc này không đưa link cho ai** |
 | **M5 — Dùng như sản phẩm** | T-3.12 | Giao diện xong |
+| **M5b — Chuẩn hoá xong** | T-S.18 | Giao diện khớp bản vẽ v2; mọi nút của P4–P9 đã có chỗ và chờ được gắn |
 | **M6 — Đủ tính năng** | T-8.8 | Toàn bộ phạm vi v1 |
 
 ---
@@ -1356,6 +1358,470 @@ Bạn đã yêu cầu ghi rõ Claude Design vào bước nào. Đây là bảy b
 
 ---
 
+## 7b. Phase S — Standardize *(chèn giữa P3 và P4, 2026-09-23)*
+
+**Mục tiêu:** M5b — giao diện khớp bản vẽ v2, và mọi nút của P4–P9 đã có chỗ trên màn hình, chờ được gắn. Kèm ba tính năng nhỏ: đặt tên hội thoại tự động, chọn mức suy luận, hồ sơ người dùng.
+
+**Cái gì và tại sao:** KE-HOACH **§24.2b** (S0–S15). **Hướng dẫn cho người thiết kế:** `docs/standardize-tutorial.md` — thứ tự từng bước, prompt dán vào Claude Design, prompt giao task cho agent.
+
+**Luật riêng của phase này — năm điều:**
+
+1. **Hai file kế hoạch chỉ được chèn thêm, không được sửa** (NQ-107). Những gì Phase S thêm vào hợp đồng chung (endpoint, cột, biến `.env`) sống ở KE-HOACH §24.2b·S14. Với task của phase này, dòng DoD chung *"Endpoint mới đã thêm vào KE-HOACH §18"* (§15) được thoả bằng một dòng trong bảng S14 — `§18` không được sửa.
+2. **Bản vẽ v1 là bản của P3; bản vẽ lại mang hậu tố `-v2`.** Hai màn mới là **T-HD8** (sáu màn auth) và **T-HD9** (trang Cài đặt). Link ghi ở `design/README.md`, mục v2 (NQ-108). Quy tắc phân vai của §3 không đổi: agent **không tự đổi màu, spacing, bố cục**.
+3. **Backend không chờ bản vẽ nào.** T-S.0 … T-S.8 chạy trong lúc người dùng vẽ. Mỗi task FE (T-S.9 … T-S.17) chờ đúng bản vẽ của vùng nó dựng — cột "Phụ thuộc" ghi rõ.
+4. **T-S.1 (đổi tên) đi trước mọi thứ**, để không task nào viết thêm vào một file sắp bị đổi tên.
+5. **Nút của phase tương lai là `ComingSoon` và không có hành vi** (§24.2b·S12). Mỗi nút mang `data-planned="<task sẽ gắn>"`; bảng §7b.2 là danh sách chuẩn.
+
+**Ước lượng: 64 h cho 19 task, cộng T-S.19 chưa ước lượng** (người dùng giao nội dung sau). Nền: tốc độ P3 đo được bám sát ước lượng — T-3.9 3 h/3 h, T-3.10 3.5 h/3 h, T-3.11 3 h/2 h, T-3.12 6 h/7 h — nên ở đây không nhân hệ số. Hai task có bề mặt mới thật (T-S.2 thí nghiệm, T-S.7 stream thứ hai) được ước rộng tay.
+
+**DoD của phase:** KE-HOACH §24.3 dòng PS.
+
+---
+
+### 7b.1 Việc của NGƯỜI trong Phase S — tám bản vẽ
+
+Prompt đầy đủ cho từng bước nằm ở `docs/standardize-tutorial.md`. Bảng này chỉ trả lời "làm khi nào" và "chặn task nào".
+
+| ID | Bước | Làm khi | Đầu ra giao cho agent | Chặn |
+|---|---|---|---|---|
+| **T-HD1-v2** | Token bổ sung: bảng màu avatar, trạng thái "nút chờ", luật con trỏ, đường kẻ trong menu | Sau T-S.0 | Phần `theme.css` bổ sung + bảng tương phản bổ sung | T-S.9 |
+| **T-HD2-v2** | Khung chính v2: màn nháp (ô nhập giữa màn), ô nhập độc lập, header mới, sidebar nhóm theo ngày, khối + menu tài khoản, nút chờ của ô nhập / header / menu hội thoại | Sau T-HD1-v2 | Artboard + mã component | T-S.10, T-S.12, T-S.13 |
+| **T-HD9** | Trang Cài đặt chia tab (Tài khoản · Giao diện · Model · Khoá API · Mức sử dụng) | Sau T-HD1-v2 | Mã component | T-S.11 |
+| **T-HD8** | Sáu màn auth, một bố cục chung | Sau T-HD1-v2 | Mã component | T-S.16 |
+| **T-HD3-v2** | Bong bóng v2: một nút Thử lại, chip model · mức, "Đọc to", thành phần chờ | Sau **T-S.3** (nhãn mức thật) | Mã component | T-S.15 |
+| **T-HD4-v2** | Model Picker v2: Model hiện tại · Thinking Effort › · More models › · Giá | Sau **T-S.3** (dữ liệu catalog v4) | Mã component | T-S.14 |
+| **T-HD7-v2** | Admin v2: khoản "Đặt tên", màn Model thấy đường đi thật, năm chỗ lệch của B-262 | Sau T-HD1-v2 | Mã component | T-S.17 |
+| **T-HD5-v2** | Chuyển động v2: ô nhập trượt, viền focus hiện dần, tiêu đề chảy, thanh quota chạy từ 0, menu con trượt, lò xo của icon | **Cuối cùng** — sau T-HD2-v2, T-HD4-v2, T-HD9 | Token + class trong `theme.css`; hằng lò xo cho `lib/motion.ts` | T-S.9 |
+
+### 7b.2 Bảng nút chờ — vị trí, bản vẽ, task dựng, task sẽ gắn
+
+"Mount" = hiện trên màn hình hôm nay dưới dạng `ComingSoon`. "Dựng sẵn" = component có trong code và có test render với fixture, nhưng chưa mount vì chưa có dữ liệu. Cột đầu là đúng giá trị của `data-planned`.
+
+| `data-planned` | Nút / thành phần | Vị trí | Bản vẽ | Dựng ở | Trạng thái |
+|---|---|---|---|---|---|
+| `T-4.7` | Đính kèm ảnh/tệp | Ô nhập | T-HD2-v2 | T-S.10 | mount |
+| `T-4.5` | Trạng thái "model này không đọc được ảnh" của nút đính kèm | Ô nhập | T-HD2-v2 | T-S.10 | vẽ, P4 bật |
+| `T-4.7` | Khay xem trước tệp + nút xoá trước khi gửi | Trên ô nhập | T-HD2-v2 | T-S.10 | dựng sẵn |
+| `T-4.7` | Ảnh / tệp trong bong bóng người dùng | Bong bóng user | T-HD3-v2 | T-S.15 | dựng sẵn |
+| `T-4.5` | Cảnh báo "model không có vision mà hội thoại đã có ảnh" | Model Picker | T-HD4-v2 | T-S.14 | chỗ chừa (T-3.6) |
+| `T-6.7` | Công tắc "Tìm web" | Ô nhập | T-HD2-v2 | T-S.10 | mount |
+| `T-6.7` | Chip "Đang tìm web…" + chip nguồn có favicon | Bong bóng assistant | T-HD3-v2 | T-S.15 | dựng sẵn |
+| `T-7.9` | Chọn skill | Ô nhập | T-HD2-v2 | T-S.10 | mount |
+| `T-7.9` | Chip "Đang chạy code…" | Bong bóng assistant | T-HD3-v2 | T-S.15 | dựng sẵn |
+| `T-5.4` | Mở panel artifact | Header | T-HD2-v2 | T-S.12 | mount |
+| `T-5.3` | Thẻ artifact | Bong bóng assistant | T-HD3-v2 | T-S.15 | dựng sẵn |
+| `T-8.4` | Mic — nhập bằng giọng nói | Ô nhập | T-HD2-v2 | T-S.10 | mount *(T-8.4 ẩn trên Firefox)* |
+| `T-8.4` | Đọc to | Hàng nút dưới câu trả lời | T-HD3-v2 | T-S.15 | mount |
+| `T-8.1` | Chia sẻ | Menu hàng hội thoại | T-HD2-v2 | T-S.13 | mount |
+| `T-8.7` | Xuất (Markdown / JSON) | Menu hàng hội thoại | T-HD2-v2 | T-S.13 | mount |
+| `B-264` | Ngôn ngữ | Menu tài khoản | T-HD2-v2 | T-S.12 | mount |
+| `B-264` | Trợ giúp | Menu tài khoản | T-HD2-v2 | T-S.12 | mount |
+| `B-264` | Nâng cấp gói | Menu tài khoản | T-HD2-v2 | T-S.12 | mount |
+| `B-265` | Tải ảnh avatar lên | Cài đặt · Tài khoản | T-HD9 | T-S.11 | mount |
+
+> **Ba mục ngoài P4–P9 có trong kế hoạch nhưng người dùng chọn KHÔNG làm nút chờ** (NQ-121): công tắc bật/tắt model ở admin (B-258), "Chi tiêu của tôi" (`GET /settings/usage`, §18.4), link trang quyền riêng tư (T-9.6).
+
+---
+
+### T-S.0 — Mở phase: mục v2 trong `design/README.md`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-3.12 ✅ · **Ước lượng:** 0.5h
+- **KH:** §24.2b·S1, S13 · NQ-108
+- **Việc:**
+  - [ ] Thêm tiêu đề `## v1 — Phase 3 (bản gốc)` phía trên bảng hiện có của `design/README.md` — **không** sửa một dòng nào của bảng ấy
+  - [ ] Thêm mục `## v2 — Phase S (Standardize)`: bảng tám hàng T-HD1-v2, T-HD2-v2, T-HD3-v2, T-HD4-v2, T-HD5-v2, T-HD7-v2, T-HD8, T-HD9; ba cột `Task · Link Claude Design · Ngày chốt`, hai cột sau để trống cho người dùng điền
+  - [ ] Ghi dưới bảng v2 hash commit hiện tại — **mốc code của v1**; T-S.18 so từ mốc này
+- **Xong khi (DoD):**
+  - [ ] `git diff --stat` chỉ có `design/README.md`
+  - [ ] `git diff design/README.md` chỉ có dòng **thêm** — bảng v1 không đổi một byte
+- **Cạm bẫy:**
+  - ① `design/README.md` có thể đang mang thay đổi chưa commit của người dùng (có, ngày 2026-09-23). **Hỏi trước khi chạm**; không stash, không ghi đè.
+
+---
+
+### T-S.1 — 🔒 Đổi tên định danh tiếng Việt không dấu — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.0 · **Ước lượng:** 6h
+- **KH:** §24.2b·S2 · `CLAUDE.md` mục "Không bao giờ", dòng cuối · NQ-109 (thay NQ-87)
+- **Việc:**
+  - [ ] `scripts/check_identifiers.py`: trích định danh bằng `ast` cho Python và bằng một bộ tách token cho TS/TSX (bỏ qua chuỗi, comment, đối số của `t("…")`); so từng định danh (tách camelCase/snake_case) với một danh sách âm tiết tiếng Việt không dấu đặc trưng, cộng một danh sách cho phép **có ghi lý do từng dòng**. In `file:dòng: tên`. Gắn vào `make lint`
+  - [ ] Chạy nó để lập danh sách, rồi đổi tên: biến, hàm, lớp, prop, **tên file** (`NutDuoiCauTraLoi.tsx`, `ThanhQuota.tsx`, `FormDangNhap.tsx`, `macDinh.ts`, `HoatAnh.test.tsx`, …), **tên test** — trong `backend/`, `frontend/src/`, `scripts/`
+  - [ ] Giữ nguyên và đưa vào danh sách cho phép: tên trường trên dây của API (ví dụ `streams_dang_chay`, NQ-70 ②), khoá `vi.json`, tên bảng/cột, khoá Redis
+  - [ ] Ghi bảng ánh xạ `cũ → mới` vào `scripts/renames-T-S.1.tsv`: `tasks.md` và KE-HOACH vẫn nhắc tên cũ (vùng cấm sửa), agent sau cần một chỗ tra
+- **Xong khi (DoD):**
+  - [ ] `python scripts/check_identifiers.py` → `0` phát hiện. **Ca âm:** thêm tạm `const dangTai = 1;` vào một `.tsx` → lệnh **đỏ**, in đúng `file:dòng`; gỡ ra sau
+  - [ ] `cd backend && .venv/bin/pytest` xanh và **số test không giảm** — dán hai con số trước/sau; FE `pnpm test` cũng vậy
+  - [ ] `make test-resume` đạt (S3) — luồng chạm nhiều file nhất
+  - [ ] `git diff --stat -M` cho thấy file được **đổi tên** (`R`) chứ không xoá-rồi-thêm
+  - [ ] JSON của `/auth/me`, `/admin/system`, `/conversations/{id}` **giống hệt** trước khi đổi (`jq -S` hai lần, `diff` rỗng)
+  - [ ] `make lint && make check-hardcode` sạch
+- **Cạm bẫy:**
+  - ① **Commit đổi tên thuần tuý.** Một dòng đổi hành vi lọt vào đây là thứ `git bisect` không bao giờ tìm ra. Thấy bug trong lúc đổi tên ⇒ ghi Backlog, **không** sửa.
+  - ② **Pydantic: tên thuộc tính là tên trường JSON.** Đổi `streams_dang_chay` trong model là đổi API. `Field(alias=…)` giữ được tên dây nhưng đó là thay đổi có hành vi — để nguyên, cho vào danh sách cho phép.
+  - ③ **Khoá `vi.json` là chuỗi, không phải định danh**, và `t()` gõ kiểu theo `keyof` (T-3.1b). Script phải bỏ qua đối số của `t()`, nếu không nó đòi đổi `chat.phimGui` — một thay đổi chạm cả file dịch.
+  - ④ **Chạy trên cây sạch.** Đổi tên hàng trăm chỗ trộn với thay đổi dở của người khác là một conflict không ai gỡ nổi.
+  - ⑤ Comment viết tiếng Việt không dấu **không** thuộc phạm vi — luật nói về định danh. Không sửa chúng ở đây.
+
+---
+
+### T-S.2 — 🔒⭐ Thí nghiệm: mỗi mức suy luận có thật sự tới được model không — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.1 · **Ước lượng:** 3h
+- **KH:** §24.2b·S3b, §9.1, §9.5, Phụ lục E · NQ-118 · **Cần người:** bật 9Router **và** Sub2API trên host Windows suốt task (T-H2)
+- **Việc:**
+  - [ ] **Ghim image LiteLLM** thay cho `main-latest`: đọc version của container đang chạy, ghi tag cụ thể vào `docker-compose.yml`. Cách LiteLLM dịch `reasoning_effort` đổi theo version (issue BerriAI/litellm#27439) — không ghim thì kết quả đo hôm nay không còn đúng sau lần `pull` tới
+  - [ ] `scripts/probe_reasoning.py`: với mỗi (model × mức × đường) gửi **một** câu hỏi cố định, in `completion_tokens`, `reasoning_tokens`, độ dài chữ suy luận, mã HTTP. Đường **system** qua LiteLLM cho cả năm model; đường **BYOK** gọi thẳng provider cho `deepseek` và `anthropic` (hai provider `byok_supported`)
+  - [ ] Thử cả dạng OpenAI (`reasoning_effort`) lẫn dạng gốc của provider trong `extra_body` (`thinking`), vì LiteLLM có thể gộp mức
+  - [ ] 9Router: thử `reasoning_effort` trên alias hiện có **và** các alias hậu tố `-medium` / `-high` (thêm tạm vào `litellm.config.yaml`)
+  - [ ] Ghi bảng kết quả vào "Ghi nhận" của task, kèm khối `reasoning` đề xuất cho từng model — T-S.3 chép nguyên
+- **Xong khi (DoD):**
+  - [ ] Bảng đủ mọi ô (model × mức × đường), mỗi ô **hai** lần đo; mức được giữ lại phải cho `reasoning_tokens` khác rõ mức kề nó ở cả hai lần
+  - [ ] **Ca âm:** gửi `reasoning_effort: "ultra-bogus"` qua LiteLLM → ghi lại nó bị **bỏ im lặng** (`200`, token như mặc định) hay bị từ chối. Đây là bằng chứng cho luật "không đo thì không vào catalog"
+  - [ ] Claude Haiku: một lượt bật thinking **kèm** `temperature` khác mặc định → ghi mã lỗi hoặc việc bị bỏ qua — quyết `omit_temperature`
+  - [ ] Tổng chi phí thí nghiệm ≤ **0.10 USD**: `SELECT sum(cost_usd) FROM usage_events WHERE created_at > '<mốc bắt đầu>'`, dán kết quả
+  - [ ] `docker compose --profile core --profile tools ps` — `litellm` healthy với tag đã ghim
+- **Cạm bẫy:**
+  - ① **`drop_params: true` biến "sai" thành "không có tác dụng".** `200 OK` không chứng minh gì; chỉ `reasoning_tokens` đổi mới là bằng chứng.
+  - ② **Đường BYOK của Anthropic là lớp tương thích OpenAI:** tài liệu ghi `reasoning_effort` bị bỏ qua và chữ suy luận **không** được trả về. Thinking bật được qua `thinking` trong `extra_body`, nhưng khối "Suy luận" sẽ rỗng trên đường này (B-267) — ghi lại để T-S.6 xử lý.
+  - ③ **Grok qua Sub2API:** B-250 đã thấy Sub2API bỏ qua `max_tokens`; có thể nó bỏ qua cả `reasoning_effort`. Nếu vậy `grok-4.6` **không** có khối `reasoning` — không đoán thay.
+  - ④ **Gemini 3.8 Flash báo lỗi với `minimal`** và không tắt được suy luận: không có mức `off` cho model này.
+  - ⑤ **Task tốn tiền thật:** câu hỏi ngắn, `max_tokens` vừa đủ, DeepSeek chạy trong khung thấp điểm nếu được.
+
+---
+
+### T-S.3 — Catalog v4: provider hiển thị, ẩn đường trung gian, khối `reasoning`, `title_model`, giá trong `GET /models`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.2 · **Ước lượng:** 4h
+- **KH:** §24.2b·S3, §9.2, §9.3, §19.1 · NQ-118, NQ-119, NQ-120
+- **Việc:**
+  - [ ] Schema (`app/config/catalog.py`): `version: 4`; `providers[].user_visible`; `models[].display_provider`; `models[].reasoning` (`default`, `options[]` với `id` ∈ `off/low/medium/high/xhigh/max`, `params`, tuỳ chọn `byok_params` / `alias` / `omit_temperature`); khoá cấp cao `title_model`
+  - [ ] Luật kiểm lúc nạp — hỏng thì không boot và in đúng `id`: provider `user_visible: false` ⇒ model của nó **phải** có `display_provider`; `reasoning.default` ∈ `options`; `alias` phải có trong `config/litellm.config.yaml` (test đọc cả hai file, cùng khuôn `test_compose_goi_dung_module`); `title_model.model` tồn tại và `enabled`
+  - [ ] Dữ liệu `config/model_catalog.json`: khối `reasoning` **đúng bảng T-S.2**; `display_provider` (DeepSeek · Anthropic · Google AI · xAI · Alibaba Qwen — người dùng sửa được trong file); gỡ badge `9Router`, gỡ badge `Self-host` của `grok-4.6`; `display_name` không còn "(qua 9Router)"; `user_visible: false` cho `ninerouter`, `sub2api`
+  - [ ] `GET /models`: `provider` = provider hiển thị; thêm `reasoning` (chỉ `id` + `default`), `pricing` (USD/1M dạng chuỗi, khung đang áp dụng + khung còn lại nếu có `pricing_schedules`, `estimated`), `pricing_mode`. `provider_id` giữ nguyên — BYOK và quota cần nó
+  - [ ] `unavailable_reason`: không chèn `label` của provider `user_visible: false` — một câu chung
+  - [ ] **`docs/RUNBOOK-them-provider.md`** *(người dùng cho phép đích danh — NQ-118)*: khai `display_provider` / `user_visible`; thêm một mức suy luận (đo bằng `scripts/probe_reasoning.py` trước, khai sau); chỉnh trần vào `context_window` và trần ra `max_output`, kèm ràng buộc: `max_output` phải lớn hơn ngân sách thinking lớn nhất của model, và `MESSAGE_MAX_CHARS` phải nằm dưới ngân sách token nhỏ nhất của catalog (B-208)
+- **Xong khi (DoD):**
+  - [ ] `curl -sk https://localhost/api/v1/models -b <cookie user> | grep -ciE "9router|sub2api"` → `0`
+  - [ ] **Ca âm:** xoá `display_provider` của `nr-gemini-flash` → `docker compose up -d api` → **không boot**, log in đúng `nr-gemini-flash`; trả lại, rồi `restart nginx` (NQ-86)
+  - [ ] `pytest tests/config/` — ≥ 8 ca mới, gồm: `default` không thuộc `options` ⇒ lỗi; `alias` vắng trong `litellm.config.yaml` ⇒ lỗi; `id` ngoài bộ từ vựng ⇒ lỗi
+  - [ ] S7 vẫn chạy: thêm một model có khối `reasoning` → `POST /admin/catalog/reload` → `GET /models` có nó kèm danh sách mức, không rebuild
+  - [ ] Giá `deepseek-flash` trong `GET /models` khớp `model_catalog.json` từng chữ số, và khung đang áp dụng đổi đúng khi giả giờ sang khung thấp điểm (đồng hồ giả)
+  - [ ] `make check-hardcode` sạch — không chuỗi tên model/provider mới nào trong `.py`
+- **Cạm bẫy:**
+  - ① **`params` không bao giờ rời backend.** Đó là tham số gửi provider, có thể mang cả ngân sách token; FE chỉ cần `id`.
+  - ② **Admin vẫn phải thấy 9Router.** Màn Model của T-3.12 đang đọc `GET /models`; sau task này tên đường đi biến khỏi đó. `GET /admin/models` (T-S.8) là chỗ trả lại. Giữa hai task, màn Model tạm chỉ thấy provider hiển thị — ghi vào báo cáo, **đừng** "vá nhanh" bằng cách trả tên đường đi trong `/models`.
+  - ③ **Tiền là chuỗi** từ catalog tới màn hình (T-2.16, T-3.11 ③).
+  - ④ Loader có `extra="forbid"`: catalog v4 trên backend cũ là không boot — đúng, nhưng thông điệp phải nói rõ "catalog v4 cần backend từ T-S.3".
+
+---
+
+### T-S.4 — Model Picker tự nạp: đo provider ngầm, request không bao giờ chờ
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.3 · **Ước lượng:** 2.5h
+- **KH:** §24.2b·S5, §9.3, RR-5 · T-3.6 Cạm bẫy ② · NQ-113
+- **Việc:**
+  - [ ] `core/provider_health.py`: một lượt đo lúc `api` khởi động (lifespan, chờ tối đa bằng trần đo) + một tác vụ nền làm tươi mỗi TTL. `provider_statuses()` **chỉ đọc** bộ nhớ, không bao giờ `await` một lượt đo
+  - [ ] `TTL_S`, `PROBE_TIMEOUT_S` chuyển vào `Settings` + `.env.example` (A3, A4)
+  - [ ] `GET /models` trả `checked_at` — thời điểm backend đo. Gỡ đoạn "vùng cấm" trong docstring của `useModels.ts`: S14 đã cho phép trường này
+  - [ ] FE: picker hiện trạng thái đang tải thay cho "Chưa có mô hình nào" khi lần đọc đầu chưa xong; mở picker khi `checked_at` cũ hơn TTL ⇒ hỏi lại ngầm, danh sách cũ vẫn bấm được
+- **Xong khi (DoD):**
+  - [ ] 9Router **im lặng** (chặn gói, không tắt tiến trình — đúng ca đo 2026-09-23): 5 lần `curl -w '%{time_total}'` cách nhau 31 s → **mọi** lần < 0.3 s. Dán cả hai con số trước bản vá (5.09 s / 5.06 s)
+  - [ ] `docker compose restart api` → request đầu tiên sau khi `api` healthy < 0.3 s, `checked_at` khác `null`
+  - [ ] Bật lại 9Router → trong ≤ TTL + 5 s, mở picker (không F5) → model của 9Router sáng lại
+  - [ ] `pytest tests/core/test_provider_health.py` với đồng hồ giả: tác vụ nền ném lỗi ⇒ vòng lặp **vẫn chạy** lượt sau; `POST /admin/catalog/reload` ⇒ lượt đo kế dùng catalog mới
+- **Cạm bẫy:**
+  - ① **Tác vụ nền chết im lặng là lỗi đáng sợ nhất ở đây.** Một `asyncio.create_task` ném ngoại lệ một lần là dừng mãi, và `available` đóng băng ở giá trị cuối. Bọc từng vòng, log lỗi, có test đúng ca này.
+  - ② **Mỗi tiến trình `api` có bộ nhớ riêng:** N worker uvicorn là N lượt đo mỗi TTL. Với R1 thì chấp nhận được — ghi lại, đừng dựng Redis cho nó.
+  - ③ **Test không được mở tác vụ nền thật** — một vòng lặp vô hạn trong `pytest` là một bộ test treo. Có công tắc qua `Settings` hoặc fixture.
+  - ④ Lượt đo lúc khởi động làm `api` boot chậm tối đa một trần đo khi 9Router im lặng; `start_period` của healthcheck phải chịu được — đo.
+
+---
+
+### T-S.5 — Backend hồ sơ + tuỳ chọn: tên hiển thị, avatar, mức suy luận đã nhớ
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.3 · **Ước lượng:** 2.5h
+- **KH:** §24.2b·S4, S10, §18.1, §18.4 · T-3.0 (khuôn `/auth/me`) · NQ-116, NQ-118
+- **Việc:**
+  - [ ] `PUT /settings` nhận thêm: `display_name` (trần độ dài ở `Settings`, biến mới), `avatar_color` (tên màu `^[a-z0-9-]{1,32}$` — backend **không** biết bảng màu; FE rơi về màu mặc định khi gặp tên lạ), `reasoning_prefs` (`{model_id: level_id}`, kiểm từng cặp theo catalog lúc **ghi**)
+  - [ ] Lưu `avatar_color` và `reasoning_prefs` trong `user_settings.prefs_json` (bảng có từ migration 0001; tạo hàng khi ghi lần đầu); `display_name` ở cột `users.display_name` đã có
+  - [ ] `GET /auth/me` trả thêm `avatar_color`, `reasoning_prefs`, `display_name_max_chars` (`display_name`, `tier_name`, `last_login_at` nếu chưa có thì thêm)
+  - [ ] Đọc: một cặp `model → mức` không còn hợp lệ vì catalog vừa sửa ⇒ **bỏ qua** cặp đó, không lỗi — cùng lý lẽ Cạm bẫy ③ của T-3.0
+- **Xong khi (DoD):**
+  - [ ] `curl -X PUT /settings` với đủ các trường → `/auth/me` trả đúng từng giá trị; gọi lại sau F5 vẫn đúng
+  - [ ] **Ca PUT thay cả tài nguyên:** `PUT {"display_name":"A"}` (vắng `default_model`) ⇒ `default_model` về `null`. Test ghi rõ đây là hành vi **có chủ ý** của §18.4, để T-S.11 biết phải gửi đủ
+  - [ ] `reasoning_prefs: {"ol-qwen-small": "high"}` ⇒ `400 REASONING_UNSUPPORTED`; `{"deepseek-flash": "high"}` ⇒ `200`
+  - [ ] **Ca IDOR:** `grep -n user_id app/api/v1/settings.py` — `user_id` chỉ đến từ dependency và đi thẳng vào `WHERE`
+  - [ ] `pytest tests/api/test_settings.py` xanh, số test tăng
+- **Cạm bẫy:**
+  - ① **Hai chỗ lưu "cài đặt" sau task này:** `users.default_model` (NQ-79) và `user_settings.prefs_json`. Không dời `default_model` sang — đó là một migration dữ liệu không ai yêu cầu. Docstring ghi rõ cái gì ở đâu.
+  - ② `display_name` rỗng ⇒ lưu `NULL`, không lưu chuỗi rỗng. FE hiện **nguyên email** khi `NULL` (NQ-116).
+  - ③ Tên hiển thị hiện ở sidebar và ở admin: đếm độ dài theo ký tự như `MESSAGE_MAX_CHARS`, và FE không bao giờ render nó như HTML.
+
+---
+
+### T-S.6 — ⭐ Mức suy luận đầu-cuối ở backend + một nút Thử lại
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.3, T-S.5 · **Ước lượng:** 3.5h
+- **KH:** §24.2b·S4, §7.4, §9.1, §9.6, §10.2 · B-33 · NQ-118
+- **Việc:**
+  - [ ] Migration: `messages.reasoning_effort TEXT` nullable (cùng khuôn hai cột của T-3.7a); trả trong đường đi (`GET /conversations/{id}`, `/siblings`)
+  - [ ] `POST …/messages` và `POST /messages/{id}/retry` nhận `reasoning_effort`; mức không có ở model hiệu lực ⇒ `400 REASONING_UNSUPPORTED` **trước** khi tạo message
+  - [ ] Giải mức: body › `reasoning_prefs[model]` › `reasoning.default` › không có. Retry vắng `reasoning_effort` ⇒ dùng lại mức của câu trả lời đang thử lại (API giữ ngữ nghĩa cũ; FE của T-S.15 luôn gửi mức trên picker)
+  - [ ] Worker: trộn `params` (hoặc `byok_params` trên đường BYOK) vào `extra`; `alias` thay tên model gửi LiteLLM; `omit_temperature` bỏ `temperature`. Ghi `messages.reasoning_effort`; event `start` mang thêm `reasoning_effort`
+- **Xong khi (DoD):**
+  - [ ] `pytest tests/workers/test_generate.py` — mỗi loại tuỳ chọn (`params` / `byok_params` / `alias` / `omit_temperature`) một ca, khẳng định trên **body thật** gửi đi (adapter giả ghi lại request)
+  - [ ] Stack thật, `deepseek-flash`: gửi `low` rồi `max` → `messages.reasoning_effort` là `low`, `max`; `reasoning_tokens` lệch nhau đúng chiều T-S.2 đã đo
+  - [ ] **Ca âm:** `reasoning_effort: "high"` với `ol-qwen-small` ⇒ `400`, `SELECT count(*) FROM messages` **không đổi**
+  - [ ] B-33 vẫn đứng: context gửi ở lượt 2 **không** chứa suy luận của lượt 1 (test hiện có của `context.py` vẫn xanh)
+  - [ ] Retry bằng model khác + mức khác → `psql`: hai anh em cùng `parent_id`, khác `model_id` và `reasoning_effort` (UC-04 dòng 4)
+- **Cạm bẫy:**
+  - ① **Anthropic + thinking + `temperature`:** T-S.2 quyết có cần `omit_temperature` không. Đừng để `LLMClient` luôn gửi `temperature` như hôm nay rồi trông chờ LiteLLM tự bỏ.
+  - ② **Khối "Suy luận" rỗng trên đường BYOK của Anthropic** (B-267): `messages.reasoning` phải là `NULL`, không phải chuỗi rỗng, để FE không vẽ một khối gập được mà bên trong không có gì.
+  - ③ **P6 sẽ va vào B-33** (S4, B-266). Không làm ở đây.
+  - ④ `est_max` của §10.2 **không** đổi: thinking nằm trong `max_tokens`. Nếu T-S.2 thấy provider nào tiêu vượt `max_tokens` (Sub2API, B-250), model ấy là `unmetered` và không qua cửa quota — ghi lại, không vá công thức.
+
+---
+
+### T-S.7 — 🔒⭐ Đặt tên hội thoại tự động: job `title`, stream riêng, SSE — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.3, T-S.6 · **Ước lượng:** 5h
+- **KH:** §24.2b·S6, §7.2–§7.4, §10.2, §10.3, §23 (`workers/title.py`) · A1, A7 · NQ-110
+- **Việc:**
+  - [ ] Migration: `usage_events.purpose TEXT NOT NULL DEFAULT 'chat' CHECK (purpose IN ('chat','title'))`
+  - [ ] `POST …/messages`: câu hỏi **đầu tiên** của hội thoại có `title IS NULL` ⇒ enqueue `title` (job id `title:{conversation_id}`) ngay sau `generate`. Handler vẫn chỉ tạo record + enqueue (A1)
+  - [ ] `workers/title.py`: dựng prompt từ `config/prompts/title.jinja` + câu hỏi đầu (cắt theo trần ở `Settings`), gọi `title_model` bằng **system key** ở mức suy luận của `title_model`, XADD `start` / `delta` / `done` / `error` vào `stream:title:{conversation_id}`; xong ⇒ `UPDATE … SET title = :t WHERE id = :id AND title IS NULL`
+  - [ ] `record_usage(purpose='title')`: INSERT `usage_events`, **không** `ZADD` hai cửa sổ; `rebuild_quota` chỉ đọc `purpose = 'chat'`
+  - [ ] `GET /conversations/{id}/title/stream`: dùng lại consumer §7.3 (XRANGE → XREAD, `Last-Event-ID`), lọc `user_id` trong SQL; thêm đường này vào location SSE của `nginx.conf`, giữ `proxy_buffering off`
+- **Xong khi (DoD):**
+  - [ ] Hội thoại mới trên stack thật → `curl -N -sk https://localhost/api/v1/conversations/<id>/title/stream -b <cookie>` thấy `start`, **nhiều** `delta` đến rời nhau, rồi `done` mang tiêu đề — **qua Nginx** (C1)
+  - [ ] `psql`: `conversations.title` có giá trị; `usage_events` có đúng **1** dòng `purpose='title'`, `key_source='system'`, `cost_usd > 0`
+  - [ ] **Quota không bị trừ:** tổng hai ZSET `quota:5h:{uid}` và `quota:7d:{uid}` trước/sau chỉ tăng đúng chi phí của lượt **chat**; rồi `app/cli.py rebuild-quota <uid>` (hoặc lệnh tương đương đang có) → tổng **không đổi**. Dán cả ba con số
+  - [ ] **Không ghi đè tay người:** đổi tên hội thoại trong lúc job còn chạy (model giả chậm) → tên của người dùng còn nguyên
+  - [ ] **Ca IDOR:** user B gọi stream tiêu đề của user A ⇒ `404`
+  - [ ] Câu hỏi thứ hai của cùng hội thoại **không** enqueue `title`; hai request đầu song song (double-click) chỉ ra **một** job
+  - [ ] Job lỗi (model giả ném) ⇒ event `error`, `title` vẫn `NULL`, worker sống
+- **Cạm bẫy:**
+  - ① **`rebuild_quota` là chỗ dễ quên nhất.** Bỏ `ZADD` thì quota hôm nay đúng; nhưng lần đầu Redis mất dữ liệu (`docker compose down -v`, §10.3), `rebuild_quota` đọc lại `usage_events` và trừ oan mọi lượt đặt tên. DoD dòng 3 tồn tại vì vậy.
+  - ② **Chỗ nào đang quét `stream:*`?** `streams_dang_chay` của `/admin/system` và reaper có thể đếm/quét theo tiền tố; `stream:title:` sẽ lọt vào con số "stream đang chạy". Grep trước khi chốt tên khoá.
+  - ③ **Nginx chọn location theo regex.** Đường mới không khớp location SSE thì chữ im lặng rồi trả một cục (C1). Chỉ `curl -N` qua `https://localhost` mới bắt được.
+  - ④ **Không trừ quota không có nghĩa là không giới hạn:** một lượt mỗi hội thoại, và hội thoại chỉ ra đời khi câu đầu đã qua cửa quota + rate limit. Đừng mở đường tạo hội thoại nào đi vòng qua cửa ấy.
+  - ⑤ **A7:** `price_snapshot` của dòng `title` đóng băng giá lúc gọi, như mọi dòng khác.
+
+---
+
+### T-S.8 — Backend mở đường cho FE: `?pinned=`, `/admin/usage` theo `purpose`, `GET /admin/models`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.7 · **Ước lượng:** 2.5h
+- **KH:** §24.2b·S3a, S6, S8, S14, §16.3, §18.2, §18.5 · NQ-112, NQ-119
+- **Việc:**
+  - [ ] `GET /conversations?pinned=true` ⇒ mọi hội thoại ghim, một lần, không `next_cursor` (trần ở `Settings`; vượt ⇒ trả đúng trần kèm `truncated: true`); `?pinned=false` ⇒ danh sách phân trang còn lại; vắng tham số ⇒ như hôm nay
+  - [ ] `/admin/usage`: thêm phần tách theo `purpose` (`chat` / `title`) ở tổng, theo ngày, theo user, theo model — hai cột `metered` / `unmetered` hiện có giữ nguyên
+  - [ ] `GET /admin/models`: từng model kèm provider hiển thị **và** đường đi thật (label provider), health, `enabled`. Chỉ admin
+- **Xong khi (DoD):**
+  - [ ] Ghim nhiều hơn một trang hội thoại → `?pinned=true` trả **đủ** trong một response; `?pinned=false` qua hai trang không có hội thoại ghim nào và không trùng lặp
+  - [ ] `curl` bằng cookie user thường vào `/admin/models` và `/admin/usage` ⇒ `403 ADMIN_REQUIRED`
+  - [ ] Sau ít nhất một lượt đặt tên: `/admin/usage` trả phần `title` khác 0, và **tổng** vẫn bằng `SUM(cost_usd)` của `usage_events` trong cửa sổ — dán cả hai
+  - [ ] `pytest tests/api/test_conversations.py tests/api/test_admin.py` xanh, gồm ca IDOR cho `?pinned=true` (chỉ thấy hội thoại của mình)
+- **Cạm bẫy:**
+  - ① **Lọc `user_id` trong câu SQL**, kể cả nhánh `pinned=true` không phân trang (CLAUDE.md "Không bao giờ").
+  - ② Con trỏ của `pinned=false` vẫn là `updated_at` (T-3.3 ②): chỉ thêm `pinned = false` vào `WHERE`, không đổi `ORDER BY`.
+
+---
+
+### T-S.9 — Áp `theme.css` v2 (T-HD1-v2 + T-HD5-v2) + ba thứ dùng chung: luật con trỏ, `ComingSoon`, `Icon`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD1-v2, T-HD5-v2, T-S.1 · **Ước lượng:** 3.5h
+- **KH:** §24.2b·S9, S10, S12, §19.1 · T-3.2, T-3.9 · NQ-117, NQ-121
+- **Việc:**
+  - [ ] Chép token mới của T-HD1-v2 (bảng màu avatar, trạng thái nút chờ…) và T-HD5-v2 (ô nhập trượt, viền focus hiện dần, tiêu đề chảy, thanh quota chạy từ 0, menu con trượt) vào `frontend/src/styles/theme.css` — **cả hai** khối sáng/tối; `make sync-theme` / `check-theme` như T-3.2
+  - [ ] `@layer base`: `cursor: pointer` cho mọi phần tử bấm được; `cursor: not-allowed` cho `:disabled` và `[aria-disabled="true"]`
+  - [ ] `components/ui/ComingSoon.tsx`: `aria-disabled="true"`, tooltip "Sắp có", prop `planned` **bắt buộc** ⇒ `data-planned`, không nhận `onClick`
+  - [ ] `pnpm add lucide`; `components/ui/Icon.tsx` bọc `MorphIcon` của `morphicons`: luôn `reducedMotion="user"`, lò xo lấy từ `lib/motion.ts` (hằng số của T-HD5-v2)
+- **Xong khi (DoD):**
+  - [ ] Hai `grep` của T-3.2 (màu) và T-3.9 (thời lượng) vẫn **rỗng** trên `components/` + `features/`
+  - [ ] Chrome: `getComputedStyle(el).cursor` là `"pointer"` cho nút "Hội thoại mới", tên hội thoại, công tắc Sáng/Tối; là `"not-allowed"` cho một `ComingSoon`
+  - [ ] `pnpm test src/components/ui/` — `ComingSoon`: bấm **không** gọi gì, có `data-planned`, tooltip đúng chữ; `Icon`: `matchMedia` reduce ⇒ không có khung hình trung gian
+  - [ ] **Ca âm:** bỏ `reducedMotion="user"` khỏi `Icon` → test trên **đỏ**
+  - [ ] `make audit` → 4/4 đường `A11Y ≥ 90`, 0 `serious` / `critical`
+- **Cạm bẫy:**
+  - ① **Thêm gói = rebuild image `web` + `restart nginx`** (B-251, NQ-86). Thiếu bước này thì `502` hoặc "không tìm thấy module" chỉ trong container.
+  - ② **morphicons mặc định KHÔNG tôn trọng giảm chuyển động** (từ bản 1.4.2). Một `MorphIcon` dùng thẳng, không qua `Icon`, là một chỗ vi phạm T-3.9 — các task sau có dòng DoD `grep "from \"morphicons" frontend/src | grep -v components/ui/Icon.tsx` → rỗng.
+  - ③ `morphicons` nhận **dữ liệu** icon (`lucide`), không nhận component (`lucide-react`). Đừng cài nhầm gói.
+  - ④ **`aria-disabled`, không `disabled`:** phần tử `disabled` không nhận focus, nên tooltip "Sắp có" không bao giờ tới được người dùng bàn phím.
+
+---
+
+### T-S.10 — 🔒⭐ Ô nhập v2 + hội thoại nháp — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD2-v2, T-S.9 · **Ước lượng:** 5h
+- **KH:** §24.2b·S7, S9, S12, §11.4 (C22), UC-02, UC-07 · T-3.4, T-3.11 · NQ-111, NQ-114, NQ-115
+- **Việc:**
+  - [ ] **Hội thoại nháp:** mở `/` hoặc bấm "Hội thoại mới" ⇒ không gọi API nào. Câu đầu ⇒ `POST /conversations` rồi `POST …/messages`; **hai** khoá sinh khi lần soạn thảo bắt đầu, giữ qua mọi lần thử lại; bước 1 xong mà bước 2 hỏng ⇒ lần thử lại dùng lại hội thoại đã tạo. Báo cho sidebar hội thoại mới (T-S.13 nghe)
+  - [ ] **Bố cục:** màn nháp ⇒ ô nhập ở giữa (theo T-HD2-v2); câu đầu đi ⇒ khung ô nhập trượt xuống đáy bằng token T-HD5-v2; bỏ dải nền full-width quanh ô nhập; viền focus hiện dần
+  - [ ] Bỏ dòng `chat.phimGui`; bộ đếm chỉ hiện khi **vượt** `message_max_chars`; chừa chỗ model picker ở dưới-phải (nút mở picker dựng lại ở T-S.14)
+  - [ ] Bỏ thanh quota khỏi màn chat. Thêm **một dòng** cảnh báo nhỏ trên ô nhập khi còn ≤ `quota_warn_remaining_pct`, có link `/cai-dat/muc-su-dung`; hết quota ⇒ thông báo + thời điểm hoàn lại + khoá Gửi, trừ khi BYOK phủ provider đang chọn
+  - [ ] Bỏ dải trạng thái (mã hội thoại · trạng thái kết nối · `in/out`); chỉ giữ thông báo khi **đang nối lại**
+  - [ ] Nút chờ trong ô nhập theo §7b.2 (đính kèm, Tìm web, mic, skill) qua `ComingSoon`; khay xem trước tệp dựng sẵn, chưa mount
+- **Xong khi (DoD):**
+  - [ ] **Ca âm C22, hai chiều:** câu đầu, mock `POST …/messages` trả `500` sau khi `POST /conversations` đã `201` → bấm gửi lại ⇒ **không** có `POST /conversations` thứ hai, và `POST …/messages` mang **cùng** khoá; gửi thành công rồi gõ câu mới ⇒ khoá **khác**
+  - [ ] Chrome: bấm Gửi hai lần trong 300 ms ở màn nháp → `psql`: `conversations` của user tăng đúng **1**, `messages` role `user` tăng đúng **1**
+  - [ ] Mở app 5 lần liền không gửi gì → `SELECT count(*) FROM conversations WHERE user_id='<id>'` **không đổi**
+  - [ ] `pnpm test` — bộ đếm ẩn ở `max`, hiện ở `max+1`; DOM không còn mã hội thoại; `matchMedia` reduce ⇒ ô nhập nhảy thẳng xuống đáy
+  - [ ] `bash scripts/test_idempotency.sh` vẫn đúng S5; ba ca ngưỡng của T-3.11 vẫn xanh ở dạng mới: 21% ⇒ không có dòng cảnh báo, 20% ⇒ có, 0% ⇒ Gửi `disabled`
+  - [ ] Chrome 375 px: ô nhập giữa màn và ở đáy đều không tràn ngang; bàn phím ảo không che (`dvh`)
+- **Cạm bẫy:**
+  - ① **`StrictMode` chạy effect hai lần** (B-260). Màn nháp là màn **không gọi API lúc mount**; một `useEffect` "tạo sẵn hội thoại" lọt vào đây là hai hội thoại mỗi lần mở app — chỉ ở dev, nên không ai thấy.
+  - ② **Chỉ khung ô nhập di chuyển.** Hoạt ảnh trên phần tử chứa chữ đang stream là cách chắc nhất giết C1 (T-3.9 ①).
+  - ③ **Ngoại lệ BYOK** (T-3.11 ①): dòng cảnh báo và việc khoá Gửi đọc cùng `isSendBlocked` / `byokCovers` như hôm nay.
+  - ④ **Hai khoá, không một.** Một khoá cho cả hai endpoint vẫn an toàn (khoá Redis chứa route, §11.4) nhưng làm test C22 mơ hồ — tách ra để mỗi endpoint một khẳng định.
+
+---
+
+### T-S.11 — Trang Cài đặt v2 (T-HD9): chia tab, hồ sơ, Mức sử dụng
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD9, T-S.5, T-S.9 · **Ước lượng:** 4h
+- **KH:** §24.2b·S10, UC-07, §18.4 · T-3.11, T-3.12 · NQ-114, NQ-116
+- **Việc:**
+  - [ ] Đường dẫn con: `/cai-dat/tai-khoan` (mặc định của `/cai-dat`), `/cai-dat/giao-dien`, `/cai-dat/model`, `/cai-dat/khoa-api`, `/cai-dat/muc-su-dung` — vào `PATHS` và `routes.tsx`
+  - [ ] Tab Tài khoản: tên hiển thị (trần từ `/auth/me`, placeholder = email), chọn màu avatar (bảng token T-HD1-v2), "Tải ảnh lên" là `ComingSoon planned="B-265"`, email chỉ đọc, tier, nút Đăng xuất
+  - [ ] Tab Mức sử dụng: hai thanh quota của T-3.11 dời sang, kèm thời điểm hoàn lại và ghi chú BYOK; thanh chạy từ 0 **chỉ** khi `last_login_at` khác lần đã chạy (lưu trong `localStorage`, bọc `try/catch` như `ThemeToggle`)
+  - [ ] Giao diện · Model · Khoá API: nội dung T-3.12 dựng lại theo T-HD9. Mọi lần lưu gửi **đủ** body của `PUT /settings` (T-S.5 DoD dòng 2)
+- **Xong khi (DoD):**
+  - [ ] `pnpm test src/components/settings/` — deep link `/cai-dat/muc-su-dung` mở đúng tab; đổi tên **không** xoá `default_model` (khẳng định trên body gửi đi); thanh chạy ở lần mở đầu, **không** chạy ở lần hai, **chạy lại** khi `last_login_at` đổi; `localStorage` ném lỗi ⇒ vẫn render, không chạy hoạt ảnh
+  - [ ] Chrome: xoá tên hiển thị → F5 → `/auth/me` trả `display_name: null`
+  - [ ] Chrome 375 px trên cả năm tab: `document.documentElement.scrollWidth <= window.innerWidth` — dán năm `true`
+  - [ ] Dòng DoD BYOK của T-3.12 chạy lại (thêm khoá → 4 ký tự cuối, không bao giờ bản rõ) và vẫn đạt
+- **Cạm bẫy:**
+  - ① **`PUT` thay cả tài nguyên.** Tab Tài khoản phải đọc `default_model` và `reasoning_prefs` từ `/auth/me` rồi gửi lại, nếu không mỗi lần đổi tên là một lần mất model mặc định.
+  - ② **"Lần đầu trong một lần đăng nhập" không phải "lần đầu trong tab":** `sessionStorage` chạy lại ở mỗi tab mới, `useRef` chạy lại sau mỗi F5. Chỉ `last_login_at` đổi đúng lúc người dùng đăng nhập lại.
+  - ③ `make audit` không đo được màn đã đăng nhập (B-259) — dòng 375 px ở trên là phép đo thay thế.
+
+---
+
+### T-S.12 — Header v2 + khối tài khoản + menu tài khoản (T-HD2-v2)
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD2-v2, T-S.5, T-S.9, T-S.11 · **Ước lượng:** 3.5h
+- **KH:** §24.2b·S10, S12 · T-3.1a (`Layout`), T-3.10 (drawer) · NQ-115, NQ-116, NQ-117
+- **Việc:**
+  - [ ] Header: bỏ email và Đăng xuất; thêm `ComingSoon planned="T-5.4"` (mở panel artifact)
+  - [ ] Chân sidebar, cả trong drawer mobile: avatar tròn (chữ cái đầu + màu `avatar_color`), tên hiển thị (trống ⇒ nguyên email), nhãn tier (`vi.json`; tier chưa có nhãn ⇒ tên gốc)
+  - [ ] Menu tài khoản, đúng thứ tự: Cài đặt → `/cai-dat` · Mức sử dụng → `/cai-dat/muc-su-dung` · Ngôn ngữ · Trợ giúp · ── · Nâng cấp gói · ── · Đăng xuất. Ba mục chờ qua `ComingSoon planned="B-264"`; icon qua `Icon`, biến hình khi hover
+  - [ ] Primitive menu: `@radix-ui/react-dropdown-menu` (cùng họ Radix đã dùng; bàn phím + ARIA có sẵn) — hoặc đúng thứ bản T-HD2-v2 chọn
+- **Xong khi (DoD):**
+  - [ ] `pnpm test` — header không còn email / nút Đăng xuất; menu có đúng thứ tự `menuitem` và **hai** `separator`; ba mục chờ `aria-disabled`; Đăng xuất từ menu xoá phiên rồi về `/dang-nhap`
+  - [ ] Bàn phím: Enter mở menu, mũi tên đi giữa các mục, Esc đóng và trả tiêu điểm về khối tài khoản
+  - [ ] Chrome 375 px: khối tài khoản nằm trong drawer, menu mở đúng dạng bản vẽ, không tràn ngang
+  - [ ] `grep "from \"morphicons" frontend/src | grep -v components/ui/Icon.tsx` → rỗng
+- **Cạm bẫy:**
+  - ① `/admin` và `/cai-dat` **không có sidebar**: lối Đăng xuất ở đó là tab Tài khoản (T-S.11). Đừng thêm lại nút vào header "cho tiện".
+  - ② Tên hiển thị do người dùng gõ: không render như HTML, và cắt bằng `truncate` — một tên 200 ký tự không được đẩy giãn sidebar.
+
+---
+
+### T-S.13 — Sidebar v2 (T-HD2-v2): nhóm theo ngày, mục ghim đầy đủ, tiêu đề chảy
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD2-v2, T-S.7, T-S.8, T-S.10 · **Ước lượng:** 3.5h
+- **KH:** §24.2b·S6, S8, S12 · T-3.3 · NQ-110, NQ-112
+- **Việc:**
+  - [ ] Hai nguồn: `?pinned=true` cho mục Đã ghim (đầy đủ), `?pinned=false` phân trang cho phần còn lại. Bỏ `sidebar.pinScopeNote` khỏi màn hình và khỏi `vi.json`
+  - [ ] Nhóm theo `updated_at`, giờ máy người dùng: Hôm nay · Hôm qua · `d/m/yyyy`; tính lại nhóm khi tab lấy lại tiêu điểm (qua nửa đêm)
+  - [ ] Hàng vừa tạo từ màn nháp (T-S.10), và hàng `title: null` còn trong `STREAM_TTL_S`, nghe `…/title/stream` bằng client SSE đang có; chữ chảy theo token T-HD5-v2; `error` hoặc hết hạn ⇒ "Hội thoại chưa đặt tên"
+  - [ ] Menu hàng hội thoại: thêm `ComingSoon` Chia sẻ (`planned="T-8.1"`) và Xuất (`planned="T-8.7"`)
+- **Xong khi (DoD):**
+  - [ ] `pnpm test src/components/sidebar/` với đồng hồ giả 2026-09-23, giờ +07: `updated_at` 23/9 ⇒ Hôm nay, 22/9 ⇒ Hôm qua, 21/9 ⇒ "21/9/2026"; `2026-09-22T17:30:00Z` ⇒ **Hôm nay** (đã là 00:30 ngày 23/9 ở +07)
+  - [ ] Ghim nhiều hơn một trang → F5 → mục Đã ghim đủ **mà không** bấm "Tải thêm" — đóng Cạm bẫy ① của T-3.3
+  - [ ] Chrome: hội thoại mới → tiêu đề hiện từng mảnh trong sidebar; DevTools Network thấy `…/title/stream` kiểu `text/event-stream`
+  - [ ] Dòng DoD "tìm kiếm lọc đúng và không gọi mạng" của T-3.3 vẫn xanh
+- **Cạm bẫy:**
+  - ① **"Hôm nay" là hàm của thời gian, không phải của dữ liệu.** Tính một lần lúc render đầu thì để app mở qua đêm, hôm qua vẫn tên là Hôm nay.
+  - ② Hàng đang chảy chữ phải giữ bề rộng (`truncate`), nếu không mỗi delta là một lần reflow cả danh sách.
+  - ③ Bỏ ghim một hàng thì hàng ấy phải đổi mục **ngay**, không tải lại — hai danh sách, một thao tác.
+
+---
+
+### T-S.14 — Model Picker v2 (T-HD4-v2): Thinking Effort, More models, giá
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD4-v2, T-S.4, T-S.5, T-S.6, T-S.10 · **Ước lượng:** 4h
+- **KH:** §24.2b·S3, S4, S11 · T-3.6, UC-05 · NQ-118, NQ-119, NQ-120
+- **Việc:**
+  - [ ] Nút mở = tên model hiệu lực, chữ trơn không khung, ở chỗ T-S.10 chừa
+  - [ ] Bốn khối: Model hiện tại (tên, provider hiển thị, badge, capability, tầng mặc định) · Thinking Effort › (mức của model, nhãn tiếng Anh trong `vi.json`; model không có ⇒ hàng mờ + tooltip) · More models › (danh sách, xám + lý do, `checked_at` + nút kiểm lại) · Giá (USD/1M vào/ra, khung giá đang áp dụng, "ước lượng", "không tính theo token", dòng "suy luận tính như token ra")
+  - [ ] Dưới 640 px: sheet; hai mục `›` là màn trượt có nút quay lại
+  - [ ] Chọn mức ⇒ `PUT /settings` với `reasoning_prefs` (gửi đủ body); gửi tin nhắn ⇒ mang `reasoning_effort` hiệu lực
+- **Xong khi (DoD):**
+  - [ ] `pnpm test src/features/models/` — model không có `reasoning` ⇒ hàng Thinking Effort `aria-disabled`; chọn `high` cho DeepSeek ⇒ `PUT` đúng body và lần gửi sau mang `reasoning_effort: "high"`; model `available: false` trong More models vẫn **không** chọn được (T-3.6 DoD dòng 3)
+  - [ ] Chrome: chọn DeepSeek + High → gửi → `psql` `messages.reasoning_effort = 'high'`; F5 → picker vẫn High
+  - [ ] Chrome, user thường, picker mở ở cả ba màn (chính, Thinking Effort, More models): `document.body.innerText` không chứa "9Router" hay "Sub2API"
+  - [ ] S7 đầu-cuối của T-3.6 (DoD dòng 1) chạy lại với một model có khối `reasoning`
+  - [ ] `grep -rnE '"(deepseek|claude|gpt|gemini|grok|ol)-[a-z0-9.-]+"' frontend/src --include=*.ts --include=*.tsx | grep -v "\.test\."` → rỗng
+- **Cạm bẫy:**
+  - ① **Giá là chuỗi**, chỉ đổi sang số đúng một lần để định dạng (T-3.11 ③). Khung cao/thấp điểm do **backend** tính — FE không tự so giờ.
+  - ② **Mức nhớ theo model:** đổi model thì mức hiện trên picker phải đổi sang mức đã nhớ của model mới, không mang mức cũ sang.
+
+---
+
+### T-S.15 — Bong bóng v2 (T-HD3-v2): một nút Thử lại, chip model · mức, nút chờ dưới câu trả lời
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD3-v2, T-S.6, T-S.14 · **Ước lượng:** 3h
+- **KH:** §24.2b·S4, S12, UC-02, UC-04 · T-3.5, T-3.7 · NQ-118, NQ-121
+- **Việc:**
+  - [ ] Gộp "Thử lại" và "Đổi model & thử lại" làm **một** nút, gửi model + mức đang chọn trên picker; gỡ khoá `vi.json` không còn dùng
+  - [ ] Chip dưới câu trả lời: tên hiển thị của model · nhãn mức (từ `messages.reasoning_effort`); khối "Suy luận" không vẽ khi `reasoning` là `NULL`
+  - [ ] `ComingSoon planned="T-8.4"` "Đọc to" trong hàng nút
+  - [ ] Dựng sẵn, có test render với fixture, **chưa mount**: chip "Đang tìm web…" + chip nguồn có favicon (`T-6.7`), thẻ artifact (`T-5.3`), chip "Đang chạy code…" (`T-7.9`), ảnh/tệp trong bong bóng người dùng (`T-4.7`)
+- **Xong khi (DoD):**
+  - [ ] `pnpm test src/components/chat/` — nút Thử lại gửi `model_id` **và** `reasoning_effort` của picker (chỉ `fetch` bị thay, như T-3.7); không còn nút thứ hai
+  - [ ] Chrome: đổi model trên picker → Thử lại → `psql` hai anh em cùng `parent_id`, khác `model_id`; bấm `‹` về nhánh cũ vẫn thấy chip của model cũ (UC-04 dòng 4)
+  - [ ] Hàng nút ở 375 px: mọi nút ≥ 44 px, không tràn (luật gập vào "…" của T-HD3 v1)
+  - [ ] `grep -rn "data-planned" frontend/src --include=*.tsx | grep -v "\.test\." | wc -l` khớp số hàng "mount" của §7b.2 đã dựng tới task này
+- **Cạm bẫy:**
+  - ① **UC-02 dòng 5 vẫn phải đạt:** "Đổi model & retry" nay là "đổi model trên picker rồi bấm Thử lại". Tooltip của nút phải nói nó dùng model đang chọn — người quen nút cũ sẽ không tự đoán ra.
+  - ② Component chưa mount vẫn phải đi qua sanitizer ngày chúng nhận dữ liệu thật (tiêu đề trang web, tên tệp) — đừng viết chúng với chuỗi thô.
+
+---
+
+### T-S.16 — Sáu màn auth v2 (T-HD8)
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD8, T-S.9 · **Ước lượng:** 3h
+- **KH:** §11.1, §11.5, §11.6, UC-01 · T-3.1b · NQ-108
+- **Việc:**
+  - [ ] Dựng lại `/dang-nhap`, `/dang-ky`, `/quen-mat-khau`, `/dat-lai-mat-khau`, `/verify-email`, `/cho-duyet` và màn tài khoản bị khoá theo T-HD8 — **chỉ trình bày**, không đổi luồng
+- **Xong khi (DoD):**
+  - [ ] `pnpm test src/components/auth/` — **số ca không giảm** so với trước task, vẫn render trong `StrictMode`
+  - [ ] Dòng DoD một mạch Chrome của T-3.1b (đăng ký → Mailpit → verify → chờ duyệt → duyệt → đăng nhập → chat) chạy lại và đạt
+  - [ ] `make audit` → `/dang-nhap`, `/dang-ky` `A11Y ≥ 90`, 0 `serious` / `critical`; 375 px không tràn trên cả sáu màn
+- **Cạm bẫy:**
+  - ① **Email đã tồn tại ⇒ màn hình nói giống hệt ca thành công** (UC-01). Một thiết kế mới có "thông báo thân thiện hơn" cho ca trùng là một lỗ lộ email.
+  - ② Turnstile loại **invisible** chiếm một khoảng 336×71 px trước khi hiện huy hiệu (T-3.1b): bố cục phải chừa chỗ, không nhảy.
+
+---
+
+### T-S.17 — Admin v2 (T-HD7-v2): khoản "Đặt tên", màn Model thấy đường đi thật
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-HD7-v2, T-S.8 · **Ước lượng:** 2h
+- **KH:** §24.2b·S3a, S6, §16.3 · T-3.12 · B-262 · NQ-110, NQ-119
+- **Việc:**
+  - [ ] Màn Chi phí: cột + thẻ "Đặt tên" từ phần `purpose` của `/admin/usage`; biểu đồ giữ hai chuỗi
+  - [ ] Màn Model đọc `GET /admin/models`: provider hiển thị + "qua <đường đi>" + health
+  - [ ] Áp những chỗ T-HD7-v2 chốt cho năm mục của B-262
+- **Xong khi (DoD):**
+  - [ ] Chrome (admin): số "Đặt tên" khớp `SELECT sum(cost_usd) FROM usage_events WHERE purpose='title' AND created_at >= '<đầu cửa sổ>'` — dán cả hai
+  - [ ] Màn Model hiện "Google AI · qua 9Router" cho `nr-gemini-flash`; tắt 9Router → hàng đó báo hỏng **theo đường đi**
+  - [ ] `pnpm test src/components/admin/` xanh, số ca không giảm
+- **Cạm bẫy:**
+  - ① **Tiền là chuỗi, không cộng ở FE** (T-HD7). Tổng "Đặt tên" đến từ backend.
+
+---
+
+### T-S.18 — Đối chiếu toàn bộ bản v2 với code, chốt `design/README.md` *(task cận cuối)*
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.10 … T-S.17 · **Ước lượng:** 3h
+- **KH:** §24.2b·S13 · §3 (quy tắc phân vai) · NQ-108
+- **Việc:**
+  - [ ] Đọc từng bản v2 (link ở `design/README.md` mục v2) **cạnh bản v1 tương ứng** và cạnh code hiện tại; lập bảng lệch: `màn · chỗ lệch · lệch trình bày / lệch hành vi`
+  - [ ] Sửa **chỉ** lệch trình bày (class, token, thứ tự phần tử). Lệch hành vi ⇒ **dừng và hỏi**, ghi Backlog
+  - [ ] Đối chiếu bảng §7b.2 với DOM: mỗi hàng "mount" có đúng một `data-planned` tương ứng
+  - [ ] `design/README.md`: điền đủ ngày chốt; thêm cột "Đã đối chiếu (T-S.18)"
+- **Xong khi (DoD):**
+  - [ ] Bảng lệch dán vào báo cáo, mỗi dòng mang trạng thái `đã sửa` / `hỏi` / `giữ (lý do)`
+  - [ ] `make audit` 4/4; 375 px `true` trên mọi đường, gồm năm tab `/cai-dat/*`
+  - [ ] `python scripts/check_identifiers.py` vẫn 0; hai `grep` màu / thời lượng vẫn rỗng
+  - [ ] `make test && make lint && make check-hardcode` xanh
+- **Cạm bẫy:**
+  - ① Task này **không** phải chỗ thêm tính năng. Bản v2 vẽ một thứ mà §24.2b không nhắc tới ⇒ hỏi, không làm.
+  - ② Đọc bản vẽ qua claude_design MCP như `design/README.md` hướng dẫn (`/design-login`). Không vào được ⇒ dừng và báo; đừng dựng lại từ ảnh chụp.
+
+---
+
+### T-S.19 — Hoàn thiện theo yêu cầu bổ sung *(task cuối — người dùng giao sau)*
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-S.18 · **Ước lượng:** chưa ước lượng
+- **KH:** §24.2b·S13
+- **Việc:** để trống có chủ ý. Người dùng giao nội dung khi tới nơi; agent chép "Việc" và "Xong khi (DoD)" vào đây **trước** khi viết dòng code đầu tiên, ghi ước lượng, rồi mới làm
+- **Xong khi (DoD):** theo nội dung được giao, cộng DoD của phase (KE-HOACH §24.3 dòng PS)
+
+---
+
 ## 8. Phase 4 — Ảnh & Vision *(dạng bảng)*
 
 | ID | Task | Phụ thuộc | KH | Ước lượng |
@@ -1739,6 +2205,13 @@ P1 **nghiêng hẳn về nhóm B** (Redis stream, SSE qua Nginx, trình duyệt,
 | B-261 | **Redis chết + F5 ở `/admin` ⇒ bị đẩy về `/dang-nhap`.** `GET /auth/me` cũng đi qua `require_app_access` ⇒ `503` (C21) ⇒ `usePhien` coi như chưa đăng nhập ⇒ `AdminOnly` chuyển hướng; đăng nhập lại cũng `503`. Đo 2026-09-23: màn Hệ thống đang mở ⇒ F5 ⇒ `/dang-nhap`. Màn ĐANG MỞ thì không sao (rơi về `/health/deep`, B-190). **Cần chốt:** `usePhien` phân biệt `503` ("không kiểm được phiên") với `401` ("chưa đăng nhập") và hiện một trang lỗi hạ tầng thay vì form đăng nhập — đổi hành vi của mọi màn, nên không làm trong T-3.12 | T-3.12, B-190, C21 (2026-09-23) |
 | B-262 | **Bản T-HD7 lệch dữ liệu ở năm chỗ — việc của người thiết kế, không phải agent.** (1) File tự ghi nhãn "T-HD6 · ADMIN PANEL" (T-HD6 là panel artifact); (2) dialog "Hạn mức tháng (USD)" một ô — hệ thống có hai cửa sổ 5 giờ/7 ngày (§10.3), T-3.12 dựng hai ô cùng khuôn; (3) không có màn/khối cho `GET/PATCH /admin/tiers` — T-3.12 đặt "Hạn mức theo tier" cuối màn Người dùng; (4) thẻ provider vẽ độ trễ + "Kiểm lúc" mà `GET /models` không trả, và cột "Bật" không có endpoint (B-258); (5) màn Chi phí bỏ bộ lọc nguồn tiền + bảng "theo nguồn" của B-178 — T-3.12 giữ lại. Thêm: T-HD2 không có lối vào "Cài đặt" — T-3.12 dùng email ở header (≥ `sm`) + dòng cuối sidebar. **Cần:** T-HD bổ sung chốt năm chỗ này (hoặc duyệt cách T-3.12 đã làm) | T-3.12, T-HD7, T-HD2 (2026-09-23) |
 | ~~B-239~~ | **DA SUA 2026-09-22 — dang nhap THANH CONG roi request ke tiep van `401 TOKEN_EXPIRED`.** Trieu chung nguoi dung gap: dang nhap lai bao nhieu lan cung vo ich. Do tren stack that bang mot co 0/1 tam them vao log nginx (khong ghi gia tri token, §20): `POST /api/v1/auth/login 200` → `GET /api/v1/auth/me 401` (83 byte = `TOKEN_EXPIRED`), va cac request sau do mang `ss=1 dup=1` — **trinh duyet gui HAI cookie `scarlet_session`**. Nguyen nhan: `Cookie(alias=...)` cua FastAPI doc `request.cookies`, ma `cookie_parser` cua Starlette gan vao mot `dict` trong mot vong lap nen **gia tri CUOI thang** (`cookie_parser('scarlet_session=CU; scarlet_session=MOI')` → `MOI`); RFC 6265 §5.4 lai bat trinh duyet xep cookie `Path` DAI hon len truoc, nen cookie vua cap (`Path=/api/v1`) di **truoc** va mot cookie cu o path rong hon di **sau** va thang. Khong phai chuyen phien toai: day la **cookie tossing** — ai dat duoc mot cookie cung ten o path rong hon (hoac, khi len domain that, tu mot subdomain anh em) se khoa vinh vien phien cua nguoi khac ma khong can biet mot bi mat nao, va `HttpOnly` khong do duoc vi no chan JS **doc** chu khong chan ghi de. **Sua:** `_moi_cookie_phien()` trong `app/core/deps.py` doc header `Cookie` tho va tra **moi** gia tri; `get_access_claims` nhan cai dau tien giai ma duoc, va uu tien `TOKEN_EXPIRED` hon `UNAUTHENTICATED` khi khong cai nao dung duoc (mot cookie rac di kem khong duoc ha cap chan doan ma FE dung de di `/auth/refresh`). `_xoa_hai_cookie` quet them `Path=/` va `/api` vi `Set-Cookie` la duong duy nhat xoa mot cookie `HttpOnly` va no phai trung dung `Path`. Bay ca test moi trong `tests/api/test_auth.py` gui header `Cookie` **tho** — kho cookie cua `httpx` la mot `dict` theo ten nen bo test cu **khong the** dung lai tinh huong nay, dung ly do no xanh suot trong khi trinh duyet hong | Phat hien khi chay DoD dong 4 cua T-3.5 → dong 2026-09-22, commit rieng |
+| B-263 | **`make check-docs` (NQ-82) chưa tồn tại.** `Makefile` không có target này (`grep -n check-docs Makefile` rỗng, 2026-09-23), trong khi §15 DoD chung dòng 4 đòi nó exit 0 — tức một dòng DoD không chạy được cho bất kỳ task nào. Bảng §2 của Phase S vì vậy được cộng tay (64 h / 20 task). **Cần:** một commit chore đúng như NQ-82 đã chốt, hoặc gỡ dòng ấy khỏi §15 | Lập Phase S (2026-09-23), NQ-82 |
+| B-264 | **Ba mục menu tài khoản là nút chờ không thuộc phase nào:** Ngôn ngữ, Trợ giúp, Nâng cấp gói (`data-planned="B-264"`, NQ-121). Ngôn ngữ kéo theo i18n thật — hôm nay chỉ có `vi.json` và `t()` không interpolation; Nâng cấp gói kéo theo việc người dùng tự đổi tier, tức một đường tiền mới. Cả hai cần ADR trước khi lên roadmap | §24.2b·S10, S12 |
+| B-265 | **Tải ảnh avatar lên** (`data-planned="B-265"`) cần đường ống ảnh của T-4.1–T-4.3 (MinIO, magic bytes, từ chối SVG, resize) — **không** task nào của P4 nhắc tới avatar, và vùng P4 không được sửa từ Phase S. Khi P4 xong cần một task nhỏ gắn nút này | §24.2b·S10, S15 |
+| B-266 | **Suy luận phải được gửi lại khi có tool call — trái B-33.** Tài liệu DeepSeek (thinking mode) ghi `reasoning_content` bắt buộc gửi lại trong các lượt có tool; Anthropic cũng đòi giữ khối thinking qua tool use. B-33 hôm nay cố ý không bao giờ gửi lại suy luận. P6 (T-6.x) và P7 (T-7.7) sẽ va vào đây đầu tiên — cần chốt trước khi P6 bật tool đầu tiên | §24.2b·S4, S15 (tra cứu 2026-09-23) |
+| B-267 | **Đường BYOK của Anthropic không trả chữ suy luận.** `ByokAdapter` gọi `api.anthropic.com/v1` qua lớp tương thích OpenAI: tài liệu ghi `reasoning_effort` bị bỏ qua và chữ thinking không được trả về, nên khối "Suy luận" rỗng với Claude dùng khoá riêng. Cách chữa thật là một adapter gọi Messages API gốc (A9 cho phép khác biệt nằm ở adapter) — cần quyết | T-S.2 Cạm bẫy ②, §24.2b·S3b |
+| B-268 | **Dòng "Tổng" của bảng §2 chưa cộng Phase S.** Người dùng chỉ cho chèn Phase S, không cho sửa dòng khác (NQ-107). Tổng đúng sau khi chèn: **130 task · 353 h** (+ T-S.19 chưa ước lượng). Cần người dùng cho phép một lần sửa dòng ấy | Lập Phase S (2026-09-23) |
+| B-269 | **`frontend/package-lock.json` (npm) chưa track trong working tree ngày 2026-09-23**, cạnh `pnpm-lock.yaml`. `CLAUDE.md` chỉ cho `pnpm`; hai file lock cho hai trình quản lý gói là hai đáp án khác nhau cho "đã cài bản nào". Đề xuất: xoá file ấy và thêm `package-lock.json` vào `.gitignore` của `frontend/` | Lập Phase S |
 
 **Ghi chú lệch nhỏ:** B-28 ghi "chưa nghiệm thu được vì `ANTHROPIC_API_KEY` rỗng" — **đã cũ**, key nay có giá trị (kiểm hôm nay, không in giá trị). T-1.3 không còn bị chặn vì lý do đó.
 
@@ -1999,6 +2472,21 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 | **NQ-104** | 2026-09-23 | **T-3.11 — `/auth/me` tra them `quota_warn_remaining_pct`; lech NQ-81 ("T-3.11 thuan FE") co chu y, commit backend dung rieng** | Nguoi dung giao "xu ly theo phuong an toi uu". Nguong "con ≤ 20%" song o `.env` (`QUOTA_WARN_REMAINING_PCT`); FE can no de ve muc canh bao, va hai ngả con lai deu hong: literal `20` trong `.tsx` vi pham A3, con mot bien `VITE_*` rieng la ban thu hai cua cung mot nguong — dung thu "hai nguon phai khop" cua task cam. Cung khuon `message_max_chars` (T-3.0): tinh, re, song canh `quota` trong `HoSoRa`; `login`/`refresh` KHONG tra (test canh). Tach commit theo tien le NQ-98 |
 | **NQ-105** | 2026-09-23 | **T-3.12 — hai câu hỏi trước dòng code đầu: B-216 để MỞ; B-257 sửa NGAY, commit riêng** | Người dùng chọn phương án khuyến nghị cho B-216: `/cai-dat` mở cho mọi tài khoản đã đăng nhập (`SignedInOnly`), `StatusGate` không đổi, B-216 ở lại Backlog. Loại: ② (StatusGate cho `pending_approval` có BYOK vào chat — phạm vi 🔒 phình, và model không thuộc provider BYOK vẫn bị backend từ chối) và ③ (đảo §11.1 — việc của người). B-257 (phát hiện khi đọc code cho trang Cài đặt): người dùng chọn "sửa ngay" thay vì Backlog — `GET /models` trả thêm `provider_id`, FE so bằng khoá; commit `fix(B-257)` đứng trước commit 🔒 của T-3.12 theo tiền lệ B-35/NQ-50 |
 | **NQ-106** | 2026-09-23 | **T-3.12 — năm Backlog chốt theo "phương án tối ưu" người dùng giao: B-191 JOIN backend · B-192 nhớ ở server · B-175 trần cửa sổ · B-193 `describe_error` · B-190 ngả ③ tự động** | B-191: JOIN chỉ nhánh `users` (tier đã là tên, catalog không có id), loại FE ghép `GET /admin/users` vì cùng lý do NQ-66 và vì người đã xoá không có trong danh sách ấy. B-192: `CachedChecks` trong tiến trình, `ADMIN_HEALTH_CACHE_TTL_S=10`, kèm `health_checked_at`; loại FE giãn nhịp (chỉ giãn được trong một tab). B-175: `ADMIN_USAGE_MAX_WINDOW_DAYS=92` ⇒ `400`; loại phân trang (tổng hợp không chia trang). B-190: không nới C21; màn Hệ thống gặp `5xx` thì rơi về `/health/deep` công khai sẵn có. Kèm: `limits_cache_ttl_s` trong `GET /admin/tiers` để câu "trong vòng N giây" không chép `60` vào `vi.json` (A3), `byok_providers` trong `GET /settings/keys` để trang Cài đặt không gõ sẵn danh sách provider (A3) |
+| **NQ-107** | 2026-09-23 | **Phase S (Standardize) chèn giữa P3 và P4; hai file kế hoạch chỉ được CHÈN, không được sửa** | Người dùng giao và giới hạn quyền sửa: KE-HOACH.md và tasks.md chỉ được thêm Phase S vào sau P3, trước P4. Hệ quả chọn có chủ ý: (1) chi tiết "cái gì / tại sao" ở KE-HOACH **§24.2b**, không rải vào §7.4/§17/§18/Phụ lục; (2) mọi thứ Phase S thêm vào hợp đồng chung liệt kê ở **§24.2b·S14**, và với task của Phase S thì dòng DoD chung "Endpoint mới đã thêm vào KE-HOACH §18" được thoả bằng một dòng trong S14; (3) phần task là **§7b**, không đánh số lại §8 trở đi; (4) dòng "Tổng" của bảng §2 **không** sửa → B-268; (5) task P4–P9 không sửa — những gì Phase S để lại cho chúng nằm ở §24.2b·S15 và bảng §7b.2 |
+| **NQ-108** | 2026-09-23 | **Bản vẽ: v1 = bản của P3, bản vẽ lại mang hậu tố `-v2`; T-HD8 = sáu màn auth, T-HD9 = trang Cài đặt; nút chờ vẽ trong bản v2 của vùng chứa nó; một task đối chiếu cận cuối + một task cuối để trống** | Người dùng chốt (câu 1, 2A, 3a, 3b-A). Nút chờ gộp vào v2 của vùng chứa nó (ô nhập → T-HD2-v2, dưới câu trả lời → T-HD3-v2) thay vì một T-HD riêng, vì mỗi bản v2 vẽ lại đúng vùng ấy — vẽ hai lần là hai cơ hội lệch nhau; hệ quả là có thêm T-HD3-v2 dù yêu cầu gốc không nhắc T-HD3. Mỗi thay đổi thiết kế một task FE riêng (G1); T-S.18 đối chiếu toàn bộ v2 với code; T-S.19 để người dùng giao phần còn sót. Mục v2 của `design/README.md` do T-S.0 dựng **đầu** phase, để người dùng có chỗ ghi link ngay khi vẽ xong từng bản |
+| **NQ-109** | 2026-09-23 | **Đổi tên định danh tiếng Việt không dấu: một task 🔒 riêng ở đầu Phase S (T-S.1) — thay NQ-87** | `CLAUDE.md` bản hiện hành đòi sửa mọi chỗ còn tồn tại, trái NQ-87 (chỉ áp cho code mới); người dùng chọn 4A. Đặt đầu phase để không task nào viết thêm vào một file sắp bị đổi tên. **Giữ nguyên:** tên trường JSON trên dây, khoá `vi.json`, tên bảng/cột, khoá Redis — hợp đồng hoặc dữ liệu đã lưu. Có phép kiểm `scripts/check_identifiers.py` trong `make lint` để không quay lại |
+| **NQ-110** | 2026-09-23 | **Đặt tên hội thoại tự động: enqueue ngay ở câu đầu · system key · `usage_events.purpose='title'` · không trừ quota · SSE thật qua stream riêng + endpoint mới · admin tách khoản, biểu đồ giữ hai chuỗi** | Người dùng chọn 6a-A, 6b-A, 6c-A, 6d-A. Model là `deepseek-flash` như người dùng chỉ định, khai ở `title_model` của catalog (A3), suy luận tắt. Không ghi đè tên người dùng tự đặt (`WHERE title IS NULL`). `rebuild_quota` phải lọc `purpose='chat'`, nếu không lần dựng lại quota đầu tiên trừ oan (T-S.7 Cạm bẫy ①). Không trừ quota có trần tự nhiên: một lượt mỗi hội thoại |
+| **NQ-111** | 2026-09-23 | **Mở app là vào hội thoại NHÁP — chưa ghi DB cho tới câu đầu** | Người dùng chọn 7A. Tạo sẵn mỗi lần mở app sẽ tích hội thoại rỗng. Hai khoá `Idempotency-Key` sinh cùng lần soạn thảo (một cho `POST /conversations`, một cho `POST …/messages`); khoá Redis §11.4 chứa route nên không đụng nhau |
+| **NQ-112** | 2026-09-23 | **Sidebar nhóm theo `updated_at` (không `created_at`); mục Đã ghim đầy đủ qua `?pinned=true`** | Người dùng chọn 8a-B, 8b-A. `updated_at` đúng thứ tự `ORDER BY` + con trỏ hôm nay nên không đổi backend; một hội thoại vừa chat lại lên "Hôm nay". `?pinned=true` không phân trang (có trần) khiến dòng "Ghim nổi lên đầu trong phần đã tải…" bỏ được mà không nói sai — đóng Cạm bẫy ① của T-3.3 |
+| **NQ-113** | 2026-09-23 | **Model Picker: đo provider ngầm lúc khởi động + làm tươi nền; request không bao giờ chờ đo; FE hỏi lại khi mở picker nếu `checked_at` đã cũ** | Người dùng chọn 9A. Nguyên nhân đo được, không đoán: 9Router im lặng ⇒ `GET /models` chờ đúng `PROBE_TIMEOUT_S` mỗi khi bộ nhớ 30 s hết hạn (5.09 s / 0.22 s / 5.06 s, 2026-09-23). Nới Cạm bẫy ② của T-3.6 **có điều kiện**: chỉ hỏi lại khi dữ liệu cũ, và lần hỏi chỉ đọc bộ nhớ |
+| **NQ-114** | 2026-09-23 | **Quota sang Cài đặt; màn chat giữ một dòng cảnh báo nhỏ trên ô nhập (≤ 20%, có link) + thông báo hết quota kèm giờ hoàn lại; thanh chạy từ 0 chỉ lần đầu mở trong một lần đăng nhập** | Người dùng chọn 10A kèm dòng cảnh báo "một hàng, đủ nhỏ, có link sang Cài đặt", và câu 11. UC-07 dòng 1–2 vẫn đạt. "Một lần đăng nhập" đo bằng `last_login_at` của `/auth/me` — `sessionStorage` chạy lại mỗi tab mới, `useRef` chạy lại sau mỗi F5 |
+| **NQ-115** | 2026-09-23 | **Ô nhập và màn chat gọn lại: bộ đếm ký tự chỉ hiện khi vượt trần; bỏ dòng phím tắt; bỏ dải trạng thái (chỉ giữ thông báo đang nối lại); header bỏ email + Đăng xuất** | Người dùng chọn 12A, 13A, 14A và yêu cầu gốc. Trần ký tự vẫn chặn gửi (T-3.4); không thêm ngưỡng "sắp chạm trần" nào vì đó sẽ là một con số mới phải vào config (A3). Đăng xuất có ở menu tài khoản **và** tab Tài khoản của Cài đặt, vì `/admin` và `/cai-dat` không có sidebar |
+| **NQ-116** | 2026-09-23 | **Hồ sơ: tên hiển thị = `users.display_name` (trống ⇒ hiện NGUYÊN email); avatar sinh sẵn (chữ cái đầu + màu chọn từ token), tải ảnh là nút chờ tới P4; nhãn tier trong `vi.json`, tier chưa có nhãn hiện tên gốc** | Người dùng chọn 20A ("để trống thì lấy cả email") và 21A. Câu 22 (nhãn tier) **chưa được trả lời** — áp đề xuất mặc định A của agent, nói rõ để bác được: cột `tiers.label` sửa ở admin là đúng hơn về lâu dài nhưng kéo theo đổi `OVERRIDABLE_FIELDS` của T-2.20. Avatar lưu **tên** màu, không lưu mã màu (A3) |
+| **NQ-117** | 2026-09-23 | **Icon: `morphicons` + dữ liệu `lucide`; biến hình ở mọi chỗ đổi trạng thái + khi hover trong menu tài khoản; luôn `reducedMotion="user"`** | Người dùng đã cài `morphicons` và chọn 23a (cho cài `lucide`), 23b-A, 23c. `morphicons` không kèm icon nào — nó cần dữ liệu `IconNode` của gói `lucide`. Mặc định của thư viện (từ 1.4.2) là **bỏ qua** cài đặt giảm chuyển động của hệ điều hành, trái T-3.9, nên mọi icon đi qua một wrapper duy nhất (`components/ui/Icon.tsx`). Thông số lò xo là hằng ở `lib/motion.ts` — loại token chuyển động phía JS |
+| **NQ-118** | 2026-09-23 | **Mức suy luận: khối `reasoning` theo từng model trong catalog · nhãn tiếng Anh (Off · Low · Medium · High · Extra High · Max) · nhớ theo user × model ở server · ghi vào `messages.reasoning_effort` · gộp hai nút Thử lại làm một (dùng model + mức trên picker) · đo trước khi khai (T-S.2) · ghim version LiteLLM · bổ sung RUNBOOK** | Người dùng yêu cầu thêm và chốt 16A, 17 ("quy về 1"), 18 (nhãn tiếng Anh; bổ sung `docs/RUNBOOK-them-provider.md` gồm cách thêm mức và chỉnh trần vào/ra — **người dùng cho phép đích danh sửa file này trong `docs/`**). Tra cứu 2026-09-23 cho thấy mỗi provider một cơ chế (bảng §24.2b·S3b), và `drop_params: true` bỏ im lặng tham số sai — nên không mức nào vào catalog khi chưa đo. Hệ quả cho P6 ghi ở B-266 |
+| **NQ-119** | 2026-09-23 | **Provider hiển thị theo từng model; đường trung gian (9Router, Sub2API) KHÔNG BAO GIỜ hiện với người dùng; gỡ badge "9Router" và mọi thứ liên quan; admin vẫn thấy đường đi qua `GET /admin/models`** | Người dùng yêu cầu thêm ("chỉ hiển thị các provider gốc") và bác đề xuất giữ badge "9Router". `providers[].user_visible: false` + `models[].display_provider` bắt buộc cho provider ấy; `unavailable_reason` không còn chèn tên đường đi. Màn quản trị vẫn cần đường đi thật vì health đo theo đường đi (§9.5) |
+| **NQ-120** | 2026-09-23 | **Model Picker v2 bốn khối (Model hiện tại · Thinking Effort › · More models › · Giá); giá USD/1M từ catalog qua `GET /models`** | Người dùng mô tả cấu trúc và chọn 19A. Không có tỷ giá trong hệ thống — hiện VND là thêm một con số phải vào config (A3) mà không ai yêu cầu. Khung giá cao/thấp điểm do backend tính theo múi giờ của catalog |
+| **NQ-121** | 2026-09-23 | **Nút chờ: một component `ComingSoon` (khoá, con trỏ `not-allowed`, tooltip "Sắp có" KHÔNG ghi phase, `data-planned`); panel artifact không vẽ (vẫn T-HD6 sau T-5.4); mic hiện cả trên Firefox tới P8; không làm nút chờ cho B-258, `GET /settings/usage`, T-9.6** | Người dùng chọn 15a (không ghi phase), 15b, 15c, 15d ("Không"). `aria-disabled` thay vì `disabled` để tooltip tới được người dùng bàn phím. `data-planned` là cách agent của phase sau `grep` ra đúng chỗ gắn; bảng chuẩn là §7b.2 |
 
 ---
 

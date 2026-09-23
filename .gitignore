@@ -15,3 +15,5 @@ __pycache__/
 evals/results/
 *.tsbuildinfo
 frontend/dist/
+# B-269: repo dung pnpm; lock cua npm la dap an thu hai cho "da cai ban nao".
+frontend/package-lock.json
