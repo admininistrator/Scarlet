@@ -4,14 +4,86 @@
 
 | Task | Link Claude Design | Ngày chốt |
 |---|---|---|
-| T-HD1-v2 |  |  |
-| T-HD2-v2 |  |  |
-| T-HD3-v2 |  |  |
-| T-HD4-v2 |  |  |
-| T-HD5-v2 |  |  |
-| T-HD7-v2 |  |  |
-| T-HD8 |  |  |
-| T-HD9 |  |  |
+| T-HD1-v2 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet.dc.html` | 2026-09-23 |
+| T-HD2-v2 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+Khung+ch%C3%ADnh+v2.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Khung chính v2.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Khung chính v2.dc.html` | 2026-09-23 |
+| T-HD3-v2 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+Bong+b%C3%B3ng+tin+nh%E1%BA%AFn+v2.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Bong bóng tin nhắn v2.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Bong bóng tin nhắn v2.dc.html` | 2026-09-24 |
+| T-HD4-v2 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+Model+Picker+v2.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Model Picker v2.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Model Picker v2.dc.html` | 2026-09-24 |
+| T-HD5-v2 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+Chuy%E1%BB%83n+%C4%91%E1%BB%99ng+v2.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Chuyển động v2.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Chuyển động v2.dc.html` | 2026-09-25 |
+| T-HD7-v2 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+Qu%E1%BA%A3n+tr%E1%BB%8B+v2.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Quản trị v2.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Quản trị v2.dc.html` | 2026-09-24 |
+| T-HD8 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+X%C3%A1c+th%E1%BB%B1c.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Xác thực.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Xác thực.dc.html` | 2026-09-24 |
+| T-HD9 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+C%C3%A0i+%C4%91%E1%BA%B7t.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Cài đặt.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Cài đặt.dc.html` | 2026-09-24 |
 
 Mốc code của v1: `79da45ac01d357ad0ebac9ad4af93eccd340d86e` — T-S.18 so từ mốc này.
 

@@ -5,6 +5,8 @@
   "theme.light": "Sáng",
   "theme.dark": "Tối",
 
+  "common.comingSoon": "Sắp có",
+
   "chat.chuaCoHoiThoai": "Chưa mở hội thoại nào. Bấm “Hội thoại mới” để bắt đầu.",
   "chat.oNhap": "Nhập câu hỏi…",
   "chat.phimGui": "Enter để gửi · Shift+Enter để xuống dòng",

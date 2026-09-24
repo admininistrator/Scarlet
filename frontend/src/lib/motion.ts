@@ -121,3 +121,37 @@ export function usePresence<T extends HTMLElement>(open: boolean, exitToken: str
 
   return { ref, mounted, state, reduced };
 }
+
+/**
+ * Lo xo cua icon bien hinh — T-S.9, ban T-HD5-v2 (`springs.ts`), NQ-117.
+ *
+ * Loai token chuyen dong phia JS: icon chay bang vat ly lo xo cua `morphicons`
+ * chu khong bang CSS, nen khong co so mili-giay nao — thoi gian la he qua cua
+ * `stiffness`/`damping`. Ti so can ζ = damping / (2·√stiffness): ζ < 1 hoi
+ * vot, ζ ≥ 1 khong vot. Doi gia tri o DAY; `components/ui/Icon.tsx` la noi
+ * duy nhat doc chung.
+ *
+ * Ban ve con mot ham `springFor()` tra `null` khi giam chuyen dong, voi y
+ * "null = doi tuc thi". `morphicons` 1.7.1 KHONG hieu nhu the: `null` roi ve
+ * lo xo `snappy` mac dinh cua thu vien va icon VAN bay. Giam chuyen dong vi
+ * vay la viec cua `reducedMotion="user"` trong `Icon`, khong phai cua file nay.
+ */
+export type SpringConfig = { stiffness: number; damping: number };
+
+/** Doi trang thai do bam: toi nhanh, vot nhe bao "da nhan". ζ ≈ 0.79 */
+export const SPRING_SNAPPY: SpringConfig = { stiffness: 520, damping: 36 };
+/** Doi hinh lon, khong duoc vot (vot la thay meo). ζ ≈ 1.01 */
+export const SPRING_SETTLE: SpringConfig = { stiffness: 300, damping: 35 };
+/** Phan hoi re chuot, dao chieu lien tuc: mem, khong vot thay duoc. ζ ≈ 0.88 */
+export const SPRING_GENTLE: SpringConfig = { stiffness: 220, damping: 26 };
+
+/** Moi cho icon bien hinh — ten theo VAI TRO, cung loi ten token cua `theme.css`. */
+export const SPRINGS = {
+  sendStop: SPRING_SNAPPY,
+  sidebarToggle: SPRING_SNAPPY,
+  themeToggle: SPRING_SETTLE,
+  submenuChevron: SPRING_GENTLE,
+  accountMenuItemHover: SPRING_GENTLE,
+} as const satisfies Record<string, SpringConfig>;
+
+export type SpringRole = keyof typeof SPRINGS;

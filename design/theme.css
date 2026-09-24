@@ -2,7 +2,7 @@
 @import "tailwindcss";
 
 /*
- * Scarlet — Design System tokens (T-HD1)
+ * Scarlet — Design System tokens (T-HD1) · v2.0
  * ---------------------------------------------------------------------------
  * Quy tắc:
  *   • Màu CHỈ tồn tại ở file này. Component không có #rrggbb / rgb() / hsl() / oklch().
@@ -78,6 +78,40 @@
   --spacing-code-gutter: 2.5rem;     /* 40px — cột số dòng, cố định tới 999 dòng */
   --spacing-caret: 0.5rem;           /* 8px — bề ngang con trỏ stream */
 
+  /* Bong bóng tin nhắn v2 */
+  --spacing-chip: 2rem;              /* 32px — chip công cụ / nguồn, phần vẽ; vùng bấm vẫn min-h-touch */
+  --spacing-source-chip: 12rem;      /* 192px — chip nguồn rộng tối đa, tên dài cắt ellipsis */
+  --spacing-favicon: 1rem;           /* 16px — favicon trong chip nguồn */
+  --spacing-artifact: 30rem;         /* 480px — thẻ artifact rộng tối đa */
+  --spacing-artifact-icon: 2.5rem;   /* 40px — ô icon loại artifact */
+  --spacing-thumb: 6rem;             /* 96px — thumbnail ảnh trong bong bóng người dùng */
+
+  /* Model Picker v2 */
+  --spacing-submenu: 14rem;          /* 224px — menu con Thinking Effort, desktop */
+  --spacing-sheet-screen: 35rem;     /* 560px — sheet giữ nguyên chiều cao khi trượt giữa ba màn; trần vẫn là sheet-max */
+  --spacing-row-menu: 3rem;          /* 48px — hàng Thinking Effort / More models ở 375px */
+
+  /* Khung chính v2 */
+  --spacing-composer-max: 12.5rem;   /* 200px — textarea cao tối đa, sau đó cuộn trong */
+  --spacing-account: 4.5rem;         /* 72px — khối tài khoản ở chân sidebar */
+  --spacing-attachment: 3.5rem;      /* 56px — thumbnail ảnh / chip tệp trong khay */
+
+  /* Cài đặt v2 */
+  --spacing-settings-nav: 13.5rem;   /* 216px — cột tab bên trái, ≥ 1024px */
+  --spacing-settings-form: 40rem;    /* 640px — bề rộng tối đa cột nội dung */
+  --spacing-avatar-lg: 4rem;         /* 64px — avatar xem trước ở tab Tài khoản */
+  --spacing-quota-bar: 0.5rem;       /* 8px — chiều cao thanh hạn mức */
+  --spacing-row-settings: 3.5rem;    /* 56px — hàng danh sách tab ở 375px */
+
+  /* Xác thực (T-HD8) */
+  --spacing-auth: 25rem;             /* 400px — cột form; lòng thẻ 400 − 2 × 32 = 336 */
+  --spacing-auth-top: 6rem;          /* 96px — neo cột ở đỉnh, desktop */
+  --spacing-turnstile: 21rem;        /* 336px — bề ngang Turnstile */
+  --spacing-turnstile-h: 4.4375rem;  /* 71px — bề cao Turnstile, chừa sẵn trước khi huy hiệu hiện */
+  --text-input: 1rem;                /* 16px — chữ trong ô nhập; nhỏ hơn thì iOS phóng to khi focus */
+  --text-input--line-height: 1.5rem;
+  --keyboard-inset: 0px;             /* JS (useKeyboardInset) ghi đè trên <html> khi bàn phím ảo mở */
+
   /* ---------- Radius ---------------------------------------------------- */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
@@ -123,6 +157,16 @@
    * token để không một `transition-colors` nào còn chạy 150ms của thư viện (T-3.9). */
   --default-transition-duration: var(--duration-fast);
   --default-transition-timing-function: var(--ease-move);
+
+  /* Chuyển động v2 — chỉ THÊM, không đụng thang ở trên.
+   *   dock  360ms  ô nhập trượt từ giữa xuống đáy: quãng đường ~40% chiều cao màn,
+   *                dài hơn mọi panel nên cần dài hơn normal; vẫn dưới 400ms.
+   *   fill  640ms  thanh hạn mức chạy từ 0: chậm để mắt kịp đọc tỉ lệ, chạy một lần. */
+  --duration-dock: 360ms;
+  --duration-fill: 640ms;
+  --duration-type: 45ms;             /* nhịp gõ MỘT ký tự của lời chào "Hôm nay bạn cần gì?" — JS đọc token này */
+  --spacing-title-tail: 1.5rem;      /* 24px — đuôi chữ mờ của tiêu đề đang về trong sidebar */
+  --shadow-focus: 0 0 0 1px var(--color-ring); /* viền ô nhập khi focus: border 1px + 1px này = 2px */
 
   /* ---------- BỀ MẶT ----------------------------------------------------- */
   --color-background: #f7f6f4;          /* nền app */
@@ -195,6 +239,30 @@
   --color-code-function: #1c4ed8;       /* lam  — tên hàm, class, thuộc tính */
   --color-code-comment: #5c5651;        /* chú thích — cùng giá trị với muted */
   --color-code-punct: #5c5651;          /* dấu câu, toán tử */
+
+  /* ---------- AVATAR (v2) ------------------------------------------------------ */
+  /* Tám nền cho avatar tròn một chữ cái. Người dùng → màu bằng hash ổn định của
+   * user id (mod 8), không phải theo tên, để đổi tên không đổi màu.
+   * Hue OKLCH 75°–320°: tránh dải 330°–60° của accent (29°) và danger (14°).
+   * Theme sáng: nền đậm + chữ trắng. Theme tối: nền sáng + chữ tối. */
+  --color-avatar-1: #976712;            /* hổ phách · 75° */
+  --color-avatar-2: #6f771f;            /* ô liu · 115° */
+  --color-avatar-3: #37804b;            /* lục · 150° */
+  --color-avatar-4: #00807b;            /* lục lam · 190° */
+  --color-avatar-5: #1c7a9f;            /* lam · 230° */
+  --color-avatar-6: #677284;            /* xám đá · 260°, độ bão hoà thấp */
+  --color-avatar-7: #6568b6;            /* chàm · 280° */
+  --color-avatar-8: #8b5d96;            /* mận · 320° */
+  --color-avatar-foreground: #ffffff;
+
+  /* ---------- MENU (v2) --------------------------------------------------------- */
+  /* Đường kẻ ngăn mục trong menu tài khoản và Model Picker. Sáng: cùng giá trị
+   * với --color-border. Tối: --color-border chỉ đạt 1.18 trên panel nên cần riêng. */
+  --color-divider: #ded9d3;
+
+  /* ---------- KHÔNG BẤM ĐƯỢC (v2) ------------------------------------------------- */
+  /* Dùng chung cho nút chờ ("Sắp có") và nút tắt vì điều kiện. Không phải màu. */
+  --disabled-opacity: 0.45;
 }
 
 [data-theme="dark"] {
@@ -263,6 +331,20 @@
   --color-code-comment: #a8a099;
   --color-code-punct: #a8a099;
 
+  /* AVATAR (v2) — nền sáng, chữ tối */
+  --color-avatar-1: #be8f49;
+  --color-avatar-2: #96a051;
+  --color-avatar-3: #66aa76;
+  --color-avatar-4: #44aba5;
+  --color-avatar-5: #53a3c8;
+  --color-avatar-6: #8e99aa;
+  --color-avatar-7: #8b90dd;
+  --color-avatar-8: #b385bd;
+  --color-avatar-foreground: #171514;
+
+  /* MENU (v2) */
+  --color-divider: #45403b;
+
   /* Shadow phải đậm hơn trên nền tối mới nhìn thấy tầng nổi. */
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
   --shadow-panel: 0 4px 12px -2px rgb(0 0 0 / 0.55), 0 2px 4px -2px rgb(0 0 0 / 0.40);
@@ -308,6 +390,25 @@
     color: var(--color-accent-hover);
     text-decoration: underline;
   }
+
+  /* ---- Luật con trỏ (v2) ----
+   * Utility cursor-* trong component vẫn thắng vì @layer utilities đứng sau base.
+   * Khối not-allowed đứng SAU khối pointer: cùng độ đặc hiệu thì cái sau thắng. */
+  button,
+  a[href],
+  [role="button"],
+  [role="menuitem"],
+  [role="tab"],
+  [role="option"],
+  summary,
+  label:has(input[type="checkbox"], input[type="radio"]) {
+    cursor: pointer;
+  }
+  :disabled,
+  [aria-disabled="true"],
+  label:has(input[type="checkbox"]:disabled, input[type="radio"]:disabled) {
+    cursor: not-allowed;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -332,6 +433,9 @@
     --duration-slow: 0ms;
     --duration-caret: 0ms;
     --duration-spin: 0ms;
+    --duration-dock: 0ms;
+    --duration-fill: 0ms;
+    --duration-type: 0ms;             /* lời chào hiện đủ ngay, không gõ */
   }
   *,
   *::before,
@@ -343,6 +447,17 @@
   .motion-press:active {
     transform: none !important;
   }
+  /* v2 — bảy chuyển động. animation/transition đã bị tắt bởi khối * ở trên;
+   * các dòng dưới chốt TRẠNG THÁI CUỐI để không phần tử nào kẹt ở trạng thái đầu. */
+  .motion-dock { transform: none !important; }          /* 1 ô nhập nhảy thẳng xuống đáy */
+  .motion-focus-ring { transition: none !important; }   /* 2 viền hiện tức thì */
+  .motion-title { mask-image: none !important; -webkit-mask-image: none !important; } /* 3 tiêu đề hiện ngay, không đuôi mờ */
+  .motion-quota-fill { animation: none !important; }    /* 4 thanh vẽ thẳng giá trị */
+  .motion-submenu,
+  .motion-screen,
+  .motion-screen-leave,
+  .motion-menu-up { animation: none !important; transform: none !important; } /* 5, 6 menu hiện không trượt */
+  /* 7 icon: lò xo chạy bằng JS — springs.ts trả về null khi khớp REDUCED_MOTION_QUERY → đổi tức thì. */
 }
 
 /* ---------------------------------------------------------------------------
@@ -503,6 +618,13 @@
   }
 }
 /* Chỉ báo "đang làm mới trạng thái provider". Quay liên tục, không đổi layout. */
+/* Màn con trong sheet (Model Picker v2). Tiến: vào từ phải. Lùi (data-direction="back"): vào từ trái. */
+@utility motion-screen {
+  animation: scarlet-screen-in var(--duration-normal) var(--ease-enter) both;
+  &[data-direction="back"] {
+    animation-name: scarlet-screen-back;
+  }
+}
 @utility motion-spin {
   animation: scarlet-spin var(--duration-spin) var(--ease-constant) infinite;
 }
@@ -547,6 +669,122 @@
   print-color-adjust: exact;
   -webkit-print-color-adjust: exact;
 }
+/* ---- Không bấm được (v2) ------------------------------------------------
+ * Gắn .control-disabled lên MỌI nút / mục menu có thể bị khoá. Nó chỉ có tác dụng
+ * khi phần tử mang :disabled hoặc aria-disabled="true".
+ *   • Nút tắt vì điều kiện (Gửi khi ô nhập rỗng): thuộc tính disabled.
+ *   • Nút chờ: aria-disabled="true" — vẫn nhận focus và hover, nên tooltip
+ *     "Sắp có" mở được bằng chuột lẫn bàn phím (disabled gốc không phát sự kiện).
+ * Khi focus bằng bàn phím, nút chờ hiện rõ lại: opacity làm mờ luôn cả vòng
+ * focus (còn ~2.3:1), dưới ngưỡng 3:1 của ràng buộc 8. */
+@utility control-disabled {
+  &:disabled,
+  &[aria-disabled="true"] {
+    opacity: var(--disabled-opacity);
+  }
+  &[aria-disabled="true"]:focus-visible {
+    opacity: 1;
+  }
+}
+/* ---- Chuyển động v2 ------------------------------------------------------
+ *  Chỗ                            Class                 Thời lượng     Easing
+ *  ─────────────────────────────  ────────────────────  ─────────────  ──────
+ *  1 Ô nhập giữa → đáy            .motion-dock          dock   360ms   move
+ *  2 Viền ô nhập — focus vào      .motion-focus-ring    normal 200ms   enter
+ *  2 Viền ô nhập — rời focus      .motion-focus-ring    fast   140ms   exit
+ *  3 Tiêu đề sidebar — đuôi chữ   .motion-title         (tĩnh) · tắt đuôi normal 200ms move
+ *  4 Thanh hạn mức 0 → giá trị    .motion-quota-fill    fill   640ms   move
+ *  5 Menu con desktop — vào       .motion-submenu       normal 200ms   enter
+ *  5 Menu con desktop — ra        .motion-submenu       fast   140ms   exit
+ *  5 Màn con mobile — vào / ra    .motion-screen / -leave  normal 200ms enter (cặp đẩy phải đi cùng nhịp)
+ *  6 Menu tài khoản — mở lên      .motion-menu-up       fast   140ms   enter
+ *  6 Menu tài khoản — đóng        .motion-menu-up       instant 90ms   exit
+ *  7 Icon biến hình               springs.ts (JS)       lò xo, không có ms
+ * ------------------------------------------------------------------------- */
+
+/* 1. Ô nhập. FLIP: code đo vị trí khung TRƯỚC và SAU khi layout đổi, ghi hiệu số
+ * vào --dock-from (px, số âm = đi lên) trên chính khung, rồi gắn data-dock="run".
+ * Chỉ transform của KHUNG; chữ trong textarea đi theo khung, không có hoạt ảnh riêng. */
+@utility motion-dock {
+  &[data-dock="run"] {
+    animation: scarlet-dock var(--duration-dock) var(--ease-move) both;
+  }
+}
+/* 2. Viền ô nhập. Transition đọc từ trạng thái ĐÍCH: vào :focus-within dùng normal/enter,
+ * rời ra dùng fast/exit → hiện dần, mờ nhanh hơn. Component gắn
+ * `border-border focus-within:border-ring focus-within:shadow-focus`. */
+@utility motion-focus-ring {
+  transition: border-color var(--duration-fast) var(--ease-exit),
+    box-shadow var(--duration-fast) var(--ease-exit);
+  &:focus-within {
+    transition-duration: var(--duration-normal);
+    transition-timing-function: var(--ease-enter);
+  }
+}
+/* 3. Tiêu đề trong sidebar. Gắn lên VỎ inline-block bọc chữ; chữ bên trong gắn
+ * .motion-none. Mặt nạ làm mờ 24px cuối: mỗi mảnh mới đến nằm trong vùng mờ, mảnh
+ * cũ bị đẩy ra vùng rõ → chữ "hiện dần" ở đuôi, không hoạt ảnh từng ký tự.
+ * Vỏ có max-width 100% + overflow hidden; hàng đã cố định bề rộng nên không đổi.
+ * Xong luồng: data-state="done" → đuôi co về 0 trong normal.
+ * Màu trong mask chỉ lấy alpha; --color-foreground đục ở cả hai theme. */
+@property --title-tail {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@utility motion-title {
+  --title-tail: var(--spacing-title-tail);
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: top;
+  -webkit-mask-image: linear-gradient(to right, var(--color-foreground) calc(100% - var(--title-tail)), transparent);
+  mask-image: linear-gradient(to right, var(--color-foreground) calc(100% - var(--title-tail)), transparent);
+  transition: --title-tail var(--duration-normal) var(--ease-move);
+  &[data-state="done"] {
+    --title-tail: 0px;
+  }
+}
+/* 4. Thanh hạn mức. Keyframe chỉ có `from`: đích là width thật do component đặt.
+ * Code gắn class này CHỈ ở lần mở đầu tiên mỗi phiên đăng nhập; các lần sau dùng
+ * .motion-quota (v1) như cũ. */
+@utility motion-quota-fill {
+  animation: scarlet-quota-fill var(--duration-fill) var(--ease-move) both;
+}
+/* 5a. Menu con desktop (Radix DropdownMenu.SubContent). Trượt ra từ phía menu cha:
+ * data-side="right" → vào từ trái; data-side="left" (sát mép phải màn) → vào từ phải. */
+@utility motion-submenu {
+  --submenu-from: -0.5rem;
+  animation: scarlet-submenu-in var(--duration-normal) var(--ease-enter) both;
+  &[data-side="left"] {
+    --submenu-from: 0.5rem;
+  }
+  &[data-state="closed"] {
+    animation: scarlet-fade-out var(--duration-fast) var(--ease-exit) both;
+  }
+}
+/* 5b. Màn con mobile: màn RỜI đi. Đi cặp với .motion-screen (v1) của màn mới.
+ * Tiến: màn cũ ra trái; lùi (data-direction="back"): màn cũ ra phải.
+ * Cùng thời lượng + easing với màn vào để hai màn dính mép nhau — ngoại lệ có chủ ý
+ * của luật "ra ngắn hơn vào". Unmount khi animationend (hoặc ngay nếu animation-name = none). */
+@utility motion-screen-leave {
+  animation: scarlet-screen-leave var(--duration-normal) var(--ease-enter) both;
+  &[data-direction="back"] {
+    animation-name: scarlet-screen-leave-back;
+  }
+}
+/* 6. Menu tài khoản mở LÊN từ chân sidebar (Radix side="top"). Gốc biến đổi là mép
+ * dưới — chỗ nút tài khoản — nên menu "mọc" từ nút ra. */
+@utility motion-menu-up {
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin, bottom left);
+  animation: scarlet-menu-up-in var(--duration-fast) var(--ease-enter) both;
+  &[data-state="closed"] {
+    animation: scarlet-menu-up-out var(--duration-instant) var(--ease-exit) both;
+  }
+}
+
 @utility tabular {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
@@ -600,8 +838,43 @@
   from { transform: translateY(100%); }
   to   { transform: none; }
 }
+@keyframes scarlet-screen-in {
+  from { transform: translateX(100%); }
+  to   { transform: none; }
+}
+@keyframes scarlet-screen-back {
+  from { transform: translateX(-100%); }
+  to   { transform: none; }
+}
 @keyframes scarlet-spin {
   to { transform: rotate(360deg); }
+}
+@keyframes scarlet-dock {
+  from { transform: translateY(var(--dock-from, 0px)); }
+  to   { transform: none; }
+}
+@keyframes scarlet-quota-fill {
+  from { width: 0; }
+}
+@keyframes scarlet-submenu-in {
+  from { opacity: 0; transform: translateX(var(--submenu-from)); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes scarlet-screen-leave {
+  from { transform: none; }
+  to   { transform: translateX(-100%); }
+}
+@keyframes scarlet-screen-leave-back {
+  from { transform: none; }
+  to   { transform: translateX(100%); }
+}
+@keyframes scarlet-menu-up-in {
+  from { opacity: 0; transform: translateY(0.375rem) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes scarlet-menu-up-out {
+  from { opacity: 1; }
+  to   { opacity: 0; transform: translateY(0.25rem); }
 }
 @keyframes scarlet-pulse {
   from { opacity: 0.45; }
