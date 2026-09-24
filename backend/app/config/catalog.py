@@ -969,6 +969,18 @@ def get_model(model_id: str) -> ModelEntry | None:
     return next((m for m in _catalog.models if m.id == model_id and m.enabled), None)
 
 
+def supports_reasoning(model: ModelEntry, level_id: str) -> bool:
+    """`model` có khai mức `level_id` trong `reasoning.options` không (§24.2b·S4).
+
+    Một câu hỏi, một chỗ trả lời: `PUT /settings` kiểm `reasoning_prefs` lúc
+    ghi, `/auth/me` bỏ qua cặp đã hết hợp lệ lúc đọc (T-S.5), và biên vào của
+    lượt sinh kiểm `reasoning_effort` (T-S.6) — ba người hỏi mà hai luật thì
+    một ngày nào đó sẽ lệch nhau. Model không có khối `reasoning` ⇒ `False`
+    với mọi mức, kể cả `off`.
+    """
+    return model.reasoning is not None and model.reasoning.option(level_id) is not None
+
+
 def get_default_model() -> ModelEntry | None:
     """Model dùng khi request không nói dùng model nào (§9.2 `default: true`).
 

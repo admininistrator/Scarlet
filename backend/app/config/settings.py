@@ -407,6 +407,11 @@ class Settings(BaseSettings):
     #: nhỏ hơn ~28k token là lúc phải hạ con số này xuống theo — đó là lý do nó
     #: là một biến `.env` chứ không phải một hằng trong `api/v1/messages.py`.
     MESSAGE_MAX_CHARS: int = Field(default=24000, gt=0)
+    #: Trần độ dài `users.display_name`, tính bằng **ký tự** như
+    #: `MESSAGE_MAX_CHARS` (T-S.5 Cạm bẫy ③). Áp ở biên vào của `PUT /settings`;
+    #: FE đọc lại chính con số này qua `GET /auth/me` (`display_name_max_chars`).
+    #: Cột là `TEXT` không `CHECK`, nên nới con số này không cần migration.
+    DISPLAY_NAME_MAX_CHARS: int = Field(default=64, gt=0)
     CONTEXT_WINDOW_CAP: int = Field(default=128000, gt=0)
     RESERVE_TOKENS: int = Field(default=1000, ge=0)
     VISION_MAX_EDGE_PX: int = Field(default=1568, gt=0)

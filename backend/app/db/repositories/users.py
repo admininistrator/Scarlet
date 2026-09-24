@@ -172,15 +172,23 @@ class UserRepository:
 
     # ═════════════ cài đặt cá nhân (§18.4) — T-3.0 ═════════════
 
-    async def set_default_model(self, user_id: uuid.UUID, model_id: str | None) -> bool:
-        """Ghi `users.default_model` cho CHÍNH người gọi (§18.4, B-206) — T-3.0.
+    async def set_profile(
+        self, user_id: uuid.UUID, *, display_name: str | None, default_model: str | None
+    ) -> bool:
+        """Ghi hai cột cài đặt của `users` cho CHÍNH người gọi (§18.4) — T-3.0, T-S.5.
+
+        `default_model` (B-206, T-3.0) và `display_name` (NQ-116, T-S.5) — hai
+        trường của `PUT /settings` sống trên hàng `users`; phần còn lại ở
+        `user_settings.prefs_json` (`UserSettingsRepository`).
 
         Nhận `None` và ghi `None` thật: "bỏ chọn, dùng lại mặc định của
-        catalog" là một ý định có thật của người dùng, nên nó phải đi được qua
-        hàm này. Đó cũng là lý do tham số không có giá trị mặc định — bỏ quên
-        nó phải là lỗi cú pháp, không phải một lần xoá âm thầm.
+        catalog" và "bỏ tên, hiện nguyên email" là những ý định có thật của
+        người dùng, nên chúng phải đi được qua hàm này. Đó cũng là lý do tham số
+        không có giá trị mặc định — bỏ quên một trường phải là lỗi cú pháp,
+        không phải một lần xoá âm thầm.
 
-        **Không** kiểm `model_id` có trong catalog: đó là việc của tầng router
+        **Không** kiểm `default_model` có trong catalog, không cắt khoảng trắng
+        của `display_name`: đó là việc của tầng router
         (`api/v1/settings.py::put_settings`), nơi có `ApiError` để nói với
         người dùng. Repository nói chuyện với Postgres, không với người.
 
@@ -194,11 +202,37 @@ class UserRepository:
         stmt = (
             update(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
-            .values(default_model=model_id)
+            .values(display_name=display_name, default_model=default_model)
             .returning(User.id)
             .execution_options(synchronize_session=False)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def record_login(self, user_id: uuid.UUID) -> datetime | None:
+        """Đóng dấu `users.last_login_at = now()` sau một lần đăng nhập thành công — T-S.5.
+
+        Cột có từ Phụ lục A mà tới T-S.5 chưa ai ghi (admin đọc ra luôn
+        `null`). S10/NQ-114 dùng nó để nhận ra "một lần đăng nhập": thanh
+        quota chạy từ 0 khi giá trị này **đổi**. Vì vậy chỉ `POST /auth/login`
+        gọi hàm này — `refresh` xoay token chứ không phải đăng nhập lại, và
+        ghi ở đó thì F5 sau 15 phút cũng chạy lại hoạt ảnh.
+
+        Đồng hồ của Postgres chứ không đồng hồ Python — cùng máy với
+        `created_at` của chính hàng này. `clock_timestamp()` chứ không `now()`,
+        cùng lý do migration 0002: `now()` là mốc **mở transaction**, nên hai
+        lần đăng nhập trong cùng một transaction (đúng hình dạng của bộ test,
+        NQ-17) mang cùng một giá trị và "đã đổi chưa" trả lời sai. Trả giá trị
+        vừa ghi (`RETURNING`) để response của `login` mang đúng nó mà không
+        phải đọc lại; `None` khi không hàng nào khớp.
+        """
+        stmt = (
+            update(User)
+            .where(User.id == user_id, User.deleted_at.is_(None))
+            .values(last_login_at=func.clock_timestamp())
+            .returning(User.last_login_at)
+            .execution_options(synchronize_session=False)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     # ═════════════ ba câu của admin panel (§16.3, §18.5) — T-2.16 ═════════════
 

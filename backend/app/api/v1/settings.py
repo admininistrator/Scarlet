@@ -1,7 +1,9 @@
-"""Cài đặt cá nhân — BYOK CRUD (§18.4, §10.5) — T-2.14; `PUT /settings` — T-3.0.
+"""Cài đặt cá nhân — BYOK CRUD (§18.4, §10.5) — T-2.14; `PUT /settings` — T-3.0,
+nở thêm hồ sơ và mức suy luận đã nhớ — T-S.5.
 
-KH tham chiếu: §10.5, §18.4, §9.2, §11.1, §19.1, §20, §23 `api/v1/settings.py` ·
-Cạm bẫy C20, C42 · CLAUDE.md A3 · tasks.md T-2.14, T-3.0, B-206, NQ-79.
+KH tham chiếu: §10.5, §18.4, §9.2, §11.1, §19.1, §20, §23 `api/v1/settings.py`,
+§24.2b·S4, S10, S14 · Cạm bẫy C20, C42 · CLAUDE.md A3 · tasks.md T-2.14, T-3.0,
+T-S.5, B-206, NQ-79, NQ-116, NQ-118.
 
 Ba endpoint của hàng "keys" trong bảng §18.4, cộng `PUT /settings` từ T-3.0.
 `GET /settings` và `GET /settings/usage` **chưa** có task nào — không dựng sẵn.
@@ -11,14 +13,24 @@ Ba endpoint của hàng "keys" trong bảng §18.4, cộng `PUT /settings` từ 
 └──────────────────────────────────────────────────────────────────────────┘
 
 §18.4 ghi `GET/PUT /settings` trên cùng một hàng, nhưng T-3.0 chỉ dựng vế
-`PUT`. Lý do: vế `GET` đã có người trả lời rồi. `default_model` — hôm nay là
-**toàn bộ** nội dung của "cài đặt cá nhân" ở tầng server — đi ra trong
-`GET /auth/me` (§18.1, NQ-81), và theme thì sống trong `localStorage` từ
-T-0.10. Một `GET /settings` hôm nay vì thế là endpoint thứ hai trả lời đúng
-một câu hỏi, tức chỗ đầu tiên để hai câu trả lời lệch nhau.
+`PUT`. Lý do: vế `GET` đã có người trả lời rồi — **mọi** trường của
+`PUT /settings` đi ra trong `GET /auth/me` (§18.1, NQ-81; S14 ghi hai endpoint
+ấy trên cùng một hàng), và theme thì sống trong `localStorage` từ T-0.10. Một
+`GET /settings` vì thế là endpoint thứ hai trả lời đúng một câu hỏi, tức chỗ
+đầu tiên để hai câu trả lời lệch nhau.
 
-Tên endpoint giữ nguyên chữ của §18.4 để tuỳ chọn thứ hai ghép thẳng vào đây
-mà không phải đổi đường dẫn — và đó cũng là lúc `GET /settings` có việc để làm.
+┌──────────────────────────────────────────────────────────────────────────┐
+│  CÁI GÌ LƯU Ở ĐÂU (T-S.5 Cạm bẫy ①)                                      │
+└──────────────────────────────────────────────────────────────────────────┘
+
+- `default_model` → `users.default_model` (NQ-79). **Không** dời sang
+  `user_settings` — đó là một migration dữ liệu không ai yêu cầu.
+- `display_name` → `users.display_name` (NQ-116), cột có từ Phụ lục A.
+- `avatar_color`, `reasoning_prefs` → `user_settings.prefs_json`, khoá
+  `avatar_color` và `reasoning` (S14; hình dạng ở `app/core/user_prefs.py`).
+
+Hai bảng, **một** transaction: một lần bấm Lưu không được để tên mới đi cùng
+mức suy luận cũ.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  BẢN RÕ SỐNG ĐÚNG MỘT LẦN, TRONG ĐÚNG MỘT HÀM                            │
@@ -73,15 +85,17 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
 
 from app.config import catalog
 from app.config.catalog import Provider
+from app.config.settings import settings
 from app.core.crypto import DecryptionError, Sealed, mask_secret, seal, unseal
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
+from app.core.user_prefs import UserPrefs
 from app.db.models import UserProviderKey
-from app.db.repositories import ProviderKeyRepository, UserRepository
+from app.db.repositories import ProviderKeyRepository, UserRepository, UserSettingsRepository
 from app.db.session import session_scope
 from app.llm.byok_verify import VerifyOutcome, VerifyUnavailable, verify_key
 
@@ -332,43 +346,120 @@ async def delete_provider_key(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# ═══════════════════ PUT /settings (§18.4, B-206, NQ-79) — T-3.0 ════════════
+# ═══════════════ PUT /settings (§18.4, B-206, NQ-79) — T-3.0, T-S.5 ═════════
+
+#: Tên màu avatar (§24.2b·S10, T-S.5 Việc 1): chữ thường, số, gạch nối. Chỉ
+#: kiểm **hình dạng** — backend không biết bảng màu token của T-HD1-v2 (A3), nên
+#: một tên hợp hình dạng mà FE không biết vẫn lưu được, và FE rơi về màu mặc
+#: định. Hình dạng hẹp là để tên màu không bao giờ mang được một mã CSS nào.
+_AVATAR_COLOR_PATTERN = r"^[a-z0-9-]{1,32}$"
+
+#: Không ký tự điều khiển C0/DEL trong tên hiển thị. `\x00` là lý do cứng:
+#: Postgres `TEXT` không nhận NUL, và thiếu luật này thì nó đi hết biên vào rồi
+#: nổ thành `500` ở câu `UPDATE`. Xuống dòng, tab thì không có chỗ trong một tên
+#: hiện trên một dòng sidebar.
+_DISPLAY_NAME_PATTERN = r"^[^\x00-\x1f\x7f]*$"
+
+
+def _blank_to_none(value: object) -> object:
+    """`display_name`: cắt khoảng trắng hai đầu; rỗng ⇒ `None` (Cạm bẫy ② của T-S.5).
+
+    Chạy **trước** trần độ dài, nên `"  An  "` đếm là 2 ký tự chứ không 6, và
+    `"   "` thành `NULL` trong DB — FE hiện nguyên email (NQ-116). Lưu chuỗi
+    rỗng là cho FE hai cách viết "chưa đặt tên".
+    """
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return value
+
+
+#: Ràng buộc đặt trên kiểu `str` **bên trong**, không trên `str | None`. Đo khi
+#: viết task: `Field(max_length=…)` đặt ngoài cùng `BeforeValidator` thì
+#: Pydantic áp `max_length` lên cả `None` do `_blank_to_none` trả về và nổ
+#: `TypeError` (tức `500`) — đúng ca rỗng mà Cạm bẫy ② đòi phải đi được.
+#: `avatar_color` đi cùng khuôn cho khỏi hai cách viết một loại ràng buộc.
+_DisplayName = Annotated[
+    str,
+    StringConstraints(max_length=settings.DISPLAY_NAME_MAX_CHARS, pattern=_DISPLAY_NAME_PATTERN),
+]
+_AvatarColor = Annotated[str, StringConstraints(pattern=_AVATAR_COLOR_PATTERN)]
 
 
 class SettingsIn(BaseModel):
-    """Body của `PUT /settings`. Đúng **một** trường, cố ý.
+    """Body của `PUT /settings` — **thay cả tài nguyên** (§18.4, S10).
 
-    NQ-79 chốt "tối thiểu": không dựng sẵn khung cho tuỳ chọn chưa tồn tại.
-    Đó là cùng lý lẽ đã dùng để `quota/tiers.py` không có `invalidate()`
-    (NQ-51) — một chỗ cắm không ai cắm vào là một chỗ không ai kiểm.
+    Trường vắng mặt đọc thành "không có": `default_model`/`display_name`/
+    `avatar_color` về `null`, `reasoning_prefs` về `{}`. Đó là hành vi **có chủ
+    ý**: S10 chốt `PUT` vẫn thay cả tài nguyên khi tài nguyên nở thêm trường,
+    nên FE (T-S.11) luôn gửi **đủ** — không có luật "vắng mặt nghĩa là giữ
+    nguyên" nào nhét vào `PUT`. Test `test_put_replaces_whole_resource` canh.
 
-    `extra="forbid"` để một khoá gõ sai (`defaultModel`, `default_model_id`)
-    thành `422` chứ không thành một lần ghi im lặng không có tác dụng gì.
+    `extra="forbid"` để một khoá gõ sai (`defaultModel`, `avatarColor`) thành
+    `422` chứ không thành một lần ghi im lặng — mà với `PUT` thay cả tài nguyên
+    thì còn tệ hơn: trường gõ sai bị bỏ qua, trường đúng tên thì bị xoá.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    #: `null` (hoặc vắng mặt) = **bỏ chọn**, quay về bậc thang mặc định của
-    #: §9.2. Đó là một ý định có thật, nên nó phải gửi được — và vì `PUT` thay
-    #: cả tài nguyên chứ không vá từng trường, vắng mặt đọc thành `null`. Hôm
-    #: nay tài nguyên ấy có đúng một trường nên hai cách đọc trùng nhau; ngày
-    #: có trường thứ hai thì `PATCH` mới là method phải thêm, không phải một
-    #: luật "vắng mặt nghĩa là giữ nguyên" nhét vào `PUT`.
+    #: `null` = **bỏ chọn**, quay về bậc thang mặc định của §9.2.
     default_model: str | None = None
+    #: `null`/rỗng/toàn khoảng trắng ⇒ `NULL` ⇒ FE hiện nguyên email (NQ-116).
+    #: Trần đếm theo **ký tự** như `MESSAGE_MAX_CHARS` (Cạm bẫy ③), không bắt
+    #: duy nhất (S10). FE không bao giờ render nó như HTML — việc của FE.
+    display_name: Annotated[_DisplayName | None, BeforeValidator(_blank_to_none)] = None
+    #: Tên màu, không mã màu (A3, NQ-116). `null` = màu mặc định của FE.
+    avatar_color: _AvatarColor | None = None
+    #: `{model_id: level_id}` — mức suy luận đã nhớ (§24.2b·S4). Kiểm **từng
+    #: cặp** theo catalog lúc ghi, trong `_check_reasoning_prefs`.
+    reasoning_prefs: dict[str, str] = Field(default_factory=dict)
 
 
 class SettingsOut(BaseModel):
     """`200` của `PUT /settings` — trạng thái sau khi ghi.
 
-    Trả lại giá trị thay vì `204`: FE vừa gửi một tên model và cần biết chắc
-    server đã nhận đúng tên ấy, chứ không phải suy ra từ một response rỗng.
-    Cùng hình dạng với trường `default_model` của `GET /auth/me`, để hai chỗ
-    nói về cùng một thứ bằng cùng một cái tên.
+    Trả lại giá trị thay vì `204`: FE vừa gửi và cần biết chắc server đã nhận
+    đúng thứ ấy (kể cả `display_name` đã cắt khoảng trắng), chứ không phải suy
+    ra từ một response rỗng. Cùng tên trường với `GET /auth/me`, để hai chỗ nói
+    về cùng một thứ bằng cùng một cái tên.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     default_model: str | None
+    display_name: str | None
+    avatar_color: str | None
+    reasoning_prefs: dict[str, str]
+
+
+def _check_reasoning_prefs(prefs: dict[str, str]) -> None:
+    """Kiểm từng cặp `model → mức` theo catalog **lúc ghi** (T-S.5 Việc 1).
+
+    Cùng hai luật với `default_model` và cùng một hàm với lúc đọc
+    (`catalog.supports_reasoning`), nên một cặp ghi được hôm nay thì
+    `/auth/me` trả lại nó — trừ khi catalog đổi ở giữa, lúc ấy đọc bỏ qua.
+
+    Raises:
+        ApiError 400 `MODEL_UNKNOWN`: model không có hoặc đã `enabled: false`.
+        ApiError 400 `REASONING_UNSUPPORTED`: model không khai mức ấy — kể cả
+            model không có khối `reasoning` nào.
+    """
+    for model_id, level in prefs.items():
+        model = catalog.get_model(model_id)
+        if model is None:
+            raise ApiError(
+                status.HTTP_400_BAD_REQUEST,
+                ApiErrorCode.MODEL_UNKNOWN,
+                f"model khong co trong catalog hoac da tat: {model_id}",
+                details={"model_id": model_id},
+            )
+        if not catalog.supports_reasoning(model, level):
+            raise ApiError(
+                status.HTTP_400_BAD_REQUEST,
+                ApiErrorCode.REASONING_UNSUPPORTED,
+                f"model {model_id} khong co muc suy luan {level}",
+                details={"model_id": model_id, "level": level},
+            )
 
 
 @router.put(
@@ -378,7 +469,8 @@ class SettingsOut(BaseModel):
     responses={
         400: {
             "model": ErrorEnvelope,
-            "description": "model khong co trong catalog hoac da tat (MODEL_UNKNOWN)",
+            "description": "model khong co trong catalog hoac da tat (MODEL_UNKNOWN), "
+            "hoac model khong co muc suy luan do (REASONING_UNSUPPORTED)",
         }
     },
 )
@@ -386,27 +478,26 @@ async def put_settings(
     body: SettingsIn,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
 ) -> SettingsOut:
-    """Ghi cài đặt cá nhân của **chính mình** (§18.4, UC-05).
+    """Ghi cài đặt cá nhân của **chính mình** (§18.4, UC-05, §24.2b·S10).
 
     Không có tham số nào trỏ sang người khác: `user_id` đến từ dependency và đi
-    thẳng vào `WHERE` của câu `UPDATE` (§20) — đường dẫn không có `{id}`, body
-    không có `user_id`, và `UserRepository.set_default_model` không nhận một
-    khoá nào khác để lọc.
+    thẳng vào `WHERE` của cả hai câu ghi (§20) — đường dẫn không có `{id}`, body
+    không có `user_id`, và `UserRepository.set_profile` lẫn
+    `UserSettingsRepository.put_prefs` không nhận một khoá nào khác để lọc.
 
     **Validate catalog lúc GHI, không lúc đọc** (Cạm bẫy ③ của T-3.0). Catalog
     là file sửa nóng (`POST /admin/catalog/reload`, §19.1), nên một model hợp
     lệ hôm nay có thể biến mất ngày mai. Chặn ở đây thì người dùng chọn xong là
-    biết ngay; chặn lúc đọc thì một dòng cấu hình admin vừa sửa sẽ ném lỗi vào
-    mặt một người không làm gì cả. `GET /auth/me` vì vậy trả nguyên văn giá trị
-    đã lưu và để FE rơi về `default: true` của catalog.
+    biết ngay; lúc đọc thì `/auth/me` trả nguyên văn `default_model` (FE rơi về
+    `default: true`) và bỏ qua cặp suy luận hết hợp lệ (`user_prefs.read_prefs`).
 
-    `catalog.get_model` lọc luôn `enabled`, cùng lối `_pick_model` của
-    `api/v1/messages.py`: chọn mặc định một model đang tắt là hẹn trước một
-    `MODEL_UNKNOWN` cho mọi lượt chat sau đó.
+    Kiểm **hết** trước khi mở transaction: một `400` không ghi gì cả, kể cả
+    những trường hợp lệ đi cùng body ấy.
 
     Raises:
-        ApiError 400 `MODEL_UNKNOWN`: `default_model` không có trong catalog
-            hoặc đã `enabled: false`.
+        ApiError 400 `MODEL_UNKNOWN`: `default_model` hoặc một khoá của
+            `reasoning_prefs` không có trong catalog hoặc đã `enabled: false`.
+        ApiError 400 `REASONING_UNSUPPORTED`: model không khai mức ấy.
         ApiError 401 `UNAUTHENTICATED`: tài khoản đã bị xoá giữa hai request.
     """
     if body.default_model is not None and catalog.get_model(body.default_model) is None:
@@ -416,15 +507,25 @@ async def put_settings(
             f"model khong co trong catalog hoac da tat: {body.default_model}",
             details={"model_id": body.default_model},
         )
+    _check_reasoning_prefs(body.reasoning_prefs)
+    prefs = UserPrefs(avatar_color=body.avatar_color, reasoning=body.reasoning_prefs)
 
     async with session_scope() as session:
-        written = await UserRepository(session).set_default_model(user_id, body.default_model)
+        written = await UserRepository(session).set_profile(
+            user_id, display_name=body.display_name, default_model=body.default_model
+        )
         if not written:
             raise ApiError(
                 status.HTTP_401_UNAUTHORIZED,
                 ApiErrorCode.UNAUTHENTICATED,
                 "user khong con ton tai",
             )
+        await UserSettingsRepository(session).put_prefs(user_id, prefs.to_json())
         await session.commit()
 
-    return SettingsOut(default_model=body.default_model)
+    return SettingsOut(
+        default_model=body.default_model,
+        display_name=body.display_name,
+        avatar_color=prefs.avatar_color,
+        reasoning_prefs=prefs.reasoning,
+    )

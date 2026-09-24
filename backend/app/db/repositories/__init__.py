@@ -26,6 +26,7 @@ from app.db.repositories.usage_events import (
     UsageBucket,
     UsageEventRepository,
 )
+from app.db.repositories.user_settings import UserSettingsRepository
 from app.db.repositories.users import UserRepository
 
 __all__ = [
@@ -45,5 +46,6 @@ __all__ = [
     "UsageBucket",
     "UsageEventRepository",
     "UserRepository",
+    "UserSettingsRepository",
     "path_statement",
 ]

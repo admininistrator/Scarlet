@@ -192,6 +192,13 @@ class ApiErrorCode(StrEnum):
     #: `model_id` không có trong catalog hoặc đã `enabled: false` (§9.2).
     #: Cùng chuỗi với `streaming.events.ErrorCode.MODEL_UNKNOWN`, cố ý.
     MODEL_UNKNOWN = "MODEL_UNKNOWN"
+    #: Model có thật nhưng không khai mức suy luận ấy trong `reasoning.options`
+    #: của catalog (§24.2b·S4, S14) — kể cả model không có khối `reasoning` nào.
+    #: Mã riêng với `MODEL_UNKNOWN`: ở đó FE tải lại danh sách model, ở đây nó
+    #: chỉ cần tải lại danh sách **mức** của một model. `details` mang
+    #: `{"model_id", "level"}`. Dùng ở `PUT /settings` (T-S.5) và ở biên vào
+    #: của lượt sinh (T-S.6).
+    REASONING_UNSUPPORTED = "REASONING_UNSUPPORTED"
     #: Không request nào chỉ định model và model `default` cũng đã bị tắt.
     NO_MODEL_AVAILABLE = "NO_MODEL_AVAILABLE"
     #: Không đẩy được job vào hàng đợi (Redis hỏng) — §7.2 ① không hoàn tất.

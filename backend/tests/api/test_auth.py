@@ -646,6 +646,12 @@ async def test_me_returns_all_four_groups_of_18_1(
         "T-3.11: FE doc nguong canh bao tu day, cung bien voi quota_warning cua 202"
     )
     assert body["default_model"] is None, "chua ai chon gi ⇒ FE roi ve default cua catalog"
+    # T-S.5 — hồ sơ của Phase S, người chưa từng `PUT /settings`.
+    assert body["display_name"] is None, "NQ-116: FE hien nguyen email"
+    assert body["display_name_max_chars"] == settings.DISPLAY_NAME_MAX_CHARS
+    assert body["avatar_color"] is None, "chua co hang user_settings ⇒ mau mac dinh cua FE"
+    assert body["reasoning_prefs"] == {}
+    assert body["last_login_at"] is not None, "vua dang nhap xong"
 
     assert [w["limit_type"] for w in body["quota"]] == ["5h", "weekly"], "du HAI cua so (§10.3)"
     for window in body["quota"]:
@@ -702,6 +708,52 @@ async def test_login_and_refresh_do_not_return_quota(
         assert "message_max_chars" not in resp.json()
         assert "quota_warn_remaining_pct" not in resp.json()
         assert resp.json()["default_model"] is None, "cot cua chinh hang users ⇒ co o ca ba"
+        # T-S.5: hai trường của `user_settings` là một lượt đọc thêm ⇒ chỉ `/me`.
+        assert "avatar_color" not in resp.json()
+        assert "reasoning_prefs" not in resp.json()
+        assert "display_name_max_chars" not in resp.json()
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_login_stamps_last_login_at_and_refresh_does_not(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`last_login_at` đổi **đúng** khi đăng nhập lại — T-S.5, NQ-114.
+
+    T-S.11 chạy thanh quota từ 0 khi giá trị này đổi. `refresh` mà cũng ghi thì
+    F5 sau khi access token hết hạn chạy lại hoạt ảnh — đúng thứ Cạm bẫy ② của
+    T-S.11 cấm; login mà không ghi thì đăng nhập lại không chạy.
+    """
+    user_id, email = await _create_real_user(session_factory)
+
+    first = await client.post(LOGIN_PATH, json={"email": email, "password": _TEST_PASSWORD})
+    stamped = first.json()["last_login_at"]
+    refreshed = await client.post(REFRESH_PATH)
+    me = await client.get(ME_PATH)
+    second = await client.post(LOGIN_PATH, json={"email": email, "password": _TEST_PASSWORD})
+
+    assert stamped is not None, "response cua login mang dung gia tri vua ghi"
+    assert refreshed.json()["last_login_at"] == stamped, "refresh KHONG phai dang nhap lai"
+    assert me.json()["last_login_at"] == stamped
+    restamped = datetime.fromisoformat(second.json()["last_login_at"])
+    assert restamped > datetime.fromisoformat(stamped), "dang nhap lai ⇒ doi"
+    async with session_factory() as session:
+        column = await session.scalar(select(User.last_login_at).where(User.id == user_id))
+    assert column == restamped, "cot trong DB = gia tri response tra ve"
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_wrong_password_does_not_stamp_last_login_at(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    user_id, email = await _create_real_user(session_factory)
+
+    resp = await client.post(LOGIN_PATH, json={"email": email, "password": "sai-mat-khau-roi-123"})
+
+    assert resp.status_code == 401
+    async with session_factory() as session:
+        column = await session.scalar(select(User.last_login_at).where(User.id == user_id))
+    assert column is None
 
 
 async def test_me_not_logged_in_is_401(client: AsyncClient) -> None:

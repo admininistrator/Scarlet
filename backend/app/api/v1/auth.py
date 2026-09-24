@@ -3,7 +3,8 @@
 `GET /auth/me` (§11.2, ADR-07) — T-2.3. `POST /auth/logout` (§11.3, C21) — T-2.4.
 `POST /auth/forgot-password`, `/reset-password` (§11.5, §11.6) — T-2.5.
 `GET /auth/me` nở ra đủ bốn nhóm của §18.1 (quota, `message_max_chars`,
-`default_model`) — T-3.0.
+`default_model`) — T-3.0. Hồ sơ của Phase S (`display_name_max_chars`,
+`avatar_color`, `reasoning_prefs`, `last_login_at`) — T-S.5.
 
 KH tham chiếu: §11.5, §11.2, §11.3, §11.6, §10.6, §18.1, UC-01, UC-07,
 ADR-07, C21 · CLAUDE.md A3, A7 · tasks.md T-2.2, T-2.3, T-2.4, T-2.5, T-3.0,
@@ -184,6 +185,7 @@ request kế tiếp của tab đó nhận `401` mà không ai hiểu vì sao.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -220,9 +222,11 @@ from app.core.ratelimit import (
 from app.core.redis import get_redis
 from app.core.security import hash_password, is_common_password, verify_password
 from app.core.turnstile import verify_turnstile
+from app.core.user_prefs import read_prefs
 from app.db.models import EmailTokenPurpose, UserRole, UserStatus
 from app.db.repositories.email_tokens import ConsumeResult, EmailTokenRepository
 from app.db.repositories.refresh_tokens import RefreshTokenRepository, RotateResult
+from app.db.repositories.user_settings import UserSettingsRepository
 from app.db.repositories.users import UserRepository
 from app.db.session import session_scope
 from app.quota.snapshot import WindowSnapshot, read_snapshot
@@ -515,17 +519,22 @@ class UserOut(BaseModel):
     #: endpoint; và biết nó ngay sau `login` là bớt một vòng gọi trước khi vẽ
     #: Model Picker. Xem `ProfileOut` cho hai trường chỉ `/me` mới trả.
     default_model: str | None = None
+    #: Lần `POST /auth/login` thành công gần nhất (T-S.5) — `null` = chưa đăng
+    #: nhập lần nào kể từ khi cột bắt đầu được ghi. FE (T-S.11, NQ-114) so giá
+    #: trị này để biết "đây là một lần đăng nhập mới"; `refresh` không đổi nó.
+    last_login_at: datetime | None = None
 
 
 class ProfileOut(UserOut):
     """`GET /auth/me` — *"User + tier + quota còn lại + trạng thái"* (§18.1).
 
-    Rộng hơn `UserOut` đúng ba trường (hai của T-3.0, `quota_warn_remaining_pct`
-    của T-3.11), và đứng riêng vì chúng thuộc về thanh quota và ô nhập — còn
-    `quota` thì **không** miễn phí: `quota` là hai lượt đọc Redis (và có thể một lượt dựng
-    lại từ Postgres, RR-7). `login`/`refresh` không có việc gì phải trả giá đó
-    — chúng trả lời "anh là ai", còn câu "anh còn bao nhiêu tiền" là câu FE hỏi
-    lại nhiều lần sau đó.
+    Rộng hơn `UserOut` đúng sáu trường (hai của T-3.0, `quota_warn_remaining_pct`
+    của T-3.11, ba của T-S.5), và đứng riêng vì chúng thuộc về thanh quota, ô
+    nhập và trang Cài đặt — còn `avatar_color`/`reasoning_prefs` là một lượt
+    đọc `user_settings`, và `quota` thì **không** miễn phí: `quota` là hai
+    lượt đọc Redis (và có thể một lượt dựng lại từ Postgres, RR-7).
+    `login`/`refresh` không có việc gì phải trả giá đó — chúng trả lời "anh là
+    ai", còn câu "anh còn bao nhiêu tiền" là câu FE hỏi lại nhiều lần sau đó.
 
     **Đừng đặt `Cache-Control` lên endpoint này.** `message_max_chars` tĩnh
     nhưng `quota` đổi sau **mỗi** lượt sinh, và FE gọi lại chính `/auth/me` để
@@ -543,6 +552,17 @@ class ProfileOut(UserOut):
     #: `quota_warning` của `202` (`estimator._warning`), nên thanh quota của FE
     #: và khối cảnh báo của backend không thể dùng hai ngưỡng khác nhau (A3).
     quota_warn_remaining_pct: int
+    #: Trần độ dài `display_name` tính bằng ký tự (T-S.5) — cùng lối
+    #: `message_max_chars`: ô nhập tên của FE đếm về đúng con số của `.env`.
+    display_name_max_chars: int
+    #: Tên màu avatar (§24.2b·S10) — `null` hoặc một tên FE không biết ⇒ FE
+    #: dùng màu mặc định. Sống ở `user_settings.prefs_json`, không ở `users`,
+    #: nên chỉ `/me` trả (một lượt đọc thêm), không `login`/`refresh`.
+    avatar_color: str | None
+    #: Mức suy luận đã nhớ, `{model_id: level_id}` (§24.2b·S4). Đã lọc theo
+    #: catalog **hiện tại**: cặp hết hợp lệ vì catalog vừa sửa bị bỏ qua, không
+    #: lỗi — xem `app/core/user_prefs.py`.
+    reasoning_prefs: dict[str, str]
 
 
 def _set_session_cookie(response: Response, user: UserOut) -> None:
@@ -625,7 +645,11 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Use
         # tài khoản bị khoá không có việc gì phải cầm một credential 30 ngày.
         ensure_status_allowed(user.status, STATUSES_CAN_LOGIN)
 
-        out = UserOut.model_validate(user)
+        # T-S.5: đóng dấu lần đăng nhập — chỉ ở đây, không ở `refresh` (xem
+        # `UserRepository.record_login`). Sau `ensure_status_allowed`: một tài
+        # khoản bị khoá gõ đúng mật khẩu thì chưa "đăng nhập" được.
+        logged_in_at = await UserRepository(session).record_login(user.id)
+        out = UserOut.model_validate(user).model_copy(update={"last_login_at": logged_in_at})
         raw_refresh_token, _family_id = await RefreshTokenRepository(session).issue_new_family(
             user_id=user.id,
             ttl_days=settings.REFRESH_TOKEN_TTL_DAYS,
@@ -1073,6 +1097,7 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> ProfileO
         # `user` vẫn còn sống, nhưng thói quen ở cả `conversations.py` là chốt
         # hình dạng ngay khi còn cầm hàng trong tay.
         profile = UserOut.model_validate(user)
+        prefs = read_prefs(await UserSettingsRepository(session).get_prefs(user_id))
         quota = await read_snapshot(session, user_id=user_id)
 
     return ProfileOut(
@@ -1080,4 +1105,7 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> ProfileO
         quota=quota,
         message_max_chars=settings.MESSAGE_MAX_CHARS,
         quota_warn_remaining_pct=settings.QUOTA_WARN_REMAINING_PCT,
+        display_name_max_chars=settings.DISPLAY_NAME_MAX_CHARS,
+        avatar_color=prefs.avatar_color,
+        reasoning_prefs=prefs.reasoning,
     )
