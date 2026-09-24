@@ -62,6 +62,7 @@ from app.db.models import (
     MessageStatus,
     RefreshToken,
     UsageEvent,
+    UsagePurpose,
     User,
     UserRole,
     UserStatus,
@@ -695,6 +696,7 @@ async def _write_ledger(
             cost_usd=Decimal(cost),
             cost_confidence=confidence,
             price_snapshot={},
+            purpose=UsagePurpose.CHAT,
         )
         await session.commit()
 

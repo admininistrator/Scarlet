@@ -347,6 +347,31 @@ class ErrorEvent(Event):
         return {"code": self.code.value, "message": self.message}
 
 
+@dataclass(frozen=True, slots=True)
+class TitleDoneEvent(Event):
+    """`done` của stream TIÊU ĐỀ `stream:title:{conversation_id}` (§24.2b·S6, T-S.7).
+
+    Stream tiêu đề dùng bốn event của §7.4 — `start`, `delta` và `error` là
+    đúng ba lớp ở trên — nhưng `done` của nó mang **tiêu đề**, không mang
+    `finish_reason`/`usage`: FE thay chữ đã chảy bằng đúng chuỗi này, và chi
+    phí của lượt đặt tên không phải việc của người dùng (nó không trừ quota
+    của họ). Cùng `TYPE` với `DoneEvent`, nên consumer §7.3 — thứ chỉ nhìn
+    `type` để biết lúc đóng — dùng lại được nguyên vẹn.
+
+    `title` là tiêu đề **đang nằm trong Postgres** sau lượt này, không nhất
+    thiết là chữ model vừa sinh: người dùng đổi tên trước khi job ghi xong thì
+    `UPDATE … WHERE title IS NULL` không chạm hàng nào, và chuỗi ở đây là tên
+    của họ (NQ-110 — tay người thắng).
+    """
+
+    TYPE: ClassVar[EventType] = "done"
+
+    title: str
+
+    def data(self) -> dict[str, Any]:
+        return {"title": self.title}
+
+
 #: Mọi loại event — dùng cho test "đủ chín loại" và cho `match` ở consumer.
 ALL_EVENT_TYPES: tuple[type[Event], ...] = (
     StartEvent,

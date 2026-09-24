@@ -428,6 +428,20 @@ MATRIX: tuple[CaIDOR, ...] = (
         body=lambda _target: {"content": "A chen mot cau hoi vao hoi thoai cua B"},
         error_code=ApiErrorCode.CONVERSATION_NOT_FOUND,
     ),
+    # T-S.7 (§24.2b·S6): stream tiêu đề đọc `conversations.title` của B — tiêu
+    # đề sinh từ câu hỏi đầu của B, tức rò đúng thứ §20 gọi tên. Thủng thì ra
+    # `200 text/event-stream` (`_FakeStreamRedis`: không stream ⇒ dựng lại
+    # `done` từ Postgres), không phải 404.
+    CaIDOR(
+        name="GET /conversations/{cua-B}/title/stream",
+        resource="conversation",
+        route=f"{API}/conversations/{{conversation_id}}/title/stream",
+        method="GET",
+        target="conversation",
+        path=lambda target, _of_a: f"{API}/conversations/{target}/title/stream",
+        body=None,
+        error_code=ApiErrorCode.CONVERSATION_NOT_FOUND,
+    ),
     # ── hai ca id-của-B-nằm-trong-BODY: đường dẫn là hội thoại của CHÍNH A ──
     #
     # Đây là hình dạng IDOR mà một bộ test chỉ thay id trong URL bỏ sót hoàn

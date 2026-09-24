@@ -30,6 +30,11 @@ BYOK quay lại ZSET ở lần `refill_if_empty` đầu tiên (RR-7) — tức �
 khoá và xoá hai khoá quota, ZSET dựng lại ra **2** member trong đó có đúng
 khoản BYOK 0.000068 USD vừa tiêu.
 
+**Và chỉ đọc `purpose='chat'` (T-S.7, §24.2b·S6).** Lượt đặt tên hội thoại đi
+bằng system key nhưng **không** trừ quota — `quota/meter.py` bỏ `ZADD` cho nó.
+Cùng hình dạng lỗi với B-168 ở trên: thiếu bộ lọc thứ hai này thì §24.2b·S6 bị
+phá một nhịp sau, ở lần `refill_if_empty` đầu tiên (Cạm bẫy ① của T-S.7).
+
 `sum_since` trả lời **cả hai** câu, và nó bắt người gọi nói ra mình hỏi câu
 nào: tham số `key_source` **bắt buộc**, không có giá trị mặc định (T-2.17,
 B-172). Một mặc định ở đây là chọn hộ người gọi tiếp theo — đúng hình dạng đã
@@ -67,7 +72,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CostConfidence, KeySource, UsageEvent, User
+from app.db.models import CostConfidence, KeySource, UsageEvent, UsagePurpose, User
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +166,7 @@ class UsageEventRepository:
         cost_usd: Decimal,
         cost_confidence: CostConfidence,
         price_snapshot: dict[str, Any],
+        purpose: UsagePurpose,
         upstream_model_reported: str | None = None,
     ) -> UsageEvent:
         """Ghi MỘT dòng sổ và trả về nó (đã có `id` do Postgres sinh).
@@ -191,6 +197,7 @@ class UsageEventRepository:
             cost_usd=cost_usd,
             cost_confidence=cost_confidence,
             price_snapshot=price_snapshot,
+            purpose=purpose,
             upstream_model_reported=upstream_model_reported,
         )
         self._session.add(event)
@@ -259,7 +266,8 @@ class UsageEventRepository:
         Redis — tức phần sắp rơi khỏi cửa sổ, chỗ mất mát rẻ nhất.
 
         Lọc `user_id` **trong câu SQL** (§20), đi đúng index `ix_usage_user_time`.
-        Lọc `key_source='system'` ở cùng chỗ — xem docstring module (§10.5).
+        Lọc `key_source='system'` và `purpose='chat'` ở cùng chỗ — xem docstring
+        module (§10.5, §24.2b·S6).
         """
         stmt = (
             select(UsageEvent.id, UsageEvent.cost_usd, UsageEvent.created_at)
@@ -267,6 +275,7 @@ class UsageEventRepository:
                 UsageEvent.user_id == user_id,
                 UsageEvent.created_at >= since,
                 UsageEvent.key_source == KeySource.SYSTEM,
+                UsageEvent.purpose == UsagePurpose.CHAT,
             )
             .order_by(UsageEvent.created_at)
         )
@@ -292,6 +301,7 @@ class UsageEventRepository:
                 UsageEvent.user_id == user_id,
                 UsageEvent.created_at >= since,
                 UsageEvent.key_source == KeySource.SYSTEM,
+                UsageEvent.purpose == UsagePurpose.CHAT,
             )
             .limit(1)
         )
@@ -310,6 +320,7 @@ class UsageEventRepository:
             .where(
                 UsageEvent.created_at >= since,
                 UsageEvent.key_source == KeySource.SYSTEM,
+                UsageEvent.purpose == UsagePurpose.CHAT,
             )
             .distinct()
         )

@@ -51,7 +51,7 @@ from arq.worker import Function
 
 from app.config.settings import settings
 from app.core.log_redact import install_log_redaction
-from app.core.queue import GENERATE_JOB_NAME, redis_settings
+from app.core.queue import GENERATE_JOB_NAME, TITLE_JOB_NAME, redis_settings
 from app.db.session import dispose_engine
 from app.llm.adapters.system import SystemAdapter
 from app.workers.generate import CTX_LLM_CLIENT, generate
@@ -61,11 +61,17 @@ from app.workers.spend_alert import (
     SPEND_ALERT_MINUTES_IN_HOUR,
     spend_alert,
 )
+from app.workers.title import generate_title
 
 logger = logging.getLogger(__name__)
 
 #: KHÔNG thử lại. Xem điểm 2 ở docstring module và docstring `generate.py`.
 GENERATE_MAX_TRIES = 1
+
+#: Job đặt tên hội thoại (T-S.7) cũng KHÔNG thử lại — §24.2b·S6: "Không thử lại
+#: vô hạn". Hỏng một lần là tiêu đề ở lại `NULL` và sidebar hiện "Hội thoại chưa
+#: đặt tên"; thử lại là trả tiền lần hai cho thứ người dùng tự gõ được.
+TITLE_MAX_TRIES = 1
 
 FUNCTIONS: list[Function] = [
     func(
@@ -73,6 +79,15 @@ FUNCTIONS: list[Function] = [
         name=GENERATE_JOB_NAME,
         timeout=settings.GENERATE_TIMEOUT_S,
         max_tries=GENERATE_MAX_TRIES,
+    ),
+    # Cùng trần thời gian với `generate` và cùng lý do (điểm 3 docstring
+    # module): timeout HTTP của `SystemAdapter` phải nổ trước arq để `_close`
+    # còn ghi được event kết thúc.
+    func(
+        generate_title,
+        name=TITLE_JOB_NAME,
+        timeout=settings.GENERATE_TIMEOUT_S,
+        max_tries=TITLE_MAX_TRIES,
     ),
 ]
 

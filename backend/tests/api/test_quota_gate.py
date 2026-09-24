@@ -272,7 +272,8 @@ async def test_low_quota_202_with_warning_in_body(
     assert warning["limit_type"] == "5h"
     assert warning["remaining_pct"] == 15
     assert Decimal(warning["remaining_usd"]) == Decimal("0.075")
-    assert len(fake_arq.pushed) == 1, "cảnh báo KHÔNG được chặn (UC-07 dòng 1)"
+    # "cảnh báo KHÔNG được chặn (UC-07 dòng 1)"; `title` là của T-S.7 (câu đầu).
+    assert [name for name, _ in fake_arq.pushed] == ["generate", "title"]
 
 
 async def test_ample_quota_has_no_warning(
@@ -411,7 +412,8 @@ async def test_byok_still_chats_when_system_quota_exhausted(
     )
 
     assert resp.status_code == 202, resp.text
-    assert len(fake_arq.pushed) == 1, "lượt sinh phải thật sự mở ra"
+    # "lượt sinh phải thật sự mở ra"; `title` là của T-S.7 (câu đầu).
+    assert [name for name, _ in fake_arq.pushed] == ["generate", "title"]
 
 
 async def test_byok_body_has_no_quota_warning(

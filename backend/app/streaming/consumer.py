@@ -41,6 +41,14 @@ khi đó — consumer đọc `messages.content` rồi phát ra đúng những ev
 ứng. Redis là bộ đệm, Postgres là sự thật (C5), nên đây không phải đường lùi
 tạm bợ mà là đường đúng cho một câu trả lời đã khép.
 
+**Hai loại stream, một consumer (T-S.7).** `stream:{message_id}` của lượt sinh
+và `stream:title:{conversation_id}` của lượt đặt tên hội thoại (§24.2b·S6) đi
+qua **đúng** các bước dưới đây — §24.2b·S6 đòi dùng lại consumer §7.3, không
+viết bản thứ hai. Chỗ duy nhất hai loại khác nhau là đường thứ hai (dựng lại
+từ Postgres): consumer nhận một `ReplaySource` — `MessageSnapshot` hoặc
+`TitleSnapshot` — biết tên khoá, biết "đã khép chưa", và biết phát lại những
+event nào.
+
 **Đường thứ ba: cursor đứng sau event kết thúc (B-84).** Một client đã nhận
 `done` mà vẫn quay lại — trái §7.4, nhưng có thật — không được treo. Consumer hỏi
 `XREVRANGE COUNT 1` xem bản ghi cuối của stream có phải event kết thúc không, rồi
@@ -55,7 +63,7 @@ import re
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from app.db.models import Message, MessageStatus
 from app.llm.client import Usage
@@ -66,8 +74,15 @@ from app.streaming.events import (
     ErrorEvent,
     Event,
     StartEvent,
+    TitleDoneEvent,
 )
-from app.streaming.producer import FIELD_DATA, FIELD_TYPE, encode_event, stream_key
+from app.streaming.producer import (
+    FIELD_DATA,
+    FIELD_TYPE,
+    encode_event,
+    stream_key,
+    title_stream_key,
+)
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -209,6 +224,26 @@ def _error_code(raw: str | None) -> ErrorCode:
         return ErrorCode.INTERNAL_ERROR
 
 
+class ReplaySource(Protocol):
+    """Những gì consumer cần từ Postgres cho MỘT stream, đọc một lần trước khi mở.
+
+    Ba câu hỏi, đúng ba chỗ consumer phải hỏi Postgres thay vì Redis:
+
+    * `stream_key` — đọc khoá nào;
+    * `closed` — stream vắng mặt có nghĩa là "đã khép, dựng lại được" (đường
+      thứ hai), hay "chưa có gì, chờ tiếp" (bước ③);
+    * `replay()` — những event nào phát lại khi đi đường thứ hai.
+    """
+
+    @property
+    def stream_key(self) -> str: ...
+
+    @property
+    def closed(self) -> bool: ...
+
+    def replay(self) -> Iterator[Event]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class MessageSnapshot:
     """Những gì consumer cần từ Postgres, đọc MỘT LẦN trước khi stream mở.
@@ -243,6 +278,41 @@ class MessageSnapshot:
             completion_tokens=message.completion_tokens,
         )
 
+    @property
+    def stream_key(self) -> str:
+        return stream_key(self.message_id)
+
+    @property
+    def closed(self) -> bool:
+        """Lượt sinh đã khép — `queued`/`streaming` nghĩa là còn chữ sẽ tới."""
+        return self.status in TERMINAL_STATUSES
+
+    def replay(self) -> Iterator[Event]:
+        """Câu trả lời đã khép, dựng lại từ `messages` — xem `StreamConsumer._from_postgres`.
+
+        `start` đi trước không phải để cho đủ bộ: nó báo FE "đây là một câu trả
+        lời bắt đầu từ đầu", nên một client reconnect với cursor ở giữa cũng
+        hiển thị đúng thay vì nối chồng lên phần nó đã có. Vắng `model_id` thì
+        bỏ hẳn event này — một message chết trước khi kịp chọn model không có
+        gì để khai báo, và chuỗi rỗng sẽ là một `model_id` sai.
+        """
+        if self.model_id is not None:
+            yield StartEvent(
+                message_id=str(self.message_id),
+                model_id=self.model_id,
+                # Cùng hình dạng `start` của đường Redis (T-S.6): mở lại sau một
+                # giờ vẫn phải ra đúng chip "model · mức".
+                reasoning_effort=self.reasoning_effort,
+            )
+        if self.content:
+            yield DeltaEvent(text=self.content)
+        if self.status is MessageStatus.FAILED:
+            # Phần chữ đã sinh được vẫn gửi ở trên: `finish_generation` giữ nó
+            # lại cho cả đường lỗi, và người dùng đã nhìn thấy nó trên màn hình.
+            yield ErrorEvent(code=_error_code(self.error_code))
+        else:
+            yield DoneEvent(finish_reason=self.finish_reason, usage=self.usage())
+
     def usage(self) -> Usage | None:
         """`Usage` dựng lại từ hai cột, hoặc `None` khi không đủ số.
 
@@ -263,8 +333,51 @@ class MessageSnapshot:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class TitleSnapshot:
+    """Nguồn dựng lại của `stream:title:{conversation_id}` (§24.2b·S6, T-S.7).
+
+    Hai thứ đọc lúc mở kết nối: `conversations.title` (đã lọc `user_id` trong
+    câu SQL ở route) và job `title` còn đang chờ/chạy hay không
+    (`core/queue.py::title_job_pending` — route chỉ hỏi khi `title` còn `NULL`).
+
+    Không có `start`/`delta` để phát lại: stream tiêu đề đã hết TTL thì thứ
+    duy nhất còn đáng nói là tiêu đề cuối, và đó là đúng một event `done`.
+    """
+
+    conversation_id: uuid.UUID
+    title: str | None
+    job_pending: bool
+
+    @property
+    def stream_key(self) -> str:
+        return title_stream_key(self.conversation_id)
+
+    @property
+    def closed(self) -> bool:
+        """Không còn lượt đặt tên nào sẽ ghi vào stream này.
+
+        `title` có giá trị ⇒ khép, bất kể job: nếu job còn chạy thì stream của
+        nó đã tồn tại và bước ① đọc nó trước (đường thứ hai chỉ chạy khi khoá
+        vắng mặt); nếu job chưa kịp `XADD start` mà người dùng đã đặt tên thì
+        job cũng sẽ kết thúc bằng đúng tên ấy. `title` còn `NULL` ⇒ khép chỉ khi
+        hàng đợi không còn job nào — ngược lại là job chưa kịp bắt đầu, chờ.
+        """
+        return self.title is not None or not self.job_pending
+
+    def replay(self) -> Iterator[Event]:
+        if self.title is not None:
+            yield TitleDoneEvent(title=self.title)
+            return
+        # Không tiêu đề, không stream, không job: lượt đặt tên đã hỏng và đã
+        # quá `STREAM_TTL_S`, hoặc chưa từng được đẩy vào hàng đợi. `JOB_LOST`
+        # — "không có lượt nào đang chạy, chưa một chữ nào" — và FE hiện "Hội
+        # thoại chưa đặt tên" như mọi ca `error` của §24.2b·S6.
+        yield ErrorEvent(code=ErrorCode.JOB_LOST, message="khong co luot dat ten nao dang chay")
+
+
 class StreamConsumer:
-    """Đầu đọc của MỘT kết nối SSE tới MỘT message.
+    """Đầu đọc của MỘT kết nối SSE tới MỘT stream (message hoặc tiêu đề).
 
     Một instance cho mỗi kết nối, không dùng lại: cursor là trạng thái của
     riêng client đó, và C7 sống hay chết ở đúng chỗ này.
@@ -272,9 +385,9 @@ class StreamConsumer:
 
     __slots__ = ("_redis", "_key", "_block_ms", "_snapshot")
 
-    def __init__(self, redis: Redis, snapshot: MessageSnapshot, *, heartbeat_s: int) -> None:
+    def __init__(self, redis: Redis, snapshot: ReplaySource, *, heartbeat_s: int) -> None:
         self._redis = redis
-        self._key = stream_key(snapshot.message_id)
+        self._key = snapshot.stream_key
         self._block_ms = heartbeat_s * 1000
         self._snapshot = snapshot
 
@@ -313,11 +426,7 @@ class StreamConsumer:
         #    Thứ tự ba điều kiện là thứ tự giá tiền: hai phép so trong RAM đứng
         #    trước vòng round-trip tới Redis, nên một message đang `streaming`
         #    không tốn thêm lệnh nào cho nhánh này.
-        if (
-            not has_entries
-            and self._snapshot.status in TERMINAL_STATUSES
-            and not await self._redis.exists(self._key)
-        ):
+        if not has_entries and self._snapshot.closed and not await self._redis.exists(self._key):
             for frame in self._from_postgres():
                 yield frame
             return
@@ -411,49 +520,27 @@ class StreamConsumer:
         return sse_frame(kind, data, event_id=entry_id)
 
     def _from_postgres(self) -> Iterator[str]:
-        """Dựng lại câu trả lời đã khép từ `messages`, khi stream đã hết TTL.
+        """Dựng lại một stream đã khép từ Postgres, khi khoá đã hết TTL.
 
-        Phát đúng hình dạng event của §7.4 qua `encode_event()` — cùng hàm mà
-        producer dùng — nên FE chỉ có MỘT bộ phân tích, không phải hai.
+        Những event nào thì `ReplaySource.replay()` quyết (`MessageSnapshot` —
+        câu trả lời; `TitleSnapshot` — tiêu đề); ở đây chỉ đóng khung. Phát đúng
+        hình dạng event của §7.4 qua `encode_event()` — cùng hàm mà producer
+        dùng — nên FE chỉ có MỘT bộ phân tích, không phải hai.
 
         **Không event nào ở đây mang `id:`**, và đó là chủ ý: `id:` là Redis
         Stream ID, mà ở đây không còn stream nào để trỏ tới. Bịa một ID nghĩa
         là phát cho client một cursor mà lần reconnect sau không ai hiểu. Theo
         đúng SSE, event không có `id:` thì `Last-Event-ID` của client giữ
-        nguyên giá trị cũ — và vì đường này luôn phát **toàn bộ** câu trả lời,
-        không có gì để nối tiếp.
+        nguyên giá trị cũ — và vì đường này luôn phát **toàn bộ** phần còn đáng
+        nói, không có gì để nối tiếp.
 
-        `start` đi trước không phải để cho đủ bộ: nó báo FE "đây là một câu trả
-        lời bắt đầu từ đầu", nên một client reconnect với cursor ở giữa cũng
-        hiển thị đúng thay vì nối chồng lên phần nó đã có. Vắng `model_id` thì
-        bỏ hẳn event này — một message chết trước khi kịp chọn model không có
-        gì để khai báo, và chuỗi rỗng sẽ là một `model_id` sai.
+        Log chỉ còn tên khoá (T-S.7): trạng thái và độ dài của bản cũ là trường
+        riêng của `MessageSnapshot`, và tên khoá đã nói stream nào — `stream:`
+        hay `stream:title:` — đang được dựng lại.
         """
-        snap = self._snapshot
-        logger.info(
-            "consumer: %s khong con tren Redis, dung lai tu Postgres (status=%s, %d ky tu)",
-            self._key,
-            snap.status.value,
-            len(snap.content),
-        )
-        if snap.model_id is not None:
-            yield self._event_frame(
-                StartEvent(
-                    message_id=str(snap.message_id),
-                    model_id=snap.model_id,
-                    # Cùng hình dạng `start` của đường Redis (T-S.6): mở lại
-                    # sau một giờ vẫn phải ra đúng chip "model · mức".
-                    reasoning_effort=snap.reasoning_effort,
-                )
-            )
-        if snap.content:
-            yield self._event_frame(DeltaEvent(text=snap.content))
-        if snap.status is MessageStatus.FAILED:
-            # Phần chữ đã sinh được vẫn gửi ở trên: `finish_generation` giữ nó
-            # lại cho cả đường lỗi, và người dùng đã nhìn thấy nó trên màn hình.
-            yield self._event_frame(ErrorEvent(code=_error_code(snap.error_code)))
-        else:
-            yield self._event_frame(DoneEvent(finish_reason=snap.finish_reason, usage=snap.usage()))
+        logger.info("consumer: %s khong con tren Redis, dung lai tu Postgres", self._key)
+        for event in self._snapshot.replay():
+            yield self._event_frame(event)
 
     @staticmethod
     def _event_frame(event: Event) -> str:

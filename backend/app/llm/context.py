@@ -66,6 +66,10 @@ PROMPTS_DIR = Path(__file__).resolve().parents[3] / "config" / "prompts"
 #: Tên file prompt hệ thống. tasks.md T-1.4 ghi thẳng tên này.
 SYSTEM_PROMPT_NAME = "system.jinja"
 
+#: Prompt của lượt đặt tên hội thoại (§24.2b·S6, T-S.7) — `workers/title.py`.
+#: Cùng thư mục, cùng môi trường Jinja, cùng nhịp đọc lại với prompt hệ thống.
+TITLE_PROMPT_NAME = "title.jinja"
+
 #: §19.1: "System prompt · sửa file · không cần restart (đọc lại có cache 60 s)".
 #: Con số là hợp đồng vận hành viết trong kế hoạch, không phải một nút vặn theo
 #: môi trường, nên nó là hằng có tên ở đây chứ không phải một biến `.env` nữa.
@@ -142,12 +146,26 @@ class _CachedTemplate:
 
 
 _cached_template: _CachedTemplate | None = None
+_cached_title_template: _CachedTemplate | None = None
 
 
 def reload_system_prompt() -> None:
-    """Vứt bản cache, buộc lần gọi sau đọc lại đĩa. Dùng trong test và ở T-2.16."""
-    global _cached_template
+    """Vứt bản cache, buộc lần gọi sau đọc lại đĩa. Dùng trong test và ở T-2.16.
+
+    Vứt cả bản của `title.jinja` (T-S.7): "đọc lại prompt" là một việc, không
+    phải một việc cho mỗi file.
+    """
+    global _cached_template, _cached_title_template
     _cached_template = None
+    _cached_title_template = None
+
+
+def _fresh(cached: _CachedTemplate | None, name: str) -> _CachedTemplate:
+    """`cached` nếu còn trong `SYSTEM_PROMPT_TTL_S`, không thì đọc lại `name`."""
+    now = time.monotonic()
+    if cached is None or now - cached.loaded_at >= SYSTEM_PROMPT_TTL_S:
+        return _CachedTemplate(_ENV.get_template(name), now)
+    return cached
 
 
 def _system_template() -> Template:
@@ -160,12 +178,8 @@ def _system_template() -> Template:
     chạm đĩa lần nào.
     """
     global _cached_template
-    now = time.monotonic()
-    cached = _cached_template
-    if cached is None or now - cached.loaded_at >= SYSTEM_PROMPT_TTL_S:
-        cached = _CachedTemplate(_ENV.get_template(SYSTEM_PROMPT_NAME), now)
-        _cached_template = cached
-    return cached.template
+    _cached_template = _fresh(_cached_template, SYSTEM_PROMPT_NAME)
+    return _cached_template.template
 
 
 def render_system_prompt(*, model_display_name: str) -> str:
@@ -177,6 +191,18 @@ def render_system_prompt(*, model_display_name: str) -> str:
     đây và một dòng chú thích ở đầu file `.jinja`.
     """
     return _system_template().render(model_display_name=model_display_name).strip()
+
+
+def render_title_prompt(*, question: str) -> str:
+    """Render `config/prompts/title.jinja` — lượt đặt tên hội thoại (T-S.7).
+
+    Cùng luật tham số tường minh với `render_system_prompt`. `question` đã được
+    người gọi cắt theo `TITLE_INPUT_MAX_CHARS`; ở đây không cắt thêm gì, để trần
+    ấy có đúng một chỗ áp.
+    """
+    global _cached_title_template
+    _cached_title_template = _fresh(_cached_title_template, TITLE_PROMPT_NAME)
+    return _cached_title_template.template.render(question=question).strip()
 
 
 # ───────────────────────────── dựng ngữ cảnh ─────────────────────────────

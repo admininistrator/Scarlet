@@ -355,7 +355,8 @@ async def test_pending_approval_with_byok_is_202(
     resp = await client.post(MESSAGES_PATH.format(conversation_id), json={"content": "xin chao"})
 
     assert resp.status_code == 202, resp.text
-    assert len(fake_arq.pushed) == 1
+    # T-S.7: câu hỏi ĐẦU của hội thoại chưa có tiêu đề ⇒ thêm đúng một job `title`.
+    assert [name for name, _ in fake_arq.pushed] == ["generate", "title"]
 
 
 async def test_pending_approval_with_WRONG_PROVIDER_byok_still_403(

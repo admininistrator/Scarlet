@@ -94,6 +94,26 @@ job chỉ mang một khoá chính (C5), và đổi mức đã nhớ giữa lúc 
 hàng đợi không được đổi mức của một câu hỏi đã gửi. `PATCH` không nhận mức
 trong body (S14 không mở) nhưng đi qua cùng hàm, nên lượt sinh của nó cũng
 theo mức đã nhớ › mặc định.
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│  T-S.7 — CÂU HỎI ĐẦU TIÊN CÒN ĐẨY THÊM MỘT JOB `title`                   │
+└──────────────────────────────────────────────────────────────────────────┘
+
+§24.2b·S6: hội thoại chưa có tiêu đề nhận câu hỏi đầu tiên ⇒ enqueue job
+`title` (job id `title:{conversation_id}`) ngay sau `generate`. "Đầu tiên" =
+`title IS NULL` **và** `active_leaf_id IS NULL` lúc nhận request — hội thoại
+chưa có message nào, vì mọi lượt sinh đều dời con trỏ ấy. A1 giữ nguyên: vẫn
+chỉ là một lần enqueue nữa, không `await` nào tới model.
+
+**Khác `generate`, job này đẩy SAU `commit`, và hỏng thì KHÔNG làm hỏng
+request.** Lý lẽ "enqueue trong transaction" ở trên sinh ra để không có hàng
+`queued` mồ côi; job `title` không có hàng nào của riêng nó — hỏng thì tiêu
+đề ở lại `NULL`, đúng ngả "Hỏng" mà S6 đã chấp nhận. Đẩy sau `commit` còn đóng
+luôn khe B-91 cho job này (worker không bao giờ thấy câu hỏi chưa commit), và
+một `503` cho câu trả lời đã vào hàng đợi chỉ vì lượt đặt tên là trả lời sai sự
+thật. Hai request đầu song song (double-click với hai khoá khác nhau) cùng thấy
+"đầu tiên" và cùng đẩy — `_job_id` chung làm lần thứ hai thành `None`, tức
+đúng **một** job.
 """
 
 from __future__ import annotations
@@ -118,7 +138,7 @@ from app.core.deps import (
     require_chat_access,
 )
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
-from app.core.queue import GENERATE_JOB_NAME, get_arq_pool
+from app.core.queue import GENERATE_JOB_NAME, TITLE_JOB_NAME, get_arq_pool, title_job_id
 from app.core.ratelimit import acquire_generation_seat, chat_limit, release_generation_seat
 from app.core.redis import get_redis
 from app.core.user_prefs import read_prefs
@@ -314,6 +334,8 @@ async def create_message(
         current_leaf = conversation.active_leaf_id
         parent_id = body.parent_id if "parent_id" in body.model_fields_set else current_leaf
         branched = parent_id != current_leaf
+        # T-S.7 — cùng lý do đọc trước: `_open_generation` sắp dời con trỏ ấy.
+        first_question = conversation.title is None and current_leaf is None
 
         try:
             user_message = await messages.create_message(
@@ -346,6 +368,10 @@ async def create_message(
             reasoning_effort=reasoning_effort,
         )
         await session.commit()
+
+    # T-S.7 — SAU `commit`, xem docstring module.
+    if first_question:
+        await _enqueue_title(conversation_id, uid)
 
     return CreateMessageResponse(
         user_message_id=uid,
@@ -646,6 +672,36 @@ async def _day_job(assistant_message_id: uuid.UUID) -> None:
             ApiErrorCode.ENQUEUE_FAILED,
             "hang doi tu choi job",
         )
+
+
+async def _enqueue_title(conversation_id: uuid.UUID, question_id: uuid.UUID) -> None:
+    """§24.2b·S6: đẩy job `title` cho câu hỏi đầu tiên. Hỏng thì chỉ log (T-S.7).
+
+    Payload là hai khoá chính — hội thoại và câu hỏi được đặt tên — không có
+    chữ nào (C5, cùng lý do `_day_job`). `_job_id` = `title:{conversation_id}`
+    (NQ-110): arq trả `None` cho lần đẩy thứ hai cùng hội thoại, và đó là ca
+    **đúng**, không phải lỗi — hai câu đầu song song chỉ ra một job.
+
+    Không ném gì: xem docstring module cho vì sao một lượt đặt tên không được
+    biến `202` của một câu hỏi hợp lệ thành `503`. `logger.exception` là chỗ
+    khai; `GET …/title/stream` thấy không có job nào và đóng bằng `error`, FE
+    hiện "Hội thoại chưa đặt tên".
+    """
+    try:
+        pool = await get_arq_pool()
+        job = await pool.enqueue_job(
+            TITLE_JOB_NAME,
+            str(conversation_id),
+            str(question_id),
+            _job_id=title_job_id(conversation_id),
+        )
+    except Exception:
+        logger.exception(
+            "khong day duoc job title cho hoi thoai %s — tieu de o lai NULL", conversation_id
+        )
+        return
+    if job is None:
+        logger.info("job title cho hoi thoai %s da co trong hang doi — bo qua", conversation_id)
 
 
 # ══════════════════════ §7.5 — huỷ giữa chừng (T-1.9) ══════════════════════

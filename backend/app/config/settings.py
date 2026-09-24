@@ -58,6 +58,16 @@ MIN_SECRET_CHARS = 32
 #: dán cả một file log vào ô lý do.
 FEEDBACK_REASON_MAX_CHARS = 2000
 
+#: Trần độ dài ``conversations.title``, tính bằng **ký tự** — một hợp đồng, hai
+#: người ghi (T-S.7): người dùng qua ``POST``/``PATCH /conversations`` (schema của
+#: ``api/v1/conversations.py``) và lượt đặt tên tự động (``workers/title.py``
+#: cắt tiêu đề model trả về theo đúng con số này). Hai chỗ đọc một hằng, nên một
+#: tiêu đề tự đặt không bao giờ dài hơn thứ người dùng được phép tự gõ lại.
+#: Hằng module chứ không field ``.env``: cùng loại với trần trên — nó là hình
+#: dạng của một trường API, không phải nút vặn vận hành. Cột là ``TEXT`` không
+#: ``CHECK``. Giá trị 200 là con số hai schema ấy đã có từ T-1.2.
+CONVERSATION_TITLE_MAX_CHARS = 200
+
 _HTTP_URL = TypeAdapter(AnyHttpUrl)
 
 
@@ -412,6 +422,12 @@ class Settings(BaseSettings):
     #: FE đọc lại chính con số này qua `GET /auth/me` (`display_name_max_chars`).
     #: Cột là `TEXT` không `CHECK`, nên nới con số này không cần migration.
     DISPLAY_NAME_MAX_CHARS: int = Field(default=64, gt=0)
+    #: Trần đầu vào của lượt đặt tên hội thoại (§24.2b·S6, S14 — T-S.7): câu hỏi
+    #: đầu dài hơn thì chỉ **ngần này ký tự đầu** vào prompt của `title_model`.
+    #: Tiêu đề chỉ cần ý chính, và lượt này đi bằng tiền system mà không trừ
+    #: quota ai — nên trần của nó phải nằm ở đây, không để một câu hỏi 24000 ký
+    #: tự (`MESSAGE_MAX_CHARS`) biến lượt đặt tên thành lượt đắt nhất hội thoại.
+    TITLE_INPUT_MAX_CHARS: int = Field(default=2000, gt=0)
     CONTEXT_WINDOW_CAP: int = Field(default=128000, gt=0)
     RESERVE_TOKENS: int = Field(default=1000, ge=0)
     VISION_MAX_EDGE_PX: int = Field(default=1568, gt=0)

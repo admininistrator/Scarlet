@@ -18,8 +18,21 @@ from typing import Any
 import pytest
 
 from app.llm.client import Usage
-from app.streaming.events import DeltaEvent, DoneEvent, ErrorCode, ErrorEvent, StartEvent
-from app.streaming.producer import FIELD_DATA, FIELD_TYPE, StreamProducer, stream_key
+from app.streaming.events import (
+    DeltaEvent,
+    DoneEvent,
+    ErrorCode,
+    ErrorEvent,
+    StartEvent,
+    TitleDoneEvent,
+)
+from app.streaming.producer import (
+    FIELD_DATA,
+    FIELD_TYPE,
+    StreamProducer,
+    stream_key,
+    title_stream_key,
+)
 
 
 class FakeRedis:
@@ -123,3 +136,25 @@ async def test_both_done_and_error_reach_the_wire(fake_redis: FakeRedis, mid: uu
     kind = [fields[FIELD_TYPE] for _, fields in fake_redis.records]
     assert kind == ["done", "error"]
     assert json.loads(fake_redis.records[1][1][FIELD_DATA])["code"] == "UPSTREAM_ERROR"
+
+
+# ═════════════ T-S.7 — stream tiêu đề `stream:title:{conversation_id}` ═════════════
+
+
+def test_title_stream_key_follows_S14(fake_redis: FakeRedis) -> None:
+    """Khoá chốt ở T-S.7 (§24.2b·S14): cùng tiền tố `stream:` — C8 và phép đếm của nó."""
+    cid = uuid.uuid4()
+    producer = StreamProducer.for_title(fake_redis, cid, ttl_s=60)  # type: ignore[arg-type]
+    assert producer.key == title_stream_key(cid) == f"stream:title:{cid}"
+    assert producer.key != stream_key(cid), "khong dung khoa voi stream cua mot message"
+
+
+async def test_title_done_carries_title_only(fake_redis: FakeRedis) -> None:
+    """`done` của stream tiêu đề: `{"title": …}` — không `finish_reason`, không tiền (C10)."""
+    cid = uuid.uuid4()
+    producer = StreamProducer.for_title(fake_redis, cid, ttl_s=60)  # type: ignore[arg-type]
+    await producer.emit(TitleDoneEvent(title='Nấu phở "bò"\nmới'))
+    ((name, fields),) = fake_redis.records
+    assert name == f"stream:title:{cid}"
+    assert fields[FIELD_TYPE] == "done"
+    assert json.loads(fields[FIELD_DATA]) == {"title": 'Nấu phở "bò"\nmới'}

@@ -62,7 +62,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import catalog
-from app.config.settings import settings
+from app.config.settings import CONVERSATION_TITLE_MAX_CHARS, settings
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.db.models import Conversation, Message, MessageFeedback, MessageRole, MessageStatus
@@ -86,7 +86,7 @@ class CreateConversationRequest(BaseModel):
     message duy nhất, nên A1/A2/C14 chỉ có một chỗ để đúng.
     """
 
-    title: str | None = Field(default=None, max_length=200)
+    title: str | None = Field(default=None, max_length=CONVERSATION_TITLE_MAX_CHARS)
     #: Model mặc định của riêng hội thoại này (§9.2). Kiểm ngay tại đây chứ
     #: không đợi lượt chat đầu tiên: một hội thoại mang tên model không tồn tại
     #: là quả mìn hẹn giờ mà người dùng chỉ thấy khi đã gõ xong câu hỏi.
@@ -108,7 +108,7 @@ class UpdateConversationRequest(BaseModel):
     hai của cùng danh sách đó — hai chỗ phải cùng nói một chuyện.
     """
 
-    title: str | None = Field(default=None, max_length=200)
+    title: str | None = Field(default=None, max_length=CONVERSATION_TITLE_MAX_CHARS)
     default_model: str | None = None
     #: `null` không có nghĩa (cột `NOT NULL`) → handler trả `400`. Khai
     #: `bool | None` chứ không `bool` để phân biệt được "vắng" với "gửi null":

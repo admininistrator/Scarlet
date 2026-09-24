@@ -154,6 +154,46 @@ class ConversationRepository:
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
 
+    async def set_title_if_unset(
+        self, conversation_id: uuid.UUID, *, user_id: uuid.UUID, title: str
+    ) -> tuple[bool, str | None]:
+        """Ghi tiêu đề tự đặt — CHỈ khi hội thoại chưa có tiêu đề (NQ-110, T-S.7).
+
+        `UPDATE … SET title = :t WHERE id = :id AND user_id = :u AND title IS
+        NULL`. Điều kiện `title IS NULL` nằm **trong câu SQL**, không phải một
+        phép đọc-rồi-ghi ở Python: người dùng đổi tên giữa lúc job đặt tên còn
+        chạy thì câu này không chạm hàng nào, và tên của họ thắng — không có khe
+        nào giữa "thấy `NULL`" và "ghi" để một `PATCH` chen vào.
+
+        Trả `(đã_ghi, tiêu_đề_hiện_tại)`: tiêu đề **đang nằm trong DB** sau câu
+        lệnh — của model nếu ghi được, của người dùng nếu họ đặt trước — vì đó
+        là chuỗi event `done` của stream tiêu đề phải mang (`TitleDoneEvent`).
+        `(False, None)` khi hội thoại không còn (hoặc không phải của `user_id`).
+
+        Không lọc `deleted_at` ở câu `UPDATE`: chữ của NQ-110 là `WHERE id AND
+        title IS NULL`, và đặt tên cho một hội thoại vừa bị xoá mềm là vô hại —
+        nó không hiện ở đâu, và khôi phục nó thì có tên sẵn.
+        """
+        stmt = (
+            update(Conversation)
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+                Conversation.title.is_(None),
+            )
+            .values(title=title)
+            .returning(Conversation.title)
+            .execution_options(synchronize_session=False)
+        )
+        written = (await self._session.execute(stmt)).scalar_one_or_none()
+        if written is not None:
+            return True, written
+        current = select(Conversation.title).where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id,
+        )
+        return False, (await self._session.execute(current)).scalar_one_or_none()
+
     async def soft_delete_conversation(
         self, conversation_id: uuid.UUID, *, user_id: uuid.UUID
     ) -> bool:

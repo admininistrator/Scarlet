@@ -33,7 +33,7 @@ from app import cli
 from app.config import catalog
 from app.config.settings import settings
 from app.core.errors import ApiError, ApiErrorCode
-from app.db.models import CostConfidence, KeySource, MessageRole
+from app.db.models import CostConfidence, KeySource, MessageRole, UsagePurpose
 from app.db.repositories import (
     ConversationRepository,
     MessageRepository,
@@ -79,6 +79,7 @@ async def _write_ledger(
     cost: str,
     age_seconds: float = 0.0,
     key_source: KeySource = KeySource.SYSTEM,
+    purpose: UsagePurpose = UsagePurpose.CHAT,
 ) -> uuid.UUID:
     """Một dòng `usage_events` có tuổi cho trước. Trả `id` của nó.
 
@@ -101,6 +102,7 @@ async def _write_ledger(
         cost_usd=Decimal(cost),
         cost_confidence=CostConfidence.EXACT,
         price_snapshot={"source": "catalog"},
+        purpose=purpose,
     )
     if age_seconds:
         await session.execute(
@@ -299,6 +301,7 @@ async def test_loads_in_batches_not_one_command_per_row(
             cost_usd=Decimal("0.000001"),
             cost_confidence=CostConfidence.EXACT,
             price_snapshot={"source": "catalog"},
+            purpose=UsagePurpose.CHAT,
         )
     await session.flush()
 
@@ -681,6 +684,86 @@ async def test_rebuild_all_skips_byok_only_spenders(
             cost="0.700000",
             age_seconds=INSIDE_5H,
             key_source=KeySource.BYOK,
+        )
+        await record_statement.commit()
+
+    async with session_factory() as reader:
+        rebuilt = await rebuild_all(reader, quota_redis_fake, now=time.time())
+
+    assert [report.user_id for report in rebuilt] == [user_a]
+    assert _zset(quota_redis_fake, LimitType.SHORT, user_b) == {}
+
+
+# ══════ T-S.7 — lượt đặt tên (`purpose=title`) KHÔNG quay lại quota khi dựng ══════
+#
+# Cạm bẫy ① của T-S.7: `record_usage` bỏ `ZADD` cho dòng `title` thì quota hôm
+# nay đúng, nhưng lần đầu Redis mất dữ liệu (§10.3) ba câu dưới đây đọc lại
+# `usage_events` — thiếu bộ lọc `purpose=chat` là trừ oan mọi lượt đặt tên.
+# Cùng ba vế với nhóm BYOK ở trên, và cùng lý do phải kiểm từng vế riêng.
+
+
+async def test_TITLE_rows_stay_out_of_ZSET_on_rebuild(
+    session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
+) -> None:
+    """`list_since` — `rebuild_quota` chỉ nạp lại dòng `chat`."""
+    await _write_ledger(session, user_a, cost="0.100000", age_seconds=INSIDE_5H)
+    await _write_ledger(
+        session, user_a, cost="0.000300", age_seconds=INSIDE_5H, purpose=UsagePurpose.TITLE
+    )
+    await session.commit()
+
+    report = await rebuild_quota(session, quota_redis_fake, user_id=user_a, now=time.time())
+
+    assert _total(quota_redis_fake, LimitType.SHORT, user_a) == Decimal("0.100000")
+    assert len(_zset(quota_redis_fake, LimitType.SHORT, user_a)) == 1
+    assert _total(quota_redis_fake, LimitType.LONG, user_a) == Decimal("0.100000")
+    assert report.members == 2, "moi cua so dung 1 member — dong title khong duoc nap"
+
+
+async def test_only_TITLE_rows_does_NOT_ASK_postgres_twice(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    quota_redis_fake: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`has_events_since` — người chỉ có lượt đặt tên thì cửa sổ rỗng là ĐÚNG."""
+    await _write_ledger(
+        session, user_a, cost="0.000300", age_seconds=INSIDE_5H, purpose=UsagePurpose.TITLE
+    )
+    await session.commit()
+    state = await read_window(quota_redis_fake, windows()[0], user_id=user_a, now=time.time())
+    full_window_reads = 0
+    original = UsageEventRepository.list_since
+
+    async def counting(self: UsageEventRepository, **kwargs: Any) -> Any:
+        nonlocal full_window_reads
+        full_window_reads += 1
+        return await original(self, **kwargs)
+
+    monkeypatch.setattr(UsageEventRepository, "list_since", counting)
+
+    after = await refill_if_empty(session, quota_redis_fake, state, user_id=user_a, now=time.time())
+
+    assert after.spent == Decimal(0)
+    assert _zset(quota_redis_fake, LimitType.SHORT, user_a) == {}
+    assert full_window_reads == 0
+
+
+async def test_rebuild_all_skips_title_only_spenders(
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    user_b: uuid.UUID,
+    quota_redis_fake: Any,
+) -> None:
+    """`user_ids_since` — `rebuild-quota --all` không nạp ai chỉ vì một lượt đặt tên."""
+    async with session_factory() as record_statement:
+        await _write_ledger(record_statement, user_a, cost="0.200000", age_seconds=INSIDE_5H)
+        await _write_ledger(
+            record_statement,
+            user_b,
+            cost="0.000300",
+            age_seconds=INSIDE_5H,
+            purpose=UsagePurpose.TITLE,
         )
         await record_statement.commit()
 

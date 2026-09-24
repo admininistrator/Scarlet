@@ -51,8 +51,23 @@ FIELD_TYPE = "type"
 FIELD_DATA = "data"
 
 
+#: Đoạn giữa của khoá stream tiêu đề: `stream:title:{conversation_id}`
+#: (§24.2b·S6, S14 — T-S.7). Cùng tiền tố `stream:` nên cùng hưởng mọi thứ đã
+#: dựng cho nó (C8, `maxmemory-policy volatile-lru`, phép đếm `--scan` của C8).
+#: Tên chốt sau khi rà mọi chỗ quét `stream:*` (Cạm bẫy ② của T-S.7): con số
+#: `streams_dang_chay` của `/admin/system` đếm `messages.status` trong
+#: Postgres, reaper đi từ `message_id` — không chỗ nào suy `message_id` ngược
+#: từ tên khoá, nên một khoá `stream:title:` không lọt vào con số nào.
+TITLE_STREAM_SEGMENT = "title:"
+
+
 def stream_key(message_id: uuid.UUID | str) -> str:
     return f"{STREAM_KEY_PREFIX}{message_id}"
+
+
+def title_stream_key(conversation_id: uuid.UUID | str) -> str:
+    """`stream:title:{conversation_id}` — stream riêng của lượt đặt tên (T-S.7)."""
+    return stream_key(f"{TITLE_STREAM_SEGMENT}{conversation_id}")
 
 
 def encode_event(event: Event) -> tuple[str, str]:
@@ -86,6 +101,19 @@ class StreamProducer:
         self._redis = redis
         self._key = stream_key(message_id)
         self._ttl_s = ttl_s
+
+    @classmethod
+    def for_title(
+        cls, redis: Redis, conversation_id: uuid.UUID | str, *, ttl_s: int
+    ) -> StreamProducer:
+        """Đầu ghi của `stream:title:{conversation_id}` — job `title` (T-S.7).
+
+        Cùng lớp, cùng `emit`/`expire`: chỉ khác khoá. Khoá ra đúng
+        `title_stream_key(conversation_id)` — cùng `TITLE_STREAM_SEGMENT`, cùng
+        `stream_key` — nên consumer của `GET …/title/stream` đọc đúng khoá job
+        ghi (`tests/streaming/test_producer.py` canh).
+        """
+        return cls(redis, f"{TITLE_STREAM_SEGMENT}{conversation_id}", ttl_s=ttl_s)
 
     @property
     def key(self) -> str:

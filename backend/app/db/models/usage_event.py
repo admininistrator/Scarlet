@@ -69,6 +69,20 @@ class CostConfidence(StrEnum):
     LOW = "low"
 
 
+class UsagePurpose(StrEnum):
+    """Lượt gọi model này phục vụ việc gì — §24.2b·S6, S14 (T-S.7, migration 0007).
+
+    Quyết định **có vào hai cửa sổ quota hay không**, độc lập với `KeySource`:
+    `chat` vào (nếu `system`), `title` — lượt đặt tên hội thoại tự động — thì
+    không bao giờ, dù nó luôn đi bằng system key. Trần tự nhiên của nó là một
+    lượt mỗi hội thoại, và hội thoại chỉ ra đời khi câu đầu đã qua cửa quota
+    (Cạm bẫy ④ của T-S.7).
+    """
+
+    CHAT = "chat"
+    TITLE = "title"
+
+
 class UsageEvent(Base):
     __tablename__ = "usage_events"
 
@@ -112,6 +126,12 @@ class UsageEvent(Base):
     #: LiteLLM ghi đè bằng alias trước khi backend nhìn thấy. Đo và chốt ở
     #: B-32; cột giữ lại vì ngày có gateway nào chịu khai thì đây là chỗ ghi.
     upstream_model_reported: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: `chat` hay `title` (T-S.7). Ghi **tường minh** ở đường ghi của app, cùng
+    #: lý lẽ `key_source`: `DEFAULT 'chat'` của DDL là lưới cho hàng cũ và cho
+    #: `INSERT` viết tay, không phải cho code.
+    purpose: Mapped[UsagePurpose] = mapped_column(
+        Text, nullable=False, server_default=text("'chat'")
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )

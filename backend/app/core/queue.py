@@ -37,10 +37,12 @@ job là pickle). Hai mục đích, hai kết nối — cùng lý lẽ đã ghi �
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 from arq.constants import default_queue_name
+from arq.jobs import Job, JobStatus
 
 from app.config.settings import settings
 
@@ -51,6 +53,18 @@ from app.config.settings import settings
 #: ký và job nằm mãi trong hàng đợi — **không lỗi, không log**. Ghim tên vào
 #: một hằng mà cả hai bên import làm chỗ đó đứt ngay lúc đọc code.
 GENERATE_JOB_NAME = "generate"
+
+#: Job đặt tên hội thoại tự động (§24.2b·S6, T-S.7). Cùng lý lẽ với hằng trên:
+#: tên job là giao kèo giữa hai tiến trình, nên nó sống ở chỗ cả hai import.
+TITLE_JOB_NAME = "title"
+
+#: Tiền tố `_job_id` của job `title`. Một hội thoại có **đúng một** job id, nên
+#: arq từ chối lần enqueue thứ hai cho cùng hội thoại (trả `None`) — kể cả hai
+#: câu hỏi đầu gửi song song (double-click) — cho tới khi kết quả của job đầu
+#: hết `keep_result`. Tới lúc ấy hội thoại đã có message, nên điều kiện "câu
+#: hỏi đầu tiên" của `api/v1/messages.py` không còn đúng nữa: không đường nào
+#: enqueue lại được (NQ-110 — "không bao giờ đặt tên hai lần").
+TITLE_JOB_ID_PREFIX = "title:"
 
 _pool: ArqRedis | None = None
 _lock = asyncio.Lock()
@@ -64,6 +78,11 @@ def redis_settings() -> RedisSettings:
     host là `redis` — sai lặng lẽ thành "job biến mất", không thành lỗi.
     """
     return RedisSettings.from_dsn(str(settings.REDIS_URL))
+
+
+def title_job_id(conversation_id: uuid.UUID | str) -> str:
+    """`_job_id` của job `title` — `title:{conversation_id}` (NQ-110)."""
+    return f"{TITLE_JOB_ID_PREFIX}{conversation_id}"
 
 
 async def get_arq_pool() -> ArqRedis:
@@ -107,3 +126,28 @@ async def queue_depth() -> int:
     """
     pool = await get_arq_pool()
     return await pool.zcard(default_queue_name)
+
+
+#: Ba trạng thái arq nghĩa là "job `title` còn sẽ ghi gì đó vào stream".
+#: `complete` và `not_found` nằm ngoài: job đã chạy xong (kết quả còn giữ tới
+#: hết `keep_result`) hoặc chưa từng có / đã quá hạn giữ kết quả.
+_TITLE_PENDING = frozenset({JobStatus.deferred, JobStatus.queued, JobStatus.in_progress})
+
+
+async def title_job_pending(conversation_id: uuid.UUID) -> bool:
+    """Job `title` của hội thoại này có còn đang chờ hoặc đang chạy không (T-S.7).
+
+    Người hỏi duy nhất là `GET /conversations/{id}/title/stream`, cho đúng một ca:
+    tiêu đề còn `NULL` mà `stream:title:{id}` **không tồn tại**. Hai khả năng
+    trông y hệt nhau từ phía Redis Stream — job chưa kịp `XADD start` (phải
+    chờ), hoặc không còn lượt nào sẽ tới (job hỏng đã quá `STREAM_TTL_S`, hay
+    không bao giờ được đẩy vào hàng đợi) — và chỉ hàng đợi phân biệt được.
+    Không hỏi thì ca sau là một kết nối SSE treo bằng `: ping` tới khi client
+    bỏ đi.
+
+    Đọc qua `Job.status()` — API công khai của arq, không tự ghép tên khoá
+    `arq:result:`/`arq:in-progress:` — cùng lý lẽ `queue_depth` đọc
+    `default_queue_name` của arq thay vì gõ lại chuỗi.
+    """
+    pool = await get_arq_pool()
+    return await Job(title_job_id(conversation_id), pool).status() in _TITLE_PENDING

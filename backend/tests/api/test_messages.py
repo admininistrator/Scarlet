@@ -210,7 +210,12 @@ async def test_creates_two_messages_and_enqueues_job(
     assert assistant.content == ""
 
     assert await _active_leaf(session_factory, conversation.id) == amid
-    assert fake_arq.pushed == [("generate", (str(amid),))]
+    # T-S.7: câu đầu của hội thoại chưa có tiêu đề ⇒ `title` theo sau `generate`,
+    # payload là hai khoá chính (hội thoại, câu hỏi) — không có chữ nào (C5).
+    assert fake_arq.pushed == [
+        ("generate", (str(amid),)),
+        ("title", (str(conversation.id), str(uid))),
+    ]
 
 
 async def test_assistant_is_queued(
@@ -748,7 +753,8 @@ async def test_job_id_equals_assistant_message_id(
 
     assert resp.status_code == 202
     amid = resp.json()["assistant_message_id"]
-    assert fake_arq.used_job_ids == [amid]
+    # Job `title` của câu đầu (T-S.7) có id riêng theo hội thoại — NQ-110.
+    assert fake_arq.used_job_ids == [amid, f"title:{conversation.id}"]
 
 
 # ═════════════════════ body và Idempotency-Key (§11.4) ════════════════════
@@ -857,7 +863,8 @@ async def test_two_sends_same_key_create_one_turn(
     assert first.json() == second.json()
     assert second.headers["Idempotent-Replay"] == "true"
     assert await _count_messages(session_factory, conversation.id) == 2
-    assert len(fake_arq.pushed) == 1
+    # T-S.7: câu hỏi ĐẦU của hội thoại chưa có tiêu đề ⇒ thêm đúng một job `title`.
+    assert [name for name, _ in fake_arq.pushed] == ["generate", "title"]
 
 
 async def test_missing_idempotency_key_is_400(

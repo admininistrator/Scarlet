@@ -19,7 +19,7 @@ from app.db.models.email_token import EmailToken, EmailTokenPurpose
 from app.db.models.message import Message, MessageFeedback, MessageRole, MessageStatus
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.tier import Tier
-from app.db.models.usage_event import CostConfidence, KeySource, UsageEvent
+from app.db.models.usage_event import CostConfidence, KeySource, UsageEvent, UsagePurpose
 from app.db.models.user import User, UserRole, UserStatus
 from app.db.models.user_provider_key import UserProviderKey
 from app.db.models.user_settings import UserSettings
@@ -43,6 +43,7 @@ __all__ = [
     "RefreshToken",
     "Tier",
     "UsageEvent",
+    "UsagePurpose",
     "User",
     "UserProviderKey",
     "UserRole",

@@ -229,7 +229,8 @@ async def test_two_parallel_requests_same_key_create_one_message(
         assert loser.json()["error"]["code"] == "IN_PROGRESS"
 
     assert await _count_messages(session_factory, conversation.id) == 2
-    assert len(fake_arq.pushed) == 1
+    # T-S.7: câu hỏi ĐẦU của hội thoại chưa có tiêu đề ⇒ thêm đúng một job `title`.
+    assert [name for name, _ in fake_arq.pushed] == ["generate", "title"]
 
 
 async def test_in_flight_is_409_in_progress(
@@ -293,7 +294,8 @@ async def test_resend_after_completion_returns_same_response(
     assert HEADER_REPLAY not in first.headers
     assert second.headers[HEADER_REPLAY] == "true"
     assert await _count_messages(session_factory, conversation.id) == 2
-    assert len(fake_arq.pushed) == 1
+    # T-S.7: câu hỏi ĐẦU của hội thoại chưa có tiêu đề ⇒ thêm đúng một job `title`.
+    assert [name for name, _ in fake_arq.pushed] == ["generate", "title"]
 
 
 async def test_other_body_same_key_returns_old_response(
@@ -343,7 +345,8 @@ async def test_other_key_creates_new_turn(
     assert first.status_code == second.status_code == 202
     assert first.json()["assistant_message_id"] != second.json()["assistant_message_id"]
     assert await _count_messages(session_factory, conversation.id) == 4
-    assert len(fake_arq.pushed) == 2
+    # T-S.7: `title` chỉ đi cùng câu ĐẦU — lượt thứ hai là `generate` trơn.
+    assert [name for name, _ in fake_arq.pushed] == ["generate", "title", "generate"]
 
 
 async def test_other_users_key_cannot_be_shared(

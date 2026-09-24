@@ -111,7 +111,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import catalog
 from app.config.catalog import TOKENS_PER_PRICE_UNIT
-from app.db.models import CostConfidence, KeySource, MessageRole
+from app.db.models import CostConfidence, KeySource, MessageRole, UsagePurpose
 from app.db.repositories import UsageEventRepository
 from app.llm.client import Usage
 from app.llm.tokens import count_message, count_messages, count_text
@@ -300,6 +300,7 @@ async def record_usage(
     reasoning: str,
     tool_calls: list[dict[str, Any]] | None,
     key_source: KeySource = KeySource.SYSTEM,
+    purpose: UsagePurpose = UsagePurpose.CHAT,
 ) -> UsageRecord:
     """Ghi sổ một lượt sinh đã khép: `INSERT usage_events` rồi `ZADD` hai cửa sổ.
 
@@ -319,6 +320,14 @@ async def record_usage(
     sánh). Một lượt sinh dài mười phút có thể bắt đầu lúc 16:58 giờ cao điểm
     và kết thúc lúc 17:08 giờ thường: giá phải là giá 16:58, còn cửa sổ 5 giờ
     phải đếm từ 17:08. Gộp hai cái thành một tham số là chọn sai một trong hai.
+
+    **`purpose` là vế thứ hai của "có `ZADD` hay không" (T-S.7, §24.2b·S6).**
+    Lượt đặt tên hội thoại (`title`) đi bằng system key mà vẫn **không** trừ
+    quota. Mặc định `chat` là mặc định chặt hơn: một đường ghi sổ mới quên
+    khai `purpose` thì trừ quota thừa, không chạy miễn phí — cùng chiều với
+    `key_source`. Nửa đọc của luật này ở `UsageEventRepository` (ba câu dựng
+    lại quota lọc `purpose=chat`); hai nửa phải đi cùng nhau, nếu không lần
+    `rebuild_quota` đầu tiên trả lại đúng khoản vừa được tha.
 
     Raise:
         Ngoại lệ của Postgres hoặc Redis đi thẳng ra ngoài. Chỗ gọi mới biết
@@ -344,6 +353,7 @@ async def record_usage(
         cost_usd=cost,
         cost_confidence=confidence,
         price_snapshot=snapshot_of(model, rates, at),
+        purpose=purpose,
         # B-32 — đã đo, không lấy được. Xem docstring module.
         upstream_model_reported=None,
     )
@@ -353,7 +363,8 @@ async def record_usage(
     # `workers/generate.py` chở `key_source` xuống từ `llm/credentials.py`.
     # Luật vẫn ở đây — chỗ duy nhất biết cả hai vế — chứ không ở chỗ gọi, nên
     # một đường ghi sổ thứ hai sinh ra sau này không thể quên nó (B-157).
-    if key_source is KeySource.SYSTEM:
+    # T-S.7 thêm vế thứ hai theo đúng lối ấy: lượt đặt tên không trừ quota.
+    if key_source is KeySource.SYSTEM and purpose is UsagePurpose.CHAT:
         await add_to_windows(redis, user_id=user_id, usage_id=event.id, cost_usd=cost, now=now)
 
     return UsageRecord(id=event.id, cost_usd=cost, confidence=confidence, spent=spent)

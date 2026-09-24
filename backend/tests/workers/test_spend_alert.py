@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import app.db.session as db_session
 from app.config.settings import settings
 from app.core.mailer import _SUBJECTS, TEMPLATES_DIR
-from app.db.models import CostConfidence, KeySource, User, UserRole
+from app.db.models import CostConfidence, KeySource, UsagePurpose, User, UserRole
 from app.db.repositories import CostSplit, UsageEventRepository, UserRepository
 from app.workers.main import CRON_JOBS
 from app.workers.spend_alert import (
@@ -171,6 +171,7 @@ async def _write_ledger(
             cost_usd=Decimal(cost),
             cost_confidence=confidence,
             price_snapshot={},
+            purpose=UsagePurpose.CHAT,
         )
         if age_seconds:
             await session.execute(

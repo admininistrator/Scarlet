@@ -28,7 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import catalog
-from app.db.models import CostConfidence, KeySource, UsageEvent
+from app.db.models import CostConfidence, KeySource, UsageEvent, UsagePurpose
 from app.llm.client import Usage
 from app.quota.meter import (
     Spent,
@@ -319,6 +319,7 @@ async def _write_one_row(
     now: float | None = None,
     content: str = "Ha Noi mua thu dep.",
     key_source: KeySource = KeySource.SYSTEM,
+    purpose: UsagePurpose = UsagePurpose.CHAT,
 ) -> Any:
     record = await record_usage(
         session,
@@ -334,6 +335,7 @@ async def _write_one_row(
         reasoning="",
         tool_calls=None,
         key_source=key_source,
+        purpose=purpose,
     )
     await session.commit()
     return record
@@ -469,6 +471,38 @@ async def test_byok_still_writes_ledger_but_does_NOT_charge_quota(
     assert row.key_source == KeySource.BYOK
     assert row.cost_usd > 0
     assert quota_redis_fake.zset == {}
+
+
+async def test_title_turn_writes_ledger_but_does_NOT_charge_quota(
+    session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
+) -> None:
+    """T-S.7 (§24.2b·S6): lượt đặt tên — system key, có dòng sổ, KHÔNG `ZADD`.
+
+    Khác ca BYOK ngay trên ở đúng chỗ đáng kiểm: `key_source` vẫn là `system`
+    (tiền của người vận hành, A7 vẫn áp), chỉ `purpose` mới quyết không trừ.
+    """
+    usage = Usage(prompt_tokens=180, completion_tokens=9, total_tokens=189)
+    record = await _write_one_row(
+        session, quota_redis_fake, user_a, usage=usage, purpose=UsagePurpose.TITLE
+    )
+    row = (await session.execute(select(UsageEvent).where(UsageEvent.id == record.id))).scalar_one()
+    assert row.purpose == UsagePurpose.TITLE
+    assert row.key_source == KeySource.SYSTEM
+    assert row.cost_usd > 0
+    assert row.price_snapshot["input_per_1m"] is not None, "A7 van ap cho dong title"
+    assert quota_redis_fake.zset == {}
+    assert quota_redis_fake.ttl_calls == []
+
+
+async def test_chat_turn_is_purpose_chat_by_default(
+    session: AsyncSession, user_a: uuid.UUID, quota_redis_fake: Any
+) -> None:
+    """Mặc định chặt hơn: đường ghi sổ không khai `purpose` là `chat` — trừ quota."""
+    usage = Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+    record = await _write_one_row(session, quota_redis_fake, user_a, usage=usage)
+    row = (await session.execute(select(UsageEvent).where(UsageEvent.id == record.id))).scalar_one()
+    assert row.purpose == UsagePurpose.CHAT
+    assert quota_redis_fake.zset != {}
 
 
 async def test_postgres_sum_matches_redis_zset_total(

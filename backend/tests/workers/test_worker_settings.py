@@ -30,20 +30,32 @@ from app.workers.main import (
     FUNCTIONS,
     GENERATE_JOB_NAME,
     GENERATE_MAX_TRIES,
+    TITLE_JOB_NAME,
+    TITLE_MAX_TRIES,
     WorkerSettings,
     redis_settings,
 )
 from app.workers.reaper import REAPER_JOB_NAME
 
 
-def test_exactly_one_job_named_generate() -> None:
-    """§7.2 bước ① viết `enqueue('generate', ...)` — tên đó là giao kèo."""
-    assert [f.name for f in FUNCTIONS] == ["generate"]
+def test_exactly_two_jobs_generate_and_title() -> None:
+    """§7.2 bước ① viết `enqueue('generate', ...)` — tên đó là giao kèo.
+
+    T-S.7 thêm job thứ hai, `title` (§24.2b·S6), với cùng loại giao kèo: bên
+    đẩy là `api/v1/messages.py::_enqueue_title`.
+    """
+    assert [f.name for f in FUNCTIONS] == ["generate", "title"]
     assert GENERATE_JOB_NAME == "generate"
+    assert TITLE_JOB_NAME == "title"
 
 
 def test_generate_never_retries() -> None:
     assert GENERATE_MAX_TRIES == 1
+
+
+def test_title_never_retries() -> None:
+    """§24.2b·S6: "Không thử lại vô hạn" — hỏng một lần là tiêu đề ở lại `NULL`."""
+    assert TITLE_MAX_TRIES == 1
 
 
 def test_redis_settings_from_env_not_arq_default() -> None:
@@ -60,6 +72,10 @@ def test_real_worker_gets_all_three_params() -> None:
     generate = worker.functions["generate"]
     assert generate.max_tries == 1, "mất max_tries=1 -> arq quay về mặc định 5"
     assert generate.timeout_s == settings.GENERATE_TIMEOUT_S
+
+    title = worker.functions["title"]
+    assert title.max_tries == 1, "mất max_tries=1 -> arq quay về mặc định 5"
+    assert title.timeout_s == settings.GENERATE_TIMEOUT_S
 
     # `health_check_interval` và `redis_settings` chỉ có tác dụng nếu arq thật
     # sự nhận được chúng — xem lý do ở docstring module.
