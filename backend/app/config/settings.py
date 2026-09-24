@@ -371,6 +371,21 @@ class Settings(BaseSettings):
     #: phải bỏ cuộc theo đơn vị giây. Gộp hai biến thì nới cái kia sẽ treo màn
     #: hình cài đặt.
     BYOK_VERIFY_TIMEOUT_S: int = Field(default=10, gt=0)
+    #: Nhịp của lượt đo provider `host-dependent` chạy nền trong `api`
+    #: (`app/core/provider_health.py`, T-S.4, NQ-113) — cũng là tuổi mà FE coi
+    #: `checked_at` của `GET /models` là cũ (`stale_after_s`). Hai hằng số của
+    #: T-3.6 trong `.py` chuyển về đây vì chúng là *giới hạn* (A3, §19.2 L4).
+    #:
+    #: 30 s: đủ thưa để 9Router (đo ~0.7–2.5 s mỗi lượt) không thành tải, đủ
+    #: dày để bật 9Router lên rồi mở picker là thấy hàng sáng lại trong khoảng
+    #: một nhịp. Mỗi tiến trình `api` đo riêng (Cạm bẫy ② T-S.4).
+    PROVIDER_HEALTH_TTL_S: int = Field(default=30, gt=0)
+    #: Trần cho MỘT lượt đo, và cũng là trần mà `api` chờ lượt đo đầu lúc khởi
+    #: động. Rộng hơn `CHECK_TIMEOUT_S` (2 s) của `/health/deep` có chủ ý: một
+    #: lần chạm trần ở đây xám một model đang chạy được suốt một nhịp trước mặt
+    #: người dùng. Giá của trần rộng chỉ trả khi host **im lặng** — và từ T-S.4
+    #: nó rơi vào tác vụ nền, không rơi vào request nào.
+    PROVIDER_PROBE_TIMEOUT_S: float = Field(default=5.0, gt=0)
 
     # ═══ Context & vision (§9.6, §15.3) ═══
     #: Trần độ dài MỘT message người dùng gửi lên, tính bằng ký tự (B-205,

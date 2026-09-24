@@ -51,6 +51,7 @@ import subprocess
 import sys
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -611,3 +612,28 @@ def event_hooks() -> dict[str, list[Callable[[httpx.Request], Awaitable[None]]]]
     và từ T-2.18 nó có người dùng thứ hai ở `tests/security/`.
     """
     return {"request": [_attach_idempotency_key]}
+
+
+# ───── Phần 4: không vòng đo provider nền nào chạy trong pytest (T-S.4) ─────
+#
+# Cạm bẫy ③ của T-S.4: `lifespan` của `app/main.py` mở một vòng lặp vô hạn đo
+# 9Router qua mạng thật. Hôm nay không test nào chạy `lifespan` (`TestClient`
+# không dùng `with`, `ASGITransport` không gọi nó), nhưng "hôm nay không ai
+# chạy" là kỷ luật chứ không phải cấu trúc: ca đầu tiên viết `with
+# TestClient(app)` sẽ đo 9Router trên máy đang chạy test và chờ tới một trần
+# đo. Fixture này làm lượt ấy thành không làm gì, cho MỌI thư mục.
+#
+# `tests/core/test_provider_health.py` đo chính `background()` bằng tham chiếu
+# lấy lúc import (`_REAL_BACKGROUND`), trước khi fixture này kịp thay.
+
+
+@asynccontextmanager
+async def _no_background() -> AsyncIterator[None]:
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_provider_probe_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core import provider_health
+
+    monkeypatch.setattr(provider_health, "background", _no_background)

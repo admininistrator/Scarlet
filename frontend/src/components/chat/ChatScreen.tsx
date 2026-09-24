@@ -127,10 +127,12 @@ export function ChatScreen() {
     <ModelPicker
       models={modelCatalog.models}
       defaultPick={chat.defaultPick}
-      loadedAtLabel={formatTime(modelCatalog.loadedAt)}
+      checkedAtLabel={formatTime(modelCatalog.checkedAt)}
+      loading={modelCatalog.loading}
       refreshing={modelCatalog.refreshing}
       onRefresh={() => void modelCatalog.refresh()}
       onPick={(id) => void selectModel(id)}
+      onOpen={modelCatalog.refreshIfStale}
     />
   );
   /*

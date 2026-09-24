@@ -279,6 +279,8 @@ describe("providerCards — health tung provider tu `GET /models`", () => {
       badge: null,
       available: true,
       unavailable_reason: null,
+      checked_at: null,
+      stale_after_s: 30,
       ...p,
     };
   }

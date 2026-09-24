@@ -1,7 +1,8 @@
 /**
  * Model Picker — T-3.6, ban thiet ke T-HD4.
  *
- * KH tham chieu: §9.3, §9.4, UC-05, RR-5 · tasks.md T-3.6 · ADR-16.
+ * KH tham chieu: §9.3, §9.4, UC-05, RR-5, §24.2b·S5 · tasks.md T-3.6, T-S.4 ·
+ * ADR-16.
  *
  * ╔════════════════════════════════════════════════════════════════════════╗
  * ║  KHONG MOT ID MODEL NAO TRONG FILE NAY                                 ║
@@ -71,16 +72,24 @@ export interface ModelPickerProps {
   /** Ket qua cua `pickDefault()` — model dang dung + tang cua tung id. */
   defaultPick: DefaultPick;
   /**
-   * Moc gio da dinh dang SAN ben ngoai, vi du `"14:32"`.
+   * Moc gio backend DO (`checked_at`, T-S.4) da dinh dang SAN ben ngoai, vi
+   * du `"14:32"`.
    *
    * Dinh dang o ngoai chu khong o day vi ham `t()` cua FE khong co
    * interpolation (xem `lib/i18n.ts`): cau "Trang thai kiem luc" va con so la
    * hai phan tu canh nhau, khong phai mot chuoi ghep.
    */
-  loadedAtLabel: string;
+  checkedAtLabel: string;
+  /**
+   * Lan doc dau tien chua xong (T-S.4): hien "dang tai" thay cho "Chua co mo
+   * hinh nao" — danh sach rong luc ay la CHUA BIET, khong phai KHONG CO.
+   */
+  loading?: boolean;
   refreshing?: boolean;
   onRefresh: () => void;
   onPick: (modelId: string) => void;
+  /** Goi moi lan picker MO — `useModels.refreshIfStale` (T-S.4). */
+  onOpen?: () => void;
 }
 
 function capabilityLabel(capability: string): string {
@@ -266,15 +275,15 @@ function ModelRow({
 }
 
 function StatusStrip({
-  loadedAtLabel,
+  checkedAtLabel,
   refreshing,
   onRefresh,
-}: Pick<ModelPickerProps, "loadedAtLabel" | "refreshing" | "onRefresh">) {
+}: Pick<ModelPickerProps, "checkedAtLabel" | "refreshing" | "onRefresh">) {
   return (
     <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5">
       <p className="min-w-0 text-xs text-muted">
         <span>{t("model.checkedAtPrefix")}</span>{" "}
-        <span className="tabular font-medium text-foreground">{loadedAtLabel}</span>
+        <span className="tabular font-medium text-foreground">{checkedAtLabel}</span>
       </p>
       <button
         type="button"
@@ -294,13 +303,23 @@ function PickerBody({
   defaultPick,
   narrow,
   onPick,
-  ...strip
+  loading,
+  checkedAtLabel,
+  refreshing,
+  onRefresh,
 }: ModelPickerProps & { narrow: boolean }) {
   return (
     <>
-      <StatusStrip {...strip} />
+      <StatusStrip checkedAtLabel={checkedAtLabel} refreshing={refreshing} onRefresh={onRefresh} />
       {models.length === 0 ? (
-        <p className="px-3 py-4 text-xs text-muted">{t("model.trong")}</p>
+        /*
+          T-S.4 — hai cau khac nhau cho hai trang thai khac nhau: dang cho lan
+          doc dau (`role="status"` de screen reader duoc bao khi no doi) va
+          da doc xong ma that su rong.
+        */
+        <p role="status" className="px-3 py-4 text-xs text-muted">
+          {loading ? t("model.loading") : t("model.trong")}
+        </p>
       ) : (
         <ul role="listbox" aria-label={t("model.listLabel")} className="flex flex-col gap-0.5 p-2">
           {models.map((m) => (
@@ -354,7 +373,7 @@ export function ModelPicker(props: ModelPickerProps) {
     >
       <span className="flex min-w-0 flex-col">
         <span className="truncate text-base font-semibold text-foreground">
-          {selected?.display_name ?? t("model.trong")}
+          {selected?.display_name ?? (props.loading ? t("model.loadingShort") : t("model.trong"))}
         </span>
         {/*
           Dong thu hai la cho tra loi "model nay den tu dau" (ban T-HD4, 3d).
@@ -368,6 +387,18 @@ export function ModelPicker(props: ModelPickerProps) {
     </button>
   );
 
+  /*
+    T-S.4 — moi lan MO bao cho `useModels` biet; no tu quyet co hoi lai hay
+    khong (chi khi `checked_at` da cu). Danh sach dang cam van hien va bam
+    duoc trong luc cho — khong che, khong skeleton.
+  */
+  const handleOpenChange = (next: boolean): void => {
+    setOpen(next);
+    if (next) {
+      props.onOpen?.();
+    }
+  };
+
   const selectAndClose = (id: string): void => {
     props.onPick(id);
     setOpen(false);
@@ -375,7 +406,7 @@ export function ModelPicker(props: ModelPickerProps) {
 
   if (narrow) {
     return (
-      <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Root open={open} onOpenChange={handleOpenChange}>
         <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>
         <Dialog.Portal>
           <Dialog.Overlay className="motion-scrim fixed inset-0 z-40 bg-scrim" />
@@ -401,7 +432,7 @@ export function ModelPicker(props: ModelPickerProps) {
 
   return (
     <Tooltip.Provider delayDuration={200}>
-      <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Root open={open} onOpenChange={handleOpenChange}>
         <Popover.Trigger asChild>{trigger}</Popover.Trigger>
         <Popover.Portal>
           <Popover.Content

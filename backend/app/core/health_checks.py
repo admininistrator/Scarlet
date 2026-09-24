@@ -108,7 +108,7 @@ async def _check_ninerouter() -> None:
     # và hai bản sao của một lệnh gọi là hai chỗ để `base_url` được ghép khác
     # nhau (C43). Khác biệt duy nhất giữa hai người gọi là bộ nhớ: mục kiểm
     # của `/health/deep` luôn đo TƯƠI (người vận hành đang nhìn màn hình để
-    # chẩn đoán), còn picker đọc bản có hạn `TTL_S`.
+    # chẩn đoán), còn picker đọc lượt đo nền gần nhất (T-S.4).
     await probe_provider(get_catalog().providers[NINEROUTER])
 
 

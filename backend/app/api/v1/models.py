@@ -28,6 +28,15 @@ T-S.3 (catalog v4, §24.2b·S3, S14):
   đang áp dụng lẫn khung còn lại; backend chọn khung theo múi giờ của catalog,
   FE không so giờ (NQ-120). Chỉ giá niêm yết đi ra — không có "giá vốn" nào
   khác trong catalog để giấu.
+
+T-S.4 (§24.2b·S5, NQ-113): handler **không `await` gì cả**. Trạng thái
+provider là lượt đo nền gần nhất (`provider_statuses()` là hàm đồng bộ), nên
+9Router im lặng không còn làm request chờ trần đo. Mỗi model mang thêm
+`checked_at` (lúc backend đo, `null` khi chưa lượt nào xong) và
+`stale_after_s` (nhịp đo) — trường thứ hai nằm ngoài bảng S14, người dùng chốt
+ở T-S.4: FE cần nó để biết khi nào hỏi lại lúc mở picker mà không phải chép
+một con số của `.env` vào `.tsx` (A3). Cả hai giống nhau ở mọi phần tử: response
+vẫn là một mảng để không đổi hình dạng §18.3 cho ba màn đang đọc nó.
 """
 
 from __future__ import annotations
@@ -39,6 +48,7 @@ from pydantic import BaseModel
 
 from app.config import catalog
 from app.config.catalog import Catalog, ModelEntry, PriceWindow, PricingMode, WindowedRates
+from app.config.settings import settings
 from app.core.provider_health import ProviderStatus, provider_statuses
 
 router = APIRouter(tags=["models"])
@@ -113,6 +123,13 @@ class PublicModel(BaseModel):
     #: `None` = model chưa có giá ở cả hai nguồn (0 USD với quota, B-65).
     pricing: PublicPricing | None
     pricing_mode: PricingMode
+    #: T-S.4 — lúc backend BẮT ĐẦU lượt đo sinh ra `available` ở trên, không
+    #: phải lúc response này được dựng. `None` = chưa lượt nào xong kể từ khi
+    #: `api` khởi động (khi ấy `available` là `True` — không biết ≠ đã tắt).
+    checked_at: datetime | None
+    #: T-S.4 — nhịp đo nền, giây (`PROVIDER_HEALTH_TTL_S`). `checked_at` cũ hơn
+    #: ngần này ⇒ đã có (hoặc sắp có) lượt mới hơn; FE hỏi lại lúc mở picker.
+    stale_after_s: int
 
 
 def _public_rates(entry: WindowedRates) -> PublicRates:
@@ -147,7 +164,9 @@ def _public_reasoning(m: ModelEntry) -> PublicReasoning | None:
 @router.get("/models", response_model=list[PublicModel])
 async def list_models() -> list[PublicModel]:
     cat = catalog.get_catalog()
-    statuses = await provider_statuses()
+    # Chỉ đọc bộ nhớ — không có `await` nào trong handler này (NQ-113).
+    snapshot = provider_statuses()
+    statuses = snapshot.statuses
     at = _now()
     enabled = sorted((m for m in cat.models if m.enabled), key=lambda m: m.order)
     return [
@@ -166,6 +185,8 @@ async def list_models() -> list[PublicModel]:
             reasoning=_public_reasoning(m),
             pricing=_public_pricing(cat, m, at),
             pricing_mode=m.pricing_mode,
+            checked_at=snapshot.checked_at,
+            stale_after_s=settings.PROVIDER_HEALTH_TTL_S,
         )
         for m in enabled
     ]

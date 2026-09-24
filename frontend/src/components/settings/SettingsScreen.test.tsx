@@ -51,6 +51,8 @@ const MODEL: ModelOut = {
   badge: null,
   available: true,
   unavailable_reason: null,
+  checked_at: null,
+  stale_after_s: 30,
 };
 
 const changeDefaultModel = vi.fn(async () => undefined);

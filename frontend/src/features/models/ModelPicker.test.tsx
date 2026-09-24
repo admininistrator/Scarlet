@@ -40,6 +40,8 @@ function model(p: Partial<ModelOut> & Pick<ModelOut, "id">): ModelOut {
     badge: null,
     available: true,
     unavailable_reason: null,
+    checked_at: "2026-09-24T07:32:10Z",
+    stale_after_s: 30,
     ...p,
   };
 }
@@ -82,11 +84,13 @@ function renderView(
     conversation?: string | null;
     account?: string | null;
     refreshing?: boolean;
+    loading?: boolean;
   } = {},
 ) {
   const models = options.models ?? FOUR;
   const onPick = vi.fn();
   const onRefresh = vi.fn();
+  const onOpen = vi.fn();
   render(
     <ModelPicker
       models={models}
@@ -94,13 +98,15 @@ function renderView(
         conversation: options.conversation ?? null,
         account: options.account ?? null,
       })}
-      loadedAtLabel="14:32"
+      checkedAtLabel="14:32"
+      loading={options.loading}
       refreshing={options.refreshing}
       onRefresh={onRefresh}
       onPick={onPick}
+      onOpen={onOpen}
     />,
   );
-  return { onPick, onRefresh };
+  return { onPick, onRefresh, onOpen };
 }
 
 async function openPicker(): Promise<void> {
@@ -363,7 +369,7 @@ describe("tầng mặc định và strip trạng thái", () => {
       <ModelPicker
         models={FOUR}
         defaultPick={pickDefault(FOUR, { conversation: null, account: null })}
-        loadedAtLabel="14:32"
+        checkedAtLabel="14:32"
         onRefresh={vi.fn()}
         onPick={vi.fn()}
       />,
@@ -380,5 +386,29 @@ describe("tầng mặc định và strip trạng thái", () => {
     for (const m of FOUR) {
       expect(screen.queryByText(m.id)).toBeNull();
     }
+  });
+
+  it("29. T-S.4 — lần đọc đầu chưa xong ⇒ 'đang tải', KHÔNG phải 'Chưa có mô hình nào'", async () => {
+    renderView({ models: [], loading: true });
+    expect(screen.getByRole("button", { name: "Chọn mô hình" })).toHaveTextContent("Đang tải…");
+    await openPicker();
+    expect(screen.getByRole("status")).toHaveTextContent("Đang tải danh sách mô hình…");
+    expect(screen.queryByText("Chưa có mô hình nào")).toBeNull();
+  });
+
+  it("30. T-S.4 — đọc xong mà rỗng thật thì vẫn nói rỗng", async () => {
+    renderView({ models: [], loading: false });
+    await openPicker();
+    expect(screen.getByRole("status")).toHaveTextContent("Chưa có mô hình nào");
+  });
+
+  it("31. T-S.4 — mỗi lần MỞ gọi `onOpen` đúng một lần; đóng thì không", async () => {
+    const { onOpen } = renderView();
+    await openPicker();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard("{Escape}");
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    await openPicker();
+    expect(onOpen).toHaveBeenCalledTimes(2);
   });
 });

@@ -15,6 +15,7 @@ model được", nên router `models` cố ý đứng ngoài mọi danh sách ph
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -29,6 +30,7 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import models as models_api
 from app.config import catalog
+from app.config.settings import settings
 from app.core import provider_health
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
@@ -60,6 +62,17 @@ async def _no_ledger_writes() -> AsyncIterator[_FakeSession]:
 async def _probe_ok(_provider: object) -> None:
     """Provider trả lời được — xem `_no_real_network_probe`."""
     return None
+
+
+def _probe_now() -> None:
+    """Chạy MỘT lượt đo nền ngay bây giờ, với `probe_provider` đang được thay.
+
+    T-S.4: `GET /models` không còn đo theo yêu cầu — nó chỉ đọc lượt đo gần
+    nhất. Ca nào cần "9Router tắt" thì phải tự cho một lượt đo chạy, đúng như
+    vòng nền trong `api` làm. `asyncio.run` được vì các ca ở đây là hàm đồng bộ
+    (`TestClient` chạy app trên vòng lặp riêng của nó).
+    """
+    asyncio.run(provider_health.refresh())
 
 
 class _FakeRedis:
@@ -113,9 +126,12 @@ def _no_real_network_probe(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Mặc định là "mọi provider trả lời được", nên các ca cũ của T-0.7 giữ
     nguyên ý nghĩa. Ca nào cần chiều ngược lại thì tự `monkeypatch` lại.
+
+    T-S.4: fixture chạy luôn một lượt đo (`_probe_now`) — đúng như `api` làm
+    lúc khởi động — nên mọi ca bắt đầu với `checked_at` khác `null`.
     """
     monkeypatch.setattr(provider_health, "probe_provider", _probe_ok)
-    provider_health.forget_all()
+    _probe_now()
 
 
 def test_get_models_does_not_leak_base_url() -> None:
@@ -200,7 +216,7 @@ def test_host_dependent_provider_down_greys_out_its_models(
         raise ConnectionError("Connection refused")
 
     monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
-    provider_health.forget_all()
+    _probe_now()
 
     body = client.get("/api/v1/models").json()
 
@@ -231,12 +247,12 @@ def test_unavailable_model_STILL_in_list(
         raise ConnectionError("Connection refused")
 
     monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
-    provider_health.forget_all()
+    _probe_now()
 
     count_when_off = len(client.get("/api/v1/models").json())
 
     monkeypatch.setattr(provider_health, "probe_provider", _probe_ok)
-    provider_health.forget_all()
+    _probe_now()
     count_when_alive = len(client.get("/api/v1/models").json())
 
     assert count_when_off == count_when_alive
@@ -263,7 +279,7 @@ def test_reason_takes_provider_name_from_catalog(
         raise TimeoutError("het gio cho")
 
     monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
-    provider_health.forget_all()
+    _probe_now()
 
     body = client.get("/api/v1/models").json()
     cat = catalog.get_catalog()
@@ -285,7 +301,7 @@ def test_reason_of_hidden_route_is_generic_sentence(monkeypatch: pytest.MonkeyPa
         raise ConnectionError("Connection refused")
 
     monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
-    provider_health.forget_all()
+    _probe_now()
 
     body = client.get("/api/v1/models").json()
     cat = catalog.get_catalog()
@@ -309,7 +325,7 @@ def test_get_models_does_not_leak_base_url_when_provider_down(
         raise ConnectionError("All connection attempts failed: http://host.docker.internal:20128")
 
     monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
-    provider_health.forget_all()
+    _probe_now()
 
     body = client.get("/api/v1/models").json()
 
@@ -393,7 +409,7 @@ def test_get_models_never_names_intermediate_route(
             raise ConnectionError("Connection refused")
 
         monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
-        provider_health.forget_all()
+        _probe_now()
 
     resp = client.get("/api/v1/models")
     text = resp.text.lower()
@@ -555,3 +571,53 @@ def test_s7_new_model_with_reasoning_appears_after_reload(
     }
     # Không khai `display_provider` ⇒ nhãn của provider (`user_visible`).
     assert added["provider"] == catalog.get_catalog().providers["deepseek"].label
+
+
+# ═══════════════ T-S.4 — `checked_at`, `stale_after_s`, không chờ đo ════════
+
+
+def test_models_carry_checked_at_of_the_background_round(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`checked_at` = lúc backend ĐO (lượt nền), không phải lúc response dựng."""
+    at = datetime(2026, 9, 24, 6, 0, 0, tzinfo=ZoneInfo("UTC"))
+    monkeypatch.setattr(provider_health, "_now", lambda: at)
+    _probe_now()
+
+    body = client.get("/api/v1/models").json()
+
+    assert body
+    assert {datetime.fromisoformat(m["checked_at"]) for m in body} == {at}
+    assert {m["stale_after_s"] for m in body} == {settings.PROVIDER_HEALTH_TTL_S}
+
+
+def test_before_first_round_checked_at_is_null_and_models_stay_pickable() -> None:
+    """Chưa lượt nào xong ⇒ `checked_at: null`; không biết ≠ đã tắt."""
+    provider_health.forget_all()
+
+    body = client.get("/api/v1/models").json()
+
+    assert body
+    assert all(m["checked_at"] is None for m in body)
+    assert all(m["available"] and m["unavailable_reason"] is None for m in body)
+
+
+def test_get_models_never_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DoD T-S.4 dòng 1 ở tầng test: 9Router im lặng không còn chạm request.
+
+    Probe ở đây treo mãi; nếu `GET /models` còn đo theo yêu cầu thì ca này
+    chờ tới trần thời gian của pytest thay vì xanh ngay."""
+    probed = 0
+
+    async def hanging_probe(_provider: object) -> None:
+        nonlocal probed
+        probed += 1
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(provider_health, "probe_provider", hanging_probe)
+    provider_health.forget_all()
+
+    for _ in range(3):
+        assert client.get("/api/v1/models").status_code == 200
+
+    assert probed == 0

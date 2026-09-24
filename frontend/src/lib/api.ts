@@ -298,6 +298,17 @@ export interface ModelOut {
    * cau 150+ ky tu), nen cho hien no phai tu xuong dong.
    */
   unavailable_reason: string | null;
+  /**
+   * T-S.4 — luc backend DO luot trang thai sinh ra `available` (ISO 8601),
+   * giong nhau o moi phan tu. `null` = `api` vua khoi dong, luot do dau chua
+   * xong (khi ay moi model `available`).
+   */
+  checked_at: string | null;
+  /**
+   * T-S.4 — nhip do nen cua backend, giay. `checked_at` cu hon ngan nay thi
+   * mo picker se hoi lai ngam (`useModels.refreshIfStale`).
+   */
+  stale_after_s: number;
 }
 
 /** `PUT /settings` — §18.4, B-206/NQ-79. Cung hinh dang voi body gui di. */

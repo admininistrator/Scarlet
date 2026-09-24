@@ -1,6 +1,12 @@
 """Ứng dụng FastAPI của service `api`.
 
-`lifespan` chỉ làm một việc: **đóng pool khi tiến trình dừng.** T-1.7 là task
+`lifespan` làm hai việc. **Chạy vòng đo provider nền** (T-S.4, NQ-113):
+`provider_health.background()` chờ lượt đo đầu tối đa một trần đo rồi để vòng
+lặp chạy suốt đời tiến trình — `GET /models` chỉ đọc kết quả, không bao giờ
+chờ mạng. Gọi qua tên module (`provider_health.background`) chứ không import
+thẳng hàm, để `tests/conftest.py` thay được nó (Cạm bẫy ③).
+
+Và **đóng pool khi tiến trình dừng.** T-1.7 là task
 đầu tiên mà tầng HTTP giữ tài nguyên sống lâu hơn một request —
 `app/core/redis.py` (một `XREAD BLOCK` cho mỗi SSE đang mở) và
 `app/db/session.py` (engine dùng chung với worker); T-1.8 thêm cái thứ ba,
@@ -33,7 +39,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.v1 import router as api_v1_router
-from app.core import errors, idempotency
+from app.core import errors, idempotency, provider_health
 from app.core.idempotency import IdempotencyMiddleware
 from app.core.log_redact import install_log_redaction
 from app.core.origin import OriginCheckMiddleware
@@ -50,7 +56,8 @@ install_log_redaction()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    yield
+    async with provider_health.background():
+        yield
     await dispose_redis()
     await dispose_arq_pool()
     await dispose_engine()

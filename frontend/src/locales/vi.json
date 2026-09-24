@@ -351,6 +351,8 @@
   "model.tierCatalog": "Mặc định catalog",
   "model.tierOrder": "Thứ tự thắng: hội thoại › tài khoản › catalog",
   "model.trong": "Chưa có mô hình nào",
+  "model.loading": "Đang tải danh sách mô hình…",
+  "model.loadingShort": "Đang tải…",
 
   "quota.label": "Hạn mức sử dụng",
   "quota.window.5h": "5 giờ",
