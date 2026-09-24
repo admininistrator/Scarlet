@@ -94,6 +94,16 @@ export const routes: RouteObject[] = [
           </SignedInOnly>
         ),
       },
+      {
+        // T-S.10 — dich cua dong han muc tren o nhap. T-S.11 bien no thanh tab
+        // "Muc su dung"; toi luc ay no la chinh man Cai dat.
+        path: PATHS.settingsUsage,
+        element: (
+          <SignedInOnly>
+            <SettingsScreen />
+          </SignedInOnly>
+        ),
+      },
       { path: PATHS.login, element: <LoginRoute /> },
       { path: PATHS.register, element: <RegisterForm /> },
       { path: PATHS.forgotPassword, element: <ForgotPasswordForm /> },

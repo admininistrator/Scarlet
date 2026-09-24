@@ -65,6 +65,23 @@
  * cho mot cap, **giu** qua moi lan hong (mang rot, `500`, `503` — van la mot
  * y dinh), **bo** khi va chi khi `202` ve. Nho vay bam nhanh hai lan la mot
  * hoa don, con bam lai sau khi da xong la mot anh em that (§8.2 cho phep).
+ *
+ * ── Hoi thoai NHAP (T-S.10, §24.2b·S7, NQ-111) ───────────────────────────
+ *
+ * Mo `/` hay bam "Hoi thoai moi" ⇒ man NHAP: cay rong, **khong mot loi goi
+ * API nao** va khong mot hang nao trong DB. Hook nay khong co `useEffect` nao
+ * tao san hoi thoai — `StrictMode` chay effect hai lan (B-260), nen mot effect
+ * nhu vay la hai hoi thoai rong moi lan mo app, chi o dev, khong ai thay.
+ *
+ * Cau DAU gui di la hai buoc, hai khoa (`SendKeys`), hai route:
+ *
+ *   1. `POST /conversations`              — khoa `conversation`
+ *   2. `POST /conversations/{id}/messages` — khoa `message`
+ *
+ * Buoc 1 xong ma buoc 2 hong ⇒ id vua tao nam o `draftConversationRef`, va
+ * lan thu lai BO QUA buoc 1: khong co `POST /conversations` thu hai, nen khong
+ * co hoi thoai rong thu hai. Id ay chi song khi man nhap con tren man hinh —
+ * mo mot hoi thoai khac la bo no (xem `openConversation`).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -135,8 +152,44 @@ function errorText(error: unknown): string {
  */
 export type SendResult = "da-gui" | "ket-khoa" | "hong";
 
+/**
+ * Hai `Idempotency-Key` cua MOT lan soan thao — T-S.10, §24.2b·S7, C22.
+ *
+ * Sinh CUNG LUC khi o nhap chuyen tu rong sang co chu (`Composer`), giu qua
+ * moi lan thu lai. `conversation` chi duoc dung o man nhap (buoc 1); trong mot
+ * hoi thoai da co thi no nam yen. Hai khoa chu khong mot (Cam bay ④): khoa
+ * Redis cua §11.4 da chua ten route nen mot khoa cung an toan, nhung khi ay
+ * phep do C22 khong con tach duoc endpoint nao giu khoa nao.
+ */
+export interface SendKeys {
+  conversation: string;
+  message: string;
+}
+
+/**
+ * Man hinh chat dang o dau — T-S.10.
+ *
+ * `draft`: chua co hoi thoai nao (ban T-HD2-v2: o nhap GIUA man, loi chao).
+ * `conversation`: mot hoi thoai dang mo, HOAC dang mo (`?c=` luc F5 — neu
+ * khong, F5 vao mot hoi thoai co se thay man nhap loe len mot nhip roi o nhap
+ * truot xuong day).
+ */
+export type ChatPhase = "draft" | "conversation";
+
 export interface ChatState {
   tree: TreeState;
+  phase: ChatPhase;
+  /**
+   * Dem so lan VAO man nhap bang tay ("Hoi thoai moi", hoac hoi thoai dang mo
+   * bi xoa). Loi chao go lai chu moi khi so nay doi (ban T-HD5-v2, muc 1b).
+   */
+  draftEpoch: number;
+  /**
+   * Hoi thoai vua ra doi tu man nhap cua tab nay — dat ngay khi cau dau cua
+   * no nhan `202`, cung luot voi id cua cay. Sidebar nghe gia tri nay (T-S.13
+   * them tieu de chay chu tren dung hang ay).
+   */
+  createdConversationId: string | null;
   /**
    * T-3.6 — TANG 1 cua ba tang mac dinh: `conversations.default_model` cua
    * hoi thoai dang mo. `null` = hoi thoai nay khong dat gi, hoac chua mo
@@ -182,13 +235,14 @@ export interface ChatState {
    * va no thuoc ve `useSessionState` chu khong ve day.
    */
   changeConversationModel: (modelId: string) => Promise<void>;
-  newConversation: () => Promise<void>;
+  /** T-S.10 — ve man nhap. KHONG goi API nao (§24.2b·S7). */
+  newConversation: () => void;
   /** T-3.3 — sidebar chon mot hoi thoai da co. */
   openConversation: (conversationId: string) => Promise<void>;
-  /** T-3.3 — hoi thoai dang mo vua bi xoa: roi khoi no, khong mo cai nao. */
+  /** T-3.3 — hoi thoai dang mo vua bi xoa: roi khoi no, ve man nhap. */
   closeConversation: () => void;
-  /** `khoa` do NGUOI GOI cam (C22) — xem `SendResult`. */
-  send: (content: string, key: string) => Promise<SendResult>;
+  /** Hai khoa do NGUOI GOI cam (C22) — xem `SendResult`, `SendKeys`. */
+  send: (content: string, keys: SendKeys) => Promise<SendResult>;
   stop: () => Promise<void>;
   /**
    * §8.2 — sinh lai cau tra loi `messageId` thanh mot anh em cua no.
@@ -287,6 +341,20 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
   const [usage, setUsage] = useState<UsageOut | null>(null);
   const [notes, setNotes] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
+  /*
+    T-S.10 — `true` trong luc `open()` doi `GET /conversations/{id}`. Gia tri
+    DAU doc thang URL: F5 tren `?c=` phai ve khung "trong hoi thoai" ngay tu
+    khung hinh dau, khong ve man nhap roi moi truot xuong.
+  */
+  const [opening, setOpening] = useState(() => readConversationParam() !== null);
+  const [draftEpoch, setDraftEpoch] = useState(0);
+  const [createdConversationId, setCreatedConversationId] = useState<string | null>(null);
+  /**
+   * T-S.10 — hoi thoai buoc 1 cua man nhap da tao ma buoc 2 chua `202`.
+   * `ref` chu khong `state`: lan thu lai doc no ngay trong cung mot luot, va
+   * no khong ve gi len man hinh.
+   */
+  const draftConversationRef = useRef<string | null>(null);
 
   /*
     Ba tang, mot phep chon, mot cho (T-3.6). `pickDefault` la ham THUAN nen
@@ -542,10 +610,15 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
 
   const open = useCallback(
     async (conversationId: string) => {
-      const nextTree = await reload(conversationId);
-      if (nextTree !== null) {
-        writeConversationParam(conversationId);
-        ensureStream(nextTree);
+      setOpening(true);
+      try {
+        const nextTree = await reload(conversationId);
+        if (nextTree !== null) {
+          writeConversationParam(conversationId);
+          ensureStream(nextTree);
+        }
+      } finally {
+        setOpening(false);
       }
     },
     [ensureStream, reload],
@@ -592,22 +665,25 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     };
   }, [closeStream, loadInitial]);
 
-  const newConversation = useCallback(async () => {
-    setBusy(true);
-    try {
-      closeStream();
-      setRunning(null);
-      setConnection(null);
-      const conversation = await api.createConversation(
-        effectiveModel === null ? {} : { default_model: effectiveModel },
-      );
-      await open(conversation.id);
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [closeStream, open, effectiveModel]);
+  /**
+   * T-S.10 — hoi thoai dang mo roi khoi man hinh, ve man NHAP.
+   *
+   * KHONG goi API nao, va do la toan bo diem cua §24.2b·S7 (NQ-111): ban T-3.x
+   * `POST /conversations` ngay o day, nen moi lan bam "Hoi thoai moi" ma khong
+   * go gi la mot hang rong nam lai trong DB. Hoi thoai gio ra doi o cau dau
+   * (`send`). Dung chung cho "Hoi thoai moi" va "hoi thoai dang mo vua bi xoa".
+   */
+  const leaveConversation = useCallback(() => {
+    closeStream();
+    setRunning(null);
+    setConnection(null);
+    setUsage(null);
+    setError(null);
+    setConversationModel(null);
+    updateTree(() => emptyTree());
+    clearConversationParam();
+    setDraftEpoch((n) => n + 1);
+  }, [updateTree, closeStream]);
 
   /**
    * T-3.3 — sidebar chon mot hoi thoai da co.
@@ -615,12 +691,18 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
    * Dong stream cu TRUOC khi mo hoi thoai khac: luat 3 cua file nay cho moi
    * tab mot `EventSource`, va mot stream con song cua hoi thoai truoc se noi
    * chu cua no vao cay vua nap.
+   *
+   * T-S.10: roi man nhap bang duong nay la BO hoi thoai buoc 1 dang treo (neu
+   * co). No da nam trong DB va sidebar se liet ke no; gui vao no tu man nhap
+   * sau nay voi `parent_id = null` la mot goc thu hai trong mot hoi thoai co
+   * the da co tin nhan.
    */
   const openConversation = useCallback(
     async (conversationId: string) => {
       if (conversationId === treeRef.current.conversationId) {
         return;
       }
+      draftConversationRef.current = null;
       closeStream();
       setRunning(null);
       setConnection(null);
@@ -651,46 +733,60 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     [updateTree],
   );
 
-  const closeConversation = useCallback(() => {
-    closeStream();
-    setRunning(null);
-    setConnection(null);
-    setUsage(null);
-    setError(null);
-    setConversationModel(null);
-    updateTree(() => emptyTree());
-    clearConversationParam();
-  }, [updateTree, closeStream]);
-
   /**
    * §7.2 ① — tao message roi mo stream. KHONG sinh mot chu nao o day (A1).
    *
-   * `khoa` di VAO chu khong duoc sinh o day (C22, T-3.4): mot khoa sinh tai
+   * `keys` di VAO chu khong duoc sinh o day (C22, T-3.4): mot khoa sinh tai
    * cho la mot khoa moi cho moi lan thu lai, va khi ay middleware §11.4 vo
    * dung — dung cai bay ma C22 ta. Chu so huu khoa la `Composer`, vi don vi
    * cua C22 la "lan soan thao" chu khong "loi goi HTTP".
+   *
+   * T-S.10 — o man nhap day la HAI buoc; xem khoi "Hoi thoai NHAP" o docstring
+   * module.
    */
   const send = useCallback(
-    async (newContent: string, key: string): Promise<SendResult> => {
-      const conversationId = treeRef.current.conversationId;
-      if (conversationId === null) {
-        setError("chua co hoi thoai nao dang mo");
-        return "hong";
-      }
+    async (newContent: string, keys: SendKeys): Promise<SendResult> => {
+      const fromDraft = treeRef.current.conversationId === null;
       setBusy(true);
       try {
+        let conversationId = treeRef.current.conversationId ?? draftConversationRef.current;
+        if (conversationId === null) {
+          const created = await api.createConversation(
+            effectiveModel === null ? {} : { default_model: effectiveModel },
+            keys.conversation,
+          );
+          conversationId = created.id;
+          // Truoc buoc 2: buoc 2 hong thi lan thu lai doc lai dung id nay.
+          draftConversationRef.current = conversationId;
+        }
         const output = await api.sendMessage(
           conversationId,
           {
             content: newContent,
-            // C14 — la CLIENT dang thay, khong de server tu lay.
+            // C14 — la CLIENT dang thay, khong de server tu lay. Man nhap:
+            // cay rong, tuc `null` — cau dau la goc.
             parent_id: treeRef.current.activeLeafId,
             model_id: effectiveModel,
           },
-          key,
+          keys.message,
         );
         if (output.branched) {
           setError("da mo mot nhanh moi (parent_id khac la hien tai) — C14");
+        }
+        if (fromDraft) {
+          draftConversationRef.current = null;
+          /*
+            Dat id vao cay TRUOC khi mo stream: `loadConversation` don sach
+            `inFlight` khi id hoi thoai doi, nen mot cay con `null` luc `start`
+            va vai `delta` dau toi se lam mat dung phan mo dau cua cau tra loi
+            ngay khi `GET` duoi day ve.
+          */
+          const id = conversationId;
+          updateTree(() => ({ ...emptyTree(), conversationId: id }));
+          // CUNG luot render voi id cua cay: sidebar thay "mo mot id la" va
+          // "id nay vua ra doi" mot lan, nap lai danh sach mot lan.
+          setCreatedConversationId(id);
+          writeConversationParam(id);
         }
         reportQuotaWarning(output.quota_warning);
         openStreamFor(output.stream_url, output.assistant_message_id, conversationId);
@@ -706,7 +802,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
         setBusy(false);
       }
     },
-    [reportQuotaWarning, reportQuotaError, reload, effectiveModel, openStreamFor],
+    [reportQuotaWarning, reportQuotaError, reload, effectiveModel, openStreamFor, updateTree],
   );
 
   /**
@@ -860,6 +956,9 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
 
   return {
     tree,
+    phase: tree.conversationId !== null || opening ? "conversation" : "draft",
+    draftEpoch,
+    createdConversationId,
     conversationModel,
     defaultPick,
     effectiveModel,
@@ -870,9 +969,9 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     notes,
     error,
     changeConversationModel,
-    newConversation,
+    newConversation: leaveConversation,
     openConversation,
-    closeConversation,
+    closeConversation: leaveConversation,
     send,
     stop,
     retry,

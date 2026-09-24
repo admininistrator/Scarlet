@@ -36,6 +36,12 @@ export const PATHS = {
   home: "/",
   admin: "/admin",
   settings: "/cai-dat",
+  /**
+   * T-S.10 — dich cua link "Xem muc su dung" tren dong han muc (NQ-114). Tab
+   * that la cua T-S.11; toi luc ay route nay ve dung man Cai dat hien co, de
+   * link khong roi vao 404.
+   */
+  settingsUsage: "/cai-dat/muc-su-dung",
   login: "/dang-nhap",
   register: "/dang-ky",
   forgotPassword: "/quen-mat-khau",

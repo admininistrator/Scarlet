@@ -655,8 +655,24 @@ export const api = {
         : `/conversations?${new URLSearchParams({ updated_before: updatedBefore }).toString()}`,
     ),
 
-  createConversation: (body: { title?: string | null; default_model?: string | null } = {}) =>
-    request<ConversationOut>("/conversations", { method: "POST", body: JSON.stringify(body) }),
+  /**
+   * §18.2 — tao hoi thoai RONG (`201`). Tu T-S.10 chi goi o cau DAU cua man
+   * nhap (§24.2b·S7, NQ-111): mo app hay bam "Hoi thoai moi" khong tao gi.
+   *
+   * `idempotencyKey` bat buoc o chu ky nay du route o server chi "tuy chon"
+   * (khong nam trong `IDEMPOTENCY_REQUIRED_ROUTES`): khoa do `Composer` sinh
+   * cung luc voi khoa cua `POST .../messages`, hai khoa cho hai route (C22), va
+   * bam Gui hai lan o man nhap chi duoc ra MOT hoi thoai.
+   */
+  createConversation: (
+    body: { title?: string | null; default_model?: string | null },
+    idempotencyKey: string,
+  ) =>
+    request<ConversationOut>("/conversations", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
 
   getConversation: (id: string) => request<ConversationDetail>(`/conversations/${id}`),
 

@@ -401,6 +401,38 @@ describe("Sidebar — chon hoi thoai", () => {
     expect(await screen.findByText("Vừa tạo")).toBeInTheDocument();
     expect(listMock()).toHaveBeenCalledTimes(2);
   });
+
+  /**
+   * T-S.10 (§24.2b·S7): "Hoi thoai moi" dua man chat ve man NHAP, va do la
+   * khong mot loi goi API nao — ke ca `GET /conversations` cua sidebar. Ca
+   * doi chieu o nua sau: hoi thoai vua ra doi tu man nhap (`createdConversationId`)
+   * ⇒ nap lai DUNG MOT lan, du no doi cung luot voi `openConversationId`.
+   */
+  it("11b. ve man nhap (id → null) KHONG goi mang · hoi thoai vua tao ⇒ nap lai mot lan", async () => {
+    listMock().mockResolvedValue(page([conversation({ id: "a", title: "Một" })]));
+    const props = { onSelect: vi.fn(), onNewChat: vi.fn(), onOpenConversationDeleted: vi.fn() };
+
+    const { rerender } = mount({ openConversationId: "a" });
+    await screen.findByText("Một");
+    expect(listMock()).toHaveBeenCalledTimes(1);
+
+    rerender(<Sidebar openConversationId={null} {...props} />);
+    await act(async () => {});
+    expect(listMock()).toHaveBeenCalledTimes(1);
+
+    listMock().mockResolvedValue(
+      page([conversation({ id: "moi", title: "Vừa tạo" }), conversation({ id: "a", title: "Một" })]),
+    );
+    rerender(<Sidebar openConversationId="moi" createdConversationId="moi" {...props} />);
+    expect(await screen.findByText("Vừa tạo")).toBeInTheDocument();
+    expect(listMock()).toHaveBeenCalledTimes(2);
+
+    // Doi hoi thoai qua lai sau do: khong nap lai vi "moi" da duoc xu ly.
+    rerender(<Sidebar openConversationId="a" createdConversationId="moi" {...props} />);
+    rerender(<Sidebar openConversationId="moi" createdConversationId="moi" {...props} />);
+    await act(async () => {});
+    expect(listMock()).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("sortConversations", () => {

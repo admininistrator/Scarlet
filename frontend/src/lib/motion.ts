@@ -123,6 +123,95 @@ export function usePresence<T extends HTMLElement>(open: boolean, exitToken: str
 }
 
 /**
+ * FLIP cua khung o nhap — T-S.10, ban T-HD5-v2 muc 1 (`.motion-dock`).
+ *
+ * Man nhap dat o nhap GIUA man, trong hoi thoai thi o DAY; `docked` doi la
+ * bo cuc doi mot phat. Hook nay do dinh khung o moi lan commit, va khi `docked`
+ * vua doi thi ghi hieu so (vi tri cu − vi tri moi) vao `--dock-from` roi gan
+ * `data-dock="run"`: keyframe `scarlet-dock` dua khung tu cho cu ve cho moi
+ * bang `transform`. CHI khung co hoat anh — khong phan tu chu dang stream nao
+ * (Cam bay ② cua T-S.10, T-3.9 ①).
+ *
+ * Do o MOI lan commit (effect khong mang deps), khong chi luc `docked` doi: vi
+ * tri "cu" phai la vi tri ngay truoc lan doi, ma o nhap tu gian ra theo chu go,
+ * dong han muc hien/an — mot lan do tu luc mount da cu tu lau.
+ *
+ * Giam chuyen dong ⇒ KHONG gan `data-dock`: khung nhay thang xuong day (DoD
+ * dong 4). `theme.css` cung tat animation o `@media`, nhung khong gan gi ca
+ * thi phep do trong jsdom (khong nap CSS) moi co nghia.
+ */
+export function useDock<T extends HTMLElement>(docked: boolean) {
+  const reduced = useReducedMotion();
+  const ref = useRef<T>(null);
+  const lastTop = useRef<number | null>(null);
+  const lastDocked = useRef(docked);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) {
+      return;
+    }
+    const top = el.getBoundingClientRect().top;
+    const from = lastTop.current;
+    const changed = lastDocked.current !== docked;
+    lastTop.current = top;
+    lastDocked.current = docked;
+    if (!changed || from === null || reduced) {
+      return;
+    }
+    el.style.setProperty("--dock-from", `${from - top}px`);
+    // Go roi gan lai, ep tinh style o giua: hai lan doi lien tiep (nhap → hoi
+    // thoai → nhap) phai chay lai keyframe tu dau, khong noi tiep lan truoc.
+    el.removeAttribute("data-dock");
+    void el.offsetWidth;
+    el.setAttribute("data-dock", "run");
+  });
+
+  /** Gan vao `onAnimationEnd` cua chinh khung. */
+  const onAnimationEnd = (event: { target: EventTarget; currentTarget: HTMLElement }) => {
+    // Su kien noi bot tu con (va tu portal cua tooltip) — chi keyframe cua khung.
+    if (event.target === event.currentTarget) {
+      event.currentTarget.removeAttribute("data-dock");
+    }
+  };
+
+  return { ref, onAnimationEnd };
+}
+
+/**
+ * Loi chao go tung ky tu — T-S.10, ban T-HD5-v2 muc 1b.
+ *
+ * Nhip la token `--duration-type` (`theme.css`); file nay chi DOC. Giam chuyen
+ * dong ⇒ token = 0 ⇒ hien du ngay; jsdom (khong nap CSS) cung ra 0, nen test
+ * thay cau day du. `runKey` doi ⇒ go lai tu dau ("Hoi thoai moi").
+ */
+export function useTypewriter(text: string, runKey: number) {
+  const chars = Array.from(text);
+  const total = chars.length;
+  const [count, setCount] = useState(total);
+
+  useEffect(() => {
+    const step = readDurationMs("--duration-type");
+    if (step <= 0) {
+      setCount(total);
+      return undefined;
+    }
+    setCount(0);
+    let typed = 0;
+    const id = window.setInterval(() => {
+      typed += 1;
+      setCount(typed);
+      if (typed >= total) {
+        window.clearInterval(id);
+      }
+    }, step);
+    return () => window.clearInterval(id);
+  }, [total, runKey]);
+
+  return { typed: chars.slice(0, count).join(""), typing: count < total };
+}
+
+/**
  * Lo xo cua icon bien hinh — T-S.9, ban T-HD5-v2 (`springs.ts`), NQ-117.
  *
  * Loai token chuyen dong phia JS: icon chay bang vat ly lo xo cua `morphicons`

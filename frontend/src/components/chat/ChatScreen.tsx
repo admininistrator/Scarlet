@@ -1,16 +1,18 @@
+import { LoaderCircle } from "lucide";
 import { Link } from "react-router";
 
 import { useSession } from "../../app/Layout";
 import { PATHS } from "../../app/paths";
 import { t } from "../../lib/i18n";
-import type { ConnectionStatus } from "../../lib/sse";
+import { useTypewriter } from "../../lib/motion";
 import { useChat } from "../../features/chat/useChat";
 import { ModelPicker } from "../../features/models/ModelPicker";
 import { useModels } from "../../features/models/useModels";
-import { QuotaBar } from "../../features/quota/QuotaBar";
+import { QuotaNotice } from "../../features/quota/QuotaNotice";
 import { byokCovers, isSendBlocked, selectedProviderId } from "../../features/quota/quotaView";
 import { useQuota } from "../../features/quota/useQuota";
 import { Sidebar } from "../sidebar/Sidebar";
+import { StaticIcon } from "../ui/Icon";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 
@@ -26,18 +28,31 @@ function formatTime(at: Date | null): string {
   return at.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 }
 
-const CONNECTION_LABELS = {
-  "dang-mo": "chat.ketNoi.dangMo",
-  "dang-chay": "chat.ketNoi.dangChay",
-  "dang-noi-lai": "chat.ketNoi.dangNoiLai",
-  dong: "chat.ketNoi.dong",
-} as const;
-
-function ConnectionLabel({ connection }: { connection: ConnectionStatus | null }) {
-  if (connection === null) {
-    return null;
-  }
-  return <span className="text-xs text-muted">{t(CONNECTION_LABELS[connection])}</span>;
+/**
+ * Loi chao cua man nhap — ban T-HD2-v2 muc A/E, go tung ky tu theo T-HD5-v2
+ * muc 1b (`useTypewriter`, token `--duration-type`).
+ *
+ * Be rong giu nguyen trong luc go: ban day du TANG HINH giu cho, ban dang go
+ * nam de len tu mep trai, nen chu can giua khong xe dich. Trinh doc man hinh
+ * nghe cau day du mot lan (`sr-only`), khong nghe tung ky tu.
+ */
+function Greeting({ runKey }: { runKey: number }) {
+  const full = t("draft.greeting");
+  const { typed, typing } = useTypewriter(full, runKey);
+  return (
+    <h2 className="text-xl font-semibold lg:text-2xl lg:tracking-[-0.01em]">
+      <span className="relative inline-block whitespace-nowrap">
+        <span aria-hidden className="invisible">
+          {full}
+        </span>
+        <span aria-hidden className="absolute top-0 left-0 whitespace-nowrap">
+          <span className="motion-none">{typed}</span>
+          {typing && <span className="caret-stream ml-0.5 rounded-sm" />}
+        </span>
+        <span className="sr-only">{full}</span>
+      </span>
+    </h2>
+  );
 }
 
 /**
@@ -142,15 +157,17 @@ export function ChatScreen() {
   */
   const selectedProvider = selectedProviderId(modelCatalog.models, chat.effectiveModel);
   const quotaBlocked = isSendBlocked(quota.block, quota.byokProviders, selectedProvider);
-
-  const hasStatusBar =
-    tree.conversationId !== null || chat.connection !== null || chat.usage !== null;
+  const draft = chat.phase === "draft";
 
   /*
     Bo cuc CO DINH (ban T-HD2, `AppShell.tsx`): header cua `Layout`, sidebar va
     o nhap dung yen; CHI cot tin nhan cuon. Ca man hinh cao dung phan con lai
     duoi header (`h-full` + `min-h-0` o moi tang flex), nen khong con thanh
     cuon cua `window` nao keo ca ba thu kia di theo.
+
+    T-S.10 (ban T-HD2-v2): khong con dai trang thai (ma hoi thoai · trang thai
+    ket noi · `in/out`, NQ-115) — chi con MOT thong bao noi o dinh cot khi
+    stream dang noi lai.
   */
   return (
     <div className="flex h-full min-h-0 bg-background text-foreground">
@@ -161,8 +178,9 @@ export function ChatScreen() {
       */}
       <Sidebar
         openConversationId={tree.conversationId}
+        createdConversationId={chat.createdConversationId}
         onSelect={(id) => void chat.openConversation(id)}
-        onNewChat={() => void chat.newConversation()}
+        onNewChat={chat.newConversation}
         onOpenConversationDeleted={chat.closeConversation}
         footer={
           /*
@@ -178,18 +196,14 @@ export function ChatScreen() {
         }
       />
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {hasStatusBar && (
-          <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-gutter py-2 text-sm lg:px-gutter-lg">
-            {tree.conversationId !== null && (
-              <code className="break-all text-xs text-muted">{tree.conversationId}</code>
-            )}
-            <ConnectionLabel connection={chat.connection} />
-            {chat.usage !== null && (
-              <span className="text-xs text-muted">
-                in={chat.usage.in} out={chat.usage.out}
-              </span>
-            )}
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        {chat.connection === "dang-noi-lai" && (
+          <div
+            role="status"
+            className="absolute top-3 left-1/2 z-10 flex max-w-[calc(100%-2*var(--spacing-gutter))] -translate-x-1/2 items-center gap-2 rounded-full border border-border-strong bg-surface-panel px-3.5 py-2 text-sm whitespace-nowrap shadow-popover"
+          >
+            <StaticIcon icon={LoaderCircle} size={16} className="motion-spin shrink-0 text-muted" />
+            <span className="truncate">{t("chat.ketNoi.dangNoiLai")}</span>
           </div>
         )}
 
@@ -207,61 +221,86 @@ export function ChatScreen() {
         )}
 
         {/*
-          T-3.5 — cot doc rong toi da `--spacing-measure` (736 px, ban T-HD3).
-          Cot nay phai o DAY chu khong trong tung bong bong: bong bong nguoi
-          dung neo phai bang `ml-auto`, va "phai" cua no la mep cot chu khong
-          phai mep man hinh.
+          T-S.10 — MOT khung, hai bo cuc; `Composer` o CUNG mot vi tri trong
+          cay o ca hai (o cuoi), nen React giu nguyen phan tu `form` — chu dang
+          go, cap khoa C22, va diem xuat phat cua FLIP (`useDock`) deu song qua
+          lan doi.
+
+          Man nhap (ban T-HD2-v2 muc A/E): luoi `1fr · auto · 1fr`. Loi chao o
+          cuoi hang 1 (cach dinh hop 24), hop nhap o hang 2 — tam hop dung tam
+          vung chat — va hang duoi cua o nhap o dau hang 3 (subgrid, xem
+          `Composer`).
         */}
-        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-          {tree.conversationId === null ? (
-            <p className="px-gutter py-8 text-muted lg:px-gutter-lg">{t("chat.chuaCoHoiThoai")}</p>
-          ) : (
-            <div className="mx-auto flex w-full max-w-measure flex-col gap-4 px-gutter py-6 lg:px-gutter-lg">
-              {tree.path.map((node) => (
-                <MessageItem
-                  key={node.id}
-                  node={node}
-                  tree={tree}
-                  notes={chat.notes[node.id] ?? []}
-                  running={chat.running === node.id}
-                  // T-3.8 / B-232 — nut "Luu" cua bong bong nguoi dung tat
-                  // trong luc mot thao tac doi cay con bay. `PATCH
-                  // /messages/{id}` khong di qua §11.4 (NQ-93), nen bam hai
-                  // lan la hai nhanh va hai hoa don.
-                  busy={chat.busy}
-                  // T-3.7 — nut "Doi model & thu lai" gui dung model dang
-                  // chon tren picker. Mot nguon, khong hai: neu no bang model
-                  // da sinh ra cau tra loi nay thi nut tu tat.
-                  selectedModel={chat.effectiveModel}
-                  onRetry={(id, modelId) => void chat.retry(id, modelId)}
-                  onFeedback={(id, value) => void chat.sendFeedback(id, value)}
-                  onEdit={(id, draft) => void chat.editQuestion(id, draft)}
-                  onSwitchBranch={(n, direction) => void chat.switchBranch(n, direction)}
-                />
-              ))}
+        <div
+          className={
+            draft
+              ? "grid min-h-0 flex-1 grid-rows-[1fr_auto_1fr] justify-items-center"
+              : "flex min-h-0 flex-1 flex-col"
+          }
+        >
+          {draft && (
+            <div className="self-end px-gutter pb-6 text-center lg:px-gutter-lg">
+              <Greeting runKey={chat.draftEpoch} />
             </div>
           )}
-        </main>
 
-        <Composer
-          running={chat.running !== null}
-          enabled={tree.conversationId !== null && !chat.busy}
-          maxChars={maxChars}
-          // Tra nguyen `Promise<KetQuaGui>` chu khong `void`: `Composer` giu
-          // khoa cua §11.4 va no phai biet ket qua moi biet nen giu hay bo.
-          onSend={chat.send}
-          onStop={() => void chat.stop()}
-          modelPicker={modelPicker}
-          quotaBlocked={quotaBlocked}
-          quotaBar={
-            <QuotaBar
-              readings={quota.readings}
-              warnPct={quota.warnPct}
-              block={quota.block}
-              byokCovered={byokCovers(quota.byokProviders, selectedProvider)}
-            />
-          }
-        />
+          {/*
+            T-3.5 — cot doc rong toi da `--spacing-measure` (736 px, ban T-HD3).
+            Cot nay phai o DAY chu khong trong tung bong bong: bong bong nguoi
+            dung neo phai bang `ml-auto`, va "phai" cua no la mep cot chu khong
+            phai mep man hinh.
+          */}
+          {!draft && (
+            <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+              <div className="mx-auto flex w-full max-w-measure flex-col gap-4 px-gutter pt-6 pb-4 lg:px-gutter-lg">
+                {tree.path.map((node) => (
+                  <MessageItem
+                    key={node.id}
+                    node={node}
+                    tree={tree}
+                    notes={chat.notes[node.id] ?? []}
+                    running={chat.running === node.id}
+                    // T-3.8 / B-232 — nut "Luu" cua bong bong nguoi dung tat
+                    // trong luc mot thao tac doi cay con bay. `PATCH
+                    // /messages/{id}` khong di qua §11.4 (NQ-93), nen bam hai
+                    // lan la hai nhanh va hai hoa don.
+                    busy={chat.busy}
+                    // T-3.7 — nut "Doi model & thu lai" gui dung model dang
+                    // chon tren picker. Mot nguon, khong hai: neu no bang model
+                    // da sinh ra cau tra loi nay thi nut tu tat.
+                    selectedModel={chat.effectiveModel}
+                    onRetry={(id, modelId) => void chat.retry(id, modelId)}
+                    onFeedback={(id, value) => void chat.sendFeedback(id, value)}
+                    onEdit={(id, draft) => void chat.editQuestion(id, draft)}
+                    onSwitchBranch={(n, direction) => void chat.switchBranch(n, direction)}
+                  />
+                ))}
+              </div>
+            </main>
+          )}
+
+          <Composer
+            running={chat.running !== null}
+            // Man nhap gui duoc: cau dau TAO hoi thoai (§24.2b·S7).
+            enabled={!chat.busy}
+            maxChars={maxChars}
+            docked={!draft}
+            // Tra nguyen `Promise<SendResult>` chu khong `void`: `Composer` giu
+            // khoa cua §11.4 va no phai biet ket qua moi biet nen giu hay bo.
+            onSend={chat.send}
+            onStop={() => void chat.stop()}
+            modelPicker={modelPicker}
+            quotaBlocked={quotaBlocked}
+            quotaNotice={
+              <QuotaNotice
+                readings={quota.readings}
+                warnPct={quota.warnPct}
+                block={quota.block}
+                byokCovered={byokCovers(quota.byokProviders, selectedProvider)}
+              />
+            }
+          />
+        </div>
       </div>
     </div>
   );

@@ -7,13 +7,22 @@
 
   "common.comingSoon": "Sắp có",
 
-  "chat.chuaCoHoiThoai": "Chưa mở hội thoại nào. Bấm “Hội thoại mới” để bắt đầu.",
-  "chat.oNhap": "Nhập câu hỏi…",
-  "chat.phimGui": "Enter để gửi · Shift+Enter để xuống dòng",
+  "draft.greeting": "Hôm nay bạn cần gì?",
+
+  "chat.oNhap": "Nhập tin nhắn cho Scarlet",
   "chat.khoaKet": "Lần gửi này đang bị một yêu cầu khác giữ chỗ. Nếu nó không bao giờ xong, hãy gửi lại bằng khoá mới — lưu ý là nếu yêu cầu cũ vẫn đang chạy thì bạn sẽ có hai câu trả lời.",
   "chat.guiKhoaMoi": "Gửi lại bằng khoá mới",
   "chat.gui": "Gửi",
   "chat.dung": "Dừng",
+
+  "composer.attach": "Đính kèm ảnh hoặc tệp",
+  "composer.webSearch": "Tìm web",
+  "composer.skill": "Chọn skill",
+  "composer.voice": "Nhập bằng giọng nói",
+  "composer.overLimit": "Quá giới hạn ký tự",
+  "composer.noVision": "Model này không đọc được ảnh",
+  "composer.removeAttachment": "Xoá tệp đính kèm",
+  "composer.attachments": "Tệp đính kèm",
 
   "chat.assistantLabel": "Scarlet trả lời",
   "chat.userLabel": "Bạn",
@@ -33,10 +42,7 @@
   "chat.model": "Model",
   "chat.modelMacDinh": "(mặc định của catalog)",
 
-  "chat.ketNoi.dangMo": "đang mở kết nối…",
-  "chat.ketNoi.dangChay": "đang nhận chữ",
-  "chat.ketNoi.dangNoiLai": "mất kết nối, đang nối lại…",
-  "chat.ketNoi.dong": "kết nối đã đóng",
+  "chat.ketNoi.dangNoiLai": "Mất kết nối, đang nối lại…",
 
   "chat.branchPrev": "Nhánh trước",
   "chat.branchNext": "Nhánh sau",
@@ -368,5 +374,11 @@
   "quota.resetUnknown": "Chưa xác định được lúc hạn mức được hoàn lại.",
   "quota.byok": "Model đang chọn dùng khoá API riêng của bạn nên vẫn gửi được và không trừ hạn mức.",
   "quota.readAt": "Số liệu lúc",
-  "quota.sendBlocked": "Đã hết hạn mức — xem thời điểm hoàn lại phía trên"
+  "quota.sendBlocked": "Đã hết hạn mức — xem thời điểm hoàn lại phía trên",
+  "quota.notice.window": "Hạn mức",
+  "quota.notice.exhausted": "Đã hết hạn mức",
+  "quota.notice.resetAt": "Hoàn lại lúc",
+  "quota.notice.resetUnknown": "chưa rõ lúc hoàn lại",
+  "quota.notice.byok": "model đang chọn dùng khoá riêng của bạn, vẫn gửi được",
+  "quota.viewUsage": "Xem mức sử dụng"
 }

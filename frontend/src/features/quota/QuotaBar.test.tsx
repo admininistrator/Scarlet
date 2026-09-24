@@ -1,14 +1,20 @@
 /**
- * Thanh quota — DoD dong 4 cua T-3.11, va ca bon Cam bay cua task.
+ * Han muc tren man chat — DoD dong 4 cua T-3.11 o DANG MOI cua T-S.10 (DoD
+ * dong 5), va ca bon Cam bay cua T-3.11.
  *
- * DoD: *"21% ⇒ khong canh bao; 20% ⇒ canh bao; 0% ⇒ nut `disabled`. Hai ca o
- * hai ben nguong, khong phai mot ca o giua."* Mot ban viet `<` thay `<=` (hoac
- * nguong lech mot) chi DO o dung cap 20/21 — mot ca 10% thi xanh voi ca hai.
+ * DoD: *"21% ⇒ khong co dong canh bao; 20% ⇒ co; 0% ⇒ Gui `disabled`. Hai ca
+ * o hai ben nguong, khong phai mot ca o giua."* Mot ban viet `<` thay `<=`
+ * (hoac nguong lech mot) chi DO o dung cap 20/21 — mot ca 10% thi xanh voi ca
+ * hai.
+ *
+ * T-S.10 (NQ-114): hai thanh cua `QuotaBar` roi man chat; tren o nhap chi con
+ * MOT dong (`QuotaNotice`). `QuotaBar` van la component cua T-S.11 (tab Muc
+ * su dung) nen ca 11–12 van ve no.
  *
  * ── Ba tang ──────────────────────────────────────────────────────────────
  *
- * `describe("nguong")` ve `QuotaBar` CANH `Composer`, noi voi nhau bang dung
- * `quotaBlock` + `isSendBlocked` ma `ChatScreen` dung — tuc cau "nut co
+ * `describe("nguong")` ve `QuotaNotice` TRONG `Composer`, noi voi nhau bang
+ * dung `quotaBlock` + `isSendBlocked` ma `ChatScreen` dung — tuc cau "nut co
  * disabled khong" duoc hoi o chinh cai nut, khong o mot ham.
  *
  * `describe("hai nguon")` kiem luat ghep `/auth/me` + `202` (Cam bay ④).
@@ -20,7 +26,8 @@
 
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/api", async (importOriginal) => {
@@ -63,6 +70,7 @@ import type { StreamEvent } from "../../lib/sse";
 import { Composer } from "../../components/chat/Composer";
 import { useChat } from "../chat/useChat";
 import { QuotaBar } from "./QuotaBar";
+import { QuotaNotice } from "./QuotaNotice";
 import {
   byokCovers,
   isSendBlocked,
@@ -94,22 +102,28 @@ function readingsAt(...windows: QuotaWindow[]): QuotaReading[] {
   return windows.map((window) => ({ window, readAt: READ_AT }));
 }
 
+/** `QuotaNotice` co `<Link>` sang Muc su dung — can mot router. */
+function renderRouted(ui: ReactElement) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
+
 /**
- * `QuotaBar` + `Composer`, noi bang DUNG hai ham cua `ChatScreen`. Nut gui
- * chi bat khi co chu, nen moi ca go san mot cau truoc khi hoi nut.
+ * `QuotaNotice` trong `Composer`, noi bang DUNG hai ham cua `ChatScreen`. Nut
+ * gui chi bat khi co chu, nen moi ca go san mot cau truoc khi hoi nut.
  */
 async function renderView(readings: QuotaReading[], byok: ReadonlySet<string> | null = new Set()) {
   const block = quotaBlock(readings);
-  render(
+  renderRouted(
     <Composer
       running={false}
       enabled
       maxChars={null}
+      docked
       onSend={vi.fn()}
       onStop={vi.fn()}
       quotaBlocked={isSendBlocked(block, byok, PROVIDER)}
-      quotaBar={
-        <QuotaBar
+      quotaNotice={
+        <QuotaNotice
           readings={readings}
           warnPct={THRESHOLD}
           block={block}
@@ -123,26 +137,33 @@ async function renderView(readings: QuotaReading[], byok: ReadonlySet<string> | 
 }
 
 const sendButton = () => screen.getByRole("button", { name: "Gửi" });
-const warning = () => screen.queryByText(/Sắp hết hạn mức/);
+/** Dong canh bao "Han muc … con N%" (ban T-HD2-v2 muc G4). */
+const warning = () => screen.queryByText(/^Hạn mức .* còn/);
+/** Dong het han muc (G5). */
+const exhausted = () => screen.getByText(/Đã hết hạn mức/);
 
 describe("nguong canh bao va nut gui", () => {
-  it("1. con 21% ⇒ KHONG canh bao, nut gui bat", async () => {
+  it("1. con 21% ⇒ KHONG co dong canh bao, nut gui bat", async () => {
     await renderView(readingsAt(quotaWindow({ remaining_pct: 21, remaining_usd: "0.1050" })));
 
     expect(warning()).toBeNull();
-    expect(screen.getByText("21%").closest("[data-level]")).toHaveAttribute("data-level", "normal");
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Xem mức sử dụng" })).toBeNull();
     expect(sendButton()).toBeEnabled();
   });
 
-  it("2. con 20% ⇒ canh bao, va KHONG chan (UC-07 dong 1)", async () => {
+  it("2. con 20% ⇒ MOT dong canh bao co link sang Muc su dung, va KHONG chan (UC-07 dong 1)", async () => {
     await renderView(readingsAt(quotaWindow({ remaining_pct: 20, remaining_usd: "0.1000" })));
 
     expect(warning()).not.toBeNull();
-    expect(screen.getByRole("status")).toHaveTextContent("20%");
-    expect(screen.getByText("20%").closest("[data-level]")).toHaveAttribute(
-      "data-level",
-      "warning",
+    const line = screen.getByRole("status");
+    expect(line).toHaveTextContent("Hạn mức 5 giờ còn 20%");
+    expect(screen.getByRole("link", { name: "Xem mức sử dụng" })).toHaveAttribute(
+      "href",
+      "/cai-dat/muc-su-dung",
     );
+    // Mot dong, khong hai thanh (NQ-114): khong con `meter` nao tren man chat.
+    expect(screen.queryAllByRole("meter")).toHaveLength(0);
     expect(sendButton()).toBeEnabled();
   });
 
@@ -151,10 +172,10 @@ describe("nguong canh bao va nut gui", () => {
     await renderView(readingsAt(quotaWindow({ remaining_pct: 0, remaining_usd: "0", retry_after: 754 })));
 
     expect(sendButton()).toBeDisabled();
-    const exhaustedAlert = screen.getByRole("alert");
-    expect(exhaustedAlert).toHaveTextContent("Đã dùng hết hạn mức 5 giờ");
-    expect(exhaustedAlert).toHaveTextContent("14:12:34");
-    expect(exhaustedAlert.querySelector("time")).toHaveAttribute(
+    const line = screen.getByRole("status");
+    expect(line).toHaveTextContent("Đã hết hạn mức 5 giờ");
+    expect(line).toHaveTextContent("14:12:34");
+    expect(line.querySelector("time")).toHaveAttribute(
       "dateTime",
       new Date(READ_AT + 754_000).toISOString(),
     );
@@ -171,16 +192,16 @@ describe("nguong canh bao va nut gui", () => {
     );
 
     expect(sendButton()).toBeDisabled();
-    expect(screen.getByRole("alert")).toHaveTextContent("5 giờ và 7 ngày");
-    expect(screen.getByRole("alert")).toHaveTextContent("16:00:00");
+    expect(exhausted()).toHaveTextContent("5 giờ và 7 ngày");
+    expect(exhausted()).toHaveTextContent("16:00:00");
   });
 
   it("5. het ma KHONG biet luc nao hoan lai ⇒ noi dung nhu vay, khong bia gio", async () => {
     await renderView(readingsAt(quotaWindow({ limit_usd: "0", remaining_pct: 0, retry_after: null })));
 
     expect(sendButton()).toBeDisabled();
-    expect(screen.getByRole("alert")).toHaveTextContent("Chưa xác định");
-    expect(screen.getByRole("alert").querySelector("time")).toBeNull();
+    expect(exhausted()).toHaveTextContent("chưa rõ lúc hoàn lại");
+    expect(screen.getByRole("status").querySelector("time")).toBeNull();
   });
 });
 
@@ -190,8 +211,9 @@ describe("BYOK", () => {
     await renderView(readingsAt(quotaWindow({ remaining_pct: 0, retry_after: 60 })), new Set([PROVIDER]));
 
     expect(sendButton()).toBeEnabled();
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByRole("status")).toHaveTextContent("khoá API riêng");
+    expect(screen.getByRole("status")).toHaveTextContent("dùng khoá riêng của bạn");
+    // Khong noi "hoan lai luc" cho mot nguoi dang gui duoc.
+    expect(screen.getByRole("status").querySelector("time")).toBeNull();
   });
 
   it("7. khoa rieng cua provider KHAC ⇒ van khoa", async () => {
@@ -263,8 +285,17 @@ describe("hai nguon", () => {
     expect(output.map((r) => r.window.remaining_pct)).toEqual([12]);
   });
 
-  it("11. man hinh hien MOT con so moi cua so, kem gio doc", async () => {
-    await renderView(readingsAt(quotaWindow({ remaining_pct: 16, remaining_usd: "0.0800" })));
+  it("11. `QuotaBar` (T-S.11 dua sang Cai dat) hien MOT con so moi cua so, kem gio doc", () => {
+    const readings = readingsAt(quotaWindow({ remaining_pct: 16, remaining_usd: "0.0800" }));
+    render(
+      <QuotaBar
+        readings={readings}
+        warnPct={THRESHOLD}
+        block={quotaBlock(readings)}
+        byokCovered={false}
+        now={READ_AT}
+      />,
+    );
 
     expect(screen.getAllByRole("meter")).toHaveLength(1);
     expect(screen.getAllByText("16%")).toHaveLength(1);
@@ -338,13 +369,14 @@ function ChatWithQuota({ initial }: { initial: ProfileOut }) {
   return (
     <Composer
       running={chat.running !== null}
-      enabled={chat.tree.conversationId !== null && !chat.busy}
+      enabled={!chat.busy}
       maxChars={null}
+      docked={chat.phase !== "draft"}
       onSend={chat.send}
       onStop={() => void chat.stop()}
       quotaBlocked={isSendBlocked(quota.block, quota.byokProviders, null)}
-      quotaBar={
-        <QuotaBar readings={quota.readings} warnPct={quota.warnPct} block={quota.block} byokCovered={false} />
+      quotaNotice={
+        <QuotaNotice readings={quota.readings} warnPct={quota.warnPct} block={quota.block} byokCovered={false} />
       }
     />
   );
@@ -359,9 +391,9 @@ describe("nhip lam tuoi", () => {
     vi.mocked(api.getConversation).mockResolvedValue(CONVERSATION);
     vi.mocked(api.listProviderKeys).mockResolvedValue({ keys: [], byok_providers: [] });
     vi.mocked(api.sendMessage).mockReset();
-    render(<ChatWithQuota initial={profile([quotaWindow({ remaining_pct: 60 })])} />);
+    renderRouted(<ChatWithQuota initial={profile([quotaWindow({ remaining_pct: 60 })])} />);
     await waitFor(() => {
-      expect(screen.getByRole("textbox")).toBeEnabled();
+      expect(api.getConversation).toHaveBeenCalled();
     });
   });
 
@@ -384,7 +416,7 @@ describe("nhip lam tuoi", () => {
       stream.emit?.({ event: "done", data: { finish_reason: "stop", usage: null } });
     });
 
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Đã dùng hết"));
+    await waitFor(() => expect(exhausted()).toHaveTextContent("Đã hết hạn mức 5 giờ"));
     expect(refreshSpy).toHaveBeenCalledTimes(1);
     await userEvent.type(screen.getByRole("textbox"), "cau nua");
     expect(sendButton()).toBeDisabled();

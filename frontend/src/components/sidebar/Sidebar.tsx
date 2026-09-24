@@ -110,6 +110,12 @@ const DIACRITIC = /\p{Diacritic}/gu;
 export interface SidebarProps {
   /** Hoi thoai dang mo o man chat, hoac `null` khi chua mo cai nao. */
   openConversationId: string | null;
+  /**
+   * T-S.10 — hoi thoai vua ra doi tu man nhap (cau dau da `202`). Doi gia tri
+   * ⇒ nap lai trang dau de hang moi hien ra; T-S.13 nghe them tieu de chay chu
+   * cho dung hang nay.
+   */
+  createdConversationId?: string | null;
   /** Nguoi dung bam mot hang — man chat mo hoi thoai ay. */
   onSelect: (conversationId: string) => void;
   /** Nut "Hoi thoai moi" — T-HD2 dat no trong sidebar, khong o thanh cong cu. */
@@ -221,6 +227,7 @@ function metaOf(detail: ConversationOut): ConversationOut {
 
 export function Sidebar({
   openConversationId,
+  createdConversationId = null,
   onSelect,
   onNewChat,
   onOpenConversationDeleted,
@@ -272,20 +279,30 @@ export function Sidebar({
 
   /**
    * Nap trang dau luc mount, va nap LAI khi man chat mo mot hoi thoai chua co
-   * trong danh sach — do dung la ca "vua bam Hoi thoai moi".
+   * trong danh sach, hoac bao mot hoi thoai vua ra doi tu man nhap (T-S.10).
    *
    * Bam mot hang **da co** trong danh sach thi khong goi mang: neu goi, moi
    * lan chon mot hoi thoai la mot lan mat cac trang da tai them.
+   *
+   * Ve man nhap (`openConversationId` → `null`: "Hoi thoai moi", hoac hoi thoai
+   * dang mo vua bi xoa) cung KHONG goi mang: §24.2b·S7 noi bam "Hoi thoai moi"
+   * la khong mot loi goi API nao, va danh sach khong doi gi.
    */
+  const loadedRef = useRef(false);
+  const handledCreatedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (
-      openConversationId !== null &&
-      itemsRef.current.some((item) => item.id === openConversationId)
-    ) {
+    const known =
+      openConversationId === null ||
+      itemsRef.current.some((item) => item.id === openConversationId);
+    const justCreated =
+      createdConversationId !== null && createdConversationId !== handledCreatedRef.current;
+    handledCreatedRef.current = createdConversationId;
+    if (loadedRef.current && known && !justCreated) {
       return;
     }
+    loadedRef.current = true;
     void loadFirstPage();
-  }, [openConversationId, loadFirstPage]);
+  }, [openConversationId, createdConversationId, loadFirstPage]);
 
   /** Menu "⋯" dong khi bam ra ngoai hoac bam `Esc` — khuon popover thong thuong. */
   useEffect(() => {

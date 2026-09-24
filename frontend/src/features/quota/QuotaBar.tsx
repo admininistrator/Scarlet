@@ -1,9 +1,11 @@
-import type { LimitType } from "../../lib/api";
-import { t, type TextKey } from "../../lib/i18n";
+import { t } from "../../lib/i18n";
+import { Moment } from "./Moment";
 import {
+  WINDOW_LABEL,
   formatUsd,
   quotaLevel,
   warningReading,
+  windowNames,
   type QuotaBlock,
   type QuotaLevel,
   type QuotaReading,
@@ -26,11 +28,6 @@ import {
  * gio doc.
  */
 
-const WINDOW_LABEL: Record<LimitType, TextKey> = {
-  "5h": "quota.window.5h",
-  weekly: "quota.window.weekly",
-};
-
 const FILL: Record<QuotaLevel, string> = {
   normal: "bg-quota-normal",
   warning: "bg-quota-warning",
@@ -42,34 +39,6 @@ const PCT_TEXT: Record<QuotaLevel, string> = {
   warning: "font-semibold text-warning-text",
   empty: "font-semibold text-danger-text",
 };
-
-/**
- * Moc gio DAY DU toi giay — UC-07 doi *"thoi diem chinh xac"*, va DoD so no
- * voi `Retry-After` trong ±2 s. Khac ngay thi them thu + ngay: cua so 7 ngay
- * co the hoan lai vao mot ngay khac.
- */
-function formatMoment(ms: number, now: number): string {
-  const at = new Date(ms);
-  const sameDay = new Date(now).toDateString() === at.toDateString();
-  return at.toLocaleString("vi-VN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    ...(sameDay ? {} : { weekday: "long", day: "2-digit", month: "2-digit" }),
-  });
-}
-
-function Moment({ ms, now }: { ms: number; now: number }) {
-  return (
-    <time dateTime={new Date(ms).toISOString()} className="tabular">
-      {formatMoment(ms, now)}
-    </time>
-  );
-}
-
-function windowNames(windows: LimitType[]): string {
-  return windows.map((w) => t(WINDOW_LABEL[w])).join(` ${t("quota.and")} `);
-}
 
 export function QuotaBar({
   readings,

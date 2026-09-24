@@ -51,3 +51,24 @@ export function Icon({ icon, spring, size, strokeWidth, className, label }: Icon
     />
   );
 }
+
+/**
+ * Icon KHONG BAO GIO doi hinh — T-S.10 (nut cho, dong han muc, khay tep).
+ *
+ * Van la `MorphIcon` (S10: moi icon di qua `morphicons` + du lieu `lucide`),
+ * nhung khong nhan `spring`: `icon` o day la mot hang so, nen khong co lo xo
+ * nao chay de ma chon. Icon nao doi hinh theo trang thai thi dung `Icon` o
+ * tren — va khi ay bat buoc khai vai tro lo xo.
+ */
+export function StaticIcon({ icon, size, strokeWidth, className, label }: Omit<IconProps, "spring">) {
+  return (
+    <MorphIcon
+      icon={icon}
+      reducedMotion="user"
+      size={size}
+      strokeWidth={strokeWidth}
+      className={className}
+      label={label}
+    />
+  );
+}

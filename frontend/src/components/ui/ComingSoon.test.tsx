@@ -36,6 +36,21 @@ describe("ComingSoon", () => {
     expect(button).toContainElement(screen.getByTestId("icon"));
   });
 
+  it("cong tac (T-S.10, 'Tim web'): chu hien ra LA ten truy cap, icon nam canh, aria-pressed=false", () => {
+    render(
+      <ComingSoon planned="T-6.7" label="Tìm web" icon={<svg data-testid="icon" />} toggle />,
+    );
+
+    const button = screen.getByRole("button", { name: "Tìm web" });
+    expect(button).toHaveTextContent("Tìm web");
+    expect(button).not.toHaveAttribute("aria-label");
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("data-planned", "T-6.7");
+    expect(button).toContainElement(screen.getByTestId("icon"));
+    expect(button).toHaveClass("control-disabled", "rounded-full");
+  });
+
   it("bam bang chuot va ban phim khong goi gi, khong gui form", async () => {
     const user = userEvent.setup();
     const onClick = vi.fn();
@@ -82,7 +97,10 @@ describe("ComingSoon", () => {
     const missingPlanned = <ComingSoon label="Xuất" />;
     // @ts-expect-error — `onClick` khong co trong kieu props
     const withClick = <ComingSoon planned="T-8.7" label="Xuất" onClick={() => {}} />;
+    // @ts-expect-error — cong tac thieu `icon`
+    const toggleWithoutIcon = <ComingSoon planned="T-6.7" label="Tìm web" toggle />;
     expect(missingPlanned).toBeTruthy();
     expect(withClick).toBeTruthy();
+    expect(toggleWithoutIcon).toBeTruthy();
   });
 });

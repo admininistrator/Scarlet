@@ -27,6 +27,18 @@
  */
 
 import type { QuotaWindow, LimitType, ModelOut, QuotaWarning } from "../../lib/api";
+import { t, type TextKey } from "../../lib/i18n";
+
+/** Ten cua so tren man hinh — thanh quota (T-3.11) va dong han muc (T-S.10). */
+export const WINDOW_LABEL: Record<LimitType, TextKey> = {
+  "5h": "quota.window.5h",
+  weekly: "quota.window.weekly",
+};
+
+/** `["5h", "weekly"]` → `"5 giờ và 7 ngày"`. */
+export function windowNames(windows: LimitType[]): string {
+  return windows.map((w) => t(WINDOW_LABEL[w])).join(` ${t("quota.and")} `);
+}
 
 /** Ba muc cua ban Design System muc 05 — moi muc mot token `--color-quota-*`. */
 export type QuotaLevel = "normal" | "warning" | "empty";

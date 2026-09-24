@@ -24,27 +24,30 @@ import { t } from "../../lib/i18n";
  *   §7b.2). Agent cua phase sau `grep data-planned` ra dung cho.
  * - **Tooltip "Sap co" KHONG ghi phase hay ngay** (NQ-121 · 15a).
  *
- * Hai hinh dang cua ban ve: co `icon` ⇒ nut icon vuong 44 px, `label` thanh
- * `aria-label`; khong `icon` ⇒ nut chu co vien, `label` la chu hien ra. Muc
- * menu cho (menu tai khoan, menu hang hoi thoai) can `DropdownMenu` cua Radix
- * — goi chua cai; task dung menu ay (T-S.12, T-S.13) them hinh dang thu ba.
+ * Ba hinh dang cua ban ve: co `icon` ⇒ nut icon vuong 44 px, `label` thanh
+ * `aria-label`; khong `icon` ⇒ nut chu co vien, `label` la chu hien ra; co
+ * `icon` VA `toggle` ⇒ cong tac vien thuoc icon + chu (T-S.10, "Tim web" o o
+ * nhap — ban T-HD2-v2 muc G), `aria-pressed="false"` vi no se la mot cong tac
+ * that khi T-6.7 gan. Muc menu cho (menu tai khoan, menu hang hoi thoai) can
+ * `DropdownMenu` cua Radix — goi chua cai; task dung menu ay (T-S.12, T-S.13)
+ * them hinh dang thu tu.
  */
 
 type Planned = `${"T" | "B"}-${string}`;
 
-type ComingSoonProps = {
-  planned: Planned;
-  label: string;
-  icon?: ReactNode;
-};
+type ComingSoonProps =
+  | { planned: Planned; label: string; icon?: ReactNode; toggle?: false }
+  | { planned: Planned; label: string; icon: ReactNode; toggle: true };
 
 const ICON_CLASS =
-  "control-disabled inline-flex size-touch items-center justify-center rounded-md text-muted";
+  "control-disabled inline-flex size-touch shrink-0 items-center justify-center rounded-md text-muted";
 const TEXT_CLASS =
   "control-disabled min-h-touch rounded-md border border-border-strong bg-surface-panel px-4 text-base font-medium text-foreground";
+const TOGGLE_CLASS =
+  "control-disabled inline-flex min-h-touch shrink-0 items-center gap-1.5 rounded-full pr-3 pl-2.5 text-sm font-medium text-muted";
 
-export function ComingSoon({ planned, label, icon }: ComingSoonProps) {
-  const iconOnly = icon !== undefined;
+export function ComingSoon({ planned, label, icon, toggle }: ComingSoonProps) {
+  const iconOnly = icon !== undefined && toggle !== true;
   return (
     <Tooltip.Provider>
       <Tooltip.Root>
@@ -53,10 +56,20 @@ export function ComingSoon({ planned, label, icon }: ComingSoonProps) {
             type="button"
             aria-disabled="true"
             aria-label={iconOnly ? label : undefined}
+            aria-pressed={toggle === true ? false : undefined}
             data-planned={planned}
-            className={iconOnly ? ICON_CLASS : TEXT_CLASS}
+            className={toggle === true ? TOGGLE_CLASS : iconOnly ? ICON_CLASS : TEXT_CLASS}
           >
-            {iconOnly ? icon : label}
+            {toggle === true ? (
+              <>
+                {icon}
+                {label}
+              </>
+            ) : iconOnly ? (
+              icon
+            ) : (
+              label
+            )}
           </button>
         </Tooltip.Trigger>
         <Tooltip.Portal>
