@@ -1,0 +1,92 @@
+{
+  "_doc_1": "Kế hoạch đo của scripts/probe_reasoning.py (T-S.2, KE-HOACH §24.2b·S3b). Tên model và tham số của provider là DỮ LIỆU nên sống ở đây, không trong .py (A3). Khoá bắt đầu bằng gạch dưới là chú thích.",
+  "_doc_2": "Mỗi `case` là một cách gửi một mức: `params` được trộn nguyên văn vào body qua `extra` của LLMClient.stream (§9.1) — đúng đường khối `reasoning` của catalog v4 sẽ đi. `alias` (chỉ đường system) = gửi tên model LiteLLM khác thay vì `id`. `ladder` = các case cùng thang được so với mức kề nó; case không có `ladder` là đối chứng hoặc thăm dò.",
+  "_doc_3": "Thêm một mức mới cho một model: thêm case vào thang của model đó, chạy lại probe với --model, rồi mới khai vào catalog (RUNBOOK, T-S.3).",
+  "prompt": "Có bao nhiêu số nguyên dương n ≤ 200 sao cho n² + 1 chia hết cho 5, hoặc n³ − n chia hết cho 7? Chỉ trả lời đúng một số, không giải thích.",
+  "expected_answer": "131",
+  "runs": 2,
+  "_doc_budget": "DoD của T-S.2 đặt trần 0.10 USD; người dùng nâng lên 0.15 giữa lúc đo (2026-09-24) khi lượt 1 cho thấy ô Haiku ngân sách 4096 tốn 0.013–0.016 USD/lượt.",
+  "budget_usd": "0.15",
+  "levels": ["off", "low", "medium", "high", "xhigh", "max"],
+  "distinct": {
+    "_doc": "Hai mức kề nhau 'khác rõ' khi mọi lượt của mức trên vượt mọi lượt của mức dưới ít nhất `min_delta_tokens` VÀ gấp ít nhất `min_ratio` lần (mức dưới bằng 0 thì chỉ xét delta).",
+    "min_ratio": 1.2,
+    "min_delta_tokens": 32
+  },
+  "negative": {
+    "_doc": "Ca âm của DoD: một mức bịa ra, gửi qua LiteLLM cho mọi model. drop_params: true có thể biến nó thành 200 im lặng.",
+    "level": "bogus",
+    "params": { "reasoning_effort": "ultra-bogus" },
+    "runs": 1
+  },
+  "models": [
+    {
+      "id": "ol-qwen-small",
+      "paths": ["system"],
+      "max_tokens": 512,
+      "cases": [
+        { "level": "default", "params": {} },
+        { "level": "high", "params": { "reasoning_effort": "high" } }
+      ]
+    },
+    {
+      "id": "grok-4.6",
+      "paths": ["system"],
+      "max_tokens": 8192,
+      "cases": [
+        { "level": "default", "params": {} },
+        { "level": "low", "ladder": "effort", "params": { "reasoning_effort": "low" } },
+        { "level": "medium", "ladder": "effort", "params": { "reasoning_effort": "medium" } },
+        { "level": "high", "ladder": "effort", "params": { "reasoning_effort": "high" } },
+        { "level": "xhigh", "ladder": "effort", "params": { "reasoning_effort": "xhigh" } }
+      ]
+    },
+    {
+      "id": "nr-gemini-flash",
+      "paths": ["system"],
+      "max_tokens": 8192,
+      "cases": [
+        { "level": "low", "ladder": "alias", "params": {} },
+        { "level": "medium", "ladder": "alias", "alias": "nr-gemini-flash-medium", "params": {} },
+        { "level": "high", "ladder": "alias", "alias": "nr-gemini-flash-high", "params": {} },
+        { "level": "low", "ladder": "effort", "params": { "reasoning_effort": "low" } },
+        { "level": "medium", "ladder": "effort", "params": { "reasoning_effort": "medium" } },
+        { "level": "high", "ladder": "effort", "params": { "reasoning_effort": "high" } }
+      ]
+    },
+    {
+      "id": "claude-haiku",
+      "paths": ["system", "byok"],
+      "max_tokens": 1024,
+      "_doc": "Haiku 4.5 chỉnh bằng thinking.budget_tokens (tối thiểu 1024); max_tokens phải lớn hơn ngân sách. Ngân sách là TRẦN, không phải chỉ tiêu: 6144 chỉ khác được 4096 trên một câu khiến model nghĩ quá 4096 token, tức ~0.02 USD mỗi lượt × 2 lượt × 2 đường — không vừa 0.10 USD cùng các ô còn lại. Không đo ⇒ 6144 không vào catalog.",
+      "cases": [
+        { "level": "default", "params": {} },
+        { "level": "off", "ladder": "thinking", "params": { "thinking": { "type": "disabled" } } },
+        { "level": "low", "ladder": "thinking", "max_tokens": 1536, "params": { "thinking": { "type": "enabled", "budget_tokens": 1024 } } },
+        { "level": "high", "ladder": "thinking", "max_tokens": 4608, "params": { "thinking": { "type": "enabled", "budget_tokens": 4096 } } },
+        { "level": "low", "paths": ["system"], "runs": 1, "max_tokens": 1536, "params": { "reasoning_effort": "low" } },
+        { "level": "high", "paths": ["byok"], "runs": 1, "max_tokens": 4608, "params": { "reasoning_effort": "high" } },
+        { "level": "low", "runs": 1, "temperature": 0.5, "max_tokens": 1536, "params": { "thinking": { "type": "enabled", "budget_tokens": 1024 } } }
+      ]
+    },
+    {
+      "id": "deepseek-flash",
+      "paths": ["system", "byok"],
+      "max_tokens": 8192,
+      "cases": [
+        { "level": "default", "params": {} },
+        { "level": "off", "ladder": "thinking", "params": { "thinking": { "type": "disabled" } } },
+        { "level": "low", "ladder": "thinking", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "low" } },
+        { "level": "medium", "ladder": "thinking", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "medium" } },
+        { "level": "high", "ladder": "thinking", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "high" } },
+        { "level": "max", "ladder": "thinking", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "max" } },
+        { "level": "high", "runs": 1, "params": { "thinking": { "type": "enabled" } } },
+        { "level": "low", "runs": 1, "params": { "reasoning_effort": "low" } },
+        { "_doc": "LiteLLM 1.102.0 (llms/deepseek/chat/transformation.py) pop reasoning_effort và chỉ gửi thinking bật/tắt. extra_body lồng là đường LiteLLM chuyển nguyên văn cho provider OpenAI-compatible — thang này đo xem nó có vòng qua được không.", "level": "low", "ladder": "extra_body", "paths": ["system"], "params": { "thinking": { "type": "enabled" }, "extra_body": { "reasoning_effort": "low" } } },
+        { "level": "medium", "ladder": "extra_body", "paths": ["system"], "params": { "thinking": { "type": "enabled" }, "extra_body": { "reasoning_effort": "medium" } } },
+        { "level": "high", "ladder": "extra_body", "paths": ["system"], "params": { "thinking": { "type": "enabled" }, "extra_body": { "reasoning_effort": "high" } } },
+        { "level": "max", "ladder": "extra_body", "paths": ["system"], "params": { "thinking": { "type": "enabled" }, "extra_body": { "reasoning_effort": "max" } } }
+      ]
+    }
+  ]
+}

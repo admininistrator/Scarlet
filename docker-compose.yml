@@ -160,7 +160,14 @@ services:
     # Dang ${VAR:?} de thieu bien thi compose dung ngay va in dung ten bien — tinh than A4.
     restart: unless-stopped
     networks: [internal]
-    image: ghcr.io/berriai/litellm:main-latest
+    # T-S.2 — GHIM, khong dung main-latest nua. Cach LiteLLM dich reasoning_effort
+    # doi theo version (BerriAI/litellm#27439), va khoi `reasoning` cua catalog
+    # (§24.2b·S3b) chi dung voi DUNG ban da do bang scripts/probe_reasoning.py.
+    # Tag + digest: tag co the bi day sang ban khac, digest thi khong. Day la
+    # chinh image main-latest dang chay luc do (2026-09-24): ben trong bao
+    # `litellm==1.102.0`, digest khop tag `1.102.0-dev.1` tren ghcr. Doi ban =
+    # chay lai probe truoc, sua catalog sau.
+    image: ghcr.io/berriai/litellm:1.102.0-dev.1@sha256:1a9625b107f09f80f312ffaa3c7f7f3c0b2bf59a49ed0d5b8c3e90edcc30bb90
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     volumes: ["./config/litellm.config.yaml:/app/config.yaml:ro"]
     # T-0.12/NQ-15: key + endpoint cua provider nam trong .env.providers, KHONG
