@@ -329,7 +329,8 @@ async def test_pagination_by_updated_at_cursor(
 async def test_empty_list_has_null_next_cursor(client: AsyncClient, user_a: uuid.UUID) -> None:
     res = await client.get(PATH, headers=_session(user_a))
 
-    assert res.json() == {"items": [], "next_cursor": None}
+    # `truncated` từ T-S.8: danh sách phân trang luôn `false` (xem `ConversationList`).
+    assert res.json() == {"items": [], "next_cursor": None, "truncated": False}
 
 
 @pytest.mark.usefixtures("_db_for_tests")
@@ -343,6 +344,223 @@ async def test_limit_over_configured_cap_is_422(client: AsyncClient, user_a: uui
 
     assert res.status_code == 422
     assert res.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+# ═══════════════ GET /conversations?pinned= — T-S.8, §24.2b·S8 ═══════════════
+
+BASE_TIME = datetime(2026, 9, 15, 10, 0, tzinfo=UTC)
+
+
+async def _made_at(
+    session_factory: async_sessionmaker[AsyncSession],
+    user_id: uuid.UUID,
+    minute: int,
+    *,
+    pinned: bool,
+) -> str:
+    """Một hội thoại với `updated_at` = `BASE_TIME + minute` phút và `pinned` đặt sẵn.
+
+    Một câu `UPDATE` đặt cả hai cột: `updated_at` có `onupdate=now()`, nên ghim
+    bằng một câu riêng **sau** `_set_timestamp` sẽ kéo mốc về `now()` của
+    transaction (xem docstring module).
+    """
+    conversation = await _create_conversation(session_factory, user_id, title=f"ht{minute}")
+    async with session_factory() as session:
+        await session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation.id)
+            .values(updated_at=BASE_TIME + timedelta(minutes=minute), pinned=pinned)
+        )
+        await session.commit()
+    return str(conversation.id)
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_pinned_true_returns_every_pinned_even_beyond_one_page(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """DoD dòng 1 ở tầng test: ghim nằm ngoài trang đầu vẫn về đủ trong MỘT response.
+
+    Ba hội thoại ghim **cũ** hơn hai hội thoại thường, trang cỡ 2 ⇒ danh sách
+    không lọc không có hội thoại ghim nào ở trang đầu — đúng ca B-227 mô tả.
+
+    Trang cỡ 2 qua `?limit=2`, **không** monkeypatch `CONVERSATION_PAGE_SIZE`:
+    module này dùng `from __future__ import annotations`, nên FastAPI dựng
+    `Query(le=settings.CONVERSATION_PAGE_SIZE)` ở request ĐẦU TIÊN tới route —
+    ca này chạy trước (vd. `pytest -k pinned`) thì trần `le=2` đóng băng cho
+    mọi ca sau trong tiến trình.
+    """
+    pinned = [await _made_at(session_factory, user_a, i, pinned=True) for i in range(3)]
+    for i in range(3, 5):
+        await _made_at(session_factory, user_a, i, pinned=False)
+
+    first_page = (await client.get(PATH, params={"limit": 2}, headers=_session(user_a))).json()
+    assert not set(pinned) & {x["id"] for x in first_page["items"]}, "tien de cua phep do"
+
+    res = await client.get(PATH, params={"pinned": "true"}, headers=_session(user_a))
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert [x["id"] for x in body["items"]] == list(reversed(pinned))
+    assert all(x["pinned"] for x in body["items"])
+    assert body["next_cursor"] is None
+    assert body["truncated"] is False
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_pinned_true_over_cap_returns_cap_newest_and_truncated(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Vượt `CONVERSATION_PINNED_MAX` ⇒ đúng trần hàng MỚI NHẤT + `truncated: true`."""
+    monkeypatch.setattr(settings, "CONVERSATION_PINNED_MAX", 3)
+    pinned = [await _made_at(session_factory, user_a, i, pinned=True) for i in range(4)]
+
+    body = (await client.get(PATH, params={"pinned": "true"}, headers=_session(user_a))).json()
+
+    assert [x["id"] for x in body["items"]] == list(reversed(pinned))[:3]
+    assert body["truncated"] is True
+    assert body["next_cursor"] is None
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_pinned_true_exactly_at_cap_is_not_truncated(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Biên: đúng bằng trần là ĐỦ, không phải bị cắt — hàng thứ trần+1 mới là dấu hiệu."""
+    monkeypatch.setattr(settings, "CONVERSATION_PINNED_MAX", 3)
+    for i in range(3):
+        await _made_at(session_factory, user_a, i, pinned=True)
+
+    body = (await client.get(PATH, params={"pinned": "true"}, headers=_session(user_a))).json()
+
+    assert len(body["items"]) == 3
+    assert body["truncated"] is False
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_pinned_true_IDOR_only_own_and_filter_is_in_SQL(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    user_b: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§20, Cạm bẫy ① — A chỉ thấy hội thoại ghim của A, và lọc nằm TRONG câu SQL.
+
+    B có nhiều hội thoại ghim **mới hơn** trần. Lọc `user_id` ở Python sau
+    `LIMIT trần+1` thì các hàng của B chiếm hết chỗ và A nhận về **ít hơn**
+    phần của mình (hoặc `truncated` sai) — nên đếm đúng hai hàng ở đây là phép
+    đo vị trí của bộ lọc, không chỉ của kết quả.
+    """
+    monkeypatch.setattr(settings, "CONVERSATION_PINNED_MAX", 2)
+    mine = [await _made_at(session_factory, user_a, i, pinned=True) for i in range(2)]
+    for i in range(10, 14):
+        await _made_at(session_factory, user_b, i, pinned=True)
+
+    body = (await client.get(PATH, params={"pinned": "true"}, headers=_session(user_a))).json()
+
+    assert [x["id"] for x in body["items"]] == list(reversed(mine))
+    assert body["truncated"] is False
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_pinned_true_skips_soft_deleted(
+    client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    kept = await _made_at(session_factory, user_a, 0, pinned=True)
+    gone = await _made_at(session_factory, user_a, 1, pinned=True)
+    await client.delete(f"{PATH}/{gone}", headers=_session(user_a))
+
+    body = (await client.get(PATH, params={"pinned": "true"}, headers=_session(user_a))).json()
+
+    assert [x["id"] for x in body["items"]] == [kept]
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_pinned_false_two_pages_no_pinned_no_duplicates(
+    client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD dòng 1, vế sau: phân trang phần còn lại — không ghim, không lặp, không sót.
+
+    Ghim xen giữa các hội thoại thường theo thời gian, để một bộ lọc đặt sai
+    chỗ (sau `LIMIT`) lộ ra thành một trang thiếu hàng.
+    """
+    unpinned: list[str] = []
+    for i in range(8):
+        conv_id = await _made_at(session_factory, user_a, i, pinned=i % 3 == 0)
+        if i % 3 != 0:
+            unpinned.append(conv_id)
+    newest_first = list(reversed(unpinned))
+
+    seen: list[str] = []
+    cursor: str | None = None
+    pages = 0
+    while True:
+        params: dict[str, Any] = {"pinned": "false", "limit": 2}
+        if cursor is not None:
+            params["updated_before"] = cursor
+        body = (await client.get(PATH, params=params, headers=_session(user_a))).json()
+        pages += 1
+        assert not any(x["pinned"] for x in body["items"])
+        assert len(body["items"]) == 2 or body["next_cursor"] is None
+        assert body["truncated"] is False
+        seen += [x["id"] for x in body["items"]]
+        cursor = body["next_cursor"]
+        if cursor is None:
+            break
+
+    assert pages >= 2
+    assert len(seen) == len(set(seen)), "khong hoi thoai nao hien hai lan"
+    assert seen == newest_first
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_no_pinned_param_keeps_updated_at_order(
+    client: AsyncClient, user_a: uuid.UUID, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Vắng tham số ⇒ như hôm nay: mọi hội thoại, sắp theo `updated_at` — ghim KHÔNG nổi lên.
+
+    Cạm bẫy ② của T-S.8: `ORDER BY` không đổi. Một `pinned DESC` lén thêm vào
+    sẽ đảo hai hàng dưới đây.
+    """
+    old_pinned = await _made_at(session_factory, user_a, 0, pinned=True)
+    new_plain = await _made_at(session_factory, user_a, 1, pinned=False)
+
+    body = (await client.get(PATH, headers=_session(user_a))).json()
+
+    assert [x["id"] for x in body["items"]] == [new_plain, old_pinned]
+    assert body["truncated"] is False
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+@pytest.mark.parametrize(
+    "extra",
+    [{"limit": 5}, {"updated_before": "2026-09-15T10:00:00+00:00"}],
+    ids=["limit", "updated_before"],
+)
+async def test_pinned_true_rejects_paging_params(
+    client: AsyncClient, user_a: uuid.UUID, extra: dict[str, Any]
+) -> None:
+    """Danh sách ghim không có trang: tham số phân trang ⇒ `400`, không bị nuốt im lặng."""
+    res = await client.get(PATH, params={"pinned": "true", **extra}, headers=_session(user_a))
+
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "BAD_REQUEST"
+
+
+@pytest.mark.usefixtures("_db_for_tests")
+async def test_pinned_garbage_is_422(client: AsyncClient, user_a: uuid.UUID) -> None:
+    res = await client.get(PATH, params={"pinned": "co"}, headers=_session(user_a))
+
+    assert res.status_code == 422
 
 
 # ═════════════════════════ GET /conversations/{id} ═════════════════════════

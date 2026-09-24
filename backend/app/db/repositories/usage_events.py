@@ -114,14 +114,15 @@ class CostSplit:
 
 @dataclass(frozen=True, slots=True)
 class UsageBucket:
-    """MỘT ô của bảng chi phí admin: một khoá × một mức `cost_confidence` (T-2.16).
+    """MỘT ô của bảng chi phí admin: một khoá × một mức `cost_confidence` × một
+    `purpose` (T-2.16, T-S.8).
 
-    Không phải một hàng — một **ô**. Câu SQL trả về hai dòng cho mỗi khoá có cả
-    hai loại chi phí, và việc gộp chúng thành một hàng hai cột là việc của tầng
-    hiển thị (`app/api/v1/admin.py`). Tách ở đây giữ cho repository trả về đúng
-    thứ Postgres trả về, không phải một hình dạng đã diễn giải: C16 nói bảng
-    phải có hai cột riêng, và cách chắc nhất để hai cột không bao giờ bị cộng
-    lại là chúng chưa từng đi qua một biến chung nào.
+    Không phải một hàng — một **ô**. Câu SQL trả về tới bốn dòng cho mỗi khoá
+    (hai loại chi phí × hai việc), và việc gộp chúng thành một hàng hai cột là
+    việc của tầng hiển thị (`app/api/v1/admin.py`). Tách ở đây giữ cho
+    repository trả về đúng thứ Postgres trả về, không phải một hình dạng đã
+    diễn giải: C16 nói bảng phải có hai cột riêng, và cách chắc nhất để hai cột
+    không bao giờ bị cộng lại là chúng chưa từng đi qua một biến chung nào.
     """
 
     #: Khoá của trục: ngày ISO, `user_id`, `model_id`, hoặc `key_source`.
@@ -129,6 +130,8 @@ class UsageBucket:
     #: Nhãn đọc được của khoá khi có (email của user); `None` ở ba trục kia.
     label: str | None
     confidence: CostConfidence
+    #: T-S.8 (§24.2b·S6): lượt chat hay lượt đặt tên hội thoại.
+    purpose: UsagePurpose
     cost_usd: Decimal
     prompt_tokens: int
     completion_tokens: int
@@ -349,13 +352,19 @@ class UsageEventRepository:
         until: datetime,
         key_source: KeySource | None = None,
     ) -> Sequence[UsageBucket]:
-        """`GROUP BY (nhom, cost_confidence)` trong cửa sổ `[since, until)`.
+        """`GROUP BY (nhom, cost_confidence, purpose)` trong cửa sổ `[since, until)`.
 
         `cost_confidence` **luôn** nằm trong `GROUP BY`, ở mọi trục — đó chính
         là C16 viết thành SQL: *"trộn chung model `metered` và `unmetered` vào
         một con số làm bảng chi phí vô nghĩa — phải tách từ đây, không phải sửa
         ở tầng hiển thị"*. Một hàm `_aggregate` không có cột ấy sẽ mời người gọi
         thứ hai quên nó đi.
+
+        `purpose` (T-S.8, §24.2b·S6) nằm trong `GROUP BY` vì cùng lý do: khoản
+        "Đặt tên" của màn Chi phí đến từ **cùng** câu với hai cột, nên phần tách
+        theo việc cộng lại luôn bằng đúng hai cột — không có câu thứ hai nào để
+        `WHERE` lệch đi. Không lọc `purpose` ở đây: bảng chi phí là hoá đơn, và
+        lượt đặt tên tốn tiền thật dù không trừ quota ai.
 
         Biên `>= since` và `< until` (nửa mở), cùng luật với `list_since`: hai
         cửa sổ liền nhau không được đếm chung một dòng sổ hai lần.
@@ -371,6 +380,7 @@ class UsageEventRepository:
             columns.append(label.label("label"))
         columns += [
             UsageEvent.cost_confidence.label("confidence"),
+            UsageEvent.purpose.label("purpose"),
             func.coalesce(func.sum(UsageEvent.cost_usd), 0).label("cost_usd"),
             func.coalesce(func.sum(UsageEvent.prompt_tokens), 0).label("prompt_tokens"),
             func.coalesce(func.sum(UsageEvent.completion_tokens), 0).label("completion_tokens"),
@@ -384,7 +394,11 @@ class UsageEventRepository:
             stmt = stmt.where(UsageEvent.key_source == key_source)
         if label is not None:
             stmt = stmt.join(User, User.id == UsageEvent.user_id, isouter=True)
-        stmt = stmt.group_by(*columns[: 2 if label is not None else 1], UsageEvent.cost_confidence)
+        stmt = stmt.group_by(
+            *columns[: 2 if label is not None else 1],
+            UsageEvent.cost_confidence,
+            UsageEvent.purpose,
+        )
         stmt = stmt.order_by(columns[0])
         rows = (await self._session.execute(stmt)).all()
         return [
@@ -392,6 +406,7 @@ class UsageEventRepository:
                 key=_bucket_key(r.key),
                 label=getattr(r, "label", None),
                 confidence=CostConfidence(r.confidence),
+                purpose=UsagePurpose(r.purpose),
                 cost_usd=Decimal(str(r.cost_usd)),
                 prompt_tokens=int(r.prompt_tokens),
                 completion_tokens=int(r.completion_tokens),

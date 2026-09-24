@@ -1,6 +1,6 @@
 """Năm endpoint hội thoại của §18.2 — bốn cái đầu ra đời ở B-93, `PATCH` ở T-1.13.
 
-    GET    /api/v1/conversations          sidebar, phân trang bằng con trỏ
+    GET    /api/v1/conversations          sidebar, phân trang bằng con trỏ · ?pinned= (T-S.8)
     POST   /api/v1/conversations          tạo rỗng
     GET    /api/v1/conversations/{id}     metadata + ĐƯỜNG ĐI hiện tại
     PATCH  /api/v1/conversations/{id}     tiêu đề · model · ghim · CHUYỂN NHÁNH
@@ -231,39 +231,102 @@ class ConversationList(BaseModel):
     #: `updated_at` của dòng cuối trang này; gửi lại vào `?updated_before=` để
     #: lấy trang kế. `null` = hết. **Không** trả tổng số dòng: đếm cả bảng mỗi
     #: lần mở sidebar là một câu quét mà không màn hình nào hiển thị kết quả.
+    #: Luôn `null` ở `?pinned=true` — danh sách ấy không có trang kế.
     next_cursor: datetime | None
+    #: T-S.8 — chỉ có nghĩa ở `?pinned=true`: `true` = số hội thoại ghim vượt
+    #: `CONVERSATION_PINNED_MAX`, và `items` là đúng ngần ấy hàng mới nhất.
+    #: Danh sách phân trang luôn `false` — phần còn lại của nó nói bằng
+    #: `next_cursor`, không bằng cờ này.
+    truncated: bool
 
 
 @router.get(
     "/conversations",
     response_model=ConversationList,
-    responses={422: {"model": ErrorEnvelope, "description": "limit ngoai khoang cho phep"}},
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "pinned=true di kem limit/updated_before (BAD_REQUEST)",
+        },
+        422: {"model": ErrorEnvelope, "description": "limit ngoai khoang cho phep"},
+    },
 )
 async def list_conversations(
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     limit: Annotated[
-        int,
-        Query(ge=1, le=settings.CONVERSATION_PAGE_SIZE, description="so hoi thoai toi da"),
-    ] = settings.CONVERSATION_PAGE_SIZE,
+        int | None,
+        Query(
+            ge=1,
+            le=settings.CONVERSATION_PAGE_SIZE,
+            description="so hoi thoai toi da; vang = CONVERSATION_PAGE_SIZE",
+        ),
+    ] = None,
     updated_before: Annotated[
         datetime | None,
         Query(description="next_cursor cua trang truoc"),
     ] = None,
+    pinned: Annotated[
+        bool | None,
+        Query(description="true = moi hoi thoai ghim, mot lan; false = phan con lai"),
+    ] = None,
 ) -> ConversationList:
-    """Sidebar: mới nhất trước, phân trang bằng con trỏ `updated_at` (§17.4)."""
+    """Sidebar: mới nhất trước, phân trang bằng con trỏ `updated_at` (§17.4).
+
+    **`?pinned=` — T-S.8, §24.2b·S8, NQ-112 (đóng B-227).** Sidebar có hai
+    nguồn: mục "Đã ghim" hỏi `?pinned=true` và nhận **mọi** hội thoại ghim
+    trong một response — không con trỏ, trần `CONVERSATION_PINNED_MAX` (vượt
+    ⇒ đúng trần hàng mới nhất kèm `truncated: true`); phần còn lại hỏi
+    `?pinned=false`, phân trang y hệt danh sách không lọc. Vắng tham số ⇒ mọi
+    hội thoại, như trước T-S.8.
+
+    Hai nhánh đi qua **cùng** `list_conversations` của repository, nên
+    `WHERE user_id` nằm trong câu SQL ở cả nhánh không phân trang (Cạm bẫy ①).
+    `pinned=false` chỉ thêm một vế `WHERE`: con trỏ vẫn là `updated_at`,
+    `ORDER BY` không đổi (Cạm bẫy ②).
+
+    `?pinned=true` kèm `limit` hoặc `updated_before` ⇒ `400`, không bỏ qua im
+    lặng: danh sách ghim không có trang, và một tham số bị nuốt là thứ người
+    gọi chỉ phát hiện khi đếm hàng.
+    """
+    if pinned is True:
+        if limit is not None or updated_before is not None:
+            raise ApiError(
+                status.HTTP_400_BAD_REQUEST,
+                ApiErrorCode.BAD_REQUEST,
+                "pinned=true tra moi hoi thoai ghim mot lan; khong nhan limit/updated_before",
+            )
+        return await _pinned(user_id)
+
+    page_size = settings.CONVERSATION_PAGE_SIZE if limit is None else limit
     async with session_scope() as session:
         rows = await ConversationRepository(session).list_conversations(
-            user_id=user_id, limit=limit, updated_before=updated_before
+            user_id=user_id, limit=page_size, updated_before=updated_before, pinned=pinned
         )
         items = [ConversationOut.model_validate(row) for row in rows]
 
     # Trang chưa đầy ⇒ chắc chắn hết dữ liệu, khỏi mời client hỏi thêm một vòng
     # nữa chỉ để nhận về danh sách rỗng.
-    has_more = len(items) == limit
+    has_more = len(items) == page_size
     return ConversationList(
         items=items,
         next_cursor=items[-1].updated_at if (items and has_more) else None,
+        truncated=False,
     )
+
+
+async def _pinned(user_id: uuid.UUID) -> ConversationList:
+    """Mọi hội thoại ghim của `user_id`, một lần — nhánh `?pinned=true`.
+
+    Hỏi **trần + 1** hàng: hàng thừa là cách duy nhất biết "vượt trần" mà
+    không cần một câu `count(*)` thứ hai; nó bị cắt trước khi ra response.
+    """
+    cap = settings.CONVERSATION_PINNED_MAX
+    async with session_scope() as session:
+        rows = await ConversationRepository(session).list_conversations(
+            user_id=user_id, limit=cap + 1, pinned=True
+        )
+        items = [ConversationOut.model_validate(row) for row in rows[:cap]]
+    return ConversationList(items=items, next_cursor=None, truncated=len(rows) > cap)
 
 
 @router.post(

@@ -94,11 +94,17 @@ class ConversationRepository:
         user_id: uuid.UUID,
         limit: int,
         updated_before: datetime | None = None,
+        pinned: bool | None = None,
     ) -> Sequence[Conversation]:
         """Sidebar: mới nhất trước, phân trang bằng con trỏ `updated_before`.
 
         `limit` **không có giá trị mặc định** — hạn mức là cấu hình, không phải
         hằng số nằm trong `.py` (A3). Caller đọc nó từ nơi cấu hình sống.
+
+        `pinned` (T-S.8, §24.2b·S8): `None` = mọi hội thoại, như trước; `True`/
+        `False` = chỉ phần ghim / phần còn lại. Nó chỉ thêm một vế vào `WHERE`
+        — `ORDER BY` và con trỏ `updated_at` giữ nguyên (Cạm bẫy ② T-S.8), nên
+        hai trang của `pinned=False` nối nhau đúng như hai trang không lọc.
         """
         stmt = (
             select(Conversation)
@@ -111,6 +117,8 @@ class ConversationRepository:
         )
         if updated_before is not None:
             stmt = stmt.where(Conversation.updated_at < updated_before)
+        if pinned is not None:
+            stmt = stmt.where(Conversation.pinned.is_(pinned))
         return (await self._session.execute(stmt)).scalars().all()
 
     async def update_conversation(

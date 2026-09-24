@@ -202,6 +202,14 @@ class Settings(BaseSettings):
     #: Một biến chứ không phải hai (mặc định + trần): chưa màn hình nào cần xin
     #: nhiều hơn một trang, và hai nút vặn cho một con số là hai chỗ để lệch.
     CONVERSATION_PAGE_SIZE: int = Field(default=30, gt=0)
+    #: Trần của `GET /conversations?pinned=true` (§24.2b·S8, S14 — T-S.8): mục
+    #: "Đã ghim" của sidebar nhận **mọi** hội thoại ghim trong một response,
+    #: không con trỏ. Vượt trần ⇒ trả đúng ngần này hàng kèm `truncated: true`,
+    #: không phải lỗi. Là một *giới hạn* ⇒ ở đây (A3, §19.2 L4). Biến **riêng**,
+    #: không dùng `CONVERSATION_PAGE_SIZE`: ghim là tập người dùng tự chọn và
+    #: phải hiện đủ, còn trang là lát cắt của một danh sách vô hạn — hai con số
+    #: trả lời hai câu hỏi khác nhau.
+    CONVERSATION_PINNED_MAX: int = Field(default=100, gt=0)
     #: Số dòng tối đa một trang của `GET /admin/audit-logs` (§16.3, T-2.20) —
     #: vừa là mặc định, vừa là trần cho `?limit=`, cùng lối
     #: `CONVERSATION_PAGE_SIZE` ngay trên. Một biến **riêng** chứ không dùng

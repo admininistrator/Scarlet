@@ -209,13 +209,22 @@ async def _probe_one(provider: Provider) -> ProviderStatus:
         logger.info("provider '%s' khong phan hoi: %s", provider.label, str(exc)[:200])
         return ProviderStatus(
             available=False,
-            reason=(
-                NO_RESPONSE_REASON.format(label=provider.label)
-                if provider.user_visible
-                else HIDDEN_NO_RESPONSE_REASON
-            ),
+            reason=no_response_reason(provider, name_route=provider.user_visible),
         )
     return ProviderStatus(available=True, reason=None)
+
+
+def no_response_reason(provider: Provider, *, name_route: bool) -> str:
+    """Câu "không phản hồi" của một provider — một chỗ cho hai người đọc.
+
+    `name_route=True` chèn `label` của **đường đi** — đúng cho provider
+    `user_visible`, và cho màn quản trị (`GET /admin/models`, T-S.8): admin
+    phải đọc được "9Router … không phản hồi" vì health đo theo đường đi (§9.5).
+    `False` ⇒ câu chung của NQ-119, cho người dùng khi đường ấy bị ẩn.
+    """
+    if name_route:
+        return NO_RESPONSE_REASON.format(label=provider.label)
+    return HIDDEN_NO_RESPONSE_REASON
 
 
 async def _probe_all(cat: Catalog) -> dict[str, ProviderStatus]:

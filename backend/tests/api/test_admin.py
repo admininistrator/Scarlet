@@ -27,11 +27,13 @@ những gì bị `SET` thay vì chỉ trả `None` — B-141 và §11.3 là hai 
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from ipaddress import ip_address
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -42,8 +44,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionm
 
 from app.api.v1 import admin as admin_api
 from app.api.v1.admin import UpdateTierRequest
+from app.config import catalog
 from app.config.settings import settings
 from app.config.version import APP_VERSION
+from app.core import provider_health
 from app.core.access_token import encode_access_token
 from app.core.blacklist import user_key
 from app.core.deps import SESSION_COOKIE_NAME
@@ -83,6 +87,7 @@ TIERS_PATH = "/api/v1/admin/tiers"
 TIER_PATH = "/api/v1/admin/tiers/{}"
 SYSTEM_PATH = "/api/v1/admin/system"
 AUDIT_PATH = "/api/v1/admin/audit-logs"
+MODELS_PATH = "/api/v1/admin/models"
 
 
 # ═══════════════════════════ hạ tầng của bộ test ════════════════════════════
@@ -682,6 +687,7 @@ async def _write_ledger(
     cost: str,
     confidence: CostConfidence,
     key_source: KeySource = KeySource.SYSTEM,
+    purpose: UsagePurpose = UsagePurpose.CHAT,
 ) -> None:
     async with session_factory() as session:
         await UsageEventRepository(session).record(
@@ -696,7 +702,7 @@ async def _write_ledger(
             cost_usd=Decimal(cost),
             cost_confidence=confidence,
             price_snapshot={},
-            purpose=UsagePurpose.CHAT,
+            purpose=purpose,
         )
         await session.commit()
 
@@ -926,6 +932,280 @@ async def test_usage_since_after_until_is_400(
     assert resp.status_code == 400
 
 
+# ═══════════ T-S.8 — `/admin/usage` tách theo `purpose` (§24.2b·S6) ═════════
+
+
+def _cost(split: dict[str, Any], column: str) -> Decimal:
+    return Decimal(split[column]["cost_usd"])
+
+
+def _assert_purposes_add_up(split: dict[str, Any]) -> None:
+    """Trong TỪNG cột, các việc cộng lại bằng đúng cột ấy — cả bốn con số."""
+    for column in ("metered", "unmetered"):
+        for field in ("cost_usd", "prompt_tokens", "completion_tokens", "events"):
+            parts = [
+                Decimal(str(split["by_purpose"][p.value][column][field])) for p in UsagePurpose
+            ]
+            assert sum(parts, Decimal(0)) == Decimal(str(split[column][field])), (column, field)
+
+
+def _open_window() -> dict[str, str]:
+    """Cửa sổ TƯỜNG MINH bao dòng vừa ghi — không dựa vào `until = now()` mặc định.
+
+    `created_at` là `now()` của Postgres (đồng hồ VM Docker Desktop), còn
+    `until` mặc định là đồng hồ của tiến trình pytest (WSL). Hai đồng hồ lệch
+    vài chục ms là đủ để dòng vừa ghi rơi ra ngoài `[since, until)` — B-290.
+    """
+    now = datetime.now(UTC)
+    return {
+        "since": (now - timedelta(days=1)).isoformat(),
+        "until": (now + timedelta(minutes=1)).isoformat(),
+    }
+
+
+async def _chat_and_title(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> uuid.UUID:
+    """Một user, ba dòng sổ: chat `exact` 0.1, chat `low` 0.2, đặt tên `exact` 0.02."""
+    await _admin(client, session_factory)
+    user_id = await _create_user(session_factory, UserStatus.ACTIVE)
+    for cost, confidence, purpose in (
+        ("0.1", CostConfidence.EXACT, UsagePurpose.CHAT),
+        ("0.2", CostConfidence.LOW, UsagePurpose.CHAT),
+        ("0.02", CostConfidence.EXACT, UsagePurpose.TITLE),
+    ):
+        await _write_ledger(
+            session_factory,
+            user_id=user_id,
+            model_id="m",
+            cost=cost,
+            confidence=confidence,
+            purpose=purpose,
+        )
+    return user_id
+
+
+async def test_usage_splits_by_purpose_on_totals_and_every_axis(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Việc ① của T-S.8: phần `title` ở tổng, theo ngày, theo user, theo model."""
+    user_id = await _chat_and_title(client, session_factory)
+
+    resp = await client.get(USAGE_PATH, params=_open_window())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    totals = body["totals"]
+    assert _cost(totals["by_purpose"]["title"], "metered") == Decimal("0.02")
+    assert _cost(totals["by_purpose"]["title"], "unmetered") == Decimal("0")
+    assert _cost(totals["by_purpose"]["chat"], "metered") == Decimal("0.1")
+    assert _cost(totals["by_purpose"]["chat"], "unmetered") == Decimal("0.2")
+    assert totals["by_purpose"]["title"]["metered"]["events"] == 1
+    # Hai cột C16 giữ NGHĨA cũ — tổng mọi việc, gồm cả lượt đặt tên.
+    assert _cost(totals, "metered") == Decimal("0.12")
+    assert _cost(totals, "unmetered") == Decimal("0.2")
+    _assert_purposes_add_up(totals)
+
+    rows = [
+        body["by_day"][0],
+        {h["key"]: h for h in body["by_user"]}[str(user_id)],
+        {h["key"]: h for h in body["by_model"]}["m"],
+    ]
+    for row in rows:
+        assert _cost(row["by_purpose"]["title"], "metered") == Decimal("0.02"), row["key"]
+        assert _cost(row, "metered") == Decimal("0.12"), row["key"]
+        _assert_purposes_add_up(row)
+    # Một khoá vẫn là MỘT hàng dù Postgres trả bốn ô cho nó.
+    assert len(body["by_day"]) == len(body["by_model"]) == 1
+
+
+async def test_usage_total_equals_ledger_sum_in_window(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """DoD dòng 3 ở tầng test: **tổng** vẫn bằng `SUM(cost_usd)` của cửa sổ, gồm cả `title`."""
+    await _chat_and_title(client, session_factory)
+    window = _open_window()
+    since, until = (datetime.fromisoformat(window[k]) for k in ("since", "until"))
+
+    body = (await client.get(USAGE_PATH, params=window)).json()
+
+    async with session_factory() as session:
+        ledger = (
+            await session.execute(
+                select(func.sum(UsageEvent.cost_usd)).where(
+                    UsageEvent.created_at >= since, UsageEvent.created_at < until
+                )
+            )
+        ).scalar_one()
+    assert _cost(body["totals"], "metered") + _cost(body["totals"], "unmetered") == ledger
+    assert ledger == Decimal("0.32")
+
+
+async def test_usage_purpose_without_rows_is_zero_not_missing(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Chưa có lượt đặt tên nào ⇒ `by_purpose.title` vẫn có mặt, bằng 0 — FE không đoán."""
+    await _admin(client, session_factory)
+    user_id = await _create_user(session_factory, UserStatus.ACTIVE)
+    await _write_ledger(
+        session_factory, user_id=user_id, model_id="m", cost="0.1", confidence=CostConfidence.EXACT
+    )
+
+    body = (await client.get(USAGE_PATH, params=_open_window())).json()
+
+    for split in (body["totals"], body["by_day"][0], body["by_model"][0], body["by_user"][0]):
+        assert _cost(split["by_purpose"]["title"], "metered") == Decimal("0")
+        assert split["by_purpose"]["title"]["metered"]["events"] == 0
+
+
+async def test_usage_key_source_filter_also_applies_to_purpose_split(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """`?key_source=byok` lọc cả phần tách theo việc — lượt đặt tên luôn là tiền `system`."""
+    await _chat_and_title(client, session_factory)
+    window = _open_window()
+
+    system = (await client.get(USAGE_PATH, params={**window, "key_source": "system"})).json()
+    byok = (await client.get(USAGE_PATH, params={**window, "key_source": "byok"})).json()
+
+    # Vế `system` khác 0 thì vế `byok` bằng 0 mới nói được điều gì.
+    assert _cost(system["totals"]["by_purpose"]["title"], "metered") == Decimal("0.02")
+    assert _cost(byok["totals"]["by_purpose"]["title"], "metered") == Decimal("0")
+    assert byok["by_day"] == []
+
+
+def test_purpose_split_fields_equal_UsagePurpose() -> None:
+    """`PurposeSplit` khai tay `chat`/`title`; enum mọc thêm việc thì test này đỏ."""
+    assert set(admin_api.PurposeSplit.model_fields) == {p.value for p in UsagePurpose}
+
+
+# ═══════════ T-S.8 — `GET /admin/models`: hãng + đường đi thật (NQ-119) ═════════
+
+
+async def _probe_ok(_provider: object) -> None:
+    return None
+
+
+async def _probe_down(_provider: object) -> None:
+    raise ConnectionError("Connection refused")
+
+
+@pytest.fixture
+def _fresh_catalog_and_health() -> Iterator[None]:
+    """Mỗi ca dọn catalog + bộ nhớ đo về như cũ — cả hai sống ở tầm module."""
+    provider_health.forget_all()
+    yield
+    catalog.reload(path=catalog.CATALOG_PATH)
+    provider_health.forget_all()
+
+
+async def _probe(monkeypatch: pytest.MonkeyPatch, probe: Any) -> None:
+    """Một lượt đo nền với `probe_provider` bị thay — đúng việc vòng nền của `api` làm."""
+    monkeypatch.setattr(provider_health, "probe_provider", probe)
+    await provider_health.refresh()
+
+
+@pytest.mark.usefixtures("_fresh_catalog_and_health")
+async def test_admin_models_carries_brand_AND_real_route_for_every_model(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Việc ③: từng model kèm hãng **và** đường đi thật — kể cả đường bị ẩn với người dùng."""
+    await _admin(client, session_factory)
+    await _probe(monkeypatch, _probe_ok)
+
+    resp = await client.get(MODELS_PATH)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    cat = catalog.get_catalog()
+    assert [m["id"] for m in body["models"]] == [
+        m.id for m in sorted(cat.models, key=lambda m: m.order)
+    ]
+    for out in body["models"]:
+        entry = next(m for m in cat.models if m.id == out["id"])
+        route = cat.providers[entry.provider]
+        assert out["provider"] == cat.display_provider(entry)
+        assert out["route"] == {
+            "id": entry.provider,
+            "label": route.label,
+            "user_visible": route.user_visible,
+            "availability": route.availability,
+        }
+        assert out["enabled"] is entry.enabled
+        assert out["health"] == {"available": True, "reason": None}
+    hidden = [m for m in body["models"] if not m["route"]["user_visible"]]
+    assert hidden, "catalog that phai con it nhat mot duong trung gian"
+    assert all(m["provider"] != m["route"]["label"] for m in hidden)
+    assert body["checked_at"] is not None
+    assert body["stale_after_s"] == settings.PROVIDER_HEALTH_TTL_S
+    # Địa chỉ hạ tầng không ra khỏi server, kể cả với admin.
+    assert "base_url" not in resp.text
+    assert "health_path" not in resp.text
+
+
+@pytest.mark.usefixtures("_fresh_catalog_and_health")
+async def test_admin_models_down_route_is_named_to_admin_but_not_to_users(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Đường `host-dependent` tắt ⇒ admin đọc được TÊN đường; `GET /models` vẫn câu chung."""
+    await _admin(client, session_factory)
+    await _probe(monkeypatch, _probe_down)
+
+    admin_body = (await client.get(MODELS_PATH)).json()
+    public = {m["id"]: m for m in (await client.get("/api/v1/models")).json()}
+
+    down = [m for m in admin_body["models"] if m["route"]["availability"] == "host-dependent"]
+    assert down, "catalog that phai con it nhat mot duong host-dependent"
+    for m in admin_body["models"]:
+        if m["route"]["availability"] == "host-dependent":
+            assert m["health"]["available"] is False
+            assert m["route"]["label"] in m["health"]["reason"]
+            if not m["route"]["user_visible"] and m["id"] in public:
+                assert m["route"]["label"] not in (public[m["id"]]["unavailable_reason"] or "")
+        else:
+            assert m["health"] == {"available": True, "reason": None}
+
+
+@pytest.mark.usefixtures("_fresh_catalog_and_health")
+async def test_admin_models_lists_disabled_model_that_GET_models_hides(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    await _admin(client, session_factory)
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
+    off = next(m for m in raw["models"] if not m.get("default"))
+    off["enabled"] = False
+    fixture = tmp_path / "model_catalog.json"
+    fixture.write_text(json.dumps(raw), encoding="utf-8")
+    catalog.reload(path=fixture)
+    await _probe(monkeypatch, _probe_ok)
+
+    admin_ids = {m["id"]: m for m in (await client.get(MODELS_PATH)).json()["models"]}
+    public_ids = {m["id"] for m in (await client.get("/api/v1/models")).json()}
+
+    assert admin_ids[off["id"]]["enabled"] is False
+    assert off["id"] not in public_ids
+
+
+@pytest.mark.usefixtures("_fresh_catalog_and_health")
+async def test_admin_models_before_first_probe_is_available_with_null_checked_at(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Chưa lượt đo nào ⇒ `checked_at: null`, mọi đường coi như sống (không biết ≠ đã tắt)."""
+    await _admin(client, session_factory)
+
+    body = (await client.get(MODELS_PATH)).json()
+
+    assert body["checked_at"] is None
+    assert all(m["health"] == {"available": True, "reason": None} for m in body["models"])
+
+
 # ═══════════════════════ POST /admin/catalog/reload (B-34) ══════════════════
 
 
@@ -958,6 +1238,7 @@ async def test_read_endpoints_leave_no_audit_rows(
 
     await client.get(USERS_PATH)
     await client.get(USAGE_PATH)
+    await client.get(MODELS_PATH)
 
     assert await _audit(session_factory) == []
 

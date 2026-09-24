@@ -1,4 +1,4 @@
-"""Admin panel — **cả mười một** endpoint của §18.5.
+"""Admin panel — **cả mười một** endpoint của §18.5, cộng một của §24.2b·S14.
 
     GET    /api/v1/admin/users                   danh sách, lọc theo status
     POST   /api/v1/admin/users/{id}/approve      pending_approval → active
@@ -6,7 +6,9 @@
     POST   /api/v1/admin/users/{id}/suspend      active → suspended
     PATCH  /api/v1/admin/users/{id}              tier · ghi đè hạn mức
     GET    /api/v1/admin/usage                   chi phí, TÁCH metered/unmetered
+                                                 · và theo purpose (T-S.8)
     POST   /api/v1/admin/catalog/reload          nạp lại model_catalog.json
+    GET    /api/v1/admin/models                  model + đường đi thật (T-S.8)
     GET    /api/v1/admin/tiers                   bảng hạn mức          (T-2.20)
     PATCH  /api/v1/admin/tiers/{name}            đổi hạn mức CẢ tier   (T-2.20)
     GET    /api/v1/admin/system                  hàng đợi · stream · health
@@ -161,12 +163,14 @@ from fastapi import APIRouter, Depends, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from app.config import catalog
+from app.config.catalog import Availability
 from app.config.settings import settings
 from app.config.version import APP_VERSION
 from app.core.blacklist import revoke_all_sessions, set_user_cutoff
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.health_checks import CachedChecks, CheckResult, run_checks
+from app.core.provider_health import ProviderStatus, no_response_reason, provider_statuses
 from app.core.queue import queue_depth
 from app.core.ratelimit import client_ip
 from app.core.redis import get_redis
@@ -177,6 +181,7 @@ from app.db.models import (
     AuditAction,
     CostConfidence,
     KeySource,
+    UsagePurpose,
     User,
     UserRole,
     UserStatus,
@@ -334,8 +339,37 @@ class MeteredSplit(BaseModel):
     unmetered: UsageAmount
 
 
-class UsageRow(MeteredSplit):
-    """Một hàng của bảng chi phí: một khoá × hai cột."""
+class PurposeSplit(BaseModel):
+    """T-S.8 (§24.2b·S6) — hai cột C16, tách thêm theo **việc** lượt gọi phục vụ.
+
+    `chat` là lượt trả lời người dùng; `title` là lượt đặt tên hội thoại tự
+    động — đi bằng tiền hệ thống mà **không** trừ quota ai, nên người vận hành
+    phải thấy nó như một khoản riêng ("Đặt tên" của màn Chi phí, T-S.17).
+
+    Hai trường cố định chứ không một `dict`: FE khai kiểu được, và mỗi phần
+    vẫn là một `MeteredSplit` — tách theo việc không được là cửa sau để cộng
+    hai cột C16 lại. Tên trường là đúng giá trị của `UsagePurpose`;
+    `tests/api/test_admin.py` khẳng định đẳng thức ấy, nên ngày enum mọc thêm
+    một việc mà ở đây quên là một test đỏ.
+    """
+
+    chat: MeteredSplit
+    title: MeteredSplit
+
+
+class UsageSplit(MeteredSplit):
+    """Hai cột C16 + phần tách theo `purpose` của cùng hai cột ấy (T-S.8).
+
+    `metered`/`unmetered` **giữ nguyên nghĩa** trước T-S.8: tổng mọi việc.
+    `by_purpose` cộng lại (trong từng cột) bằng đúng hai cột ấy — cả hai đến
+    từ cùng một câu `GROUP BY`, xem `UsageEventRepository._aggregate`.
+    """
+
+    by_purpose: PurposeSplit
+
+
+class UsageRow(UsageSplit):
+    """Một hàng của bảng chi phí: một khoá × hai cột (× hai việc)."""
 
     key: str
     #: Nhãn đọc được của khoá (email, ở bảng theo user); `None` ở ba trục kia.
@@ -355,7 +389,7 @@ class AdminUsageOut(BaseModel):
     #: `None` = mọi nguồn. **`by_key_source` không bao giờ bị lọc** — xem
     #: `admin_usage` và `UsageEventRepository.admin_by_key_source`.
     key_source: KeySource | None
-    totals: MeteredSplit
+    totals: UsageSplit
     by_day: list[UsageRow]
     by_user: list[UsageRow]
     by_model: list[UsageRow]
@@ -365,6 +399,62 @@ class AdminUsageOut(BaseModel):
 class ReloadCatalogOut(BaseModel):
     models: int
     version: int
+
+
+# ─────────────────── T-S.8 · §16.3 màn "Model" thấy đường đi thật ────────────
+
+
+class AdminModelRoute(BaseModel):
+    """Đường đi THẬT của một model — `providers{}` của catalog (§9.2, NQ-119).
+
+    Đây là thứ `GET /models` cố ý giấu với người dùng (`user_visible: false`)
+    mà màn quản trị phải thấy: health đo theo đường đi (§9.5), nên "Google AI
+    xám" chỉ đọc được khi biết nó đi qua 9Router. **Không** có `base_url`,
+    `health_path` hay header nào: địa chỉ hạ tầng nội bộ không cần ra khỏi
+    server để admin biết đường nào hỏng.
+    """
+
+    #: Khoá provider trong `model_catalog.json` (`ninerouter`).
+    id: str
+    #: Nhãn đường đi (`9Router (local)`) — `providers[].label`.
+    label: str
+    #: `false` = đường trung gian, tên nó không tới người dùng (NQ-119).
+    user_visible: bool
+    #: `host-dependent` = được đo nền; `always` = không đo, luôn coi là sống
+    #: (xem `core/provider_health.py`, khung "CHỈ ĐO PROVIDER host-dependent").
+    availability: Availability
+
+
+class AdminModelHealth(BaseModel):
+    """Lượt đo nền gần nhất của **đường đi** của model (T-S.4, NQ-113)."""
+
+    available: bool
+    #: Câu tiếng Việt gọi đúng tên đường đi; `None` khi `available`.
+    reason: str | None
+
+
+class AdminModelOut(BaseModel):
+    id: str
+    display_name: str
+    #: Tên HÃNG — đúng chuỗi người dùng thấy ở `GET /models` (`Catalog.display_provider`).
+    provider: str
+    route: AdminModelRoute
+    health: AdminModelHealth
+    #: `false` = có trong catalog nhưng tắt, nên vắng mặt ở `GET /models`.
+    #: Chỉ đọc: đổi nó là sửa `model_catalog.json` rồi tải lại (B-258).
+    enabled: bool
+
+
+class AdminModelListOut(BaseModel):
+    """`GET /admin/models` — mọi model của catalog, kể cả model đang tắt."""
+
+    models: list[AdminModelOut]
+    #: Lúc lượt đo nền **bắt đầu** — cùng nghĩa `checked_at` của `GET /models`.
+    #: `None` = chưa lượt nào xong kể từ khi `api` khởi động (khi ấy mọi đường
+    #: coi như sống: không biết ≠ đã tắt).
+    checked_at: datetime | None
+    #: `PROVIDER_HEALTH_TTL_S` — nhịp đo nền, giây (cùng trường của `GET /models`).
+    stale_after_s: int
 
 
 # ────────────────────────── T-2.20 · §10.4 hàng `tiers` ─────────────────────
@@ -531,50 +621,96 @@ class AuditLogListOut(BaseModel):
 # ═══════════════════════════════ phần dùng chung ════════════════════════════
 
 _ZERO = UsageAmount(cost_usd=Decimal(0), prompt_tokens=0, completion_tokens=0, events=0)
+_ZERO_SPLIT = MeteredSplit(metered=_ZERO, unmetered=_ZERO)
+
+#: Đường chưa có trong lượt đo gần nhất (chưa lượt nào xong, hoặc provider vừa
+#: thêm bằng `catalog/reload`) — coi như sống, cùng hướng hỏng với `_AVAILABLE`
+#: của `api/v1/models.py`: không biết không phải là đã tắt.
+_NOT_PROBED = ProviderStatus(available=True, reason=None)
 
 #: B-192 — một lượt `run_checks()` dùng lại trong `ADMIN_HEALTH_CACHE_TTL_S`
 #: giây cho màn "Hệ thống". Xem `CachedChecks` cho lý do nhớ ở server.
 _system_health = CachedChecks()
 
 
+def _add(parts: list[UsageAmount]) -> UsageAmount:
+    return UsageAmount(
+        cost_usd=sum((p.cost_usd for p in parts), Decimal(0)),
+        prompt_tokens=sum(p.prompt_tokens for p in parts),
+        completion_tokens=sum(p.completion_tokens for p in parts),
+        events=sum(p.events for p in parts),
+    )
+
+
+def _sum_splits(splits: list[MeteredSplit]) -> MeteredSplit:
+    """Cộng nhiều ô hai cột. Cộng **trong từng cột**, không bao giờ qua cột kia."""
+    return MeteredSplit(
+        metered=_add([s.metered for s in splits]),
+        unmetered=_add([s.unmetered for s in splits]),
+    )
+
+
+def _split_fields(by_purpose: dict[UsagePurpose, MeteredSplit]) -> dict[str, Any]:
+    """Phần tách theo việc → ba trường của `UsageSplit` (T-S.8).
+
+    Hai cột là **tổng các việc** — tính từ đúng các phần sẽ ra response, nên
+    `by_purpose` cộng lại luôn bằng hai cột mà không cần ai giữ lời hứa ấy.
+    Việc vắng mặt trong dữ liệu ra ô `0`, không vắng trường: FE đọc
+    `by_purpose.title` ở mọi hàng.
+    """
+    parts = {p: by_purpose.get(p, _ZERO_SPLIT) for p in UsagePurpose}
+    total = _sum_splits(list(parts.values()))
+    return {
+        "metered": total.metered,
+        "unmetered": total.unmetered,
+        "by_purpose": PurposeSplit(**{p.value: split for p, split in parts.items()}),
+    }
+
+
 def _merge_buckets(buckets: list[UsageBucket]) -> list[UsageRow]:
-    """Hai dòng SQL của cùng một khoá (một `exact`, một `low`) → một hàng hai cột.
+    """Tới bốn dòng SQL của cùng một khoá (`exact`/`low` × `chat`/`title`) → một hàng.
 
     `OrderedDict` giữ nguyên thứ tự Postgres đã sắp (`ORDER BY` của
     `_aggregate`), nên biểu đồ theo ngày ra đúng thứ tự ngày mà không cần sắp
     lại lần thứ hai ở FE.
     """
-    row: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    labels: OrderedDict[str, str | None] = OrderedDict()
+    cells: dict[str, dict[UsagePurpose, dict[str, UsageAmount]]] = {}
     for b in buckets:
-        entry = row.setdefault(
-            b.key,
-            {"key": b.key, "label": b.label, "metered": _ZERO, "unmetered": _ZERO},
-        )
-        if b.label is not None:
-            entry["label"] = b.label
+        if labels.get(b.key) is None:
+            labels[b.key] = b.label
         column = "metered" if b.confidence is CostConfidence.EXACT else "unmetered"
-        entry[column] = UsageAmount(
+        cells.setdefault(b.key, {}).setdefault(b.purpose, {})[column] = UsageAmount(
             cost_usd=b.cost_usd,
             prompt_tokens=b.prompt_tokens,
             completion_tokens=b.completion_tokens,
             events=b.events,
         )
-    return [UsageRow(**v) for v in row.values()]
-
-
-def _total(rows: list[UsageRow]) -> MeteredSplit:
-    """Tổng của một trục. Cộng **trong từng cột**, không bao giờ qua cột kia."""
-
-    def sum_field(field: str) -> UsageAmount:
-        parts = [getattr(r, field) for r in rows]
-        return UsageAmount(
-            cost_usd=sum((p.cost_usd for p in parts), Decimal(0)),
-            prompt_tokens=sum(p.prompt_tokens for p in parts),
-            completion_tokens=sum(p.completion_tokens for p in parts),
-            events=sum(p.events for p in parts),
+    return [
+        UsageRow(
+            key=key,
+            label=label,
+            **_split_fields(
+                {
+                    purpose: MeteredSplit(
+                        metered=columns.get("metered", _ZERO),
+                        unmetered=columns.get("unmetered", _ZERO),
+                    )
+                    for purpose, columns in cells[key].items()
+                }
+            ),
         )
+        for key, label in labels.items()
+    ]
 
-    return MeteredSplit(metered=sum_field("metered"), unmetered=sum_field("unmetered"))
+
+def _total(rows: list[UsageRow]) -> UsageSplit:
+    """Tổng của một trục — trong từng cột **và** trong từng việc (T-S.8)."""
+    return UsageSplit(
+        **_split_fields(
+            {p: _sum_splits([getattr(r.by_purpose, p.value) for r in rows]) for p in UsagePurpose}
+        )
+    )
 
 
 async def _get_user(users: UserRepository, user_id: uuid.UUID) -> User:
@@ -919,6 +1055,13 @@ async def admin_usage(
     `totals` là tổng của CẢ cửa sổ, và một tổng không chia trang được — trang 2
     của một báo cáo tổng hợp là một câu hỏi không có nghĩa.
 
+    **Tách theo `purpose`** (T-S.8, §24.2b·S6): mỗi hàng và `totals` mang thêm
+    `by_purpose.chat` / `by_purpose.title`, mỗi phần vẫn là hai cột C16. Hai
+    cột `metered`/`unmetered` **giữ nguyên nghĩa** — tổng mọi việc — nên màn
+    hình cũ đọc đúng như trước, và biểu đồ vẫn chỉ hai chuỗi (§24.2b·S6). Lượt
+    đặt tên không trừ quota ai nhưng tiêu tiền thật, nên nó **có** trong mọi
+    tổng ở đây; bộ lọc `purpose='chat'` chỉ sống ở ba câu dựng lại quota.
+
     Raises:
         ApiError 400 `BAD_REQUEST`: `since >= until`, hoặc cửa sổ dài quá trần.
     """
@@ -998,6 +1141,56 @@ async def reload_catalog(
         )
         await session.commit()
     return ReloadCatalogOut(models=len(cat.models), version=cat.version)
+
+
+@router.get("/models", status_code=status.HTTP_200_OK, response_model=AdminModelListOut)
+async def admin_models() -> AdminModelListOut:
+    """Màn "Model" của §16.3 — từng model kèm hãng **và** đường đi thật (T-S.8).
+
+    §24.2b·S3a, NQ-119: từ T-S.3 `GET /models` không còn nói tên đường trung
+    gian với ai, kể cả admin — endpoint này là chỗ trả lại nó, sau cánh cửa
+    `require_admin` của `include_router`. Cùng nguồn với `GET /models` ở cả
+    ba thứ: catalog (`get_catalog`), hãng (`Catalog.display_provider`), và
+    lượt đo nền (`provider_statuses`, chỉ đọc bộ nhớ — không `await` mạng nào,
+    NQ-113). Hai màn hình nói hai chuyện khác nhau về cùng một provider là cách
+    chắc nhất để không ai tin màn nào.
+
+    Khác `GET /models` ở ba chỗ, cả ba vì người đọc là người vận hành: model
+    **đang tắt** vẫn có mặt (`enabled: false`); `reason` gọi đúng tên đường đi
+    kể cả khi nó ẩn với người dùng; và `route` mang khoá + nhãn của đường.
+
+    **Không ghi sổ**, cùng luật mọi endpoint `GET` của file này.
+    """
+    cat = catalog.get_catalog()
+    snapshot = provider_statuses()
+    ordered = sorted(cat.models, key=lambda m: m.order)
+    models: list[AdminModelOut] = []
+    for m in ordered:
+        route = cat.providers[m.provider]
+        available = snapshot.statuses.get(m.provider, _NOT_PROBED).available
+        models.append(
+            AdminModelOut(
+                id=m.id,
+                display_name=m.display_name,
+                provider=cat.display_provider(m),
+                route=AdminModelRoute(
+                    id=m.provider,
+                    label=route.label,
+                    user_visible=route.user_visible,
+                    availability=route.availability,
+                ),
+                health=AdminModelHealth(
+                    available=available,
+                    reason=None if available else no_response_reason(route, name_route=True),
+                ),
+                enabled=m.enabled,
+            )
+        )
+    return AdminModelListOut(
+        models=models,
+        checked_at=snapshot.checked_at,
+        stale_after_s=settings.PROVIDER_HEALTH_TTL_S,
+    )
 
 
 # ═════════════════════ T-2.20 — bốn endpoint còn lại của §18.5 ══════════════
