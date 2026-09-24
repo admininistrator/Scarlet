@@ -109,8 +109,31 @@ async def test_failing_host_dependent_is_unavailable_with_reason(
     nr = status[NINEROUTER]
     assert nr.available is False
     assert nr.reason is not None
-    # Câu lấy tên provider từ CATALOG, không từ một literal trong `.py`.
-    assert catalog.get_catalog().providers[NINEROUTER].label in nr.reason
+    # T-S.3 / NQ-119: 9Router là đường trung gian (`user_visible: false`) ⇒ câu
+    # chung, KHÔNG chèn tên đường đi.
+    assert catalog.get_catalog().providers[NINEROUTER].user_visible is False
+    assert nr.reason == provider_health.HIDDEN_NO_RESPONSE_REASON
+    assert catalog.get_catalog().providers[NINEROUTER].label not in nr.reason
+
+
+async def test_visible_host_dependent_reason_takes_label_from_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Provider `user_visible` thì câu vẫn chèn tên — lấy từ CATALOG, không literal."""
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
+    raw["providers"][NINEROUTER]["user_visible"] = True
+    catalog.reload(path=_write_catalog(tmp_path, raw))
+
+    async def failing_probe(provider: Provider) -> None:
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
+
+    status = await provider_health.provider_statuses()
+
+    reason = status[NINEROUTER].reason
+    assert reason is not None
+    assert catalog.get_catalog().providers[NINEROUTER].label in reason
 
 
 async def test_live_host_dependent_has_no_reason(

@@ -16,14 +16,23 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Self
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from app.config.settings import HttpUrlStr
 
@@ -33,6 +42,75 @@ logger = logging.getLogger(__name__)
 #: môi trường vì đây là một cấu trúc thư mục cố định, không phải giá trị hạ
 #: tầng thay đổi theo triển khai.
 CATALOG_PATH = Path(__file__).resolve().parents[3] / "config" / "model_catalog.json"
+
+#: Phiên bản schema mà backend này đọc (§24.2b·S3, S14). v4 thêm
+#: `providers[].user_visible`, `models[].display_provider`, `models[].reasoning`
+#: và `title_model` — xem `Catalog._version_supported` cho lý do một file khác
+#: phiên bản phải chết ngay ở dòng đầu thay vì ở trường lạ đầu tiên.
+CATALOG_VERSION = 4
+
+#: Bộ từ vựng cố định của mức suy luận (§24.2b·S3b, NQ-118). Nhãn hiển thị
+#: (Off · Low · Medium · High · Extra High · Max) sống trong `vi.json`, không ở
+#: đây và không trong catalog: catalog chỉ được **chọn** trong bộ này, nên FE
+#: luôn có sẵn nhãn cho mọi `id` backend trả ra.
+REASONING_LEVELS: tuple[str, ...] = ("off", "low", "medium", "high", "xhigh", "max")
+
+#: Khung giá của một model bán theo giờ (B-35): `peak` là bảng giá ở mức trên
+#: cùng của `pricing`, `off_peak` là `pricing.off_peak`. Tên khớp đúng hai khoá
+#: ấy trong JSON.
+PriceWindow = Literal["peak", "off_peak"]
+
+
+class _JsonFloat(float):
+    """Một số thực đọc từ `model_catalog.json`, nhớ nguyên văn chữ số trong file.
+
+    §24.2b·S3c + Cạm bẫy ③ của T-S.3: tiền là **chuỗi** từ catalog tới màn
+    hình. `json.loads` mặc định biến `0.30` thành `float` 0.3, và từ đó không
+    còn đường nào về lại `"0.30"` mà người điền giá đã viết. Lớp con của
+    `float` chứ không `Decimal`: mọi chỗ đang nhân tiền (`quota/estimator.py`,
+    `quota/meter.py`) và mọi tham số `reasoning.params` trộn vào body request
+    vẫn nhận một `float` bình thường — `Decimal` lọt vào `params` là một
+    `TypeError` của `json.dumps` ngay trên đường gọi model.
+    """
+
+    text: str
+
+    def __new__(cls, text: str) -> _JsonFloat:
+        number = super().__new__(cls, text)
+        number.text = text
+        return number
+
+
+class _UsdText(BaseModel):
+    """Giữ chữ số gốc của mọi giá `*_per_1m` để `usd()` trả lại đúng chuỗi ấy.
+
+    Model đến từ file (`_read_and_validate`) nhớ nguyên văn; model dựng bằng
+    `float` Python (test, `ManualPricing.as_rates`) rơi về dạng thập phân ngắn
+    nhất của số đó — không bao giờ là `0.30000000000000004`.
+    """
+
+    _usd_text: dict[str, Decimal] = PrivateAttr(default_factory=dict)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _remember_usd_text(cls, data: Any, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        rates = handler(data)
+        if isinstance(data, dict):
+            rates._usd_text = {
+                key: Decimal(value.text)
+                for key, value in data.items()
+                if isinstance(value, _JsonFloat)
+            }
+        return rates
+
+    def usd(self, field: str) -> str | None:
+        """Giá USD / 1M token của `field` dưới dạng chuỗi — `None` khi trống."""
+        value = getattr(self, field)
+        if value is None:
+            return None
+        exact = self._usd_text.get(field, Decimal(str(value)))
+        return format(exact, "f")
+
 
 #: Mẫu số của mọi con số giá trong catalog (`*_per_1m`). Sống ở đây chứ không
 #: ở `app/quota/`: đơn vị là một thuộc tính của **dữ liệu**, và hai chỗ tính
@@ -105,6 +183,13 @@ class Provider(BaseModel):
     #: đường, một chỗ để soi (C20). Header xác thực được gắn **sau** khối này
     #: nên một `Authorization` viết nhầm vào đây cũng không ghi đè được nó.
     extra_headers: dict[str, str] = Field(default_factory=dict)
+    #: `false` = đây là **đường đi** (9Router, Sub2API), không phải hãng làm
+    #: ra model (§24.2b·S3a, NQ-119). Tên nó không bao giờ tới người dùng:
+    #: model của nó **phải** khai `display_provider`
+    #: (`Catalog._hidden_provider_needs_display_provider`), `GET /models`
+    #: không trả khoá của nó, và `unavailable_reason` dùng một câu chung. Màn
+    #: quản trị vẫn thấy đường đi thật qua `GET /admin/models` (T-S.8).
+    user_visible: bool = True
 
 
 class PricingWindow(BaseModel):
@@ -186,7 +271,7 @@ class PricingSchedule(BaseModel):
         return any(window.contains(local.time()) for window in self.windows)
 
 
-class PricingRates(BaseModel):
+class PricingRates(_UsdText):
     """Bốn mức giá của một model, USD trên **1 triệu token** (B-35).
 
     Ba mức đầu là ba khoản của công thức §10.2 (`in*in_price +
@@ -245,7 +330,7 @@ class Pricing(PricingRates):
     off_peak: OffPeakPricing | None = None
 
 
-class ManualPricing(BaseModel):
+class ManualPricing(_UsdText):
     """Giá **ước lượng do người vận hành tự điền** cho một model (B-65, §9.5).
 
     Khác `Pricing` ở ngay chỗ quan trọng nhất: `Pricing` là giá **niêm yết**
@@ -311,12 +396,72 @@ class ManualPricing(BaseModel):
         """
         if self.input_per_1m is None or self.output_per_1m is None:
             return None
-        return PricingRates(
+        rates = PricingRates(
             input_per_1m=self.input_per_1m,
             output_per_1m=self.output_per_1m,
             cached_input_per_1m=self.cached_input_per_1m,
             cache_write_per_1m=self.cache_write_per_1m,
         )
+        rates._usd_text = dict(self._usd_text)
+        return rates
+
+
+class ReasoningOption(BaseModel):
+    """Một mức suy luận của một model (§24.2b·S3b, NQ-118).
+
+    **Không mức nào được vào đây nếu chưa đo** (T-S.2): `drop_params: true` của
+    LiteLLM biến một tham số sai thành "không có tác dụng" chứ không thành lỗi.
+
+    `params` được trộn **nguyên văn** vào body request qua đường `extra` của
+    `LLMClient.stream` (§9.1) — code không biết tên provider nào (A3), và
+    `params` **không bao giờ** rời backend: nó có thể mang cả ngân sách token,
+    FE chỉ cần `id`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Một phần tử của `REASONING_LEVELS` — kiểm ở `ModelEntry` để thông báo
+    #: lỗi gọi được đúng `id` của model.
+    id: str
+    #: Bắt buộc, kể cả khi rỗng: `{}` là "mức này không gửi thêm gì" viết ra
+    #: có chủ ý (ví dụ mức chọn bằng `alias`), không phải một trường bị quên.
+    params: dict[str, Any]
+    #: Đường BYOK gọi thẳng provider, nơi LiteLLM không có mặt để dịch. Vắng
+    #: mặt ⇒ BYOK dùng chính `params` (T-S.2 đo: `thinking` gốc chạy trên cả
+    #: hai đường cho Haiku và DeepSeek).
+    byok_params: dict[str, Any] | None = None
+    #: Tên model khác trong `config/litellm.config.yaml` — 9Router chọn mức
+    #: bằng **tên model**, không bằng tham số. Có mặt trong file ấy hay không
+    #: là việc của `tests/config/test_catalog.py` (đọc cả hai file).
+    alias: str | None = None
+    #: Anthropic từ chối `temperature` ≠ 1 khi bật thinking (T-S.2: `400` trên
+    #: cả hai đường) ⇒ mức ấy không gửi `temperature`.
+    omit_temperature: bool = False
+
+
+class Reasoning(BaseModel):
+    """Khối `reasoning` của một model: các mức được phép và mức mặc định."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default: str
+    options: list[ReasoningOption] = Field(min_length=1)
+
+    def option(self, level_id: str) -> ReasoningOption | None:
+        """Mức có `id` này, hoặc `None` nếu model không khai nó."""
+        return next((o for o in self.options if o.id == level_id), None)
+
+
+class TitleModel(BaseModel):
+    """Model đặt tên hội thoại (§24.2b·S3d, S6) — đổi model là sửa một dòng dữ liệu."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str
+    #: Một `id` trong `reasoning.options` của chính model ấy; `None` = không
+    #: gửi tham số suy luận nào.
+    reasoning: str | None = None
+    max_output: int = Field(gt=0)
 
 
 class ModelEntry(BaseModel):
@@ -325,6 +470,11 @@ class ModelEntry(BaseModel):
     id: str
     display_name: str
     provider: str
+    #: Hãng làm ra model ("Google AI", "xAI"…) — tên người dùng thấy thay cho
+    #: `providers[].label` (§24.2b·S3a, NQ-119). **Bắt buộc** khi provider có
+    #: `user_visible: false`; với provider khác thì tuỳ chọn, vắng mặt ⇒ dùng
+    #: `label` của provider. Xem `Catalog.display_provider`.
+    display_provider: str | None = Field(default=None, min_length=1)
     upstream_model: str
     capabilities: list[str] = Field(default_factory=list)
     context_window: int = Field(gt=0)
@@ -335,6 +485,34 @@ class ModelEntry(BaseModel):
     default: bool = False
     order: int = 0
     badge: str | None = None
+    #: Vắng mặt ⇒ model không có tuỳ chọn suy luận (picker hiện hàng mờ).
+    reasoning: Reasoning | None = None
+
+    @model_validator(mode="after")
+    def _reasoning_consistent(self) -> ModelEntry:
+        """Ba luật của khối `reasoning`, mỗi thông báo gọi đúng `id` của model.
+
+        Kiểm ở đây chứ không bằng `Literal` trên `ReasoningOption.id`: lỗi của
+        `Literal` chỉ in chỉ số mảng (`models.2.reasoning.options.0.id`), và
+        người sửa catalog phải tự đếm xem model thứ ba là model nào.
+        """
+        if self.reasoning is None:
+            return self
+        ids = [o.id for o in self.reasoning.options]
+        unknown = [i for i in ids if i not in REASONING_LEVELS]
+        if unknown:
+            raise ValueError(
+                f"model '{self.id}': reasoning.options[].id {unknown} không thuộc bộ "
+                f"từ vựng {list(REASONING_LEVELS)}"
+            )
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"model '{self.id}': reasoning.options có id trùng nhau: {ids}")
+        if self.reasoning.default not in ids:
+            raise ValueError(
+                f"model '{self.id}': reasoning.default '{self.reasoning.default}' không có "
+                f"trong reasoning.options {ids}"
+            )
+        return self
 
     @property
     def is_metered(self) -> bool:
@@ -387,17 +565,54 @@ class ModelEntry(BaseModel):
         return self
 
 
+@dataclass(frozen=True, slots=True)
+class WindowedRates:
+    """Một bảng giá kèm khung giờ của nó — `window` là `None` khi model bán một giá."""
+
+    window: PriceWindow | None
+    rates: PricingRates
+
+
 class Catalog(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int
     providers: dict[str, Provider]
     models: list[ModelEntry]
+    #: Model đặt tên hội thoại (§24.2b·S3d). Bắt buộc từ v4.
+    title_model: TitleModel
     #: Vắng mặt = không model nào bán theo khung giờ (B-35).
     pricing_schedules: dict[str, PricingSchedule] = Field(default_factory=dict)
     #: Giá người vận hành tự điền, khoá theo `ModelEntry.id` (B-65). Vắng mặt =
     #: chưa model nào cần tới. Xem `ManualPricing`.
     manual_pricing: dict[str, ManualPricing] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _version_supported(cls, raw: object) -> object:
+        """Sai phiên bản ⇒ một thông báo nói đúng chuyện ấy, trước mọi trường khác.
+
+        `extra="forbid"` đã làm catalog v4 chết trên backend cũ (Cạm bẫy ④ của
+        T-S.3) — đúng, nhưng lỗi nó in là "Extra inputs are not permitted" ở
+        `user_visible`, không nói gì về phiên bản. Backend cũ thì không sửa
+        được nữa; từ backend này trở đi, lệch phiên bản theo **cả hai** chiều
+        là một câu đọc được ngay.
+        """
+        if isinstance(raw, dict) and "version" in raw and raw["version"] != CATALOG_VERSION:
+            found = raw["version"]
+            if isinstance(found, int) and found < CATALOG_VERSION:
+                hint = (
+                    f"backend này (từ T-S.3) cần catalog v{CATALOG_VERSION}: thêm "
+                    f"providers[].user_visible, models[].display_provider, "
+                    f"models[].reasoning, title_model — xem docs/RUNBOOK-them-provider.md"
+                )
+            else:
+                hint = (
+                    f"catalog v{found} cần backend mới hơn — backend này chỉ đọc "
+                    f"catalog v{CATALOG_VERSION} (từ T-S.3)"
+                )
+            raise ValueError(f"model_catalog.json khai version {found!r}: {hint}")
+        return raw
 
     @field_validator("manual_pricing", mode="before")
     @classmethod
@@ -452,6 +667,44 @@ class Catalog(BaseModel):
                     f"model '{m.id}': provider '{m.provider}' không tồn tại trong "
                     f"providers ({sorted(self.providers)})"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _hidden_provider_needs_display_provider(self) -> Catalog:
+        """Đường trung gian không có tên để hiện ⇒ model của nó phải tự khai hãng.
+
+        Không có luật này thì `display_provider()` rơi về `label` — tức đúng
+        cái tên NQ-119 cấm tới người dùng — một cách im lặng. Cùng khuôn A4:
+        thiếu thì không boot và in đúng `id` của model thiếu.
+        """
+        for m in self.models:
+            provider = self.providers.get(m.provider)
+            if provider is not None and not provider.user_visible and m.display_provider is None:
+                raise ValueError(
+                    f"model '{m.id}': provider '{m.provider}' có user_visible=false nên "
+                    f"model phải khai display_provider (hãng gốc hiện cho người dùng) — NQ-119"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _title_model_usable(self) -> Catalog:
+        """`title_model` trỏ vào một model có thật, đang bật, với một mức nó có."""
+        title = self.title_model
+        model = next((m for m in self.models if m.id == title.model), None)
+        if model is None:
+            raise ValueError(
+                f"title_model.model '{title.model}' không khớp model nào trong catalog "
+                f"({sorted(m.id for m in self.models)})"
+            )
+        if not model.enabled:
+            raise ValueError(f"title_model.model '{title.model}' đang enabled=false")
+        if title.reasoning is not None and (
+            model.reasoning is None or model.reasoning.option(title.reasoning) is None
+        ):
+            raise ValueError(
+                f"title_model.reasoning '{title.reasoning}' không có trong reasoning.options "
+                f"của model '{title.model}'"
+            )
         return self
 
     @model_validator(mode="after")
@@ -536,18 +789,47 @@ class Catalog(BaseModel):
         làm mất giá của những lượt sinh nó đã chạy xong — A7 nói lịch sử chi
         phí không đổi theo catalog.
         """
+        windows = self.price_windows(model_id, at)
+        return windows[0].rates if windows else None
+
+    def price_windows(self, model_id: str, at: datetime | None = None) -> tuple[WindowedRates, ...]:
+        """Mọi bảng giá của một model, bảng **đang áp dụng** tại `at` đứng đầu.
+
+        Rỗng = không có giá ở cả hai nguồn. Một phần tử (`window=None`) = model
+        bán một giá. Hai phần tử = model bán theo khung giờ (B-35): phần tử đầu
+        là khung đang áp dụng, phần tử sau là khung còn lại — đúng thứ Model
+        Picker hiện (§24.2b·S3c). Múi giờ là của catalog, không của FE: FE
+        không tự so giờ (NQ-120).
+
+        `effective_pricing()` là phần tử đầu của hàm này, nên hai câu trả lời
+        "giá bây giờ là bao nhiêu" (cửa chặn quota và picker) không lệch nhau
+        được.
+        """
         model = next((m for m in self.models if m.id == model_id), None)
         if model is None:
-            return None
+            return ()
         if model.pricing is None:
             manual = self.manual_pricing.get(model_id)
-            return manual.as_rates() if manual is not None else None
+            rates = manual.as_rates() if manual is not None else None
+            return () if rates is None else (WindowedRates(window=None, rates=rates),)
         off_peak = model.pricing.off_peak
         if off_peak is None:
-            return model.pricing
+            return (WindowedRates(window=None, rates=model.pricing),)
         schedule = self.pricing_schedules[off_peak.schedule]
         moment = at if at is not None else datetime.now(UTC)
-        return model.pricing if schedule.contains(moment) else off_peak
+        peak = WindowedRates(window="peak", rates=model.pricing)
+        cheap = WindowedRates(window="off_peak", rates=off_peak)
+        return (peak, cheap) if schedule.contains(moment) else (cheap, peak)
+
+    def display_provider(self, model: ModelEntry) -> str:
+        """Tên hãng người dùng thấy cho model này (§24.2b·S3a, NQ-119).
+
+        `display_provider` của model nếu có, nếu không thì `label` của
+        provider. `_hidden_provider_needs_display_provider` bảo đảm nhánh sau
+        chỉ xảy ra với provider `user_visible` — tên đường trung gian không có
+        lối nào ra đây.
+        """
+        return model.display_provider or self.providers[model.provider].label
 
     def pricing_source(self, model_id: str) -> PricingSource:
         """Con số giá của model này **đến từ đâu** — giá niêm yết hay giá đoán.
@@ -659,7 +941,8 @@ class Catalog(BaseModel):
 
 
 def _read_and_validate(path: Path) -> Catalog:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    # `_JsonFloat` giữ chữ số gốc của mọi giá — xem docstring của nó.
+    raw = json.loads(path.read_text(encoding="utf-8"), parse_float=_JsonFloat)
     return Catalog.model_validate(raw)
 
 

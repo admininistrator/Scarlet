@@ -58,6 +58,9 @@ EOF
 
 ### ☐ Bước 3 — `config/model_catalog.json`, **`"enabled": false`**
 
+File đang là **catalog v4** (`"version": 4`, T-S.3). Backend chỉ đọc đúng v4:
+khai số khác thì app không boot và in rõ phiên bản nào cần backend nào.
+
 ```jsonc
 "foo": {
   "label": "Foo AI",
@@ -66,26 +69,32 @@ EOF
   "byok_supported": false,
   "cost_reporting": "exact",             // "unreliable" nếu là gateway (§9.5)
   "auth_style": "bearer",                // bearer | x-api-key | query — C44
-  "verify_path": "/models"               // null nếu không có endpoint rẻ — C42
+  "verify_path": "/models",              // null nếu không có endpoint rẻ — C42
+  "user_visible": true                   // false nếu là ĐƯỜNG TRUNG GIAN — xem mục dưới
 }
 ```
 
 ```jsonc
 {
   "id": "foo-large",                     // = model_name ở bước 2
-  "display_name": "Foo Large",
+  "display_name": "Foo Large",           // KHÔNG ghi tên đường trung gian ("qua …")
   "provider": "foo",
+  "display_provider": "Foo AI",          // hãng gốc; BẮT BUỘC nếu provider user_visible=false
   "upstream_model": "openai/foo-large-v2",
   "capabilities": [],                    // để RỖNG cho tới khi eval chứng minh — C41
-  "context_window": 32768,
-  "max_output": 4096,
+  "context_window": 32768,               // trần VÀO — xem mục "Trần vào / trần ra"
+  "max_output": 4096,                    // trần RA  — xem mục "Trần vào / trần ra"
   "pricing": { "input_per_1m": 0.10, "output_per_1m": 0.30 },
   "pricing_mode": "metered",             // "unmetered" nếu cost_reporting unreliable
   "enabled": false,                      // ⬅ LUẬT. Chỉ bật ở bước 6
   "default": false,                      // đúng MỘT model trong cả file được true
   "order": 40
+  // "reasoning": KHÔNG khai ở bước này — chỉ sau khi đo (mục "Thêm một mức suy luận")
 }
 ```
+
+Giá viết thế nào thì Model Picker hiện đúng chữ số ấy (`0.30` ra `"0.30"`): tiền
+đi dạng chuỗi từ catalog tới màn hình.
 
 ### ☐ Bước 4 — dựng lại LiteLLM
 
@@ -126,6 +135,130 @@ Rồi chạy bộ 12 case golden-set (§21.3): `make eval MODEL=$M`.
 curl -sk -X POST https://localhost/api/v1/admin/catalog/reload | jq
 curl -sk https://localhost/api/v1/models | jq '.[] | select(.id=="'$M'")'
 ```
+
+---
+
+## Provider hiển thị: `display_provider` / `user_visible` (catalog v4, NQ-119)
+
+Người dùng chỉ thấy **hãng làm ra model** (DeepSeek, Anthropic, Google AI, xAI,
+Alibaba Qwen…), không bao giờ thấy **đường đi** (9Router, Sub2API, một gateway
+tự dựng…).
+
+| Provider là… | `user_visible` | `display_provider` của model |
+|---|---|---|
+| Hãng gốc, gọi thẳng API của họ | bỏ trống (mặc định `true`) | tuỳ chọn — vắng thì dùng `label` của provider |
+| Đường trung gian (router, gateway, proxy chạy trên host) | `false` | **bắt buộc** — thiếu thì app **không boot** và log in đúng `id` model |
+
+Khi `user_visible: false`:
+
+- `GET /models` trả `provider` = `display_provider`, và `provider_id` = `null`
+  (đường trung gian không có khoá BYOK nào để so — NQ-123).
+- `unavailable_reason` là một câu chung, không chèn `label`.
+- **Không** viết tên đường đi vào `display_name` hay `badge` — đó là hai chỗ
+  loader không kiểm được. Kiểm bằng tay sau khi bật:
+
+  ```bash
+  curl -sk https://localhost/api/v1/models | grep -ciE "9router|sub2api|<tên đường mới>"   # phải ra 0
+  ```
+
+- Màn quản trị vẫn cần đường đi thật (health đo theo đường đi, §9.5) — nó đọc
+  `GET /admin/models` (T-S.8), không đọc `GET /models`.
+
+`display_provider` là dữ liệu: đổi tên hãng hiển thị = sửa một dòng + `POST
+/admin/catalog/reload`, không sửa code.
+
+---
+
+## Thêm một mức suy luận — **đo trước, khai sau** (NQ-118)
+
+`litellm_settings.drop_params: true` bỏ im lặng tham số provider không nhận: một
+mức sai vẫn `200 OK` và chỉ đổi mỗi hoá đơn. Vì vậy **không mức nào vào catalog
+khi chưa đo** — bằng chứng duy nhất là `reasoning_tokens` đổi rõ so với mức kề.
+
+1. **Khai thang đo** trong `scripts/probe_reasoning.json` (dữ liệu, không phải
+   code): thêm một phần tử vào `cases` của model trong `models[]` —
+   `{ "level": "<id>", "ladder": "<tên thang>", "params": { … } }`, với đúng
+   `params` bạn định khai và cùng `ladder` với các mức sẽ được so cạnh nó.
+   Model chưa có trong file thì thêm một mục `{ "id", "paths", "max_tokens",
+   "cases" }` theo mẫu các mục sẵn có. Mức chọn bằng **tên model khác** (kiểu
+   9Router `…-high`) thì thêm `"alias"` và thêm tạm alias ấy vào
+   `litellm.config.yaml`.
+2. **Chạy thử khô, rồi đo thật** (tốn tiền thật — xem `budget_usd` trong file):
+
+   ```bash
+   source scripts/llm_env.sh
+   backend/.venv/bin/python scripts/probe_reasoning.py --dry-run --model $M
+   backend/.venv/bin/python scripts/probe_reasoning.py --ledger-user-id <uuid admin> --model $M
+   backend/.venv/bin/python scripts/probe_reasoning.py --report
+   ```
+
+3. **Giữ mức** chỉ khi **cả hai** lượt đo "khác rõ" mức kề nó (ngưỡng `distinct`
+   trong file kế hoạch: ≥ 32 token **và** ≥ 1.2 lần). Không khác rõ ⇒ bỏ mức ấy.
+4. **Khai** vào `models[].reasoning` của catalog:
+
+   ```jsonc
+   "reasoning": {
+     "default": "high",                                   // phải là một id trong options
+     "options": [
+       { "id": "off",  "params": { "thinking": { "type": "disabled" } } },
+       { "id": "high", "params": { "thinking": { "type": "enabled" } } },
+       { "id": "low",  "params": {}, "alias": "foo-large-low" },            // mức chọn bằng tên model
+       { "id": "max",  "params": { … }, "byok_params": { … } },             // BYOK cần tham số khác
+       { "id": "xhigh", "params": { … }, "omit_temperature": true }         // provider cấm temperature khi nghĩ
+     ]
+   }
+   ```
+
+   - `id` chỉ được lấy trong bộ `off · low · medium · high · xhigh · max`. Nhãn
+     hiển thị (Off · Low · Medium · High · Extra High · Max) nằm ở `vi.json`.
+   - `params` trộn **nguyên văn** vào body request; chúng không bao giờ rời
+     backend (FE chỉ nhận `id`).
+   - `alias` phải có `model_name` tương ứng trong `config/litellm.config.yaml`
+     — `make test` đọc cả hai file và đỏ nếu thiếu. Rồi
+     `docker compose up -d --force-recreate litellm` (B-40).
+   - Chỉ khai `byok_params` / `omit_temperature` khi phép đo cho thấy cần.
+5. `POST /admin/catalog/reload` → `GET /models` có `reasoning.options` mới.
+
+Sai luật (`default` không thuộc `options`, `id` ngoài bộ từ vựng, `id` trùng)
+⇒ app **không boot** và in đúng `id` model. Model không có khối `reasoning` ⇒
+picker hiện hàng Thinking Effort mờ.
+
+---
+
+## Trần vào (`context_window`) và trần ra (`max_output`)
+
+| Trường | Nghĩa | Ai đọc |
+|---|---|---|
+| `context_window` | số token tối đa model nhận (vào + ra) | dựng context (§9.6) |
+| `max_output` | `max_tokens` gửi đi; trần của phần sinh **kể cả token suy luận** | dựng context, dự toán quota `est_max` (§10.2) |
+
+Ngân sách ngữ cảnh của một model:
+
+```
+budget = min(context_window, CONTEXT_WINDOW_CAP) − max_output − RESERVE_TOKENS
+```
+
+(`CONTEXT_WINDOW_CAP` mặc định 128000, `RESERVE_TOKENS` mặc định 1000 — cả hai
+ở `.env`). Hai ràng buộc phải giữ khi sửa một trong hai trường:
+
+1. **`max_output` > ngân sách thinking lớn nhất của model.** Token suy luận
+   nằm **trong** `max_tokens`; Anthropic còn từ chối request có `max_tokens` ≤
+   `thinking.budget_tokens`. Ví dụ hôm nay: `claude-haiku` có mức `high` với
+   `budget_tokens: 4096` ⇒ `max_output` (8192) phải > 4096. Hạ `max_output`
+   xuống dưới đó là giết mức `high`. Loader **không** kiểm ràng buộc này (tên
+   tham số ngân sách là của từng provider) — tự kiểm.
+2. **`MESSAGE_MAX_CHARS` < `budget` nhỏ nhất của catalog** (B-208). Trần ký tự
+   của một tin nhắn phải là cửa chặn **đầu tiên**; nếu một tin nhắn hợp lệ vẫn
+   có thể vượt ngân sách của model nhỏ nhất thì nó qua được cửa API rồi mới nổ
+   `CONTEXT_TOO_LARGE` trong worker. Hôm nay: `ol-qwen-small` =
+   `min(32768, 128000) − 4096 − 1000 = 27672` > `MESSAGE_MAX_CHARS` 24000 (tính
+   ở tỷ lệ bi quan 1 token / ký tự). Thêm model có `context_window` nhỏ, hoặc
+   tăng `max_output`, thì tính lại dòng này; không có phép kiểm tự động nào
+   canh nó.
+
+Tăng `max_output` còn làm **tăng dự toán quota** mỗi lượt (`est_max` tính như
+thể toàn bộ `max_output` là token ra) — người dùng sắp hết quota sẽ bị chặn sớm
+hơn với model đó.
 
 ---
 

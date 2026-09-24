@@ -268,14 +268,17 @@ export interface CancelOut {
 export interface ModelOut {
   id: string;
   display_name: string;
-  /** NHAN de hien (`DeepSeek AI`) — khong dung de so voi thu gi. */
+  /** Ten HANG de hien (`DeepSeek`, `Google AI`) — khong dung de so voi thu gi. */
   provider: string;
   /**
    * Khoa provider trong catalog (`deepseek`) — dung chuoi ma
    * `ProviderKey.provider` mang. B-257: so khoa BYOK voi `provider` (nhan) o
    * tren thi khong bao gio khop.
+   *
+   * `null` cho model di qua duong trung gian (T-S.3, NQ-119/NQ-123): ten duong
+   * di khong toi nguoi dung, va khong khoa BYOK nao so duoc voi no.
    */
-  provider_id: string;
+  provider_id: string | null;
   capabilities: string[];
   context_window: number;
   max_output: number;

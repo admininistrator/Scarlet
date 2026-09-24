@@ -38,12 +38,16 @@ interface ProviderCard {
 export function providerCards(models: readonly ModelOut[]): ProviderCard[] {
   const byProvider = new Map<string, ProviderCard>();
   for (const m of models) {
-    const existing = byProvider.get(m.provider_id) ?? { label: m.provider, ok: true, reason: null };
+    // T-S.3: model cua duong trung gian co `provider_id: null` — gom theo ten
+    // hang de hai duong khong dinh vao mot the. Duong di that tro lai o
+    // `GET /admin/models` (T-S.8).
+    const key = m.provider_id ?? m.provider;
+    const existing = byProvider.get(key) ?? { label: m.provider, ok: true, reason: null };
     if (!m.available) {
       existing.ok = false;
       existing.reason = existing.reason ?? m.unavailable_reason;
     }
-    byProvider.set(m.provider_id, existing);
+    byProvider.set(key, existing);
   }
   return [...byProvider.values()];
 }

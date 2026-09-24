@@ -1,5 +1,6 @@
 {
-  "version": 3,
+  "version": 4,
+  "title_model": { "model": "deepseek-flash", "reasoning": "off", "max_output": 64 },
   "manual_pricing": {
     "_huong_dan_1": "GIA UOC LUONG do nguoi van hanh TU DIEN TAY, cho model ma provider khong ban theo token hoac khong bao gia dang tin (9Router — xem KE-HOACH §9.5, tasks.md B-65). Gia NIEM YET cua provider thi dien o `models[].pricing`, KHONG dien o day.",
     "_huong_dan_2": "Khoa = `id` cua model trong `models[]`. Don vi: USD tren 1 TRIEU token, giong `models[].pricing`. De `null` = chua dien; luc nap catalog app se in mot dong WARNING liet ke dung ten nhung model chua co gia, va quota se KHONG tru cho chung.",
@@ -51,7 +52,8 @@
       "availability": "host-dependent",
       "byok_supported": false,
       "cost_reporting": "unreliable",
-      "health_path": "/models"
+      "health_path": "/models",
+      "user_visible": false
     },
     "ollama": {
       "label": "Ollama (self-host)",
@@ -69,7 +71,8 @@
       "byok_supported": false,
       "cost_reporting": "exact",
       "auth_style": "bearer",
-      "verify_path": "/models"
+      "verify_path": "/models",
+      "user_visible": false
     }
   },
   "models": [
@@ -77,6 +80,7 @@
       "id": "deepseek-flash",
       "display_name": "DeepSeek Flash",
       "provider": "deepseek",
+      "display_provider": "DeepSeek",
       "upstream_model": "deepseek/deepseek-flash",
       "capabilities": ["tools", "vision", "reasoning"],
       "context_window": 128000,
@@ -96,12 +100,20 @@
       "enabled": true,
       "default": true,
       "order": 10,
-      "badge": "Mặc định · Rẻ"
+      "badge": "Mặc định · Rẻ",
+      "reasoning": {
+        "default": "high",
+        "options": [
+          { "id": "off", "params": { "thinking": { "type": "disabled" } } },
+          { "id": "high", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "high" } }
+        ]
+      }
     },
     {
       "id": "claude-haiku",
       "display_name": "Claude Haiku 4.5",
       "provider": "anthropic",
+      "display_provider": "Anthropic",
       "upstream_model": "anthropic/claude-haiku-4-5-20251001",
       "capabilities": ["tools", "vision"],
       "context_window": 200000,
@@ -116,12 +128,21 @@
       "enabled": true,
       "default": false,
       "order": 20,
-      "badge": null
+      "badge": null,
+      "reasoning": {
+        "default": "off",
+        "options": [
+          { "id": "off", "params": { "thinking": { "type": "disabled" } } },
+          { "id": "low", "params": { "thinking": { "type": "enabled", "budget_tokens": 1024 } }, "omit_temperature": true },
+          { "id": "high", "params": { "thinking": { "type": "enabled", "budget_tokens": 4096 } }, "omit_temperature": true }
+        ]
+      }
     },
     {
       "id": "nr-gemini-flash",
-      "display_name": "Gemini Flash (qua 9Router)",
+      "display_name": "Gemini Flash",
       "provider": "ninerouter",
+      "display_provider": "Google AI",
       "upstream_model": "openai/ag/gemini-3.8-flash-low",
       "capabilities": ["tools"],
       "context_window": 128000,
@@ -131,12 +152,20 @@
       "enabled": true,
       "default": false,
       "order": 30,
-      "badge": "9Router"
+      "badge": null,
+      "reasoning": {
+        "default": "low",
+        "options": [
+          { "id": "low", "params": {} },
+          { "id": "high", "params": {}, "alias": "nr-gemini-flash-high" }
+        ]
+      }
     },
     {
       "id": "ol-qwen-small",
       "display_name": "Qwen2.5 0.5B (Ollama)",
       "provider": "ollama",
+      "display_provider": "Alibaba Qwen",
       "upstream_model": "openai/qwen2.5:0.5b",
       "capabilities": [],
       "context_window": 32768,
@@ -152,6 +181,7 @@
       "id": "grok-4.6",
       "display_name": "Grok 4.6",
       "provider": "sub2api",
+      "display_provider": "xAI",
       "upstream_model": "openai/grok-4.6",
       "capabilities": [],
       "context_window": 32768,
@@ -161,7 +191,7 @@
       "enabled": true,
       "default": false,
       "order": 50,
-      "badge": "Self-host"
+      "badge": null
     }
   ]
 }

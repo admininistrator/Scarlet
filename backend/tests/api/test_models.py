@@ -19,12 +19,15 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.v1 import models as models_api
 from app.config import catalog
 from app.core import provider_health
 from app.core.access_token import encode_access_token
@@ -115,7 +118,9 @@ def _no_real_network_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     provider_health.forget_all()
 
 
-def test_get_models_does_not_leak_base_url_or_pricing() -> None:
+def test_get_models_does_not_leak_base_url() -> None:
+    """T-S.3 đổi nửa sau của ca này: `pricing` nay CÓ mặt — giá niêm yết cho
+    Model Picker (§24.2b·S3c). `base_url` thì vẫn không bao giờ."""
     resp = client.get("/api/v1/models")
     assert resp.status_code == 200
     body = resp.json()
@@ -125,7 +130,7 @@ def test_get_models_does_not_leak_base_url_or_pricing() -> None:
     assert "display_name" in first
     assert "capabilities" in first
     assert "base_url" not in first
-    assert "pricing" not in first
+    assert "base_url" not in resp.text
 
 
 def test_get_models_has_exactly_one_default_deepseek_flash() -> None:
@@ -237,8 +242,22 @@ def test_unavailable_model_STILL_in_list(
     assert count_when_off == count_when_alive
 
 
-def test_reason_takes_provider_name_from_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A3 — câu hiện lên màn hình không được ghim tên một provider cụ thể."""
+def test_reason_takes_provider_name_from_catalog(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A3 — câu hiện lên màn hình không được ghim tên một provider cụ thể.
+
+    Từ T-S.3 chỉ provider `user_visible` mới được chèn tên; provider
+    `host-dependent` duy nhất của catalog thật là một đường trung gian, nên ca
+    này bật `user_visible` của nó trên một bản chép để còn đo được nhánh ấy.
+    """
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
+    for provider in raw["providers"].values():
+        if provider["availability"] == "host-dependent":
+            provider["user_visible"] = True
+    fixture = tmp_path / "model_catalog.json"
+    fixture.write_text(json.dumps(raw), encoding="utf-8")
+    catalog.reload(path=fixture)
 
     async def failing_probe(_provider: object) -> None:
         raise TimeoutError("het gio cho")
@@ -257,6 +276,26 @@ def test_reason_takes_provider_name_from_catalog(monkeypatch: pytest.MonkeyPatch
     reason = [m["unavailable_reason"] for m in body if not m["available"]]
     assert reason
     assert all(any(n in r for n in label) for r in reason)
+
+
+def test_reason_of_hidden_route_is_generic_sentence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-S.3 / NQ-119 — `unavailable_reason` không chèn tên đường trung gian."""
+
+    async def failing_probe(_provider: object) -> None:
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
+    provider_health.forget_all()
+
+    body = client.get("/api/v1/models").json()
+    cat = catalog.get_catalog()
+    hidden_labels = [p.label for p in cat.providers.values() if not p.user_visible]
+
+    reason = [m["unavailable_reason"] for m in body if not m["available"]]
+    assert reason
+    for r in reason:
+        assert r == provider_health.HIDDEN_NO_RESPONSE_REASON
+        assert not any(label.split()[0] in r for label in hidden_labels)
 
 
 def test_get_models_does_not_leak_base_url_when_provider_down(
@@ -297,9 +336,13 @@ def test_provider_id_is_catalog_key_not_label() -> None:
     assert body
     for m in body:
         entry = next(e for e in cat.models if e.id == m["id"])
-        assert m["provider_id"] == entry.provider
-        assert m["provider"] == cat.providers[entry.provider].label
-    assert any(m["provider"] != m["provider_id"] for m in body), (
+        # T-S.3: nhãn là HÃNG (`display_provider`), khoá của đường trung gian là `null`.
+        assert m["provider"] == cat.display_provider(entry)
+        if cat.providers[entry.provider].user_visible:
+            assert m["provider_id"] == entry.provider
+        else:
+            assert m["provider_id"] is None
+    assert any(m["provider_id"] and m["provider"] != m["provider_id"] for m in body), (
         "catalog thật không có provider nào có nhãn khác khoá — ca B-257 mất ý nghĩa"
     )
 
@@ -310,4 +353,205 @@ def test_provider_id_matches_key_accepted_by_settings_keys() -> None:
     cat = catalog.get_catalog()
     body = client.get("/api/v1/models").json()
 
-    assert {m["provider_id"] for m in body} <= set(cat.providers)
+    assert {m["provider_id"] for m in body} - {None} <= set(cat.providers)
+
+
+def test_hidden_route_provider_id_is_null_and_never_byok() -> None:
+    """NQ-123 — `null` không làm mất gì của BYOK: đường trung gian không
+    `byok_supported`, nên không khoá BYOK nào từng so được với khoá của nó."""
+    cat = catalog.get_catalog()
+    body = client.get("/api/v1/models").json()
+
+    hidden = [m for m in body if m["provider_id"] is None]
+    assert hidden, "catalog thật phải có model của đường trung gian"
+    for m in hidden:
+        entry = next(e for e in cat.models if e.id == m["id"])
+        assert not cat.providers[entry.provider].byok_supported
+
+
+# ═══════════════ T-S.3 — catalog v4 trong `GET /models` (§24.2b·S3, S14) ═══════════════
+
+
+def _route_names() -> list[str]:
+    """Khoá + chữ đầu của nhãn mọi provider `user_visible: false` (`ninerouter`, `9router`…)."""
+    cat = catalog.get_catalog()
+    hidden = {k: p for k, p in cat.providers.items() if not p.user_visible}
+    return sorted(
+        {k.lower() for k in hidden} | {p.label.split()[0].lower() for p in hidden.values()}
+    )
+
+
+@pytest.mark.parametrize("provider_down", [False, True])
+def test_get_models_never_names_intermediate_route(
+    monkeypatch: pytest.MonkeyPatch, provider_down: bool
+) -> None:
+    """DoD dòng 1 (`grep -ciE "9router|sub2api"` → 0), trên toàn bộ chữ của response —
+    kể cả lúc đường đi tắt và `unavailable_reason` có mặt."""
+    if provider_down:
+
+        async def failing_probe(_provider: object) -> None:
+            raise ConnectionError("Connection refused")
+
+        monkeypatch.setattr(provider_health, "probe_provider", failing_probe)
+        provider_health.forget_all()
+
+    resp = client.get("/api/v1/models")
+    text = resp.text.lower()
+
+    names = _route_names()
+    assert "9router" in names and "sub2api" in names
+    assert not [n for n in names if n in text]
+    if provider_down:
+        assert any(not m["available"] for m in resp.json())
+
+
+def test_reasoning_exposes_only_ids_and_default() -> None:
+    """Cạm bẫy ① — `params` (có thể mang cả ngân sách token) không rời backend."""
+    cat = catalog.get_catalog()
+    resp = client.get("/api/v1/models")
+    body = resp.json()
+
+    for m in body:
+        entry = next(e for e in cat.models if e.id == m["id"])
+        if entry.reasoning is None:
+            assert m["reasoning"] is None
+            continue
+        assert m["reasoning"] == {
+            "default": entry.reasoning.default,
+            "options": [{"id": o.id} for o in entry.reasoning.options],
+        }
+    for leak in ("params", "budget_tokens", "thinking", "omit_temperature", "alias"):
+        assert leak not in resp.text
+    by_id = {m["id"]: m for m in body}
+    assert [o["id"] for o in by_id["deepseek-flash"]["reasoning"]["options"]] == ["off", "high"]
+    assert by_id["deepseek-flash"]["reasoning"]["default"] == "high"
+
+
+def test_pricing_mode_and_prices_are_strings() -> None:
+    """Cạm bẫy ③ — tiền là CHUỖI; `pricing_mode` đi kèm để picker biết giá có đáng tin."""
+    cat = catalog.get_catalog()
+    body = client.get("/api/v1/models").json()
+
+    for m in body:
+        entry = next(e for e in cat.models if e.id == m["id"])
+        assert m["pricing_mode"] == entry.pricing_mode
+        if m["pricing"] is None:
+            assert cat.effective_pricing(entry.id) is None
+            continue
+        for rates in filter(None, (m["pricing"]["current"], m["pricing"]["other"])):
+            assert isinstance(rates["input_per_1m"], str)
+            assert isinstance(rates["output_per_1m"], str)
+    by_id = {m["id"]: m for m in body}
+    assert by_id["claude-haiku"]["pricing"] == {
+        "current": {"window": None, "input_per_1m": "1.00", "output_per_1m": "5.00"},
+        "other": None,
+        "estimated": False,
+    }
+    assert by_id["nr-gemini-flash"]["pricing"] is None  # `manual_pricing` còn để trống
+
+
+def _at_vn(iso: str) -> datetime:
+    return datetime.fromisoformat(iso).replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+
+
+@pytest.mark.parametrize(
+    ("moment", "current", "other"),
+    [
+        ("2026-09-14T09:00:00", "peak", "off_peak"),  # thứ Hai, khung sáng
+        ("2026-09-14T22:00:00", "off_peak", "peak"),  # thứ Hai, tối
+        ("2026-09-20T09:00:00", "off_peak", "peak"),  # Chủ nhật
+    ],
+)
+def test_deepseek_price_matches_file_and_window_follows_fake_clock(
+    monkeypatch: pytest.MonkeyPatch, moment: str, current: str, other: str
+) -> None:
+    """DoD — giá khớp `model_catalog.json` từng chữ số, và khung đang áp dụng
+    đổi đúng khi đồng hồ giả sang khung thấp điểm."""
+    monkeypatch.setattr(models_api, "_now", lambda: _at_vn(moment))
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"), parse_float=str)
+    written = next(m for m in raw["models"] if m["id"] == "deepseek-flash")["pricing"]
+    by_window = {
+        "peak": {
+            "input_per_1m": written["input_per_1m"],
+            "output_per_1m": written["output_per_1m"],
+        },
+        "off_peak": {
+            "input_per_1m": written["off_peak"]["input_per_1m"],
+            "output_per_1m": written["off_peak"]["output_per_1m"],
+        },
+    }
+
+    body = client.get("/api/v1/models").json()
+    pricing = next(m for m in body if m["id"] == "deepseek-flash")["pricing"]
+
+    assert pricing == {
+        "current": {"window": current, **by_window[current]},
+        "other": {"window": other, **by_window[other]},
+        "estimated": False,
+    }
+
+
+def test_manual_price_is_marked_estimated(tmp_path: Path) -> None:
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
+    raw["manual_pricing"]["nr-gemini-flash"].update({"input_per_1m": 0.1, "output_per_1m": 0.4})
+    fixture = tmp_path / "model_catalog.json"
+    fixture.write_text(json.dumps(raw), encoding="utf-8")
+    catalog.reload(path=fixture)
+
+    body = client.get("/api/v1/models").json()
+    pricing = next(m for m in body if m["id"] == "nr-gemini-flash")["pricing"]
+
+    assert pricing == {
+        "current": {"window": None, "input_per_1m": "0.1", "output_per_1m": "0.4"},
+        "other": None,
+        "estimated": True,
+    }
+
+
+@pytest.mark.usefixtures("admin_session")
+def test_s7_new_model_with_reasoning_appears_after_reload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """DoD — S7: thêm một model có khối `reasoning` → `POST /admin/catalog/reload`
+    → `GET /models` có nó kèm danh sách mức, không rebuild, không sửa `.py`."""
+    monkeypatch.setattr("app.api.v1.admin.session_scope", _no_ledger_writes)
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
+    raw["models"].append(
+        {
+            "id": "s7-reasoning-test",
+            "display_name": "S7 Reasoning",
+            "provider": "deepseek",
+            "upstream_model": "deepseek/s7-reasoning-test",
+            "context_window": 32768,
+            "max_output": 4096,
+            "pricing_mode": "unmetered",
+            "order": 99,
+            "reasoning": {
+                "default": "medium",
+                "options": [
+                    {"id": "low", "params": {"reasoning_effort": "low"}},
+                    {"id": "medium", "params": {"reasoning_effort": "medium"}},
+                    {"id": "xhigh", "params": {"reasoning_effort": "xhigh"}},
+                ],
+            },
+        }
+    )
+    fixture = tmp_path / "model_catalog.json"
+    fixture.write_text(json.dumps(raw), encoding="utf-8")
+    # `reload()` gắn `CATALOG_PATH` làm mặc định lúc định nghĩa, nên thay hằng
+    # ấy không đủ — thay chính lời gọi mà endpoint dùng.
+    real_reload = catalog.reload
+    monkeypatch.setattr(catalog, "reload", lambda path=fixture: real_reload(path))
+
+    reload_resp = client.post("/api/v1/admin/catalog/reload")
+    assert reload_resp.status_code == 200
+    assert reload_resp.json()["models"] == len(raw["models"])
+
+    body = client.get("/api/v1/models").json()
+    added = next(m for m in body if m["id"] == "s7-reasoning-test")
+    assert added["reasoning"] == {
+        "default": "medium",
+        "options": [{"id": "low"}, {"id": "medium"}, {"id": "xhigh"}],
+    }
+    # Không khai `display_provider` ⇒ nhãn của provider (`user_visible`).
+    assert added["provider"] == catalog.get_catalog().providers["deepseek"].label

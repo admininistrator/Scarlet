@@ -24,6 +24,16 @@ model_list:
       api_base: os.environ/NINEROUTER_BASE_URL
       api_key: os.environ/NINEROUTER_API_KEY
 
+  # Mức `high` của `nr-gemini-flash` (`reasoning.options[].alias` trong
+  # model_catalog.json): 9Router chọn mức suy luận bằng TÊN model, tham số
+  # `reasoning_effort` bị bỏ qua (đo ở T-S.2). Không phải một model riêng
+  # trong Model Picker — chỉ backend gọi tên này khi người dùng chọn High.
+  - model_name: nr-gemini-flash-high
+    litellm_params:
+      model: openai/ag/gemini-3.8-flash-high
+      api_base: os.environ/NINEROUTER_BASE_URL
+      api_key: os.environ/NINEROUTER_API_KEY
+
   # ─── Ollama self-host trong compose (T-0.12) — provider thu tu, bai dien tap
   #     cho R22/S15. api_base la TEN SERVICE, khong phai localhost (C45). ───
   - model_name: ol-qwen-small

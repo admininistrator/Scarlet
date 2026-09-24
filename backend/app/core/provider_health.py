@@ -95,6 +95,15 @@ NO_RESPONSE_REASON = (
     "chọn được. Hãy thử lại sau ít phút, hoặc xem mục Hệ thống để biết chi tiết."
 )
 
+#: Cùng câu, cho provider `user_visible: false` (đường trung gian — NQ-119):
+#: tên của nó không được tới người dùng, nên câu không chèn `label`. Cũng không
+#: chèn `display_provider`: "Google AI đang không phản hồi" là nói sai — thứ
+#: không trả lời là đường đi, không phải hãng.
+HIDDEN_NO_RESPONSE_REASON = (
+    "Nguồn cung cấp model này đang không phản hồi, nên model tạm thời không "
+    "chọn được. Hãy thử lại sau ít phút, hoặc xem mục Hệ thống để biết chi tiết."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderStatus:
@@ -164,7 +173,11 @@ async def _probe_one(provider: Provider) -> ProviderStatus:
         logger.info("provider '%s' khong phan hoi: %s", provider.label, str(exc)[:200])
         return ProviderStatus(
             available=False,
-            reason=NO_RESPONSE_REASON.format(label=provider.label),
+            reason=(
+                NO_RESPONSE_REASON.format(label=provider.label)
+                if provider.user_visible
+                else HIDDEN_NO_RESPONSE_REASON
+            ),
         )
     return ProviderStatus(available=True, reason=None)
 

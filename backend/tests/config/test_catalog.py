@@ -8,6 +8,7 @@ catalog thật khi thêm/bớt model sau này.
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +22,8 @@ from app.config import catalog
 from app.config.catalog import Catalog
 
 VALID: dict[str, Any] = {
-    "version": 1,
+    "version": catalog.CATALOG_VERSION,
+    "title_model": {"model": "deepseek-flash", "max_output": 64},
     "providers": {
         "deepseek": {
             "label": "DeepSeek AI",
@@ -364,6 +366,9 @@ def test_disabled_model_still_has_price() -> None:
     """A7: tắt một model không được xoá giá của những lượt sinh nó đã chạy."""
     data = _with_time_windows()
     data["models"][0]["enabled"] = False
+    # `title_model` phải trỏ vào một model đang bật (T-S.3) — dời nó đi để ca
+    # này vẫn đo đúng một điều: tắt model không xoá giá.
+    data["title_model"]["model"] = "claude-haiku"
     cat = Catalog.model_validate(data)
     assert cat.effective_pricing("deepseek-flash", _at("2026-09-14T09:00:00")) is not None
 
@@ -577,3 +582,418 @@ def test_provider_model_differs_from_id_for_at_least_one_real_model() -> None:
     """Hai tên trùng nhau ở MỌI model thì `Credential.model_name` không đo được."""
     cat = catalog.get_catalog()
     assert any(m.id != m.provider_model for m in cat.models)
+
+
+# ══════════ T-S.3 — catalog v4: provider hiển thị, `reasoning`, `title_model` ══════════
+#
+# KH tham chiếu: §24.2b·S3, S14 · NQ-118, NQ-119, NQ-120, NQ-123.
+
+#: Gốc repo — `config/` nằm ở đây, cùng lối `test_compose_calls_right_module`.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+LITELLM_CONFIG_PATH = REPO_ROOT / "config" / "litellm.config.yaml"
+
+#: `model_name:` của một entry trong `model_list` — đọc bằng chữ, không bằng
+#: YAML: backend không phụ thuộc trực tiếp vào một bộ đọc YAML, và phép kiểm
+#: này chỉ cần biết một cái tên có mặt hay không.
+_MODEL_NAME = re.compile(r"^\s*-\s*model_name:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def _v4() -> dict[str, Any]:
+    """`VALID` + một đường trung gian (`user_visible: false`) và khối `reasoning`."""
+    data = deepcopy(VALID)
+    data["providers"]["ninerouter"] = {
+        "label": "Route trung gian (local)",
+        "base_url": "http://host.docker.internal:20128/v1",
+        "availability": "host-dependent",
+        "byok_supported": False,
+        "cost_reporting": "unreliable",
+        "health_path": "/models",
+        "user_visible": False,
+    }
+    data["models"].append(
+        {
+            "id": "nr-gemini-flash",
+            "display_name": "Gemini Flash",
+            "provider": "ninerouter",
+            "display_provider": "Google AI",
+            "upstream_model": "openai/ag/gemini-3.8-flash-low",
+            "context_window": 128000,
+            "max_output": 8192,
+            "pricing_mode": "unmetered",
+            "order": 30,
+            "reasoning": {
+                "default": "low",
+                "options": [
+                    {"id": "low", "params": {}},
+                    {"id": "high", "params": {}, "alias": "nr-gemini-flash-high"},
+                ],
+            },
+        }
+    )
+    data["models"][0]["reasoning"] = {
+        "default": "high",
+        "options": [
+            {"id": "off", "params": {"thinking": {"type": "disabled"}}},
+            {"id": "high", "params": {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}},
+        ],
+    }
+    data["title_model"] = {"model": "deepseek-flash", "reasoning": "off", "max_output": 64}
+    return data
+
+
+def _missing_aliases(raw_catalog: dict[str, Any], litellm_text: str) -> list[str]:
+    """`model 'X': alias 'Y'` cho mọi `alias` không có `model_name` trong LiteLLM."""
+    names = set(_MODEL_NAME.findall(litellm_text))
+    return [
+        f"model '{m['id']}': alias '{o['alias']}'"
+        for m in raw_catalog["models"]
+        for o in (m.get("reasoning") or {}).get("options", [])
+        if o.get("alias") is not None and o["alias"] not in names
+    ]
+
+
+def test_v4_fixture_loads() -> None:
+    cat = Catalog.model_validate(_v4())
+    assert cat.version == catalog.CATALOG_VERSION == 4
+    assert cat.providers["ninerouter"].user_visible is False
+    assert cat.providers["deepseek"].user_visible is True  # vắng mặt ⇒ hiện
+
+
+def test_older_catalog_version_says_backend_needs_v4() -> None:
+    """Cạm bẫy ④ — lệch phiên bản phải là một câu đọc được, không phải lỗi `extra`."""
+    bad = _v4()
+    bad["version"] = 3
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    message = str(exc.value)
+    assert "catalog v4" in message
+    assert "T-S.3" in message
+
+
+def test_newer_catalog_version_says_backend_is_too_old() -> None:
+    bad = _v4()
+    bad["version"] = 5
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    assert "cần backend mới hơn" in str(exc.value)
+
+
+def test_hidden_provider_model_without_display_provider_does_not_boot() -> None:
+    """NQ-119 — thiếu `display_provider` thì tên đường đi lọt ra giao diện."""
+    bad = _v4()
+    del bad["models"][2]["display_provider"]
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    message = str(exc.value)
+    assert "nr-gemini-flash" in message
+    assert "display_provider" in message
+
+
+def test_visible_provider_falls_back_to_label() -> None:
+    cat = Catalog.model_validate(_v4())
+    haiku = next(m for m in cat.models if m.id == "claude-haiku")
+    gemini = next(m for m in cat.models if m.id == "nr-gemini-flash")
+    assert haiku.display_provider is None
+    assert cat.display_provider(haiku) == "Anthropic"
+    assert cat.display_provider(gemini) == "Google AI"
+
+
+def test_empty_display_provider_is_rejected() -> None:
+    bad = _v4()
+    bad["models"][2]["display_provider"] = ""
+    with pytest.raises(ValidationError):
+        Catalog.model_validate(bad)
+
+
+def test_reasoning_default_not_in_options_is_rejected() -> None:
+    bad = _v4()
+    bad["models"][0]["reasoning"]["default"] = "low"
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    message = str(exc.value)
+    assert "deepseek-flash" in message
+    assert "'low'" in message
+
+
+def test_reasoning_id_outside_vocabulary_is_rejected() -> None:
+    bad = _v4()
+    bad["models"][0]["reasoning"]["options"].append({"id": "ultra", "params": {}})
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    message = str(exc.value)
+    assert "deepseek-flash" in message
+    assert "ultra" in message
+
+
+def test_reasoning_duplicate_ids_rejected() -> None:
+    bad = _v4()
+    bad["models"][0]["reasoning"]["options"].append({"id": "high", "params": {}})
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    assert "trùng" in str(exc.value)
+
+
+def test_reasoning_option_unknown_field_rejected() -> None:
+    """`extra="forbid"` — `omit_temprature` gõ sai phải chết, không bị bỏ im lặng."""
+    bad = _v4()
+    bad["models"][0]["reasoning"]["options"][1]["omit_temprature"] = True
+    with pytest.raises(ValidationError):
+        Catalog.model_validate(bad)
+
+
+def test_reasoning_option_fields_are_parsed() -> None:
+    raw = _v4()
+    raw["models"][1]["reasoning"] = {
+        "default": "off",
+        "options": [
+            {"id": "off", "params": {"thinking": {"type": "disabled"}}},
+            {
+                "id": "low",
+                "params": {"thinking": {"type": "enabled", "budget_tokens": 1024}},
+                "byok_params": {"thinking": {"type": "enabled", "budget_tokens": 1024}},
+                "omit_temperature": True,
+            },
+        ],
+    }
+    cat = Catalog.model_validate(raw)
+    haiku = next(m for m in cat.models if m.id == "claude-haiku")
+    assert haiku.reasoning is not None
+    low = haiku.reasoning.option("low")
+    off = haiku.reasoning.option("off")
+    assert low is not None
+    assert off is not None
+    assert low.omit_temperature is True
+    assert low.byok_params == {"thinking": {"type": "enabled", "budget_tokens": 1024}}
+    assert off.omit_temperature is False
+    assert off.byok_params is None
+    assert haiku.reasoning.option("max") is None
+
+
+def test_missing_title_model_does_not_boot() -> None:
+    bad = _v4()
+    del bad["title_model"]
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    assert "title_model" in str(exc.value)
+
+
+def test_title_model_unknown_model_rejected() -> None:
+    bad = _v4()
+    bad["title_model"]["model"] = "khong-ton-tai"
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    assert "khong-ton-tai" in str(exc.value)
+
+
+def test_title_model_disabled_model_rejected() -> None:
+    bad = _v4()
+    bad["models"][0]["enabled"] = False
+    bad["models"][0]["default"] = False
+    bad["models"][1]["default"] = True
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    message = str(exc.value)
+    assert "title_model" in message
+    assert "enabled=false" in message
+
+
+def test_title_model_reasoning_not_in_options_rejected() -> None:
+    bad = _v4()
+    bad["title_model"]["reasoning"] = "max"
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    message = str(exc.value)
+    assert "'max'" in message
+    assert "deepseek-flash" in message
+
+
+def test_title_model_reasoning_on_model_without_block_rejected() -> None:
+    bad = _v4()
+    bad["title_model"] = {"model": "claude-haiku", "reasoning": "off", "max_output": 64}
+    with pytest.raises(ValidationError) as exc:
+        Catalog.model_validate(bad)
+    assert "claude-haiku" in str(exc.value)
+
+
+# ─────────── `alias` phải có trong `config/litellm.config.yaml` (đọc cả hai file) ───────────
+
+
+def test_real_catalog_every_alias_exists_in_litellm_config() -> None:
+    """Cùng khuôn `test_compose_calls_right_module`: không phép kiểm nào khác nối
+    hai file. Thiếu alias thì catalog vẫn nạp, picker vẫn hiện mức ấy — và lượt
+    gọi đầu tiên ở mức ấy nhận `400` của LiteLLM (`drop_params` không cứu nổi
+    một tên model không tồn tại)."""
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
+    litellm_text = LITELLM_CONFIG_PATH.read_text(encoding="utf-8")
+
+    aliases = [
+        o["alias"]
+        for m in raw["models"]
+        for o in (m.get("reasoning") or {}).get("options", [])
+        if o.get("alias") is not None
+    ]
+    assert aliases, "catalog thật phải có ít nhất một alias — nếu không ca này xanh vô nghĩa"
+    assert _missing_aliases(raw, litellm_text) == []
+
+
+def test_alias_missing_from_litellm_config_is_reported() -> None:
+    """Ca âm — gỡ entry `nr-gemini-flash-high` khỏi bản chép của file LiteLLM thật."""
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
+    litellm_text = LITELLM_CONFIG_PATH.read_text(encoding="utf-8")
+    without_alias = litellm_text.replace(
+        "model_name: nr-gemini-flash-high", "model_name: da-go-alias"
+    )
+    assert without_alias != litellm_text
+
+    missing = _missing_aliases(raw, without_alias)
+
+    assert missing == ["model 'nr-gemini-flash': alias 'nr-gemini-flash-high'"]
+
+
+# ─────────────── Dữ liệu thật: đúng bảng T-S.2, không tên đường đi ───────────────
+
+
+def test_real_catalog_reasoning_matches_t_s_2_table() -> None:
+    """Khối `reasoning` chép nguyên từ "Ghi nhận" của T-S.2 — không mức nào chưa đo."""
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
+    blocks = {m["id"]: m.get("reasoning") for m in raw["models"]}
+
+    assert blocks["deepseek-flash"] == {
+        "default": "high",
+        "options": [
+            {"id": "off", "params": {"thinking": {"type": "disabled"}}},
+            {"id": "high", "params": {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}},
+        ],
+    }
+    assert blocks["claude-haiku"] == {
+        "default": "off",
+        "options": [
+            {"id": "off", "params": {"thinking": {"type": "disabled"}}},
+            {
+                "id": "low",
+                "params": {"thinking": {"type": "enabled", "budget_tokens": 1024}},
+                "omit_temperature": True,
+            },
+            {
+                "id": "high",
+                "params": {"thinking": {"type": "enabled", "budget_tokens": 4096}},
+                "omit_temperature": True,
+            },
+        ],
+    }
+    assert blocks["nr-gemini-flash"] == {
+        "default": "low",
+        "options": [
+            {"id": "low", "params": {}},
+            {"id": "high", "params": {}, "alias": "nr-gemini-flash-high"},
+        ],
+    }
+    # T-S.2: Grok (Sub2API bỏ im lặng tham số) và Qwen (không có suy luận) KHÔNG khai.
+    assert blocks["grok-4.6"] is None
+    assert blocks["ol-qwen-small"] is None
+
+
+def test_real_catalog_hides_intermediate_routes() -> None:
+    """NQ-119 — tên đường trung gian không nằm trong chữ nào người dùng đọc được."""
+    cat = catalog.get_catalog()
+    hidden = {key: p for key, p in cat.providers.items() if not p.user_visible}
+    assert set(hidden) == {"ninerouter", "sub2api"}
+
+    names = {key.lower() for key in hidden} | {p.label.split()[0].lower() for p in hidden.values()}
+    for m in cat.models:
+        shown = " ".join([m.display_name, m.badge or "", cat.display_provider(m)]).lower()
+        assert not any(n in shown for n in names), f"{m.id}: '{shown}'"
+        if m.provider in hidden:
+            assert m.display_provider is not None
+
+
+def test_real_catalog_title_model_is_deepseek_flash_with_reasoning_off() -> None:
+    title = catalog.get_catalog().title_model
+    assert (title.model, title.reasoning) == ("deepseek-flash", "off")
+    assert title.max_output > 0
+
+
+# ─────────────── Giá dạng chuỗi và khung giá (§24.2b·S3c, NQ-120) ───────────────
+
+
+def test_price_text_keeps_digits_written_in_file(tmp_path: Path) -> None:
+    """Cạm bẫy ③ — `0.30` trong file ra `"0.30"`, không `"0.3"`, không `0.30000000000000004`."""
+    raw = _with_time_windows()
+    fixture = tmp_path / "model_catalog.json"
+    fixture.write_text(json.dumps(raw).replace('"input_per_1m": 0.3,', '"input_per_1m": 0.30,'))
+    assert '"input_per_1m": 0.30,' in fixture.read_text()
+
+    cat = catalog._read_and_validate(fixture)
+    peak = cat.effective_pricing("deepseek-flash", _at("2026-09-14T09:00:00"))
+
+    assert peak is not None
+    assert peak.usd("input_per_1m") == "0.30"
+    assert peak.usd("output_per_1m") == "1.2"
+    assert peak.usd("cache_write_per_1m") is None
+
+
+def test_price_text_from_python_float_has_no_rounding() -> None:
+    """Không nguồn chữ nào ⇒ dạng thập phân ngắn nhất của đúng số đã nhận."""
+    rates = catalog.PricingRates(input_per_1m=0.1 + 0.2, output_per_1m=0.006)
+    assert rates.usd("output_per_1m") == "0.006"
+    assert rates.usd("input_per_1m") == "0.30000000000000004"
+
+
+def test_real_catalog_price_text_matches_file_digit_for_digit() -> None:
+    """DoD — giá `deepseek-flash` khớp `model_catalog.json` từng chữ số."""
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"), parse_float=str)
+    written = next(m for m in raw["models"] if m["id"] == "deepseek-flash")["pricing"]
+    windows = catalog.get_catalog().price_windows("deepseek-flash", _at("2026-09-14T09:00:00"))
+
+    peak, off_peak = (w.rates for w in windows)
+    for field in ("input_per_1m", "output_per_1m", "cached_input_per_1m"):
+        assert peak.usd(field) == written[field]
+        assert off_peak.usd(field) == written["off_peak"][field]
+
+
+def test_manual_price_text_survives_as_rates(tmp_path: Path) -> None:
+    raw = _with_manual_pricing({"input_per_1m": 0.1, "output_per_1m": 0.4})
+    fixture = tmp_path / "model_catalog.json"
+    text = json.dumps(raw).replace('"input_per_1m": 0.1,', '"input_per_1m": 0.10,')
+    assert text != json.dumps(raw)
+    fixture.write_text(text)
+
+    rates = catalog._read_and_validate(fixture).effective_pricing("nr-gemini-flash")
+
+    assert rates is not None
+    assert rates.usd("input_per_1m") == "0.10"
+
+
+def test_json_numbers_in_reasoning_params_stay_serializable(tmp_path: Path) -> None:
+    """`_JsonFloat` là `float`: một `params` có số thực vẫn `json.dumps` được."""
+    raw = _v4()
+    raw["models"][0]["reasoning"]["options"][0]["params"] = {"top_p": 0.95}
+    fixture = tmp_path / "model_catalog.json"
+    fixture.write_text(json.dumps(raw))
+
+    model = catalog._read_and_validate(fixture).models[0]
+
+    assert model.reasoning is not None
+    assert json.dumps(model.reasoning.options[0].params) == '{"top_p": 0.95}'
+
+
+@pytest.mark.parametrize(
+    ("moment", "current", "other"),
+    [
+        ("2026-09-14T09:00:00", "peak", "off_peak"),
+        ("2026-09-14T22:00:00", "off_peak", "peak"),
+        ("2026-09-19T09:00:00", "off_peak", "peak"),
+    ],
+)
+def test_price_windows_put_active_window_first(moment: str, current: str, other: str) -> None:
+    cat = Catalog.model_validate(_with_time_windows())
+    windows = cat.price_windows("deepseek-flash", _at(moment))
+    assert [w.window for w in windows] == [current, other]
+    assert windows[0].rates is cat.effective_pricing("deepseek-flash", _at(moment))
+
+
+def test_price_windows_single_price_and_no_price() -> None:
+    cat = Catalog.model_validate(_with_manual_pricing())
+    assert [w.window for w in cat.price_windows("claude-haiku")] == [None]
+    assert cat.price_windows("nr-gemini-flash") == ()
+    assert cat.price_windows("khong-ton-tai") == ()
