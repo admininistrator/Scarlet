@@ -22,12 +22,17 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import catalog
-from app.config.catalog import ModelEntry
+from app.config.catalog import ModelEntry, ReasoningOption
 from app.config.settings import settings
 from app.core.crypto import mask_secret, seal
 from app.db.models import KeySource
 from app.db.repositories import ProviderKeyRepository
-from app.llm.credentials import resolve_credential, resolve_key_source
+from app.llm.credentials import (
+    SYSTEM_CREDENTIAL,
+    Credential,
+    resolve_credential,
+    resolve_key_source,
+)
 
 #: Ghép lúc chạy: một chuỗi khớp `sk-[a-zA-Z0-9]{20,}` nằm nguyên văn trong
 #: repo làm `scripts/check_hardcode.sh` lệnh 4 đỏ vĩnh viễn (T-2.14).
@@ -222,3 +227,56 @@ async def test_both_functions_always_agree_on_key_source(
     second = (await resolve_credential(session, user_id=user_a, model=model)).key_source
 
     assert first is second
+
+
+# ═══════════ T-S.6 — mức suy luận: tham số và tên nào cho đường nào ═══════════
+
+_LEVEL = ReasoningOption(
+    id="low",
+    params={"thinking": {"type": "enabled", "budget_tokens": 1024}},
+    byok_params={"native": {"effort": "low"}},
+    alias="alias-cho-litellm",
+)
+_LEVEL_WITHOUT_BYOK = ReasoningOption(id="high", params={"reasoning_effort": "high"})
+
+
+def _byok_credential() -> Credential:
+    model = _model_byok()
+    provider = catalog.get_catalog().providers[model.provider]
+    return Credential(key_source=KeySource.BYOK, provider=provider, api_key=FAKE_KEY)
+
+
+def test_system_path_sends_params_and_alias() -> None:
+    model = _model_byok()
+
+    assert SYSTEM_CREDENTIAL.reasoning_params(_LEVEL) == _LEVEL.params
+    assert SYSTEM_CREDENTIAL.model_name(model, _LEVEL) == "alias-cho-litellm"
+
+
+def test_byok_path_sends_byok_params_and_ignores_alias() -> None:
+    """Alias là tên trong `litellm.config.yaml`; provider gọi thẳng không biết nó."""
+    model = _model_byok()
+    cred = _byok_credential()
+
+    assert cred.reasoning_params(_LEVEL) == {"native": {"effort": "low"}}
+    assert cred.model_name(model, _LEVEL) == model.provider_model
+
+
+def test_byok_without_byok_params_falls_back_to_params() -> None:
+    """Vắng `byok_params` ⇒ BYOK dùng `params` (T-S.2: `thinking` gốc chạy cả hai đường)."""
+    assert _byok_credential().reasoning_params(_LEVEL_WITHOUT_BYOK) == {"reasoning_effort": "high"}
+
+
+def test_no_level_means_no_params_and_plain_name() -> None:
+    model = _model_byok()
+
+    assert SYSTEM_CREDENTIAL.reasoning_params(None) == {}
+    assert SYSTEM_CREDENTIAL.model_name(model, None) == model.id
+
+
+def test_reasoning_params_is_a_deep_copy() -> None:
+    """Sửa bản trả về không được chạm dict của catalog — dữ liệu dùng chung cả tiến trình."""
+    sent = SYSTEM_CREDENTIAL.reasoning_params(_LEVEL)
+    sent["thinking"]["budget_tokens"] = 1
+
+    assert _LEVEL.params["thinking"]["budget_tokens"] == 1024

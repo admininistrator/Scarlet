@@ -24,11 +24,13 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -48,6 +50,8 @@ from app.db.models import (
 )
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.llm import context as llm_context
+from app.llm.adapters import openai_compat
+from app.llm.adapters.system import SystemAdapter
 from app.llm.client import Chunk, ToolCall, Usage
 from app.quota.windows import parse_member, windows
 from app.streaming.cancel import FINISH_REASON_CANCELLED, cancel_key
@@ -204,6 +208,7 @@ async def _minimal_tree(
     *,
     model_id: str | None = MODEL_ID,
     status: MessageStatus = MessageStatus.QUEUED,
+    reasoning_effort: str | None = None,
 ) -> Message:
     """Một câu hỏi đã xong + một message assistant `queued` — đúng §7.2 ①."""
     repo = MessageRepository(session)
@@ -224,6 +229,7 @@ async def _minimal_tree(
         parent_id=question_msg.id,
         status=status,
         model_id=model_id,
+        reasoning_effort=reasoning_effort,
     )
     await session.commit()
     return answer
@@ -1230,3 +1236,371 @@ async def test_byok_adapter_closed_even_when_upstream_raises(
 
     assert fake.closed, "adapter riêng phải được close() trên mọi đường thoát"
     assert fake_redis.last["type"] == "error"
+
+
+# ══════════ T-S.6 — mức suy luận: BODY THẬT gửi đi, không phải kwargs ══════════
+#
+# DoD dòng 1: "mỗi loại tuỳ chọn (`params` / `byok_params` / `alias` /
+# `omit_temperature`) một ca, khẳng định trên **body thật** gửi đi". Vì vậy các
+# ca dưới đây KHÔNG dùng `FakeClient` (nó chỉ thấy kwargs của `stream()`): chúng
+# chạy `SystemAdapter`/`ByokAdapter` THẬT, SDK `openai` thật, và chỉ thay tầng
+# vận chuyển của httpx bằng `_WireRecorder` — thứ ghi lại đúng chuỗi JSON sẽ ra
+# dây. Một `temperature=None` mà SDK gửi thành `"temperature": null`, hay một
+# `extra_body` bị lồng sai tầng, chỉ lộ ra ở đây.
+#
+# Model của các ca này là `ts6-probe`, dựng trong catalog tạm (`ts6_catalog`):
+# mỗi mức của nó mang đúng MỘT loại tuỳ chọn, để một ca đỏ chỉ về đúng một chỗ.
+
+#: Model thử — provider `deepseek` vì cần `byok_supported: true` cho đường BYOK.
+PROBE_MODEL = "ts6-probe"
+#: Model thử không khai khối `reasoning`.
+PLAIN_MODEL = "ts6-plain"
+
+_TS6_MODELS: list[dict[str, Any]] = [
+    {
+        "id": PROBE_MODEL,
+        "display_name": "T-S.6 Probe",
+        "provider": "deepseek",
+        "upstream_model": "deepseek/ts6-native",
+        "context_window": 32768,
+        "max_output": 4096,
+        "pricing_mode": "unmetered",
+        "order": 91,
+        "reasoning": {
+            "default": "off",
+            "options": [
+                # `params` trơn.
+                {"id": "off", "params": {"thinking": {"type": "disabled"}}},
+                # `byok_params` — khác `params` ở MỌI khoá, để lẫn là thấy ngay.
+                {
+                    "id": "low",
+                    "params": {"reasoning_effort": "low"},
+                    "byok_params": {"native_effort": {"level": "low"}},
+                },
+                # `alias`.
+                {"id": "high", "params": {"reasoning_effort": "high"}, "alias": "ts6-probe-high"},
+                # `omit_temperature`.
+                {
+                    "id": "max",
+                    "params": {"thinking": {"type": "enabled", "budget_tokens": 2048}},
+                    "omit_temperature": True,
+                },
+            ],
+        },
+    },
+    {
+        "id": PLAIN_MODEL,
+        "display_name": "T-S.6 Plain",
+        "provider": "ollama",
+        "upstream_model": "openai/ts6-plain",
+        "context_window": 32768,
+        "max_output": 4096,
+        "pricing_mode": "unmetered",
+        "order": 92,
+    },
+]
+
+#: Một lượt stream tối thiểu đúng khuôn Chat Completions: một mẩu chữ, `stop`,
+#: chunk `usage` riêng (C40), rồi `[DONE]`.
+_SSE_REPLY = (
+    b"".join(
+        b"data: " + json.dumps(chunk).encode() + b"\n\n"
+        for chunk in (
+            {
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "m",
+                "choices": [{"index": 0, "delta": {"role": "assistant", "content": "ok"}}],
+            },
+            {
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "m",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            },
+            {
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "m",
+                "choices": [],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11},
+            },
+        )
+    )
+    + b"data: [DONE]\n\n"
+)
+
+
+class _WireRecorder:
+    """Tầng vận chuyển giả của httpx: ghi URL + body JSON, trả `_SSE_REPLY`."""
+
+    def __init__(self) -> None:
+        self.urls: list[str] = []
+        self.bodies: list[dict[str, Any]] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.urls.append(str(request.url))
+        self.bodies.append(json.loads(request.content))
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=_SSE_REPLY
+        )
+
+    @property
+    def body(self) -> dict[str, Any]:
+        (only,) = self.bodies
+        return only
+
+
+@pytest.fixture
+def ts6_catalog(tmp_path: Path) -> Iterator[None]:
+    """Catalog thật + hai model thử; trả catalog thật khi xong."""
+    raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
+    raw["models"].extend(_TS6_MODELS)
+    fixture = tmp_path / "model_catalog.json"
+    fixture.write_text(json.dumps(raw), encoding="utf-8")
+    catalog.reload(path=fixture)
+    yield
+    catalog.reload(path=catalog.CATALOG_PATH)
+
+
+@pytest.fixture
+def wire(monkeypatch: pytest.MonkeyPatch) -> _WireRecorder:
+    """Mọi `AsyncOpenAI` mà adapter dựng ra đi qua `_WireRecorder` — cả hai đường.
+
+    Vá đúng tên `AsyncOpenAI` mà `openai_compat.py` nhìn thấy, không vá
+    adapter: `SystemAdapter.from_settings()` và `ByokAdapter.for_provider()` chạy
+    y nguyên, chỉ còn socket là giả.
+    """
+    recorder = _WireRecorder()
+    real = openai_compat.AsyncOpenAI
+
+    def _build(**kwargs: Any) -> Any:
+        transport = httpx.MockTransport(recorder)
+        return real(**kwargs, http_client=httpx.AsyncClient(transport=transport))
+
+    monkeypatch.setattr(openai_compat, "AsyncOpenAI", _build)
+    return recorder
+
+
+async def _run_real_adapter(fake_redis: FakeRedis, message: Message, *, byok: bool = False) -> None:
+    """Chạy `generate` với `SystemAdapter` thật trong `ctx` (đường BYOK tự dựng adapter)."""
+    system = SystemAdapter.from_settings()
+    try:
+        await generate(_ctx(fake_redis, system), str(message.id))  # type: ignore[arg-type]
+    finally:
+        await system.close()
+    assert fake_redis.last["type"] == "done", fake_redis.last
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_params_merged_verbatim_into_real_body(
+    session: AsyncSession, user_a: uuid.UUID, fake_redis: FakeRedis, wire: _WireRecorder
+) -> None:
+    """**DoD dòng 1 — `params`**: khối của mức nằm ở TẦNG TRÊN CÙNG của body."""
+    message = await _minimal_tree(session, user_a, model_id=PROBE_MODEL, reasoning_effort="off")
+
+    await _run_real_adapter(fake_redis, message)
+
+    body = wire.body
+    assert body["model"] == PROBE_MODEL
+    assert body["thinking"] == {"type": "disabled"}
+    assert body["temperature"] == settings.LLM_TEMPERATURE
+    assert "reasoning_effort" not in body
+    assert wire.urls[0].startswith(settings.LITELLM_BASE_URL)
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_byok_params_replace_params_on_byok_path(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    wire: _WireRecorder,
+) -> None:
+    """**DoD dòng 1 — `byok_params`**: đường BYOK gửi `byok_params`, KHÔNG trộn `params`."""
+    message = await _minimal_tree(session, user_a, model_id=PROBE_MODEL, reasoning_effort="low")
+    await _save_byok_key(session_factory, user_a)
+
+    await _run_real_adapter(fake_redis, message)
+
+    body = wire.body
+    provider = catalog.get_catalog().providers["deepseek"]
+    assert wire.urls[0].startswith(provider.base_url), "BYOK gọi thẳng provider"
+    assert body["model"] == "ts6-native", "tên gốc của provider, không phải id LiteLLM"
+    assert body["native_effort"] == {"level": "low"}
+    assert "reasoning_effort" not in body, "params KHÔNG được trộn cùng byok_params"
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_same_level_on_system_path_sends_params_not_byok_params(
+    session: AsyncSession, user_a: uuid.UUID, fake_redis: FakeRedis, wire: _WireRecorder
+) -> None:
+    """Đối chứng của ca trên: không khoá riêng ⇒ `params`, `byok_params` vắng mặt."""
+    message = await _minimal_tree(session, user_a, model_id=PROBE_MODEL, reasoning_effort="low")
+
+    await _run_real_adapter(fake_redis, message)
+
+    assert wire.body["reasoning_effort"] == "low"
+    assert "native_effort" not in wire.body
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_alias_replaces_model_name_sent_to_litellm(
+    session: AsyncSession, user_a: uuid.UUID, fake_redis: FakeRedis, wire: _WireRecorder
+) -> None:
+    """**DoD dòng 1 — `alias`**: 9Router chọn mức bằng TÊN model (T-S.2)."""
+    message = await _minimal_tree(session, user_a, model_id=PROBE_MODEL, reasoning_effort="high")
+
+    await _run_real_adapter(fake_redis, message)
+
+    assert wire.body["model"] == "ts6-probe-high"
+    assert wire.body["reasoning_effort"] == "high"
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_alias_is_ignored_on_byok_path(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    wire: _WireRecorder,
+) -> None:
+    """Alias là tên trong `litellm.config.yaml` — provider gọi thẳng không biết nó."""
+    message = await _minimal_tree(session, user_a, model_id=PROBE_MODEL, reasoning_effort="high")
+    await _save_byok_key(session_factory, user_a)
+
+    await _run_real_adapter(fake_redis, message)
+
+    assert wire.body["model"] == "ts6-native"
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_omit_temperature_drops_the_key_from_real_body(
+    session: AsyncSession, user_a: uuid.UUID, fake_redis: FakeRedis, wire: _WireRecorder
+) -> None:
+    """**DoD dòng 1 — `omit_temperature`** (Cạm bẫy ①): khoá VẮNG, không phải `null`.
+
+    Anthropic bật thinking trả `400` cho mọi `temperature` khác 1 (T-S.2, cả
+    hai đường). `"temperature": null` cũng là "có khoá" — chỉ vắng hẳn mới an toàn.
+    """
+    message = await _minimal_tree(session, user_a, model_id=PROBE_MODEL, reasoning_effort="max")
+
+    await _run_real_adapter(fake_redis, message)
+
+    assert "temperature" not in wire.body
+    assert wire.body["thinking"] == {"type": "enabled", "budget_tokens": 2048}
+    assert wire.body["max_tokens"] == 4096, "§10.2: max_tokens không đổi theo mức"
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_model_without_reasoning_sends_no_extra_and_keeps_temperature(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    wire: _WireRecorder,
+) -> None:
+    """Không khối `reasoning` ⇒ body đúng như trước T-S.6; cột và `start` đều `null`."""
+    message = await _minimal_tree(session, user_a, model_id=PLAIN_MODEL)
+
+    await _run_real_adapter(fake_redis, message)
+
+    assert set(wire.body) == {
+        "model",
+        "messages",
+        "max_tokens",
+        "temperature",
+        "stream",
+        "stream_options",
+    }
+    assert fake_redis.data(0)["reasoning_effort"] is None
+    assert (await _reload(session_factory, message.id)).reasoning_effort is None
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_start_event_and_column_carry_the_level_sent(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    wire: _WireRecorder,
+) -> None:
+    """Việc 4: event `start` mang `reasoning_effort` (S14), cột giữ đúng mức đã gửi."""
+    message = await _minimal_tree(session, user_a, model_id=PROBE_MODEL, reasoning_effort="high")
+
+    await _run_real_adapter(fake_redis, message)
+
+    assert fake_redis.kind[0] == "start"
+    assert fake_redis.data(0) == {
+        "message_id": str(message.id),
+        "model_id": PROBE_MODEL,
+        "reasoning_effort": "high",
+    }
+    assert (await _reload(session_factory, message.id)).reasoning_effort == "high"
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_level_dropped_from_catalog_falls_back_to_default_and_column_says_so(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    wire: _WireRecorder,
+) -> None:
+    """Catalog bỏ mức giữa lúc job nằm hàng đợi ⇒ gửi `reasoning.default`, cột ghi ĐÚNG thế.
+
+    `medium` không có ở `ts6-probe` — đứng thay cho một mức admin vừa gỡ.
+    Không đổ câu hỏi của người dùng (API đã kiểm lúc nhận), nhưng cũng không để
+    cột nói một mức đã không được gửi.
+    """
+    message = await _minimal_tree(session, user_a, model_id=PROBE_MODEL, reasoning_effort="medium")
+
+    await _run_real_adapter(fake_redis, message)
+
+    assert wire.body["thinking"] == {"type": "disabled"}, "params của mức mặc định `off`"
+    assert fake_redis.data(0)["reasoning_effort"] == "off"
+    assert (await _reload(session_factory, message.id)).reasoning_effort == "off"
+
+
+@pytest.mark.usefixtures("ts6_catalog")
+async def test_catalog_params_are_not_mutated_by_a_turn(
+    session: AsyncSession, user_a: uuid.UUID, fake_redis: FakeRedis, wire: _WireRecorder
+) -> None:
+    """`params` là dữ liệu dùng chung của tiến trình — lượt sinh chỉ nhận bản sao."""
+    model = get_model(PROBE_MODEL)
+    assert model is not None and model.reasoning is not None
+    option = model.reasoning.option("max")
+    assert option is not None
+    before = json.dumps(option.params, sort_keys=True)
+    message = await _minimal_tree(session, user_a, model_id=PROBE_MODEL, reasoning_effort="max")
+
+    await _run_real_adapter(fake_redis, message)
+
+    assert json.dumps(option.params, sort_keys=True) == before
+
+
+async def test_no_reasoning_chunks_leave_column_NULL_not_empty_string(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+) -> None:
+    """Cạm bẫy ② (B-267): BYOK của Anthropic không trả chữ suy luận dù đã bật thinking.
+
+    `messages.reasoning` phải là `NULL` chứ không `''` — FE vẽ khối "Suy luận"
+    gập được theo `reasoning != null`, và một khối rỗng bên trong là lỗi hiển thị.
+    """
+    message = await _minimal_tree(session, user_a)
+    chunks = [
+        Chunk(kind="delta", text="chỉ có câu trả lời"),
+        Chunk(kind="done", finish_reason="stop"),
+    ]
+
+    await generate(_ctx(fake_redis, FakeClient(chunks)), str(message.id))
+
+    reloaded = await _reload(session_factory, message.id)
+    assert reloaded.content == "chỉ có câu trả lời"
+    assert reloaded.reasoning is None

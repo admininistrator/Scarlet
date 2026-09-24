@@ -56,6 +56,12 @@ class MessageFeedback(StrEnum):
     DISLIKE = "dislike"
 
 
+#: Bộ từ vựng của `messages.reasoning_effort` — bản của metadata, cùng giá trị
+#: với `catalog.REASONING_LEVELS` và `_LEVELS` của migration 0006. Xem CHECK
+#: `ck_msg_reasoning_effort_level` bên dưới cho lý do chép tay.
+REASONING_EFFORT_LEVELS = ("off", "low", "medium", "high", "xhigh", "max")
+
+
 class Message(Base):
     __tablename__ = "messages"
 
@@ -103,6 +109,12 @@ class Message(Base):
     #: (`settings.FEEDBACK_REASON_MAX_CHARS`): đây là trường **tự do** duy nhất
     #: trên một bảng mà mọi truy vấn đường đi (§8.3) đều kéo cả hàng về.
     feedback_reason: Mapped[str | None] = mapped_column(Text)
+    #: Mức suy luận của lượt sinh (§24.2b·S4, migration 0006) — một `id` của
+    #: `reasoning.options` trong catalog. API ghi mức đã giải lúc tạo hàng
+    #: `queued`; worker ghi lại đúng mức đã GỬI ở `mark_streaming` (rơi về
+    #: `reasoning.default` nếu catalog vừa bỏ mức ấy). `NULL` = không gửi tham số
+    #: suy luận nào: model không khai khối `reasoning`, hoặc hàng có từ trước 0006.
+    reasoning_effort: Mapped[str | None] = mapped_column(Text)
     #: `clock_timestamp()` chứ KHÔNG phải `now()` — migration 0002, B-53.
     #: `now()` là `transaction_timestamp()`, nên mọi message ghi trong cùng một
     #: transaction sẽ có `created_at` bằng nhau và §8.3 không sắp được chúng.
@@ -136,6 +148,15 @@ class Message(Base):
         CheckConstraint(
             "feedback IS NOT NULL OR feedback_reason IS NULL",
             name="ck_msg_feedback_reason_needs_value",
+        ),
+        # CHECK của migration 0006. Bộ từ vựng chép tay chứ không import
+        # `catalog.REASONING_LEVELS`: import module ấy là NẠP catalog (fail-fast
+        # lúc import), và metadata của bảng không được phụ thuộc một file JSON.
+        # `tests/db/test_reasoning_effort_column.py` canh ba chỗ không lệch nhau.
+        CheckConstraint(
+            "reasoning_effort IS NULL OR reasoning_effort IN "
+            f"({', '.join(repr(level) for level in REASONING_EFFORT_LEVELS)})",
+            name="ck_msg_reasoning_effort_level",
         ),
     )
 

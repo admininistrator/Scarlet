@@ -140,6 +140,13 @@ async def test_model_max_tokens_temperature_pass_through() -> None:
     assert completions.kwargs["temperature"] == 0.3
 
 
+async def test_temperature_none_is_omitted_not_sent_as_null() -> None:
+    """T-S.6 `omit_temperature`: `None` ⇒ `omit`, cùng lối `tools` (SDK gửi `None` thành `null`)."""
+    adapter, completions = fake_adapter()
+    await drain(adapter, temperature=None)
+    assert completions.kwargs["temperature"] is omit
+
+
 async def test_stream_returns_normalized_chunks() -> None:
     adapter, _ = fake_adapter()
     chunks = await drain(adapter)

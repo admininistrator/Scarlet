@@ -456,7 +456,9 @@ async def test_retry_while_previous_turn_open_is_409(
     amid = uuid.UUID(resp.json()["assistant_message_id"])
     if status is MessageStatus.STREAMING:
         async with session_factory() as session:
-            await MessageRepository(session).mark_streaming(amid, model_id="bat-ky")
+            await MessageRepository(session).mark_streaming(
+                amid, model_id="bat-ky", reasoning_effort=None
+            )
             await session.commit()
     before = await _count_messages(session_factory, conversation.id)
     fake_arq.pushed.clear()

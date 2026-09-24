@@ -69,7 +69,11 @@ async def test_xadd_uses_right_key_and_two_fields(fake_redis: FakeRedis, mid: uu
     assert name == f"stream:{mid}"
     assert set(fields) == {FIELD_TYPE, FIELD_DATA}
     assert fields[FIELD_TYPE] == "start"
-    assert json.loads(fields[FIELD_DATA]) == {"message_id": str(mid), "model_id": "mx"}
+    assert json.loads(fields[FIELD_DATA]) == {
+        "message_id": str(mid),
+        "model_id": "mx",
+        "reasoning_effort": None,
+    }
 
 
 async def test_emit_returns_real_redis_id(fake_redis: FakeRedis, mid: uuid.UUID) -> None:

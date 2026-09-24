@@ -4,9 +4,16 @@
 
 model_list:
   # ─── DeepSeek — gọi thẳng, có vision ───
+  #     `openai/…` + api_base, KHÔNG `deepseek/…` (B-272 ngả c, NQ-126): adapter
+  #     `deepseek/` của LiteLLM 1.102 POP `reasoning_effort` và chỉ gửi
+  #     `thinking: {type}`, nên mức low/max không bao giờ tới DeepSeek (đo ở
+  #     T-S.2). Provider OpenAI-compatible chung chuyển tham số nguyên văn.
+  #     Mất theo: `_fill_reasoning_content` của adapter DeepSeek — chỉ có tác dụng
+  #     khi request mang `tools`, tức việc của P6 (B-266).
   - model_name: deepseek-flash
     litellm_params:
-      model: deepseek/deepseek-flash
+      model: openai/deepseek-flash
+      api_base: https://api.deepseek.com/v1
       api_key: os.environ/DEEPSEEK_API_KEY
 
   # ─── Anthropic — gọi thẳng, LiteLLM chuẩn hoá sang OpenAI format (ADR-03 ②) ───

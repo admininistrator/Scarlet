@@ -130,7 +130,7 @@ class OpenAICompatAdapter:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
-        temperature: float,
+        temperature: float | None,
         extra: dict[str, Any],
     ) -> AsyncIterator[Chunk]:
         """Xem `LLMClient.stream`. Gọi bằng `async for c in await adapter.stream(...)`.
@@ -156,7 +156,11 @@ class OpenAICompatAdapter:
             # này, nên phải là `omit`.
             tools=cast(Iterable[ChatCompletionToolUnionParam], tools) if tools else omit,
             max_tokens=max_tokens,
-            temperature=temperature,
+            # `None` ⇒ khoá vắng hẳn khỏi body, cùng lý do `tools` ở trên: SDK
+            # gửi `None` thành `"temperature": null`, và Anthropic bật thinking
+            # từ chối mọi `temperature` khác 1 (T-S.2) — `omit_temperature` của
+            # catalog chỉ có nghĩa khi khoá thật sự không có mặt.
+            temperature=temperature if temperature is not None else omit,
             stream=True,
             stream_options=_STREAM_OPTIONS,
             # Tham số riêng của provider (`reasoning_effort`, `thinking`…) đi

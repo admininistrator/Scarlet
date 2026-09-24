@@ -158,6 +158,10 @@ class PathMessage(BaseModel):
     content: str
     reasoning: str | None
     model_id: str | None
+    #: Mức suy luận worker đã GỬI cho lượt này (§24.2b·S4, T-S.6) — chip "model
+    #: · mức" dưới bong bóng (T-S.15) đọc từ đây sau F5. `null` = không gửi
+    #: tham số suy luận nào, và luôn `null` ở message `user`.
+    reasoning_effort: str | None
     finish_reason: str | None
     error_code: str | None
     created_at: datetime
@@ -203,6 +207,7 @@ class PathMessage(BaseModel):
             content=m.content,
             reasoning=m.reasoning,
             model_id=m.model_id,
+            reasoning_effort=m.reasoning_effort,
             finish_reason=m.finish_reason,
             error_code=m.error_code,
             created_at=m.created_at,

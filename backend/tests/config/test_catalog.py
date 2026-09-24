@@ -854,15 +854,28 @@ def test_alias_missing_from_litellm_config_is_reported() -> None:
 
 
 def test_real_catalog_reasoning_matches_t_s_2_table() -> None:
-    """Khối `reasoning` chép nguyên từ "Ghi nhận" của T-S.2 — không mức nào chưa đo."""
+    """Khối `reasoning` chép nguyên từ "Ghi nhận" của T-S.2 — không mức nào chưa đo.
+
+    Ngoại lệ có chủ ý: `deepseek-flash` theo T-S.6 (NQ-126). LiteLLM khai nó bằng
+    `openai/…` (B-272 ngả c) nên `thinking` ở tầng trên bị `drop_params` bỏ ⇒
+    `off` đi qua `extra_body` trên đường system và `byok_params` trên BYOK (đo:
+    0 token suy luận cả hai đường). low·high·max khai theo tài liệu DeepSeek —
+    số đo không tách được chúng, người dùng chốt khai.
+    """
     raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
     blocks = {m["id"]: m.get("reasoning") for m in raw["models"]}
 
     assert blocks["deepseek-flash"] == {
         "default": "high",
         "options": [
-            {"id": "off", "params": {"thinking": {"type": "disabled"}}},
-            {"id": "high", "params": {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}},
+            {
+                "id": "off",
+                "params": {"extra_body": {"thinking": {"type": "disabled"}}},
+                "byok_params": {"thinking": {"type": "disabled"}},
+            },
+            {"id": "low", "params": {"reasoning_effort": "low"}},
+            {"id": "high", "params": {"reasoning_effort": "high"}},
+            {"id": "max", "params": {"reasoning_effort": "max"}},
         ],
     }
     assert blocks["claude-haiku"] == {

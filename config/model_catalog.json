@@ -81,7 +81,7 @@
       "display_name": "DeepSeek Flash",
       "provider": "deepseek",
       "display_provider": "DeepSeek",
-      "upstream_model": "deepseek/deepseek-flash",
+      "upstream_model": "openai/deepseek-flash",
       "capabilities": ["tools", "vision", "reasoning"],
       "context_window": 128000,
       "max_output": 8192,
@@ -104,8 +104,10 @@
       "reasoning": {
         "default": "high",
         "options": [
-          { "id": "off", "params": { "thinking": { "type": "disabled" } } },
-          { "id": "high", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "high" } }
+          { "id": "off", "params": { "extra_body": { "thinking": { "type": "disabled" } } }, "byok_params": { "thinking": { "type": "disabled" } } },
+          { "id": "low", "params": { "reasoning_effort": "low" } },
+          { "id": "high", "params": { "reasoning_effort": "high" } },
+          { "id": "max", "params": { "reasoning_effort": "max" } }
         ]
       }
     },

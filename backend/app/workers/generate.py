@@ -70,6 +70,14 @@ hai cửa sổ quota). Cùng hàm mà `api/v1/messages.py` đã hỏi lúc nhậ
 nên hai tiến trình không thể quyết hai kiểu — xem docstring `credentials.py`
 cho khe đua giữa hai lần hỏi và vì sao nó được chấp nhận.
 
+**Mức suy luận đi từ hàng `messages`, không từ payload của job (T-S.6, §24.2b·S4).**
+API đã giải mức (body › đã nhớ › mặc định) và ghi nó lên hàng `queued`; bước ①
+đọc lại, `catalog.reasoning_to_send` chốt mức sẽ GỬI, và `mark_streaming` ghi
+đè cột bằng đúng mức ấy. Ba thứ của mức đổi request ở bước ④ và **chỉ** ở đó:
+`params` (hoặc `byok_params` trên đường BYOK) trộn vào `extra`, `alias` thay
+tên model gửi LiteLLM, `omit_temperature` bỏ hẳn khoá `temperature`. Code không
+biết tên tham số nào của provider nào (A3) — nó chỉ chép khối của catalog.
+
 **Chưa có, cố ý:** `tools=None` (tool registry là §12/§13, Phase 6–7, và §7.2
 ghi vòng lặp tool ở đó); `raw_response` (§17.2) chưa có người ghi — hoãn sang
 Phase 6, khi tool-call bắt đầu vỡ thật và hình dạng "response cuối" mới kiểm
@@ -89,7 +97,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from app.config.catalog import ModelEntry, get_model
+from app.config.catalog import ModelEntry, ReasoningOption, get_model, reasoning_to_send
 from app.config.settings import settings
 from app.db.models import KeySource, MessageStatus
 from app.db.repositories import MessageRepository
@@ -326,7 +334,7 @@ async def _run(
     result: _Result,
 ) -> None:
     """Bước ① → ⑤ của §7.2 ③. Ném `GenerationError` cho mọi ngả không đi tiếp được."""
-    model_meta, wire_messages, user_id, credential = await _prepare(mid)
+    model_meta, wire_messages, user_id, credential, level = await _prepare(mid)
     result.model = model_meta
     result.user_id = user_id
     result.sent = wire_messages
@@ -336,7 +344,13 @@ async def _run(
     # đợi chunk đầu: quãng `client.stream(...)` bên dưới chính là TTFT, và đó
     # đúng là quãng mà bản cũ để trống — xem `_heartbeat` (B-122).
     async with _heartbeat(mid), _turn_client(ctx, credential) as client:
-        await producer.emit(StartEvent(message_id=str(mid), model_id=model_meta.id))
+        await producer.emit(
+            StartEvent(
+                message_id=str(mid),
+                model_id=model_meta.id,
+                reasoning_effort=level.id if level is not None else None,
+            )
+        )
 
         # Mốc giá của A7: bảng giá dùng để ghi sổ là bảng giá của **lúc gọi**,
         # không phải lúc lượt sinh kết thúc. Đặt ngay trước `await` chứ không
@@ -346,16 +360,30 @@ async def _run(
         try:
             stream = await client.stream(
                 # Alias LiteLLM hay tên gốc của provider — tuỳ credential, và
-                # `Credential` là chỗ biết cả hai (T-2.15).
-                model=credential.model_name(model_meta),
+                # `Credential` là chỗ biết cả hai (T-2.15). Mức có `alias` thì
+                # alias ấy thay tên trên đường system (9Router chọn mức bằng
+                # tên model — T-S.2); BYOK bỏ qua nó.
+                model=credential.model_name(model_meta, level),
                 messages=wire_messages,
                 # Tool registry là §12/§13 (Phase 6–7). `None` chứ không `[]`:
                 # adapter đổi nó thành `omit`, model không có capability `tools`
                 # (§9.4) thì không được thấy khoá đó (C18).
                 tools=None,
+                # §10.2 `est_max` KHÔNG đổi (Cạm bẫy ④ của T-S.6): token suy
+                # luận nằm trong `max_tokens` ở mọi provider đã đo, nên trần
+                # này vẫn là trường hợp xấu nhất của lượt sinh.
                 max_tokens=model_meta.max_output,
-                temperature=settings.LLM_TEMPERATURE,
-                extra={},
+                # `None` = không gửi khoá (Cạm bẫy ① của T-S.6): Anthropic bật
+                # thinking trả `400` cho mọi `temperature` khác 1, và
+                # `drop_params` của LiteLLM không cứu — đo ở T-S.2.
+                temperature=(
+                    None
+                    if level is not None and level.omit_temperature
+                    else settings.LLM_TEMPERATURE
+                ),
+                # `params` (hoặc `byok_params`) của mức, trộn NGUYÊN VĂN vào body
+                # (§24.2b·S3b). Bản sao sâu — xem `Credential.reasoning_params`.
+                extra=credential.reasoning_params(level),
             )
         except Exception as exc:
             # `await` này là chỗ gửi request và nhận header, nên 401/400/429 nổ
@@ -412,7 +440,7 @@ async def _turn_client(ctx: dict[str, Any], credential: Credential) -> AsyncIter
 
 async def _prepare(
     mid: uuid.UUID,
-) -> tuple[ModelEntry, list[dict[str, Any]], uuid.UUID, Credential]:
+) -> tuple[ModelEntry, list[dict[str, Any]], uuid.UUID, Credential, ReasoningOption | None]:
     """Bước ① → ③ (+ ①.5): đọc message, chọn credential, dựng ngữ cảnh, `streaming`.
 
     Cả bốn trong **một** session rồi đóng ngay: một lượt sinh có thể kéo mười
@@ -459,7 +487,22 @@ async def _prepare(
         # không ai sinh — đúng món ăn của reaper §7.6.
         credential = await resolve_credential(session, user_id=owned.user_id, model=model_meta)
 
-        if not await repo.mark_streaming(mid, model_id=model_meta.id):
+        # Mức sẽ gửi (T-S.6). Khác mức API đã ghi chỉ khi catalog vừa bỏ mức
+        # ấy lúc job còn trong hàng đợi — khi đó rơi về `reasoning.default` và
+        # nói ra trong log; cột bị ghi đè ngay dưới bằng mức thật sự gửi.
+        stored_level = owned.message.reasoning_effort
+        level = reasoning_to_send(model_meta, stored_level)
+        sent_level = level.id if level is not None else None
+        if stored_level is not None and sent_level != stored_level:
+            logger.warning(
+                "generate: %s muc %r khong con trong catalog cua %s — gui %r",
+                mid,
+                stored_level,
+                model_meta.id,
+                sent_level,
+            )
+
+        if not await repo.mark_streaming(mid, model_id=model_meta.id, reasoning_effort=sent_level):
             # Không còn `queued`: một worker khác đã nhận, hoặc message đã
             # `failed`/`cancelled` trong lúc chờ hàng đợi. Bỏ lượt là đúng —
             # sinh tiếp là trả tiền lần hai cho cùng một câu hỏi (B-72).
@@ -469,10 +512,10 @@ async def _prepare(
             )
         await session.commit()
 
-    # `user_id` đi ra cùng ba thứ kia vì đây là chỗ DUY NHẤT đọc được nó:
+    # `user_id` đi ra cùng các thứ kia vì đây là chỗ DUY NHẤT đọc được nó:
     # `messages` không có cột `user_id` (Phụ lục A), nó nằm ở hội thoại chứa
     # message. Bước ghi sổ ⑥.5 cần nó cho `usage_events.user_id`.
-    return model_meta, wire_messages, owned.user_id, credential
+    return model_meta, wire_messages, owned.user_id, credential, level
 
 
 async def _emit(producer: StreamProducer, result: _Result, chunk: Chunk) -> None:

@@ -14,7 +14,7 @@ không được nằm trong `.py` (A3). Kết quả cộng dồn vào một file
 `evals/results/`, nên chạy từng model một (`--model`) vẫn ra một bảng.
 
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  NĂM QUYẾT ĐỊNH CỦA PHÉP ĐO                                              │
+│  SÁU QUYẾT ĐỊNH CỦA PHÉP ĐO                                              │
 └──────────────────────────────────────────────────────────────────────────┘
 
 **1. Bằng chứng là token, không phải `200`.** `drop_params: true` (Phụ lục E)
@@ -51,6 +51,12 @@ lượt đó không được gửi (`skipped-budget`). Tiền mỗi lượt tín
 đếm được chính thí nghiệm này và bảng Chi phí của admin khớp hoá đơn provider.
 ZSET quota **không** bị chạm — "sổ có, ZSET thiếu" là chiều lành mà
 `rebuild_quota` vá được (xem docstring `meter.record_usage`).
+
+**6. Câu hỏi là một phần của ô đo (T-S.6).** Câu cố định `prompt` của kế
+hoạch là câu dễ: đủ tách `off`/`low`/`high`, nhưng một mức "nghĩ kỹ hơn" như
+`max` chỉ khác `high` trên một câu buộc model phải kiểm lại. Một ô có thể mang
+`"prompt": "<tên>"` trỏ vào `prompts` của kế hoạch; tên ấy vào `variant`, nên
+hai ô cùng mức khác câu không bao giờ bị so lẫn nhau.
 """
 
 from __future__ import annotations
@@ -124,11 +130,15 @@ class Case:
     ladder: str | None = None
     alias: str | None = None
     temperature: float | None = None
+    #: Tên một câu trong `prompts` của kế hoạch; `None` = câu cố định `prompt`.
+    prompt: str | None = None
 
     @property
     def variant(self) -> str:
-        """Nhãn phân biệt hai cách gửi cùng một mức (alias, tham số, temperature)."""
+        """Nhãn phân biệt hai cách gửi cùng một mức (câu hỏi, alias, tham số, temperature)."""
         parts: list[str] = []
+        if self.prompt:
+            parts.append(f"prompt={self.prompt}")
         if self.alias:
             parts.append(f"alias={self.alias}")
         if self.params:
@@ -159,6 +169,7 @@ def build_cases(plan: dict[str, Any], catalog: Catalog, only: set[str]) -> list[
         raise SystemExit(f"model chưa có trong kế hoạch {PLAN_PATH.name}: {missing}")
 
     levels = set(plan["levels"])
+    prompts = plan.get("prompts", {})
     negative = plan["negative"]
     cases: list[Case] = []
     for entry in plan["models"]:
@@ -174,6 +185,10 @@ def build_cases(plan: dict[str, Any], catalog: Catalog, only: set[str]) -> list[
                     raise SystemExit(f"{model_id}: đường '{path}' không tồn tại")
                 if raw.get("alias") and path != PATH_SYSTEM:
                     raise SystemExit(f"{model_id}: alias chỉ có nghĩa trên đường system")
+                if raw.get("prompt") and raw["prompt"] not in prompts:
+                    raise SystemExit(
+                        f"{model_id}: câu hỏi '{raw['prompt']}' không có trong prompts"
+                    )
                 cases.append(
                     Case(
                         model_id=model_id,
@@ -185,6 +200,7 @@ def build_cases(plan: dict[str, Any], catalog: Catalog, only: set[str]) -> list[
                         ladder=raw.get("ladder"),
                         alias=raw.get("alias"),
                         temperature=raw.get("temperature"),
+                        prompt=raw.get("prompt"),
                     )
                 )
         if PATH_SYSTEM in entry["paths"]:
@@ -324,6 +340,14 @@ def _short(exc: BaseException) -> str:
 
 def _messages(prompt: str) -> list[dict[str, Any]]:
     return [{"role": "user", "content": prompt}]
+
+
+def question_of(plan: dict[str, Any], case: Case) -> tuple[str, str]:
+    """(câu hỏi, đáp án) của một ô — câu cố định, hoặc câu riêng nó trỏ tới."""
+    if case.prompt is None:
+        return plan["prompt"], plan["expected_answer"]
+    named = plan["prompts"][case.prompt]
+    return named["text"], named["expected_answer"]
 
 
 def worst_case_usd(catalog: Catalog, model: ModelEntry, case: Case, prompt: str) -> Decimal:
@@ -580,7 +604,7 @@ def report(data: dict[str, Any], plan: dict[str, Any]) -> None:
 
     print(
         "\n| model | đường | mức | cách gửi | HTTP | reasoning_tokens | completion_tokens "
-        "| chữ suy luận | finish | đúng 131? |"
+        "| chữ suy luận | finish | đúng? |"
     )
     print("|---|---|---|---|---|---|---|---|---|---|")
     for key in sorted(groups, key=sort_key):
@@ -657,7 +681,6 @@ async def execute(
     ledger_user: uuid.UUID,
 ) -> None:
     budget = Decimal(plan["budget_usd"])
-    prompt, expected = plan["prompt"], plan["expected_answer"]
     # Chạy tiếp một lần bị ngắt: lượt đã có kết quả (kể cả 4xx — đó cũng là một
     # phép đo) không gửi lại, để không trả tiền hai lần cho cùng một ô.
     done = {
@@ -672,6 +695,7 @@ async def execute(
                 if run > case.runs or (*case.key, run) in done:
                     continue
                 model = next(m for m in catalog.models if m.id == case.model_id)
+                prompt, expected = question_of(plan, case)
                 worst = worst_case_usd(catalog, model, case, prompt)
                 spent = spent_usd(data["calls"])
                 if spent + worst > budget:
@@ -711,6 +735,7 @@ def asdict_case(case: Case) -> dict[str, Any]:
         "params": case.params,
         "temperature": case.temperature,
         "max_tokens": case.max_tokens,
+        "prompt": case.prompt,
     }
 
 
@@ -749,7 +774,7 @@ def main() -> int:
         total = Decimal(0)
         for case in cases:
             model = next(m for m in catalog.models if m.id == case.model_id)
-            worst = worst_case_usd(catalog, model, case, plan["prompt"]) * case.runs
+            worst = worst_case_usd(catalog, model, case, question_of(plan, case)[0]) * case.runs
             total += worst
             print(
                 f"  {case.runs}× {case.model_id} · {case.path} · {case.level} · {case.variant}"

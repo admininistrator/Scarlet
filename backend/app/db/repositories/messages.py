@@ -123,6 +123,7 @@ class MessageRepository:
         status: MessageStatus | None = None,
         model_id: str | None = None,
         tool_call_id: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> Message:
         """Thêm một node vào cây.
 
@@ -154,6 +155,7 @@ class MessageRepository:
             role=role,
             model_id=model_id,
             tool_call_id=tool_call_id,
+            reasoning_effort=reasoning_effort,
         )
         # `content` và `status` có DEFAULT trong DDL (Phụ lục A). `None` nghĩa là
         # KHÔNG đặt thuộc tính, để Postgres áp default của nó — không chép hai
@@ -294,8 +296,10 @@ class MessageRepository:
         message, user_id = row
         return OwnedMessage(message=message, user_id=user_id)
 
-    async def mark_streaming(self, message_id: uuid.UUID, *, model_id: str) -> bool:
-        """`queued` → `streaming`, đặt `model_id` và mở đồng hồ `heartbeat_at`.
+    async def mark_streaming(
+        self, message_id: uuid.UUID, *, model_id: str, reasoning_effort: str | None
+    ) -> bool:
+        """`queued` → `streaming`, đặt `model_id` + `reasoning_effort`, mở `heartbeat_at`.
 
         `WHERE status = 'queued'` chứ không chỉ `WHERE id = …`: hai worker cùng
         nhận một `message_id` (arq giao lại sau SIGKILL — B-72) thì chỉ một
@@ -307,6 +311,11 @@ class MessageRepository:
         (§7.6) so `heartbeat_at < now() - REAPER_STALE_S`, mà `NULL` thì phép
         so đó không bao giờ đúng — một worker chết ngay sau khi đổi trạng thái
         sẽ để message kẹt `streaming` vĩnh viễn.
+
+        `reasoning_effort` ghi đè mức API đã ghi lúc tạo hàng bằng mức worker
+        **thật sự gửi** (T-S.6): hai giá trị chỉ khác nhau khi catalog vừa bỏ
+        mức ấy giữa lúc job còn trong hàng đợi, và khi đó cột phải nói điều đã
+        xảy ra chứ không phải điều đã định — chip dưới bong bóng đọc từ đây.
         """
         stmt = (
             update(Message)
@@ -314,6 +323,7 @@ class MessageRepository:
             .values(
                 status=MessageStatus.STREAMING,
                 model_id=model_id,
+                reasoning_effort=reasoning_effort,
                 heartbeat_at=func.now(),
             )
             .returning(Message.id)

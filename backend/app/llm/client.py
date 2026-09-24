@@ -143,7 +143,7 @@ class LLMClient(Protocol):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
-        temperature: float,
+        temperature: float | None,
         extra: dict[str, Any],
     ) -> AsyncIterator[Chunk]:
         """Gọi model và trả về iterator các `Chunk` đã chuẩn hoá.
@@ -152,5 +152,11 @@ class LLMClient(Protocol):
         giờ là chuỗi literal trong code gọi (A3). `extra` mang tham số riêng
         của provider (ví dụ `reasoning_effort`) và đi thẳng vào body request;
         adapter không diễn giải nó.
+
+        `temperature=None` nghĩa là **không gửi khoá ấy** — không phải
+        "temperature mặc định". Đó là `omit_temperature` của một mức suy luận
+        (§24.2b·S3b, T-S.6): Anthropic bật thinking trả `400` cho mọi giá trị
+        khác 1, nên lối an toàn duy nhất là vắng mặt. §9.1 khai `float`; lệch
+        này là phần mở rộng T-S.6 cần, và nó chỉ nới — mọi lời gọi cũ vẫn đúng.
         """
         ...

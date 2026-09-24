@@ -4,9 +4,16 @@
   "_doc_3": "Thêm một mức mới cho một model: thêm case vào thang của model đó, chạy lại probe với --model, rồi mới khai vào catalog (RUNBOOK, T-S.3).",
   "prompt": "Có bao nhiêu số nguyên dương n ≤ 200 sao cho n² + 1 chia hết cho 5, hoặc n³ − n chia hết cho 7? Chỉ trả lời đúng một số, không giải thích.",
   "expected_answer": "131",
+  "_doc_prompts": "Câu riêng cho một ô (`\"prompt\": \"<tên>\"` trong case) — T-S.6. Câu cố định ở trên là câu dễ: đủ tách off/low/high nhưng không tách được một mức 'nghĩ kỹ hơn' như max khỏi high (T-S.2: DeepSeek BYOK max 1225/1268 vs high 1088/1242).",
+  "prompts": {
+    "hard": {
+      "text": "Có bao nhiêu chuỗi nhị phân độ dài 12 không chứa ba chữ số 1 liên tiếp và có số chữ số 1 chia hết cho 3? Chỉ trả lời đúng một số, không giải thích.",
+      "expected_answer": "568"
+    }
+  },
   "runs": 2,
-  "_doc_budget": "DoD của T-S.2 đặt trần 0.10 USD; người dùng nâng lên 0.15 giữa lúc đo (2026-09-24) khi lượt 1 cho thấy ô Haiku ngân sách 4096 tốn 0.013–0.016 USD/lượt.",
-  "budget_usd": "0.15",
+  "_doc_budget": "Ngân sách tính theo TỪNG file kết quả. T-S.2 (reasoning-2026-09-24.json): trần 0.10 USD, người dùng nâng 0.15 giữa lúc đo khi ô Haiku ngân sách 4096 tốn 0.013–0.016 USD/lượt. T-S.6 (đo lại DeepSeek sau B-272 ngả c, file riêng): người dùng duyệt 0.05 USD rồi bỏ trần và cho chạy ngay giờ cao điểm (NQ-126) — 0.50 chỉ còn là lưới an toàn: giá cao điểm, 25 lượt × 8192 token xấu nhất = 0.25.",
+  "budget_usd": "0.50",
   "levels": ["off", "low", "medium", "high", "xhigh", "max"],
   "distinct": {
     "_doc": "Hai mức kề nhau 'khác rõ' khi mọi lượt của mức trên vượt mọi lượt của mức dưới ít nhất `min_delta_tokens` VÀ gấp ít nhất `min_ratio` lần (mức dưới bằng 0 thì chỉ xét delta).",
@@ -71,21 +78,17 @@
     },
     {
       "id": "deepseek-flash",
+      "_doc": "T-S.6 — đo lại sau B-272 ngả (c) (NQ-126): LiteLLM khai deepseek-flash bằng `openai/…` + api_base, nên `reasoning_effort` tới DeepSeek nguyên văn trên CẢ HAI đường (DeepSeek từ chối `ultra-bogus` bằng 422 — LiteLLM bọc thành 500). Nhưng `thinking` là tham số OpenAI 'đã biết' của LiteLLM mà provider `openai/` không khai ⇒ `drop_params` bỏ im lặng: `off` trên đường system phải đi qua `extra_body` (thang `catalog`), đường BYOK gọi thẳng thì `thinking` ở tầng trên (`byok_params` của catalog). Thang `effort`/`effort-hard` (thinking + reasoning_effort) là lượt đo đầu của phiên, còn trong file kết quả. Mức theo tài liệu DeepSeek: low·high·max (minimal→low, medium/xhigh→high, ultra→max; mặc định high) — số đo KHÔNG tách được low/high/max theo luật `distinct`; người dùng chốt khai theo tài liệu (NQ-126).",
       "paths": ["system", "byok"],
       "max_tokens": 8192,
       "cases": [
-        { "level": "default", "params": {} },
-        { "level": "off", "ladder": "thinking", "params": { "thinking": { "type": "disabled" } } },
-        { "level": "low", "ladder": "thinking", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "low" } },
-        { "level": "medium", "ladder": "thinking", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "medium" } },
-        { "level": "high", "ladder": "thinking", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "high" } },
-        { "level": "max", "ladder": "thinking", "params": { "thinking": { "type": "enabled" }, "reasoning_effort": "max" } },
-        { "level": "high", "runs": 1, "params": { "thinking": { "type": "enabled" } } },
-        { "level": "low", "runs": 1, "params": { "reasoning_effort": "low" } },
-        { "_doc": "LiteLLM 1.102.0 (llms/deepseek/chat/transformation.py) pop reasoning_effort và chỉ gửi thinking bật/tắt. extra_body lồng là đường LiteLLM chuyển nguyên văn cho provider OpenAI-compatible — thang này đo xem nó có vòng qua được không.", "level": "low", "ladder": "extra_body", "paths": ["system"], "params": { "thinking": { "type": "enabled" }, "extra_body": { "reasoning_effort": "low" } } },
-        { "level": "medium", "ladder": "extra_body", "paths": ["system"], "params": { "thinking": { "type": "enabled" }, "extra_body": { "reasoning_effort": "medium" } } },
-        { "level": "high", "ladder": "extra_body", "paths": ["system"], "params": { "thinking": { "type": "enabled" }, "extra_body": { "reasoning_effort": "high" } } },
-        { "level": "max", "ladder": "extra_body", "paths": ["system"], "params": { "thinking": { "type": "enabled" }, "extra_body": { "reasoning_effort": "max" } } }
+        { "level": "off", "ladder": "catalog", "paths": ["system"], "params": { "extra_body": { "thinking": { "type": "disabled" } } } },
+        { "level": "off", "ladder": "catalog", "paths": ["byok"], "params": { "thinking": { "type": "disabled" } } },
+        { "level": "low", "ladder": "catalog", "params": { "reasoning_effort": "low" } },
+        { "level": "high", "ladder": "catalog", "params": { "reasoning_effort": "high" } },
+        { "level": "max", "ladder": "catalog", "params": { "reasoning_effort": "max" } },
+        { "level": "high", "ladder": "catalog-hard", "prompt": "hard", "params": { "reasoning_effort": "high" } },
+        { "level": "max", "ladder": "catalog-hard", "prompt": "hard", "params": { "reasoning_effort": "max" } }
       ]
     }
   ]

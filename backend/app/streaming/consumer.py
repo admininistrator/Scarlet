@@ -223,6 +223,7 @@ class MessageSnapshot:
     status: MessageStatus
     content: str
     model_id: str | None
+    reasoning_effort: str | None
     finish_reason: str | None
     error_code: str | None
     prompt_tokens: int | None
@@ -235,6 +236,7 @@ class MessageSnapshot:
             status=message.status,
             content=message.content,
             model_id=message.model_id,
+            reasoning_effort=message.reasoning_effort,
             finish_reason=message.finish_reason,
             error_code=message.error_code,
             prompt_tokens=message.prompt_tokens,
@@ -436,7 +438,13 @@ class StreamConsumer:
         )
         if snap.model_id is not None:
             yield self._event_frame(
-                StartEvent(message_id=str(snap.message_id), model_id=snap.model_id)
+                StartEvent(
+                    message_id=str(snap.message_id),
+                    model_id=snap.model_id,
+                    # Cùng hình dạng `start` của đường Redis (T-S.6): mở lại
+                    # sau một giờ vẫn phải ra đúng chip "model · mức".
+                    reasoning_effort=snap.reasoning_effort,
+                )
             )
         if snap.content:
             yield self._event_frame(DeltaEvent(text=snap.content))

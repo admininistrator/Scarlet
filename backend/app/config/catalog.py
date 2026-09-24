@@ -981,6 +981,27 @@ def supports_reasoning(model: ModelEntry, level_id: str) -> bool:
     return model.reasoning is not None and model.reasoning.option(level_id) is not None
 
 
+def reasoning_to_send(model: ModelEntry, level_id: str | None) -> ReasoningOption | None:
+    """Mức worker sẽ GỬI cho `model` khi hàng `messages` ghi `level_id` (T-S.6).
+
+    `level_id` còn được khai ⇒ đúng mức ấy. Không còn — catalog vừa bỏ mức
+    này giữa lúc job nằm trong hàng đợi, hoặc hàng có từ trước migration 0006
+    (`NULL`) — thì rơi về `reasoning.default`: API đã kiểm mức lúc nhận
+    request, và đổ một câu hỏi của người dùng vì một dòng cấu hình admin vừa
+    sửa là trái lý lẽ Cạm bẫy ③ của T-3.0. Worker ghi mức trả về này vào
+    `messages.reasoning_effort`, nên cột luôn nói đúng điều đã gửi.
+
+    Model không khai khối `reasoning` ⇒ `None`: không gửi tham số suy luận nào.
+    """
+    if model.reasoning is None:
+        return None
+    if level_id is not None:
+        option = model.reasoning.option(level_id)
+        if option is not None:
+            return option
+    return model.reasoning.option(model.reasoning.default)
+
+
 def get_default_model() -> ModelEntry | None:
     """Model dùng khi request không nói dùng model nào (§9.2 `default: true`).
 

@@ -81,6 +81,19 @@ job sau `commit`, và không test nào của hai đường kia bắt được.
 **`retry` và `PATCH` trả `202` + `stream_url` y như `POST .../messages`,** vì
 chúng tạo ra đúng cùng một thứ: một lượt sinh chưa có chữ nào. FE không cần
 biết ba đường này khác nhau ở đâu — nó nhận `stream_url` rồi mở `EventSource`.
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│  T-S.6 — MỨC SUY LUẬN CHỐT Ở BIÊN VÀO, CÙNG CHỖ VỚI MODEL                │
+└──────────────────────────────────────────────────────────────────────────┘
+
+`POST .../messages` và `retry` nhận `reasoning_effort` (§24.2b·S4). Mức được
+**giải ngay sau `_pick_model`, trước mọi `INSERT`** — `_pick_reasoning` — nên
+mức model không khai là `400 REASONING_UNSUPPORTED` mà không để lại hàng nào.
+Mức đã giải ghi lên hàng assistant `queued`, cùng lý do `model_id` ghi ở đó:
+job chỉ mang một khoá chính (C5), và đổi mức đã nhớ giữa lúc job còn trong
+hàng đợi không được đổi mức của một câu hỏi đã gửi. `PATCH` không nhận mức
+trong body (S14 không mở) nhưng đi qua cùng hàm, nên lượt sinh của nó cũng
+theo mức đã nhớ › mặc định.
 """
 
 from __future__ import annotations
@@ -108,6 +121,7 @@ from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.queue import GENERATE_JOB_NAME, get_arq_pool
 from app.core.ratelimit import acquire_generation_seat, chat_limit, release_generation_seat
 from app.core.redis import get_redis
+from app.core.user_prefs import read_prefs
 from app.db.models import (
     Conversation,
     KeySource,
@@ -121,6 +135,7 @@ from app.db.repositories import (
     ConversationRepository,
     MessageNotInConversationError,
     MessageRepository,
+    UserSettingsRepository,
 )
 from app.db.session import session_scope
 from app.llm.credentials import resolve_key_source
@@ -208,6 +223,13 @@ class CreateMessageRequest(BaseModel):
     parent_id: uuid.UUID | None = None
     #: Vắng ⇒ `conversations.default_model` ⇒ model `default` của catalog (§9.2).
     model_id: str | None = None
+    #: Một `id` trong `reasoning.options` của model hiệu lực (§24.2b·S4). Vắng
+    #: (hoặc `null`) ⇒ mức đã nhớ của người này cho model ấy ⇒
+    #: `reasoning.default` ⇒ không gửi gì. Có mà model không khai ⇒ `400
+    #: REASONING_UNSUPPORTED`, kiểm ở `_pick_reasoning` chứ không bằng `Literal`
+    #: ở đây: câu hỏi đúng là "model NÀY có mức ấy không", không phải "chữ này
+    #: có trong bộ từ vựng không".
+    reasoning_effort: str | None = None
 
 
 class CreateMessageResponse(BaseModel):
@@ -282,6 +304,10 @@ async def create_message(
             )
 
         model = _pick_model(body.model_id, conversation.default_model)
+        # TRƯỚC `create_message` bên dưới: mức sai là `400` không để lại hàng nào.
+        reasoning_effort = await _pick_reasoning(
+            session, user_id=user_id, model=model, requested=body.reasoning_effort
+        )
 
         # C14 — đọc `active_leaf_id` TRƯỚC khi ghi đè nó, nếu không `branched`
         # luôn là `False` (so một giá trị với chính nó).
@@ -317,6 +343,7 @@ async def create_message(
             user_status=user_status,
             parent_id=uid,
             model=model,
+            reasoning_effort=reasoning_effort,
         )
         await session.commit()
 
@@ -344,6 +371,7 @@ async def _open_generation(
     user_status: UserStatus,
     parent_id: uuid.UUID | None,
     model: catalog.ModelEntry,
+    reasoning_effort: str | None,
 ) -> NewGeneration:
     """Bốn bước cuối của §7.2 ① — assistant `queued`, dời lá, KIỂM QUOTA, đẩy job.
 
@@ -410,6 +438,8 @@ async def _open_generation(
             # định giữa lúc job còn trong hàng đợi không được đổi model của một
             # câu hỏi đã gửi. Worker đọc lại đúng cột này (§7.2 ③).
             model_id=model.id,
+            # Cùng lý lẽ cho mức suy luận (T-S.6): chốt ở đây, worker đọc lại.
+            reasoning_effort=reasoning_effort,
         )
     except MessageNotInConversationError as exc:
         raise ApiError(
@@ -510,6 +540,59 @@ def _pick_model(*preferred: str | None) -> catalog.ModelEntry:
             "khong co model nao dang bat trong catalog",
         )
     return default
+
+
+async def _pick_reasoning(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    model: catalog.ModelEntry,
+    requested: str | None,
+    inherited: str | None = None,
+) -> str | None:
+    """Mức suy luận của lượt sinh này — thứ tự thắng của §24.2b·S4 (T-S.6).
+
+        body (`requested`) › mức của câu trả lời đang thử lại (`inherited`, chỉ
+        `retry`) › mức đã nhớ `reasoning_prefs[model]` › `reasoning.default` ›
+        `None` (model không khai khối `reasoning`)
+
+    **Chỉ mức NGƯỜI GỌI ghi rõ mới được phép hỏng.** `requested` không có ở
+    model hiệu lực ⇒ `400`. Ba nguồn sau chỉ bị **bỏ qua** khi không còn hợp
+    lệ, cùng lý lẽ `user_prefs.read_prefs` (Cạm bẫy ③ của T-3.0): mức cũ của
+    câu trả lời được thử lại bằng một model khác, hay một mức đã nhớ mà admin
+    vừa gỡ khỏi catalog, không phải lỗi của người vừa bấm Gửi.
+
+    `inherited` giữ ngữ nghĩa cũ của `retry` (T-S.6 Việc 3): bấm Thử lại mà
+    không gửi mức thì sinh lại đúng mức cũ, như không gửi `model_id` thì sinh
+    lại đúng model cũ. FE của T-S.15 luôn gửi mức trên picker, nên nhánh này
+    là của người gọi API trực tiếp.
+
+    Chỉ đọc `user_settings` khi thật sự cần — model có khối `reasoning` và hai
+    nguồn đầu không trả lời: một câu `SELECT` trên đường `< 100 ms` của §7.2 ①.
+
+    Raise:
+        ApiError 400 `REASONING_UNSUPPORTED`: `requested` không có trong
+            `reasoning.options` của model hiệu lực — kể cả model không có khối
+            `reasoning` nào. `details` cùng hình dạng `PUT /settings` (T-S.5).
+    """
+    if requested is not None:
+        if not catalog.supports_reasoning(model, requested):
+            raise ApiError(
+                status.HTTP_400_BAD_REQUEST,
+                ApiErrorCode.REASONING_UNSUPPORTED,
+                f"model {model.id} khong co muc suy luan {requested}",
+                details={"model_id": model.id, "level": requested},
+            )
+        return requested
+    if model.reasoning is None:
+        return None
+    if inherited is not None and catalog.supports_reasoning(model, inherited):
+        return inherited
+    prefs = read_prefs(await UserSettingsRepository(session).get_prefs(user_id))
+    remembered = prefs.reasoning.get(model.id)
+    if remembered is not None:
+        return remembered
+    return model.reasoning.default
 
 
 async def _day_job(assistant_message_id: uuid.UUID) -> None:
@@ -673,6 +756,10 @@ class RetryRequest(BaseModel):
     #: Vắng ⇒ dùng lại `messages.model_id` của chính câu trả lời đang thử lại
     #: (xem `_pick_model`), rồi mới tới `conversations.default_model`.
     model_id: str | None = None
+    #: Vắng ⇒ dùng lại `messages.reasoning_effort` của chính câu trả lời đang thử
+    #: lại nếu model hiệu lực còn khai mức ấy, rồi tới mức đã nhớ và mặc định
+    #: (xem `_pick_reasoning`). Có mà model không khai ⇒ `400`.
+    reasoning_effort: str | None = None
 
 
 class RetryResponse(BaseModel):
@@ -834,6 +921,13 @@ async def retry_message(
             original.model_id,
             conversation.default_model,
         )
+        reasoning_effort = await _pick_reasoning(
+            session,
+            user_id=user_id,
+            model=model,
+            requested=body.reasoning_effort if body is not None else None,
+            inherited=original.reasoning_effort,
+        )
         generation = await _open_generation(
             session=session,
             messages=messages,
@@ -843,6 +937,7 @@ async def retry_message(
             user_status=user_status,
             parent_id=original.parent_id,
             model=model,
+            reasoning_effort=reasoning_effort,
         )
         await session.commit()
 
@@ -908,6 +1003,9 @@ async def edit_message(
         _require_role(original, MessageRole.USER)
         conversation = await _containing_conversation(conversations, original, user_id=user_id)
         model = _pick_model(conversation.default_model)
+        reasoning_effort = await _pick_reasoning(
+            session, user_id=user_id, model=model, requested=None
+        )
 
         try:
             user_message = await messages.create_message(
@@ -938,6 +1036,7 @@ async def edit_message(
             user_status=user_status,
             parent_id=uid,
             model=model,
+            reasoning_effort=reasoning_effort,
         )
         await session.commit()
 

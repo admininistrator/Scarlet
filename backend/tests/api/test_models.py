@@ -436,10 +436,24 @@ def test_reasoning_exposes_only_ids_and_default() -> None:
             "default": entry.reasoning.default,
             "options": [{"id": o.id} for o in entry.reasoning.options],
         }
-    for leak in ("params", "budget_tokens", "thinking", "omit_temperature", "alias"):
+    for leak in (
+        "params",
+        "byok_params",
+        "extra_body",
+        "budget_tokens",
+        "thinking",
+        "omit_temperature",
+        "alias",
+    ):
         assert leak not in resp.text
     by_id = {m["id"]: m for m in body}
-    assert [o["id"] for o in by_id["deepseek-flash"]["reasoning"]["options"]] == ["off", "high"]
+    # T-S.6 (NQ-126): bốn mức theo tài liệu DeepSeek.
+    assert [o["id"] for o in by_id["deepseek-flash"]["reasoning"]["options"]] == [
+        "off",
+        "low",
+        "high",
+        "max",
+    ]
     assert by_id["deepseek-flash"]["reasoning"]["default"] == "high"
 
 

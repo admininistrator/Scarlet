@@ -142,6 +142,7 @@ def _snapshot(
     status: MessageStatus = MessageStatus.STREAMING,
     content: str = "",
     model_id: str | None = "mx",
+    reasoning_effort: str | None = None,
     finish_reason: str | None = None,
     error_code: str | None = None,
     prompt_tokens: int | None = None,
@@ -152,6 +153,7 @@ def _snapshot(
         status=status,
         content=content,
         model_id=model_id,
+        reasoning_effort=reasoning_effort,
         finish_reason=finish_reason,
         error_code=error_code,
         prompt_tokens=prompt_tokens,
@@ -576,6 +578,25 @@ async def test_expired_stream_completed_message_sends_content_then_done() -> Non
     last = json.loads(_field(frame[-1], "data")[0])
     assert last == {"finish_reason": "stop", "usage": {"in": 297, "out": 298}}
     assert redis.xread_calls == 0, "khong duoc BLOCK khi da tra loi xong tu Postgres"
+
+
+@pytest.mark.parametrize("level", ["low", None])
+async def test_postgres_path_start_carries_reasoning_effort(level: str | None) -> None:
+    """T-S.6: mở lại sau khi stream hết TTL vẫn ra đúng chip "model · mức".
+
+    Cùng một `start` với đường Redis — kể cả khoá `reasoning_effort: null` của
+    model không khai mức — để FE chỉ có một cách đọc event này.
+    """
+    mid = uuid.uuid4()
+    consumer = _consumer(
+        FakeRedis(),
+        _snapshot(mid, status=MessageStatus.COMPLETED, content="x", reasoning_effort=level),
+    )
+
+    frame = await _collect(consumer, CURSOR_START)
+
+    start = json.loads(_field(frame[0], "data")[0])
+    assert start == {"message_id": str(mid), "model_id": "mx", "reasoning_effort": level}
 
 
 async def test_postgres_path_carries_no_id() -> None:

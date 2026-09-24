@@ -106,15 +106,28 @@ class Event:
 
 @dataclass(frozen=True, slots=True)
 class StartEvent(Event):
-    """§7.4: "Bắt đầu sinh, kèm `model_id`, `message_id`" → FE hiện con trỏ nháy."""
+    """§7.4: "Bắt đầu sinh, kèm `model_id`, `message_id`" → FE hiện con trỏ nháy.
+
+    `reasoning_effort` là trường thêm của §24.2b·S4/S14 (T-S.6) — "thêm một
+    trường, không thêm event": mức suy luận worker **thật sự gửi** cho lượt
+    này, để chip "model · mức" (T-S.15) hiện ngay từ chữ đầu tiên. Khoá
+    **luôn có mặt**; `null` = lượt này không gửi tham số suy luận nào (model
+    không khai khối `reasoning`). Khác luật "vắng = không báo" của `usage`:
+    ở đây không có ai "không báo" — worker luôn biết mình đã gửi gì.
+    """
 
     TYPE: ClassVar[EventType] = "start"
 
     message_id: str
     model_id: str
+    reasoning_effort: str | None = None
 
     def data(self) -> dict[str, Any]:
-        return {"message_id": self.message_id, "model_id": self.model_id}
+        return {
+            "message_id": self.message_id,
+            "model_id": self.model_id,
+            "reasoning_effort": self.reasoning_effort,
+        }
 
 
 @dataclass(frozen=True, slots=True)

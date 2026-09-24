@@ -80,9 +80,17 @@ def test_every_event_serializes_to_json() -> None:
 def test_payload_keys_match_the_plan() -> None:
     assert DeltaEvent(text="a").data() == {"t": "a"}
     assert ReasoningEvent(text="a").data() == {"t": "a"}
+    # T-S.6 (§24.2b·S14): `start` thêm `reasoning_effort` — khoá LUÔN có mặt,
+    # `null` khi lượt này không gửi tham số suy luận nào.
     assert StartEvent(message_id="m1", model_id="mx").data() == {
         "message_id": "m1",
         "model_id": "mx",
+        "reasoning_effort": None,
+    }
+    assert StartEvent(message_id="m1", model_id="mx", reasoning_effort="low").data() == {
+        "message_id": "m1",
+        "model_id": "mx",
+        "reasoning_effort": "low",
     }
     # §7.4: {"name":"web_search","args":{"query":"..."},"call_id":"c_1"}
     assert ToolCallEvent(call_id="c_1", name="web_search", arguments='{"q":1}').data() == {

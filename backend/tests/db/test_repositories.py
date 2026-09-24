@@ -550,8 +550,12 @@ async def test_mark_streaming_applies_only_once(
         status=MessageStatus.QUEUED,
     )
 
-    assert await repo.mark_streaming(message.id, model_id="mo-hinh-x") is True
-    assert await repo.mark_streaming(message.id, model_id="mo-hinh-x") is False
+    assert (
+        await repo.mark_streaming(message.id, model_id="mo-hinh-x", reasoning_effort=None) is True
+    )
+    assert (
+        await repo.mark_streaming(message.id, model_id="mo-hinh-x", reasoning_effort=None) is False
+    )
 
     async with session_factory() as reader:
         reloaded = await reader.get(Message, message.id)

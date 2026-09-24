@@ -76,14 +76,16 @@ cùng một cái giá: một phép AES-GCM cho mỗi lần hỏi.
 
 from __future__ import annotations
 
+import copy
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import catalog
-from app.config.catalog import ModelEntry, Provider
+from app.config.catalog import ModelEntry, Provider, ReasoningOption
 from app.core.crypto import DecryptionError, Sealed, unseal
 from app.db.models import KeySource
 from app.db.repositories import ProviderKeyRepository
@@ -106,7 +108,7 @@ class Credential:
     #: Khoá **bản rõ** — chỉ có ở nhánh BYOK. Không log, không đi vào exception (C20).
     api_key: str | None
 
-    def model_name(self, model: ModelEntry) -> str:
+    def model_name(self, model: ModelEntry, level: ReasoningOption | None = None) -> str:
         """Tên model gửi lên upstream — alias LiteLLM hay tên gốc của provider.
 
         Sống ở đây chứ không ở `workers/generate.py` vì nó là hệ quả trực tiếp
@@ -115,10 +117,34 @@ class Credential:
         (`config/litellm.config.yaml`). Hai quyết định ấy phải nằm cạnh nhau,
         nếu không thì một ngày nào đó có người đổi một cái mà quên cái kia và
         provider trả `400 model not found` — xem `ModelEntry.provider_model`.
+
+        **`level.alias` chỉ có nghĩa trên đường system** (§24.2b·S3b, T-S.6):
+        nó là một `model_name` khác trong `litellm.config.yaml` — cách 9Router
+        chọn mức bằng tên model — nên gửi nó thẳng tới provider là gửi một tên
+        provider không biết. Đường BYOK vì vậy bỏ qua nó và gọi tên gốc.
         """
         if self.key_source is KeySource.SYSTEM:
-            return model.id
+            return level.alias if level is not None and level.alias else model.id
         return model.provider_model
+
+    def reasoning_params(self, level: ReasoningOption | None) -> dict[str, Any]:
+        """Tham số của một mức suy luận cho ĐƯỜNG này — trộn vào `extra` (§9.1).
+
+        `byok_params` thay `params` trên đường BYOK khi catalog khai nó: LiteLLM
+        không có mặt để dịch, nên provider có thể cần tên tham số khác (§24.2b·
+        S3b). Vắng mặt ⇒ BYOK dùng chính `params` — T-S.2 đo `thinking` gốc
+        chạy trên cả hai đường cho mọi model đang khai.
+
+        Trả **bản sao sâu**: dict trong catalog là dữ liệu dùng chung của cả
+        tiến trình, và một adapter nào đó trộn thêm khoá vào nó sẽ đổi tham số
+        của mọi lượt sinh sau cho tới lần nạp catalog kế tiếp.
+        """
+        if level is None:
+            return {}
+        chosen = level.params
+        if self.key_source is not KeySource.SYSTEM and level.byok_params is not None:
+            chosen = level.byok_params
+        return copy.deepcopy(chosen)
 
 
 #: Lượt sinh đi bằng tiền của người vận hành. Một hằng dùng chung thay vì ba
