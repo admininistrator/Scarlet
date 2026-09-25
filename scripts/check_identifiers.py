@@ -66,7 +66,7 @@ _RHYMES = (
 # Chữ vừa ghép được thành âm tiết Việt vừa là từ tiếng Anh mà code dùng thật
 # (`get`, `setBan`, `toBeGreaterThan`, `trimStart`, `DOMException`,
 # `STATUSES_CAN_LOGIN`, `CONTEXT_WINDOW_CAP`, `gap_s`, `cat = catalog…`,
-# `LUA_TOKEN_BUCKET` — script Lua).
+# `LUA_TOKEN_BUCKET` — script Lua; `Sun` — icon của gói `lucide`, T-S.11).
 # Danh sách lập theo dữ liệu, không theo từ điển: những chữ như `ban`, `added`,
 # `doc`, `mat`, `man` ở kho này gần như luôn là `bản`, `thêm`, `đọc`, `mật`,
 # `màn` — cho chúng vào đây là để lọt `valid`, `DUONG_DAN`. `that` là ngoại
@@ -79,6 +79,7 @@ _ENGLISH = frozenset(
     get set put let run pop map min sum top tip pay sin
     can cap gap cat rep day dot bit hit hot cut net
     chat chip pin long lua via but trip that
+    sun
     """.split()
 )
 

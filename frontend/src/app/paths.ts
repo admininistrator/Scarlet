@@ -1,5 +1,6 @@
 /**
- * Mot ban duy nhat cua chin duong CO TEN — T-3.1a.
+ * Mot ban duy nhat cua cac duong CO TEN — T-3.1a (chin), T-S.11 them bon tab
+ * cua Cai dat.
  *
  * KH tham chieu: §16.3, §23 · tasks.md T-3.1a, T-3.1b, T-3.12 · CLAUDE.md A3.
  *
@@ -35,11 +36,18 @@
 export const PATHS = {
   home: "/",
   admin: "/admin",
-  settings: "/cai-dat",
   /**
-   * T-S.10 — dich cua link "Xem muc su dung" tren dong han muc (NQ-114). Tab
-   * that la cua T-S.11; toi luc ay route nay ve dung man Cai dat hien co, de
-   * link khong roi vao 404.
+   * T-S.11 — ≥ 1024 px chuyen thang sang `settingsAccount`; hep hon la danh
+   * sach tab (ban T-HD9 F). Nam tab ben duoi moi tab mot duong dan (§24.2b·S10).
+   */
+  settings: "/cai-dat",
+  settingsAccount: "/cai-dat/tai-khoan",
+  settingsAppearance: "/cai-dat/giao-dien",
+  settingsModel: "/cai-dat/model",
+  settingsApiKeys: "/cai-dat/khoa-api",
+  /**
+   * Tab Muc su dung — dich cua dong han muc tren o nhap (T-S.10, NQ-114) va
+   * cua menu tai khoan (T-S.12).
    */
   settingsUsage: "/cai-dat/muc-su-dung",
   login: "/dang-nhap",

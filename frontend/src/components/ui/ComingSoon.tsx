@@ -31,13 +31,18 @@ import { t } from "../../lib/i18n";
  * that khi T-6.7 gan. Muc menu cho (menu tai khoan, menu hang hoi thoai) can
  * `DropdownMenu` cua Radix — goi chua cai; task dung menu ay (T-S.12, T-S.13)
  * them hinh dang thu tu.
+ *
+ * T-S.11 — nut chu co them `leadingIcon` (icon TRUOC chu, cach 8 px): "Tai anh
+ * len" o tab Tai khoan, ban T-HD9 (`SettingsAccount`). Van la nut chu: chu la
+ * ten truy cap, icon `aria-hidden` (do `StaticIcon` khong `label`).
  */
 
 type Planned = `${"T" | "B"}-${string}`;
 
 type ComingSoonProps =
-  | { planned: Planned; label: string; icon?: ReactNode; toggle?: false }
-  | { planned: Planned; label: string; icon: ReactNode; toggle: true };
+  | { planned: Planned; label: string; icon?: undefined; toggle?: false; leadingIcon?: ReactNode }
+  | { planned: Planned; label: string; icon: ReactNode; toggle?: false; leadingIcon?: undefined }
+  | { planned: Planned; label: string; icon: ReactNode; toggle: true; leadingIcon?: undefined };
 
 const ICON_CLASS =
   "control-disabled inline-flex size-touch shrink-0 items-center justify-center rounded-md text-muted";
@@ -46,7 +51,7 @@ const TEXT_CLASS =
 const TOGGLE_CLASS =
   "control-disabled inline-flex min-h-touch shrink-0 items-center gap-1.5 rounded-full pr-3 pl-2.5 text-sm font-medium text-muted";
 
-export function ComingSoon({ planned, label, icon, toggle }: ComingSoonProps) {
+export function ComingSoon({ planned, label, icon, toggle, leadingIcon }: ComingSoonProps) {
   const iconOnly = icon !== undefined && toggle !== true;
   return (
     <Tooltip.Provider>
@@ -58,7 +63,15 @@ export function ComingSoon({ planned, label, icon, toggle }: ComingSoonProps) {
             aria-label={iconOnly ? label : undefined}
             aria-pressed={toggle === true ? false : undefined}
             data-planned={planned}
-            className={toggle === true ? TOGGLE_CLASS : iconOnly ? ICON_CLASS : TEXT_CLASS}
+            className={
+              toggle === true
+                ? TOGGLE_CLASS
+                : iconOnly
+                  ? ICON_CLASS
+                  : leadingIcon === undefined
+                    ? TEXT_CLASS
+                    : `${TEXT_CLASS} inline-flex items-center gap-2`
+            }
           >
             {toggle === true ? (
               <>
@@ -68,7 +81,10 @@ export function ComingSoon({ planned, label, icon, toggle }: ComingSoonProps) {
             ) : iconOnly ? (
               icon
             ) : (
-              label
+              <>
+                {leadingIcon}
+                {label}
+              </>
             )}
           </button>
         </Tooltip.Trigger>

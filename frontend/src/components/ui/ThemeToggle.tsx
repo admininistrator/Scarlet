@@ -35,13 +35,20 @@ import { t } from "../../lib/i18n";
  */
 
 export type Theme = "light" | "dark";
+/**
+ * T-S.11 (ban T-HD9 B) — lua chon DA LUU: mot theme co dinh, hoac `system` =
+ * theo he dieu hanh. `system` KHONG co gia tri nao trong `localStorage`: vang
+ * khoa chinh la "chua ai chon", dung nhu doan script trong `index.html` doc.
+ */
+export type ThemePreference = Theme | "system";
 
 const STORAGE_KEY = "scarlet-theme";
 /**
  * T-3.12 — trang Cai dat co o chon theme THU HAI canh nut o header. Hai noi
  * giu hai `useState` thi bam mot ben xong ben kia noi sai ("Toi" trong luc
- * trang da toi). Moi lan DOI theme phat su kien nay; moi `useTheme()` dang
- * song nghe no va theo. Khong doc `data-theme` — xem khoi ngay tren.
+ * trang da toi). Moi lan DOI theme DANG HIEN phat su kien nay; moi
+ * `useTheme()` dang song nghe no va theo. Khong doc `data-theme` — xem khoi
+ * ngay tren.
  */
 const THEME_EVENT = "scarlet:theme";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
@@ -66,17 +73,59 @@ export function initialTheme(): Theme {
   return storedTheme() ?? systemTheme();
 }
 
-/** Theme hien tai + ham doi — dung chung cho nut header va trang Cai dat. */
+/** Lua chon da luu, `system` khi chua ai chon — tab Giao dien (T-S.11). */
+export function storedPreference(): ThemePreference {
+  return storedTheme() ?? "system";
+}
+
+export function resolveTheme(preference: ThemePreference): Theme {
+  return preference === "system" ? systemTheme() : preference;
+}
+
+/**
+ * Doi theme DANG HIEN, KHONG luu — "xem truoc" cua tab Giao dien (ban T-HD9:
+ * *"Giao dien doi ngay khi chon de ban xem truoc. Bam Luu de giu lua chon"*).
+ */
+export function showTheme(theme: Theme): void {
+  document.documentElement.setAttribute("data-theme", theme);
+  window.dispatchEvent(new CustomEvent<Theme>(THEME_EVENT, { detail: theme }));
+}
+
+/**
+ * Nghe moi lan theme DANG HIEN doi (xem truoc, luu, nut header). Tra ham go.
+ * Tab Giao dien dung no de biet nut header vua luu mot lua chon khac.
+ */
+export function onThemeChange(listener: () => void): () => void {
+  window.addEventListener(THEME_EVENT, listener);
+  return () => window.removeEventListener(THEME_EVENT, listener);
+}
+
+/** Luu lua chon roi hien no. `system` = XOA khoa, khong ghi chu "system". */
+export function saveThemePreference(preference: ThemePreference): void {
+  try {
+    if (preference === "system") {
+      localStorage.removeItem(STORAGE_KEY);
+    } else {
+      localStorage.setItem(STORAGE_KEY, preference);
+    }
+  } catch {
+    // che do rieng tu co the chan localStorage — bo qua, khong lam vo app
+  }
+  showTheme(resolveTheme(preference));
+}
+
+/**
+ * Theme DANG HIEN + ham doi-va-luu — nut header (T-0.10) va tab Giao dien.
+ *
+ * T-S.11: luc mount KHONG con ghi `localStorage` (truoc day effect ghi theme
+ * ban dau vao khoa, tuc "theo he dieu hanh" bien thanh mot lua chon co dinh
+ * ngay lan mo app dau tien). Chi `setTheme`/`saveThemePreference` ghi.
+ */
 export function useTheme(): [Theme, (next: Theme) => void] {
   const [theme, setThemeState] = useState<Theme>(initialTheme);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    try {
-      localStorage.setItem(STORAGE_KEY, theme);
-    } catch {
-      // che do rieng tu co the chan localStorage — bo qua, khong lam vo app
-    }
   }, [theme]);
 
   useEffect(() => {
@@ -90,10 +139,23 @@ export function useTheme(): [Theme, (next: Theme) => void] {
     return () => window.removeEventListener(THEME_EVENT, follow);
   }, []);
 
-  const setTheme = useCallback((next: Theme) => {
-    setThemeState(next);
-    window.dispatchEvent(new CustomEvent<Theme>(THEME_EVENT, { detail: next }));
+  useEffect(() => {
+    // "Theo he thong" (ban T-HD9: *"Doi theo cai dat cua may"*) theo SONG khi
+    // he dieu hanh doi, khong chi doc mot lan luc tai trang.
+    const list = window.matchMedia?.(DARK_QUERY);
+    if (list === undefined) {
+      return;
+    }
+    const follow = () => {
+      if (storedTheme() === null) {
+        showTheme(systemTheme());
+      }
+    };
+    list.addEventListener("change", follow);
+    return () => list.removeEventListener("change", follow);
   }, []);
+
+  const setTheme = useCallback((next: Theme) => saveThemePreference(next), []);
 
   return [theme, setTheme];
 }

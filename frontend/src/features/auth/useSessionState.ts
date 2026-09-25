@@ -18,8 +18,15 @@
  * phia server, va gia phai tra la mot lan `GET /auth/me` luc mo trang.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { ApiError, ERROR_CODES, api, type ProfileOut, type UserOut } from "../../lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ApiError,
+  ERROR_CODES,
+  api,
+  type ProfileOut,
+  type SettingsOut,
+  type UserOut,
+} from "../../lib/api";
 
 export interface SessionState {
   /** `null` = chua dang nhap (hoac phien da het). */
@@ -74,6 +81,16 @@ export interface SessionState {
    */
   changeDefaultModel: (modelId: string | null) => Promise<void>;
   /**
+   * T-S.11 — ghi `PUT /settings` voi DU bon truong: `patch` (phan doi) ghep
+   * len ban day du doc tu `/auth/me`. Moi lan luu cua FE di qua day, ke ca
+   * `changeDefaultModel` (Cam bay ① cua T-S.11: PUT thay ca tai nguyen, mot
+   * lan doi ten ma quen `default_model` la mot lan mat model mac dinh).
+   *
+   * Chua co ho so (`/auth/me` hong luc mount) ⇒ hoi lai `/auth/me` TRUOC khi
+   * ghi, khong bao gio gui mot body thieu truong. Nem lai loi cho ben goi.
+   */
+  saveSettings: (patch: Partial<SettingsOut>) => Promise<void>;
+  /**
    * T-3.11 — hoi lai `GET /auth/me` de lam tuoi thanh quota.
    *
    * Goi SAU moi luot sinh (`done`/`error`) va sau mot `429 QUOTA_EXCEEDED`,
@@ -91,6 +108,13 @@ export function useSessionState(): SessionState {
   const [loading, setLoading] = useState(true);
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  /*
+    Ban ho so MOI NHAT cho `saveSettings` — mot ref chu khong doc `profile`
+    trong closure: hai lan luu lien nhau (doi ten roi doi mau) thi lan hai
+    phai ghep len ket qua cua lan mot, khong len ban cu cua lan render truoc.
+  */
+  const profileRef = useRef<ProfileOut | null>(null);
+  profileRef.current = profile;
 
   useEffect(() => {
     let mounted = true;
@@ -184,20 +208,42 @@ export function useSessionState(): SessionState {
     }
   }, []);
 
-  const changeDefaultModel = useCallback(async (modelId: string | null): Promise<void> => {
-    const output = await api.updateSettings(modelId);
+  const saveSettings = useCallback(async (patch: Partial<SettingsOut>): Promise<void> => {
+    let base = profileRef.current;
+    if (base === null) {
+      base = await api.me();
+      setProfileReadAt(Date.now());
+    }
+    const output = await api.updateSettings({
+      default_model: base.default_model,
+      display_name: base.display_name,
+      avatar_color: base.avatar_color,
+      reasoning_prefs: base.reasoning_prefs,
+      ...patch,
+    });
     /*
-      Doc lai tu RESPONSE chu khong tu `modelId` vua gui: server la noi
-      quyet dinh, va no tra `SettingsOut` dung de ben goi khong phai suy ra
-      (xem docstring `SettingsOut` cua backend).
+      Doc lai tu RESPONSE chu khong tu `patch` vua gui: server la noi quyet
+      dinh (vd. `display_name` da cat khoang trang, chuoi rong thanh `null` —
+      T-S.5 Cam bay ②), va no tra `SettingsOut` dung de ben goi khong phai suy ra.
 
-      Ca hai cho cung mang truong nay: `UserOut.default_model` la mot
-      cot cua hang `users` nen ca `/login`, `/refresh` lan `/me` deu tra —
-      cap nhat mot cho roi de cho kia lech la dung cai bay B-213 noi toi.
+      `default_model` va `display_name` la cot cua hang `users`, nen `user`
+      (`UserOut` cua login/refresh/me) cung mang — cap nhat mot cho roi de cho
+      kia lech la dung cai bay B-213 noi toi.
     */
-    setProfile((prev) => (prev === null ? prev : { ...prev, default_model: output.default_model }));
-    setUser((prev) => (prev === null ? prev : { ...prev, default_model: output.default_model }));
+    const next: ProfileOut = { ...base, ...output };
+    profileRef.current = next;
+    setProfile(next);
+    setUser((prev) =>
+      prev === null
+        ? prev
+        : { ...prev, default_model: output.default_model, display_name: output.display_name },
+    );
   }, []);
+
+  const changeDefaultModel = useCallback(
+    (modelId: string | null): Promise<void> => saveSettings({ default_model: modelId }),
+    [saveSettings],
+  );
 
   const refreshProfile = useCallback(async (): Promise<void> => {
     try {
@@ -219,6 +265,7 @@ export function useSessionState(): SessionState {
     login,
     logout,
     changeDefaultModel,
+    saveSettings,
     refreshProfile,
   };
 }

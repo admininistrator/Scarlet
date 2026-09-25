@@ -8,8 +8,9 @@
  * hai.
  *
  * T-S.10 (NQ-114): hai thanh cua `QuotaBar` roi man chat; tren o nhap chi con
- * MOT dong (`QuotaNotice`). `QuotaBar` van la component cua T-S.11 (tab Muc
- * su dung) nen ca 11–12 van ve no.
+ * MOT dong (`QuotaNotice`). T-S.11 dung lai hai thanh o tab Muc su dung theo
+ * ban T-HD9 (`components/settings/UsagePanel.tsx`) va xoa `QuotaBar`; ca 11–12
+ * doi sang `components/settings/Settings.test.tsx` (ca 17, 19).
  *
  * ── Ba tang ──────────────────────────────────────────────────────────────
  *
@@ -69,7 +70,6 @@ import {
 import type { StreamEvent } from "../../lib/sse";
 import { Composer } from "../../components/chat/Composer";
 import { useChat } from "../chat/useChat";
-import { QuotaBar } from "./QuotaBar";
 import { QuotaNotice } from "./QuotaNotice";
 import {
   byokCovers,
@@ -284,31 +284,6 @@ describe("hai nguon", () => {
 
     expect(output.map((r) => r.window.remaining_pct)).toEqual([12]);
   });
-
-  it("11. `QuotaBar` (T-S.11 dua sang Cai dat) hien MOT con so moi cua so, kem gio doc", () => {
-    const readings = readingsAt(quotaWindow({ remaining_pct: 16, remaining_usd: "0.0800" }));
-    render(
-      <QuotaBar
-        readings={readings}
-        warnPct={THRESHOLD}
-        block={quotaBlock(readings)}
-        byokCovered={false}
-        now={READ_AT}
-      />,
-    );
-
-    expect(screen.getAllByRole("meter")).toHaveLength(1);
-    expect(screen.getAllByText("16%")).toHaveLength(1);
-    expect(screen.getByText(/Số liệu lúc/)).toHaveTextContent("14:00:00");
-  });
-
-  it("12. `quota: null` (Redis chop) ⇒ AN thanh, khong ve mot thanh rong", () => {
-    const { container } = render(
-      <QuotaBar readings={mergeReadings(null, READ_AT, {})} warnPct={THRESHOLD} block={null} byokCovered={false} />,
-    );
-
-    expect(container).toBeEmptyDOMElement();
-  });
 });
 
 /* ── Nhip lam tuoi: `done`/`error`/`429`, khong bo dem thoi gian ───────────── */
@@ -338,6 +313,11 @@ function profile(quota: QuotaWindow[]): ProfileOut {
     quota,
     message_max_chars: 24000,
     quota_warn_remaining_pct: THRESHOLD,
+    last_login_at: null,
+    limits_cache_ttl_s: 60,
+    display_name_max_chars: 64,
+    avatar_color: null,
+    reasoning_prefs: {},
   };
 }
 

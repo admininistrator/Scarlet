@@ -115,6 +115,11 @@ const USER: ProfileOut = {
   quota: null,
   message_max_chars: 24000,
   quota_warn_remaining_pct: 20,
+  last_login_at: null,
+  limits_cache_ttl_s: 60,
+  display_name_max_chars: 64,
+  avatar_color: null,
+  reasoning_prefs: {},
 };
 
 const PASSWORD = "mot-mat-khau-du-manh-123";

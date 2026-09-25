@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { RouteObject } from "react-router";
 
 import { AdminScreen } from "../components/admin/AdminScreen";
@@ -8,7 +9,16 @@ import { ResetPasswordForm } from "../components/auth/ResetPasswordForm";
 import { StatusGate } from "../components/auth/StatusGate";
 import { VerifyEmailScreen } from "../components/auth/VerifyEmailScreen";
 import { ChatScreen } from "../components/chat/ChatScreen";
-import { SettingsScreen } from "../components/settings/SettingsScreen";
+import { AccountPanel } from "../components/settings/AccountPanel";
+import { ApiKeysPanel } from "../components/settings/ApiKeysPanel";
+import { AppearancePanel } from "../components/settings/AppearancePanel";
+import { ModelPanel } from "../components/settings/ModelPanel";
+import {
+  SettingsIndex,
+  SettingsLayout,
+  type SettingsTabPath,
+} from "../components/settings/SettingsLayout";
+import { UsagePanel } from "../components/settings/UsagePanel";
 import { AdminOnly } from "./AdminOnly";
 import { Layout } from "./Layout";
 import { LoginRoute } from "./LoginRoute";
@@ -16,6 +26,19 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 import { RouteErrorPage } from "./pages/ServerErrorPage";
 import { PATHS } from "./paths";
 import { SignedInOnly } from "./SignedInOnly";
+
+/**
+ * T-S.11 — nam tab cua Cai dat, MOI tab mot duong dan (§24.2b·S10). Viet
+ * tuong minh tung duong chu khong mot `/cai-dat/:tab`: duong la hang cua
+ * `PATHS`, va mot slug go sai roi vao `*` (404) chu khong vao mot tab rong.
+ */
+const SETTINGS_ROUTES: readonly (readonly [SettingsTabPath, ReactNode])[] = [
+  [PATHS.settingsAccount, <AccountPanel />],
+  [PATHS.settingsAppearance, <AppearancePanel />],
+  [PATHS.settingsModel, <ModelPanel />],
+  [PATHS.settingsApiKeys, <ApiKeysPanel />],
+  [PATHS.settingsUsage, <UsagePanel />],
+];
 
 /**
  * Bang route — 11 duong cua T-3.1a.
@@ -55,7 +78,8 @@ import { SignedInOnly } from "./SignedInOnly";
  * `/quen-mat-khau`, `/dat-lai-mat-khau`, `/cho-duyet`, `/cai-dat` de task sau
  * *"chi phai dien, khong phai dung lai cau hinh router"*. T-3.1b dien nam cho
  * dau, T-3.12 dien `/cai-dat` — `PlaceholderPage` het nguoi dung va bi xoa.
- * `/cai-dat` boc `SignedInOnly` (chi hoi "da dang nhap chua", xem B-216).
+ * `/cai-dat` boc `SignedInOnly` (chi hoi "da dang nhap chua", xem B-216);
+ * T-S.11 tach no thanh nam tab, moi tab cung boc `SignedInOnly`.
  *
  * ── `StatusGate` boc man chat, `AdminOnly` boc man quan tri ────────────────
  *
@@ -90,20 +114,18 @@ export const routes: RouteObject[] = [
         path: PATHS.settings,
         element: (
           <SignedInOnly>
-            <SettingsScreen />
+            <SettingsIndex />
           </SignedInOnly>
         ),
       },
-      {
-        // T-S.10 — dich cua dong han muc tren o nhap. T-S.11 bien no thanh tab
-        // "Muc su dung"; toi luc ay no la chinh man Cai dat.
-        path: PATHS.settingsUsage,
+      ...SETTINGS_ROUTES.map(([path, panel]) => ({
+        path,
         element: (
           <SignedInOnly>
-            <SettingsScreen />
+            <SettingsLayout tab={path}>{panel}</SettingsLayout>
           </SignedInOnly>
         ),
-      },
+      })),
       { path: PATHS.login, element: <LoginRoute /> },
       { path: PATHS.register, element: <RegisterForm /> },
       { path: PATHS.forgotPassword, element: <ForgotPasswordForm /> },

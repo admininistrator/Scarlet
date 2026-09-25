@@ -52,6 +52,11 @@ const ADMIN: ProfileOut = {
   quota: null,
   message_max_chars: 24000,
   quota_warn_remaining_pct: 20,
+  last_login_at: null,
+  limits_cache_ttl_s: 60,
+  display_name_max_chars: 64,
+  avatar_color: null,
+  reasoning_prefs: {},
 };
 
 const ZERO_AMOUNT = { cost_usd: "0", prompt_tokens: 0, completion_tokens: 0, events: 0 };
@@ -141,14 +146,23 @@ describe("bang route", () => {
     expect(screen.queryByText("404")).toBeNull();
   });
 
-  it("/cai-dat la man that: ba muc giao dien, model mac dinh, khoa rieng (T-3.12)", async () => {
+  it("/cai-dat (>= 1024 px) chuyen sang tab Tai khoan; nam tab la nam lien ket (T-S.11)", async () => {
     // Truoc T-3.12 `/cai-dat` la `PlaceholderPage` — mot man co TEN nen ca
-    // `it.each` ben tren van xanh. Ba tieu de muc la thu trang tam khong co.
+    // `it.each` ben tren van xanh. T-S.11: `/cai-dat` la mac dinh cua tab Tai
+    // khoan (jsdom = desktop, `matchMedia` khong khop), va cot tab co du nam.
     renderAt(PATHS.settings);
 
-    expect(await screen.findByRole("heading", { name: "Giao diện" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Model mặc định" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Khoá API riêng (BYOK)" })).toBeInTheDocument();
+    const nav = await screen.findByRole("navigation", { name: "Mục cài đặt" });
+    expect(screen.getByRole("link", { name: "Tài khoản" })).toHaveAttribute("aria-current", "page");
+    expect(
+      [...nav.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")]),
+    ).toEqual([
+      ["Tài khoản", PATHS.settingsAccount],
+      ["Giao diện", PATHS.settingsAppearance],
+      ["Model", PATHS.settingsModel],
+      ["Khoá API", PATHS.settingsApiKeys],
+      ["Mức sử dụng", PATHS.settingsUsage],
+    ]);
   });
 
   it("chua dang nhap thi /cai-dat day toi /dang-nhap", async () => {
@@ -162,9 +176,10 @@ describe("bang route", () => {
   it("B-216 (de mo): `pending_approval` VAO duoc /cai-dat, khong bi day ve /cho-duyet", async () => {
     vi.mocked(api.me).mockResolvedValue({ ...ADMIN, role: "user", status: "pending_approval" });
 
-    renderAt(PATHS.settings);
+    renderAt(PATHS.settingsApiKeys);
 
-    expect(await screen.findByRole("heading", { name: "Khoá API riêng (BYOK)" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Cài đặt" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Khoá API" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("heading", { name: "Đang chờ quản trị duyệt" })).toBeNull();
   });
 

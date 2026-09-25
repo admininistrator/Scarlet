@@ -141,6 +141,15 @@ describe("ThemeToggle", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
   });
 
+  it("T-S.11: MOUNT khong ghi `localStorage` — 'theo he dieu hanh' khong bien thanh lua chon co dinh", () => {
+    fakeOsTheme(true);
+
+    render(<ThemeToggle />);
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(localStorage.getItem("scarlet-theme")).toBeNull();
+  });
+
   it("khong co `window.matchMedia` (jsdom tran, WebView cu) thi roi ve sang", () => {
     vi.stubGlobal("matchMedia", undefined);
 

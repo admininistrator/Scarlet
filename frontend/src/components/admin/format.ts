@@ -68,6 +68,12 @@ export function formatDateTime(iso: string): string {
   return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}`;
 }
 
+/** `09:14 · 12/09/2026` — "Them luc" cua khoa API (ban T-HD9). */
+export function formatClockDate(iso: string): string {
+  const p = parts(iso);
+  return `${p.hour}:${p.minute} · ${p.day}/${p.month}/${p.year}`;
+}
+
 /** `22/09 14:32` — cot "Luc nao" cua so audit. */
 export function formatShortDateTime(iso: string): string {
   const p = parts(iso);

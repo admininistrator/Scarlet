@@ -311,9 +311,25 @@ export interface ModelOut {
   stale_after_s: number;
 }
 
-/** `PUT /settings` — §18.4, B-206/NQ-79. Cung hinh dang voi body gui di. */
+/**
+ * `PUT /settings` — §18.4, B-206/NQ-79, T-S.5. Cung hinh dang voi body gui di.
+ *
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║  PUT THAY CA TAI NGUYEN — GUI DU BON TRUONG, MOI LAN (T-S.5 DoD 2)     ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ *
+ * Truong vang mat trong body = `null` o server (co chu y, §24.2b·S10). Mot
+ * lan doi ten ma quen `default_model` la mot lan mat model mac dinh. Vi vay
+ * kieu nay KHONG co truong tuy chon nao, va chi `useSessionState.saveSettings`
+ * dung no — ghep phan doi vao ban day du doc tu `/auth/me` (T-S.11).
+ */
 export interface SettingsOut {
   default_model: string | null;
+  display_name: string | null;
+  /** Ten token `avatar-1`…`avatar-8` (S10: luu TEN mau, khong luu ma mau). */
+  avatar_color: string | null;
+  /** `{model_id: level_id}` — muc suy luan da nho (§24.2b·S4). */
+  reasoning_prefs: Record<string, string>;
 }
 
 // ─────────────────── kieu cua §11.2 (auth) va §16.3 (admin) ──────────────────
@@ -342,6 +358,12 @@ export interface UserOut {
    * `users`, tuc ca ba duong deu tra.
    */
   default_model: string | null;
+  /**
+   * Lan `POST /auth/login` thanh cong gan nhat (T-S.5, NQ-125) — `refresh`
+   * KHONG doi no. T-S.11 so gia tri nay de biet "mot lan dang nhap moi" (thanh
+   * quota chay tu 0, NQ-114). `null` = chua dang nhap lan nao tu khi cot duoc ghi.
+   */
+  last_login_at: string | null;
 }
 
 /** Hai gia tri cua `limit_type` (§10.3, UC-07) — `5h` va `weekly`. */
@@ -388,6 +410,17 @@ export interface ProfileOut extends UserOut {
    * `quota_warning` cua `202`, nen thanh quota khong co nguong rieng de lech.
    */
   quota_warn_remaining_pct: number;
+  /**
+   * T-S.11 — `TIER_CACHE_TTL_S`: admin doi han muc thi so moi co hieu luc
+   * trong vong N giay (§10.4). Tab Muc su dung doc N o day (A3).
+   */
+  limits_cache_ttl_s: number;
+  /** T-S.5 — tran do dai `display_name`, tinh bang ky tu (A3). */
+  display_name_max_chars: number;
+  /** T-S.5 — `null` hoac ten la ⇒ FE dung mau mac dinh (`avatarColor.ts`). */
+  avatar_color: string | null;
+  /** T-S.5 — da loc theo catalog HIEN TAI (cap het hop le bi bo qua). */
+  reasoning_prefs: Record<string, string>;
 }
 
 /**
@@ -940,27 +973,27 @@ export const api = {
   // ────────────────────── §18.4 — cai dat ca nhan (T-3.0) ───────────────────
 
   /**
-   * Ghi model mac dinh CUA CHINH MINH (§18.4, UC-05 dong 4, B-206).
+   * Ghi cai dat CUA CHINH MINH (§18.4, UC-05 dong 4, B-206, T-S.5).
    *
    * Khong co tham so `userId`: duong dan khong mang `{id}` va body khong co
    * truong nao tro sang nguoi khac — server lay danh tinh tu cookie phien.
    *
-   * `null` = BO CHON, tuc quay ve bac thang mac dinh (§9.2). Do la mot y
-   * dinh co that chu khong phai "khong gui gi", nen kieu o day la
-   * `string | null` chu khong `string | undefined`.
+   * Nhan DU bon truong (`SettingsOut`) chu khong mot `Partial`: PUT thay ca
+   * tai nguyen, xem docstring `SettingsOut`. `null` o `default_model` = BO
+   * CHON, tuc quay ve bac thang mac dinh (§9.2).
    *
    * `400 MODEL_UNKNOWN` khi model khong con trong catalog hoac da tat:
    * backend validate luc GHI chu khong luc doc (Cam bay ③ cua T-3.0), nen
    * ben goi phai do duoc ca nhanh nay.
    *
-   * KHONG co `getCaiDat()` di kem: ve `GET` cua §18.4 co y chua dung
-   * (`default_model` da di ra trong `GET /auth/me`) — xem docstring cua
+   * KHONG co `getCaiDat()` di kem: ve `GET` cua §18.4 co y chua dung (moi
+   * truong da di ra trong `GET /auth/me`) — xem docstring cua
    * `backend/app/api/v1/settings.py`.
    */
-  updateSettings: (defaultModel: string | null) =>
+  updateSettings: (body: SettingsOut) =>
     request<SettingsOut>("/settings", {
       method: "PUT",
-      body: JSON.stringify({ default_model: defaultModel }),
+      body: JSON.stringify(body),
     }),
 
   /**
