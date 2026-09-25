@@ -19,12 +19,12 @@
  * ca test. Hinh chuan cua mot icon lay bang cach dung chinh `Icon` roi doc `d`.
  */
 
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import type { IconNode } from "lucide";
-import { Menu, X } from "lucide";
+import { Menu, Settings, X } from "lucide";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { REDUCED_MOTION_QUERY } from "../../lib/motion";
-import { Icon } from "./Icon";
+import { ACCOUNT_MENU_NUDGE_PX, REDUCED_MOTION_QUERY } from "../../lib/motion";
+import { Icon, NudgeIcon } from "./Icon";
 
 /** Mot khung hinh o 60 Hz, tinh bang giay chia nghin nhu `requestAnimationFrame`. */
 const FRAME_STEP = 1000 / 60;
@@ -137,5 +137,93 @@ describe("Icon — prefers-reduced-motion", () => {
     expect(between.length).toBeGreaterThan(1);
     expect(frames).toBeLessThan(MAX_FRAMES);
     expect(path.getAttribute("d")).toBe(xD);
+  });
+});
+
+/**
+ * `NudgeIcon` — T-S.12, menu tai khoan (ban T-HD5-v2 muc 6, NQ-128 a): muc
+ * menu giu tieu diem ⇒ icon nhich `ACCOUNT_MENU_NUDGE_PX` theo lo xo gentle,
+ * roi muc ⇒ ve 0. Doc `transform` cua vo `<span>` sau tung khung hinh.
+ */
+describe("NudgeIcon — nhich khi muc menu duoc chon", () => {
+  beforeEach(() => {
+    stubFrames();
+    stubMatchMedia(false);
+  });
+
+  function renderItem() {
+    const { container } = render(
+      <div role="menuitem" tabIndex={-1}>
+        <NudgeIcon icon={Settings} size={18} />
+      </div>,
+    );
+    const item = container.querySelector<HTMLElement>('[role="menuitem"]');
+    const host = item?.querySelector("span");
+    if (!item || !host) {
+      throw new Error("khong dung duoc muc menu");
+    }
+    return { item, host };
+  }
+
+  /** `translateX(Npx)` → N; rong → 0. */
+  function offsetOf(host: HTMLElement): number {
+    const match = /translateX\((-?[\d.e-]+)px\)/.exec(host.style.transform);
+    return match === null ? 0 : Number.parseFloat(match[1]);
+  }
+
+  /** Chay het lo xo, tra moi vi tri da ve. */
+  function runOut(host: HTMLElement): number[] {
+    const seen: number[] = [];
+    let frames = 0;
+    while (step() && frames < MAX_FRAMES) {
+      seen.push(offsetOf(host));
+      frames++;
+    }
+    expect(frames).toBeLessThan(MAX_FRAMES);
+    return seen;
+  }
+
+  it("focus ⇒ nhich dan toi dung 3 px qua nhieu khung; blur ⇒ ve 0", () => {
+    const { item, host } = renderItem();
+    expect(host.style.transform).toBe("");
+
+    act(() => item.focus());
+    const going = runOut(host);
+    expect(going.filter((x) => x > 0 && x < ACCOUNT_MENU_NUDGE_PX - 0.5).length).toBeGreaterThan(1);
+    expect(host.style.transform).toBe(`translateX(${ACCOUNT_MENU_NUDGE_PX}px)`);
+
+    act(() => item.blur());
+    const back = runOut(host);
+    expect(back.filter((x) => x > 0.5 && x < ACCOUNT_MENU_NUDGE_PX).length).toBeGreaterThan(1);
+    expect(host.style.transform).toBe("");
+  });
+
+  it("doi huong giua chung: khong nhay cach, di tiep tu cho dang dung", () => {
+    const { item, host } = renderItem();
+    act(() => item.focus());
+    for (let i = 0; i < 3; i++) {
+      step();
+    }
+    const midway = offsetOf(host);
+    expect(midway).toBeGreaterThan(0);
+    expect(midway).toBeLessThan(ACCOUNT_MENU_NUDGE_PX);
+
+    act(() => item.blur());
+    step();
+    // Khung dau sau khi doi huong o GAN cho cu (van toc duoc giu), khong ve 0 mot phat.
+    expect(Math.abs(offsetOf(host) - midway)).toBeLessThan(ACCOUNT_MENU_NUDGE_PX / 2);
+    runOut(host);
+    expect(host.style.transform).toBe("");
+  });
+
+  it("matchMedia reduce ⇒ khong nhich, khong xin khung hinh nao", () => {
+    stubMatchMedia(true);
+    const { item, host } = renderItem();
+
+    act(() => item.focus());
+    expect(queue).toHaveLength(0);
+    expect(host.style.transform).toBe("");
+    act(() => item.blur());
+    expect(queue).toHaveLength(0);
   });
 });

@@ -244,3 +244,11 @@ export const SPRINGS = {
 } as const satisfies Record<string, SpringConfig>;
 
 export type SpringRole = keyof typeof SPRINGS;
+
+/**
+ * T-S.12 — quang duong icon "nhich" khi re chuot / dua tieu diem ban phim len
+ * mot muc menu tai khoan: ban T-HD5-v2 muc 6 (*"Re chuot tren tung muc: icon
+ * nhich 3 px theo lo xo gentle"*), NQ-128 a. Lo xo la `SPRINGS.accountMenuItemHover`;
+ * con so nay song canh no vi ca hai la token chuyen dong phia JS.
+ */
+export const ACCOUNT_MENU_NUDGE_PX = 3;

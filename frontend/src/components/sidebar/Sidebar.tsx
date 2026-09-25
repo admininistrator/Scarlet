@@ -123,8 +123,10 @@ export interface SidebarProps {
   /** Hoi thoai **dang mo** vua bi xoa: man chat phai roi khoi no. */
   onOpenConversationDeleted: () => void;
   /**
-   * T-3.12 — dong cuoi cua sidebar (loi vao trang Cai dat). Nguoi goi dua vao
-   * vi sidebar khong biet bang route; bam vao no trong drawer cung dong drawer.
+   * Chan sidebar — T-S.12: khoi tai khoan (`AccountMenu`), ca trong drawer.
+   * Nam NGOAI vung dem `p-3` cua danh sach, duong ke tren chay het be rong
+   * (ban T-HD2-v2 muc I). Nguoi goi dua vao vi sidebar khong biet phien; phan
+   * tu tu dong drawer khi can (xem docstring `AccountMenu`).
    */
   footer?: ReactNode;
 }
@@ -440,81 +442,76 @@ export function Sidebar({
   });
 
   const body = (
-    <nav
-      aria-label={t("sidebar.title")}
+    <div
       className={`flex ${
         drawerMode ? "min-h-0 w-full flex-1" : "w-sidebar shrink-0"
-      } flex-col border-r border-border bg-surface-sidebar p-3 motion-theme`}
+      } flex-col border-r border-border bg-surface-sidebar motion-theme`}
     >
-      <button
-        type="button"
-        onClick={() => {
-          setDrawerOpen(false);
-          onNewChat();
-        }}
-        className="motion-press h-touch w-full shrink-0 rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active"
-      >
-        {t("nav.newChat")}
-      </button>
+      <nav aria-label={t("sidebar.title")} className="flex min-h-0 flex-1 flex-col p-3">
+        <button
+          type="button"
+          onClick={() => {
+            setDrawerOpen(false);
+            onNewChat();
+          }}
+          className="motion-press h-touch w-full shrink-0 rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active"
+        >
+          {t("nav.newChat")}
+        </button>
 
-      <label htmlFor={searchId} className="mt-3 block shrink-0">
-        <span className="sr-only">{t("sidebar.search")}</span>
-        <span className="relative block">
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute top-3.5 left-3 text-muted"
-          >
-            <SearchIcon />
+        <label htmlFor={searchId} className="mt-3 block shrink-0">
+          <span className="sr-only">{t("sidebar.search")}</span>
+          <span className="relative block">
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute top-3.5 left-3 text-muted"
+            >
+              <SearchIcon />
+            </span>
+            <input
+              id={searchId}
+              type="search"
+              value={query}
+              placeholder={t("sidebar.search")}
+              onChange={(e) => setQuery(e.target.value)}
+              className="motion-control h-touch w-full rounded-md border border-border-strong bg-background pr-3 pl-9 text-base text-foreground placeholder:text-muted"
+            />
           </span>
-          <input
-            id={searchId}
-            type="search"
-            value={query}
-            placeholder={t("sidebar.search")}
-            onChange={(e) => setQuery(e.target.value)}
-            className="motion-control h-touch w-full rounded-md border border-border-strong bg-background pr-3 pl-9 text-base text-foreground placeholder:text-muted"
-          />
-        </span>
-      </label>
-      <p className="mt-1 shrink-0 text-xs text-muted">{t("sidebar.searchScopeNote")}</p>
+        </label>
+        <p className="mt-1 shrink-0 text-xs text-muted">{t("sidebar.searchScopeNote")}</p>
 
-      {error !== null && (
-        <p className="mt-2 shrink-0 text-xs text-danger-text">{error}</p>
-      )}
-
-      <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
-        <ConversationGroup label={t("sidebar.pinnedGroup")} items={pinned} rowProps={rowProps} />
-        <ConversationGroup label={t("sidebar.recentGroup")} items={recent} rowProps={rowProps} />
-
-        {items.length === 0 && !loading && (
-          <p className="px-2 text-xs text-muted">{t("sidebar.empty")}</p>
+        {error !== null && (
+          <p className="mt-2 shrink-0 text-xs text-danger-text">{error}</p>
         )}
-        {items.length > 0 && visible.length === 0 && (
-          <p className="px-2 text-xs text-muted">{t("sidebar.noMatch")}</p>
-        )}
-        {loading && <p className="px-2 text-xs text-muted">{t("sidebar.loading")}</p>}
 
-        {cursor !== null && (
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void loadMore()}
-            className="motion-press mt-2 h-touch w-full rounded-md text-base font-medium text-accent-text hover:bg-surface-hover disabled:opacity-50"
-          >
-            {t("sidebar.loadMore")}
-          </button>
-        )}
-      </div>
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+          <ConversationGroup label={t("sidebar.pinnedGroup")} items={pinned} rowProps={rowProps} />
+          <ConversationGroup label={t("sidebar.recentGroup")} items={recent} rowProps={rowProps} />
 
-      <p className="mt-2 shrink-0 text-xs text-muted">{t("sidebar.pinScopeNote")}</p>
+          {items.length === 0 && !loading && (
+            <p className="px-2 text-xs text-muted">{t("sidebar.empty")}</p>
+          )}
+          {items.length > 0 && visible.length === 0 && (
+            <p className="px-2 text-xs text-muted">{t("sidebar.noMatch")}</p>
+          )}
+          {loading && <p className="px-2 text-xs text-muted">{t("sidebar.loading")}</p>}
 
-      {footer !== undefined && (
-        // Bam vao dong cuoi trong drawer cung dong drawer, nhu chon mot hoi thoai.
-        <div className="mt-2 shrink-0" onClickCapture={() => setDrawerOpen(false)}>
-          {footer}
+          {cursor !== null && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void loadMore()}
+              className="motion-press mt-2 h-touch w-full rounded-md text-base font-medium text-accent-text hover:bg-surface-hover disabled:opacity-50"
+            >
+              {t("sidebar.loadMore")}
+            </button>
+          )}
         </div>
-      )}
-    </nav>
+
+        <p className="mt-2 shrink-0 text-xs text-muted">{t("sidebar.pinScopeNote")}</p>
+      </nav>
+      {footer}
+    </div>
   );
 
   if (drawerMode) {

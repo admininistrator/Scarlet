@@ -1,6 +1,8 @@
+import { PanelLeft, PanelLeftClose } from "lucide";
+
 import { t } from "../../lib/i18n";
 import { useDrawerMode } from "../../lib/viewport";
-import { PanelIcon } from "./icons";
+import { Icon } from "../ui/Icon";
 import {
   SIDEBAR_TOGGLE_ID,
   setDrawerOpen,
@@ -19,6 +21,9 @@ import {
  *
  * Tach khoi `app/Layout.tsx` de `Drawer.test.tsx` dung duoc DUNG nut that ma
  * khong phai dung ca phien dang nhap + router.
+ *
+ * T-S.12 (header v2, NQ-128 b): icon `panel-left` cua ban T-HD2-v2, bien hinh
+ * sang `panel-left-close` khi dang mo theo T-HD5-v2 muc 7 (lo xo `snappy`).
  */
 export function SidebarToggle() {
   const drawerMode = useDrawerMode();
@@ -35,7 +40,7 @@ export function SidebarToggle() {
       aria-label={expanded ? t("header.closeSidebar") : t("header.openSidebar")}
       className="motion-press grid size-touch shrink-0 place-items-center rounded-md text-foreground hover:bg-surface-hover"
     >
-      <PanelIcon />
+      <Icon icon={expanded ? PanelLeftClose : PanelLeft} spring="sidebarToggle" size={20} />
     </button>
   );
 }

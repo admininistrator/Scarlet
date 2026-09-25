@@ -1,8 +1,6 @@
 import { LoaderCircle } from "lucide";
-import { Link } from "react-router";
 
 import { useSession } from "../../app/Layout";
-import { PATHS } from "../../app/paths";
 import { t } from "../../lib/i18n";
 import { useTypewriter } from "../../lib/motion";
 import { useChat } from "../../features/chat/useChat";
@@ -11,6 +9,7 @@ import { useModels } from "../../features/models/useModels";
 import { QuotaNotice } from "../../features/quota/QuotaNotice";
 import { byokCovers, isSendBlocked, selectedProviderId } from "../../features/quota/quotaView";
 import { useQuota } from "../../features/quota/useQuota";
+import { AccountMenu } from "../sidebar/AccountMenu";
 import { Sidebar } from "../sidebar/Sidebar";
 import { StaticIcon } from "../ui/Icon";
 import { Composer } from "./Composer";
@@ -184,15 +183,18 @@ export function ChatScreen() {
         onOpenConversationDeleted={chat.closeConversation}
         footer={
           /*
-            T-3.12 — loi vao trang Cai dat o chan sidebar: tren dien thoai day
-            la loi DUY NHAT (header 375 px khong con cho, xem `Layout`).
+            T-S.12 — khoi tai khoan o chan sidebar, ca trong drawer: loi vao
+            Cai dat, Muc su dung va Dang xuat (header v2 khong con email lan
+            nut Dang xuat, NQ-115). `StatusGate` chi cho qua phien `active`,
+            nen `user` o day co that; `null` (vua dang xuat) thi khong ve.
           */
-          <Link
-            to={PATHS.settings}
-            className="motion-press flex h-touch items-center rounded-md px-3 text-base text-foreground hover:bg-surface-hover"
-          >
-            {t("nav.settings")}
-          </Link>
+          session.user !== null && (
+            <AccountMenu
+              user={session.user}
+              avatarColor={session.profile?.avatar_color ?? null}
+              onLogout={session.logout}
+            />
+          )
         }
       />
 

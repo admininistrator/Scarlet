@@ -1,9 +1,10 @@
 {
   "app.title": "Scarlet",
   "app.tagline": "Trợ lý chat nội bộ",
-  "theme.toggleLabel": "Đổi giao diện sáng/tối",
   "theme.light": "Sáng",
   "theme.dark": "Tối",
+  "theme.switchToDark": "Chuyển sang theme tối",
+  "theme.switchToLight": "Chuyển sang theme sáng",
 
   "common.comingSoon": "Sắp có",
 
@@ -64,6 +65,7 @@
   "nav.newChat": "Hội thoại mới",
   "header.openSidebar": "Mở thanh bên",
   "header.closeSidebar": "Đóng thanh bên",
+  "header.artifactPanel": "Mở panel artifact",
 
   "sidebar.title": "Danh sách hội thoại",
   "sidebar.search": "Tìm hội thoại",
@@ -90,7 +92,6 @@
 
   "auth.turnstileLoi": "Không tải được ô xác minh. Kiểm tra kết nối rồi tải lại trang.",
   "auth.dangNhap": "Đăng nhập",
-  "auth.dangXuat": "Đăng xuất",
   "auth.email": "Email",
   "auth.matKhau": "Mật khẩu",
   "auth.saiMatKhau": "Email hoặc mật khẩu không đúng.",
@@ -303,7 +304,6 @@
   "admin.field.models": "Số model",
   "admin.field.version": "Phiên bản catalog",
 
-  "nav.settings": "Cài đặt",
   "settings.title": "Cài đặt",
   "settings.navLabel": "Mục cài đặt",
   "settings.back": "Quay lại Cài đặt",
@@ -330,6 +330,12 @@
   "account.displayNameHint": "Để trống thì Scarlet hiện email của bạn.",
   "account.email": "Email",
   "account.tier": "Gói",
+  "account.menu": "Menu tài khoản",
+  "account.settings": "Cài đặt",
+  "account.usage": "Mức sử dụng",
+  "account.language": "Ngôn ngữ",
+  "account.help": "Trợ giúp",
+  "account.upgrade": "Nâng cấp gói",
   "account.logout": "Đăng xuất",
   "tier.free": "Miễn phí",
 

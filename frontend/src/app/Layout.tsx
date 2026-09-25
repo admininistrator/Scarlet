@@ -1,9 +1,13 @@
-import { Link, Outlet, useLocation, useNavigate, useOutletContext } from "react-router";
+import { PanelRight, Shield } from "lucide";
+import { Link, Outlet, useLocation, useOutletContext } from "react-router";
 
 import { SidebarToggle } from "../components/sidebar/SidebarToggle";
+import { ComingSoon } from "../components/ui/ComingSoon";
+import { StaticIcon } from "../components/ui/Icon";
 import { ThemeToggle } from "../components/ui/ThemeToggle";
 import { useSessionState, type SessionState } from "../features/auth/useSessionState";
 import { t } from "../lib/i18n";
+import { useDrawerMode } from "../lib/viewport";
 import { PATHS } from "./paths";
 
 /**
@@ -34,8 +38,8 @@ export function useSession(): SessionState {
 
 export function Layout() {
   const session = useSessionState();
-  const navigate = useNavigate();
   const { pathname } = useLocation();
+  const drawerMode = useDrawerMode();
 
   const isAdmin = session.user?.role === "admin";
   /*
@@ -44,6 +48,10 @@ export function Layout() {
     `/admin` va sau man auth, va o do khong co sidebar nao de bat/tat — nen nut
     chi hien tren duong co sidebar. T-3.10: duoi 1024 px cung nut nay mo
     drawer thay vi day cot — xem `SidebarToggle`.
+
+    T-S.12 — nut cho "Mo panel artifact" (T-5.4) theo CUNG dieu kien, cong
+    phien da dang nhap: panel artifact mo canh hoi thoai, con `/admin`,
+    `/cai-dat` khong co hoi thoai nao (NQ-128 c).
   */
   const hasSidebar = pathname === PATHS.home;
 
@@ -60,70 +68,68 @@ export function Layout() {
         T-3.10 — header cao DUNG `--spacing-header` (56 px) o moi be rong, nhu
         ban T-HD2 ghi ("ca desktop lan mobile"): KHONG `flex-wrap`, vi xuong
         dong o 375 px la mot header 143 px an mat mot phan tu man chat (B-242).
-        De vua 375 px: email chi hien tu `sm` tro len (nut Dang xuat van o
-        do), va lề ngang theo token gutter cua T-HD2. Moi thu bam duoc cao
-        `min-h-touch` (44 px).
+        Moi thu bam duoc la o 44 × 44 (`size-touch`/`h-touch`).
+
+        T-S.12 — header v2 (ban T-HD2-v2 `ShellHeader`, NQ-115, NQ-128 b): KHONG
+        con email lan nut Dang xuat — hai loi ay doi xuong menu tai khoan o
+        chan sidebar (`AccountMenu`), va o `/admin`, `/cai-dat` (khong sidebar)
+        la tab Tai khoan cua Cai dat. Dung them lai chung vao day "cho tien"
+        (Cam bay ① cua T-S.12). Con lai: nut sidebar · ten app | Quan tri ·
+        sang/toi · nut cho panel artifact, nen `surface-panel`, le 8 (desktop)
+        / 6 (mobile), nhom phai sat mep phai.
       */}
-      <header className="flex h-header shrink-0 items-center justify-between gap-2 border-b border-border px-gutter lg:px-gutter-lg">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
-          {hasSidebar && <SidebarToggle />}
-          <h1 className="text-lg font-semibold">
-            <Link to={PATHS.home} className="inline-flex min-h-touch items-center">
-              {t("app.title")}
-            </Link>
-          </h1>
+      <header className="flex h-header shrink-0 items-center gap-1 border-b border-border bg-surface-panel px-1.5 lg:gap-2 lg:px-2">
+        {hasSidebar && <SidebarToggle />}
+        <h1 className="text-lg font-semibold lg:tracking-[-0.01em]">
+          <Link to={PATHS.home} className="inline-flex min-h-touch items-center text-foreground no-underline">
+            {t("app.title")}
+          </Link>
+        </h1>
+
+        <div className="ml-auto flex shrink-0 items-center gap-0.5 lg:gap-1">
           {/*
             An nut nay khi khong phai admin la mot phep lich su voi nguoi
             dung, KHONG phai phan quyen — cung cau ma `AdminOnly` va
             `AdminScreen` deu chep lai. Lop chan that la `require_admin` o
             tang router cua backend (T-2.16).
-          */}
-          {isAdmin && (
-            <Link
-              to={PATHS.admin}
-              className="inline-flex min-h-touch items-center whitespace-nowrap rounded-md border border-border px-2 text-sm sm:px-3 hover:bg-accent hover:text-accent-foreground"
-            >
-              {t("admin.tieuDe")}
-            </Link>
-          )}
-        </div>
 
-        <div className="flex shrink-0 items-center gap-2 text-sm sm:gap-3">
-          {session.user === null ? (
+            Ban T-HD2-v2: desktop la chu "Quan tri" mau accent-text, mobile la
+            icon `shield` (cung ten truy cap). Chon bang `useDrawerMode` chu
+            khong bang hai phan tu an/hien bang CSS: mot link, mot ten.
+          */}
+          {isAdmin &&
+            (drawerMode ? (
+              <Link
+                to={PATHS.admin}
+                aria-label={t("admin.tieuDe")}
+                className="grid size-touch place-items-center rounded-md text-accent-text hover:bg-surface-hover"
+              >
+                <StaticIcon icon={Shield} size={20} />
+              </Link>
+            ) : (
+              <Link
+                to={PATHS.admin}
+                className="inline-flex h-touch items-center whitespace-nowrap rounded-md px-3 text-base font-medium text-accent-text no-underline hover:bg-surface-hover"
+              >
+                {t("admin.tieuDe")}
+              </Link>
+            ))}
+          {session.user === null && (
             <Link
               to={PATHS.login}
-              className="motion-press inline-flex min-h-touch items-center rounded-md border border-border px-3 hover:bg-accent hover:text-accent-foreground"
+              className="motion-press inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
             >
               {t("auth.dangNhap")}
             </Link>
-          ) : (
-            <>
-              {/*
-                T-3.12 — email la loi vao trang Cai dat tu `sm` tro len. Duoi
-                `sm` header 375 px da kin (do o T-3.10: nut cuoi ket thuc o
-                359 px khi la admin), nen tren dien thoai loi vao nam o chan
-                sidebar (drawer) thay vi mot nut thu sau o day.
-              */}
-              <Link
-                to={PATHS.settings}
-                title={t("nav.settings")}
-                className="hidden min-h-touch min-w-0 items-center truncate rounded-md px-2 text-muted hover:bg-surface-hover hover:text-foreground sm:inline-flex"
-              >
-                <span className="sr-only">{t("nav.settings")}: </span>
-                {session.user.email}
-              </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  void session.logout().then(() => navigate(PATHS.home));
-                }}
-                className="motion-press min-h-touch whitespace-nowrap rounded-md border border-border px-2 sm:px-3 hover:bg-accent hover:text-accent-foreground"
-              >
-                {t("auth.dangXuat")}
-              </button>
-            </>
           )}
           <ThemeToggle />
+          {hasSidebar && session.user !== null && (
+            <ComingSoon
+              planned="T-5.4"
+              label={t("header.artifactPanel")}
+              icon={<StaticIcon icon={PanelRight} size={20} />}
+            />
+          )}
         </div>
       </header>
 

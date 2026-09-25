@@ -10,11 +10,13 @@
  *      ly do cua `aria-disabled` thay vi `disabled` (Cam bay ④).
  */
 
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { t } from "../../lib/i18n";
 import { ComingSoon } from "./ComingSoon";
+import { MenuDismissContext } from "./menu";
 
 describe("ComingSoon", () => {
   it("la nut khoa bang aria-disabled, khong phai disabled, va mang data-planned", () => {
@@ -99,8 +101,50 @@ describe("ComingSoon", () => {
     const withClick = <ComingSoon planned="T-8.7" label="Xuất" onClick={() => {}} />;
     // @ts-expect-error — cong tac thieu `icon`
     const toggleWithoutIcon = <ComingSoon planned="T-6.7" label="Tìm web" toggle />;
+    // @ts-expect-error — muc menu cho thieu `icon`
+    const menuItemWithoutIcon = <ComingSoon planned="B-264" label="Ngôn ngữ" menuItem />;
     expect(missingPlanned).toBeTruthy();
     expect(withClick).toBeTruthy();
     expect(toggleWithoutIcon).toBeTruthy();
+    expect(menuItemWithoutIcon).toBeTruthy();
+  });
+
+  it("T-S.12 muc menu cho: aria-disabled (KHONG disabled cua Radix), data-planned, chon khong dong menu", async () => {
+    const user = userEvent.setup();
+    const dismiss = vi.fn();
+    render(
+      // `open` co dinh: jsdom co the ban `window.blur` khi focus vao menu (xem
+      // `openMenu` trong `AccountMenu.test.tsx`) va Radix se dong menu.
+      <DropdownMenu.Root open onOpenChange={() => {}}>
+        <DropdownMenu.Trigger>mo</DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content>
+            <MenuDismissContext.Provider value={dismiss}>
+              <DropdownMenu.Item>Thật</DropdownMenu.Item>
+              <ComingSoon menuItem planned="B-264" label="Ngôn ngữ" icon={<svg data-testid="icon" />} />
+            </MenuDismissContext.Provider>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>,
+    );
+
+    const item = await screen.findByRole("menuitem", { name: "Ngôn ngữ" });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveAttribute("data-planned", "B-264");
+    expect(item).not.toHaveAttribute("data-disabled");
+    expect(item).toHaveClass("control-disabled");
+    expect(item).toContainElement(screen.getByTestId("icon"));
+
+    await user.click(item);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(dismiss).not.toHaveBeenCalled();
+
+    // Mui ten toi duoc muc cho (Radix BO QUA muc `disabled`) ⇒ tooltip mo; Esc
+    // luc ay goi ham dong menu cua nguoi so huu (`MenuDismissContext`).
+    await user.keyboard("{Home}{ArrowDown}");
+    expect(item).toHaveFocus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Sắp có$/);
+    await user.keyboard("{Escape}");
+    expect(dismiss).toHaveBeenCalledTimes(1);
   });
 });

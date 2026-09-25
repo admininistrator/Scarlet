@@ -75,6 +75,20 @@ describe("ThemeToggle", () => {
     expect(localStorage.getItem("scarlet-theme")).toBe("dark");
   });
 
+  it("T-S.12: nut icon, ten truy cap noi theme SE chuyen sang (ban T-HD2-v2)", async () => {
+    fakeOsTheme(false);
+    const user = userEvent.setup();
+    render(<ThemeToggle />);
+
+    const button = screen.getByRole("button", { name: "Chuyển sang theme tối" });
+    expect(button.textContent).toBe("");
+    expect(button.querySelector("svg")).not.toBeNull();
+
+    await user.click(button);
+
+    expect(screen.getByRole("button", { name: "Chuyển sang theme sáng" })).toBe(button);
+  });
+
   it("bam hai lan thi ve cho cu", async () => {
     fakeOsTheme(false);
     const user = userEvent.setup();

@@ -1,5 +1,7 @@
+import { Moon, Sun } from "lucide";
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../../lib/i18n";
+import { Icon } from "./Icon";
 
 /**
  * Nut chuyen sang/toi — T-0.10, sua o T-3.2.
@@ -160,19 +162,27 @@ export function useTheme(): [Theme, (next: Theme) => void] {
   return [theme, setTheme];
 }
 
+/**
+ * T-S.12 (header v2, NQ-128 b) — nut icon 44 × 44 cua ban T-HD2-v2
+ * (`ShellHeader`): icon va ten noi theme SE CHUYEN SANG — dang sang thi `moon`
+ * + "Chuyen sang theme toi", dang toi thi `sun` + "Chuyen sang theme sang".
+ * Doi qua lai bang lo xo `themeToggle` (settle) cua T-HD5-v2 muc 7.
+ *
+ * `MotionV2.tsx` cua T-HD5-v2 ve nguoc (`dark ? "moon" : "sun"`, icon = theme
+ * DANG HIEN); ban T-HD2-v2 co ten truy cap di kem nen di theo no — B-306.
+ */
 export function ThemeToggle() {
   const [theme, setTheme] = useTheme();
-
-  const nextLabel = theme === "dark" ? t("theme.light") : t("theme.dark");
+  const dark = theme === "dark";
 
   return (
     <button
       type="button"
-      aria-label={t("theme.toggleLabel")}
-      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-      className="motion-press min-h-touch shrink-0 rounded-md border border-border bg-background px-2 text-sm sm:px-3 text-foreground hover:bg-accent hover:text-accent-foreground"
+      aria-label={dark ? t("theme.switchToLight") : t("theme.switchToDark")}
+      onClick={() => setTheme(dark ? "light" : "dark")}
+      className="motion-press grid size-touch shrink-0 place-items-center rounded-md text-foreground hover:bg-surface-hover"
     >
-      {nextLabel}
+      <Icon icon={dark ? Sun : Moon} spring="themeToggle" size={20} />
     </button>
   );
 }

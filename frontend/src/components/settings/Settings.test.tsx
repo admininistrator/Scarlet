@@ -494,8 +494,9 @@ describe("giao dien", () => {
 
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(localStorage.getItem("scarlet-theme")).toBeNull();
-    // Nut header moi sang theme KIA — dang toi thi nut noi "Sang".
-    expect(screen.getByRole("button", { name: "Đổi giao diện sáng/tối" })).toHaveTextContent("Sáng");
+    // Nut header moi sang theme KIA — dang toi thi ten nut la "sang" (T-S.12:
+    // nut icon, ten truy cap mang loi moi).
+    expect(screen.getByRole("button", { name: "Chuyển sang theme sáng" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Lưu" }));
     expect(localStorage.getItem("scarlet-theme")).toBe("dark");
@@ -534,7 +535,7 @@ describe("giao dien", () => {
     renderAt(PATHS.settingsAppearance);
 
     expect(await screen.findByRole("radio", { name: /Sáng/ })).toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Đổi giao diện sáng/tối" }));
+    await user.click(screen.getByRole("button", { name: "Chuyển sang theme tối" }));
 
     expect(localStorage.getItem("scarlet-theme")).toBe("dark");
     expect(screen.getByRole("radio", { name: /Tối/ })).toBeChecked();
