@@ -528,8 +528,9 @@ class UserOut(BaseModel):
 class ProfileOut(UserOut):
     """`GET /auth/me` — *"User + tier + quota còn lại + trạng thái"* (§18.1).
 
-    Rộng hơn `UserOut` đúng sáu trường (hai của T-3.0, `quota_warn_remaining_pct`
-    của T-3.11, ba của T-S.5), và đứng riêng vì chúng thuộc về thanh quota, ô
+    Rộng hơn `UserOut` đúng bảy trường (hai của T-3.0, `quota_warn_remaining_pct`
+    của T-3.11, ba của T-S.5, `limits_cache_ttl_s` của T-S.11), và đứng riêng
+    vì chúng thuộc về thanh quota, ô
     nhập và trang Cài đặt — còn `avatar_color`/`reasoning_prefs` là một lượt
     đọc `user_settings`, và `quota` thì **không** miễn phí: `quota` là hai
     lượt đọc Redis (và có thể một lượt dựng lại từ Postgres, RR-7).
@@ -552,6 +553,11 @@ class ProfileOut(UserOut):
     #: `quota_warning` của `202` (`estimator._warning`), nên thanh quota của FE
     #: và khối cảnh báo của backend không thể dùng hai ngưỡng khác nhau (A3).
     quota_warn_remaining_pct: int
+    #: `TIER_CACHE_TTL_S` (T-S.11) — admin đổi hạn mức thì số mới có hiệu lực
+    #: trong vòng N giây (§10.4, NQ-70 ①). Tab Mức sử dụng nói câu ấy cho người
+    #: dùng thường, mà người dùng thường không gọi được `GET /admin/tiers` (nơi
+    #: T-3.12 đọc cùng con số) — không có trường này thì FE chép `60` (A3).
+    limits_cache_ttl_s: int
     #: Trần độ dài `display_name` tính bằng ký tự (T-S.5) — cùng lối
     #: `message_max_chars`: ô nhập tên của FE đếm về đúng con số của `.env`.
     display_name_max_chars: int
@@ -1105,6 +1111,7 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> ProfileO
         quota=quota,
         message_max_chars=settings.MESSAGE_MAX_CHARS,
         quota_warn_remaining_pct=settings.QUOTA_WARN_REMAINING_PCT,
+        limits_cache_ttl_s=settings.TIER_CACHE_TTL_S,
         display_name_max_chars=settings.DISPLAY_NAME_MAX_CHARS,
         avatar_color=prefs.avatar_color,
         reasoning_prefs=prefs.reasoning,

@@ -646,6 +646,9 @@ async def test_me_returns_all_four_groups_of_18_1(
         "T-3.11: FE doc nguong canh bao tu day, cung bien voi quota_warning cua 202"
     )
     assert body["default_model"] is None, "chua ai chon gi ⇒ FE roi ve default cua catalog"
+    assert body["limits_cache_ttl_s"] == settings.TIER_CACHE_TTL_S, (
+        "T-S.11: tab Muc su dung noi 'co hieu luc trong N giay' — N doc tu day (A3)"
+    )
     # T-S.5 — hồ sơ của Phase S, người chưa từng `PUT /settings`.
     assert body["display_name"] is None, "NQ-116: FE hien nguyen email"
     assert body["display_name_max_chars"] == settings.DISPLAY_NAME_MAX_CHARS
@@ -707,6 +710,7 @@ async def test_login_and_refresh_do_not_return_quota(
         assert "quota" not in resp.json()
         assert "message_max_chars" not in resp.json()
         assert "quota_warn_remaining_pct" not in resp.json()
+        assert "limits_cache_ttl_s" not in resp.json()
         assert resp.json()["default_model"] is None, "cot cua chinh hang users ⇒ co o ca ba"
         # T-S.5: hai trường của `user_settings` là một lượt đọc thêm ⇒ chỉ `/me`.
         assert "avatar_color" not in resp.json()
