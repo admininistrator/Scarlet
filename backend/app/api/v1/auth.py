@@ -528,10 +528,10 @@ class UserOut(BaseModel):
 class ProfileOut(UserOut):
     """`GET /auth/me` — *"User + tier + quota còn lại + trạng thái"* (§18.1).
 
-    Rộng hơn `UserOut` đúng bảy trường (hai của T-3.0, `quota_warn_remaining_pct`
-    của T-3.11, ba của T-S.5, `limits_cache_ttl_s` của T-S.11), và đứng riêng
-    vì chúng thuộc về thanh quota, ô
-    nhập và trang Cài đặt — còn `avatar_color`/`reasoning_prefs` là một lượt
+    Rộng hơn `UserOut` đúng tám trường (hai của T-3.0, `quota_warn_remaining_pct`
+    của T-3.11, ba của T-S.5, `limits_cache_ttl_s` của T-S.11, `stream_ttl_s`
+    của T-S.13), và đứng riêng vì chúng thuộc về thanh quota, ô nhập, sidebar
+    và trang Cài đặt — còn `avatar_color`/`reasoning_prefs` là một lượt
     đọc `user_settings`, và `quota` thì **không** miễn phí: `quota` là hai
     lượt đọc Redis (và có thể một lượt dựng lại từ Postgres, RR-7).
     `login`/`refresh` không có việc gì phải trả giá đó — chúng trả lời "anh là
@@ -558,6 +558,12 @@ class ProfileOut(UserOut):
     #: dùng thường, mà người dùng thường không gọi được `GET /admin/tiers` (nơi
     #: T-3.12 đọc cùng con số) — không có trường này thì FE chép `60` (A3).
     limits_cache_ttl_s: int
+    #: `STREAM_TTL_S` (T-S.13, NQ-129) — một stream sống bấy lâu sau `start`
+    #: (§7.2), kể cả `stream:title:{id}`. Sidebar chỉ nghe tiêu đề chảy của hàng
+    #: `title: null` có `updated_at` còn trong cửa sổ này, và coi hết cửa sổ là
+    #: "hết hạn" ⇒ "Hội thoại chưa đặt tên" (B-287). Thiếu trường này thì FE
+    #: chép `3600` (A3).
+    stream_ttl_s: int
     #: Trần độ dài `display_name` tính bằng ký tự (T-S.5) — cùng lối
     #: `message_max_chars`: ô nhập tên của FE đếm về đúng con số của `.env`.
     display_name_max_chars: int
@@ -1112,6 +1118,7 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> ProfileO
         message_max_chars=settings.MESSAGE_MAX_CHARS,
         quota_warn_remaining_pct=settings.QUOTA_WARN_REMAINING_PCT,
         limits_cache_ttl_s=settings.TIER_CACHE_TTL_S,
+        stream_ttl_s=settings.STREAM_TTL_S,
         display_name_max_chars=settings.DISPLAY_NAME_MAX_CHARS,
         avatar_color=prefs.avatar_color,
         reasoning_prefs=prefs.reasoning,
