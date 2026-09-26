@@ -69,9 +69,18 @@ export interface UsageOut {
   cached?: number;
 }
 
-/** Chin loai event cua §7.4 / Phu luc F. */
+/**
+ * Chin loai event cua §7.4 / Phu luc F.
+ *
+ * `start.reasoning_effort` — truong THEM cua §24.2b·S4/S14 (T-S.6), khai o
+ * T-S.15 (B-286). FE chua doc no: chip "model · muc" chi dung khi da xong, va
+ * luc ay doc `MessageOut.reasoning_effort` cua duong di.
+ */
 export type StreamEvent =
-  | { event: "start"; data: { message_id: string; model_id: string } }
+  | {
+      event: "start";
+      data: { message_id: string; model_id: string; reasoning_effort?: string | null };
+    }
   | { event: "delta"; data: { t: string } }
   | { event: "reasoning"; data: { t: string } }
   | {

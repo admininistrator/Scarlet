@@ -285,6 +285,8 @@ export function ChatScreen() {
                     key={node.id}
                     node={node}
                     tree={tree}
+                    // T-S.15 — ten hien thi cho chip "model · muc" (ban T-HD3-v2 3c).
+                    models={modelCatalog.models}
                     notes={chat.notes[node.id] ?? []}
                     running={chat.running === node.id}
                     // T-3.8 / B-232 — nut "Luu" cua bong bong nguoi dung tat
@@ -292,11 +294,10 @@ export function ChatScreen() {
                     // /messages/{id}` khong di qua §11.4 (NQ-93), nen bam hai
                     // lan la hai nhanh va hai hoa don.
                     busy={chat.busy}
-                    // T-3.7 — nut "Doi model & thu lai" gui dung model dang
-                    // chon tren picker. Mot nguon, khong hai: neu no bang model
-                    // da sinh ra cau tra loi nay thi nut tu tat.
-                    selectedModel={chat.effectiveModel}
-                    onRetry={(id, modelId) => void chat.retry(id, modelId)}
+                    // T-S.15 — MOT nut Thu lai: `useChat.retry` tu doc model +
+                    // muc dang chon tren picker (§24.2b·S4). Bong bong khong
+                    // biet gi ve picker, nen khong co nguon thu hai de lech.
+                    onRetry={(id) => void chat.retry(id)}
                     onFeedback={(id, value) => void chat.sendFeedback(id, value)}
                     onEdit={(id, draft) => void chat.editQuestion(id, draft)}
                     onSwitchBranch={(n, direction) => void chat.switchBranch(n, direction)}

@@ -48,6 +48,7 @@ function message(overrides: Partial<MessageOut> & Pick<MessageOut, "id">): Messa
     sibling_index: 0,
     sibling_count: 1,
     feedback: null,
+    reasoning_effort: null,
     ...overrides,
   };
 }

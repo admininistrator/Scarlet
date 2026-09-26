@@ -7,11 +7,11 @@
  * (§7.2 ③), nen "chua co chu" phai doc tu `inFlight` chu khong tu `path`.
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { MessageOut } from "../../lib/api";
+import type { MessageOut, ModelOut } from "../../lib/api";
 import { emptyTree, type TreeState } from "../../lib/tree";
 import { MessageItem } from "./MessageItem";
 
@@ -30,20 +30,55 @@ function node(patch: Partial<MessageOut> = {}): MessageOut {
     sibling_index: 0,
     sibling_count: 1,
     feedback: null,
+    reasoning_effort: null,
     ...patch,
   };
 }
 
-function renderView(n: MessageOut, tree: TreeState = emptyTree(), running = false, busy = false) {
+function model(id: string, displayName: string): ModelOut {
+  return {
+    id,
+    display_name: displayName,
+    provider: "Hang",
+    provider_id: null,
+    capabilities: [],
+    context_window: 1000,
+    max_output: 100,
+    default: false,
+    badge: null,
+    available: true,
+    unavailable_reason: null,
+    reasoning: null,
+    pricing: null,
+    pricing_mode: "unmetered",
+    checked_at: null,
+    stale_after_s: 30,
+  };
+}
+
+/** Danh muc gia cho chip — ten hien thi KHAC han id de phep so co nghia. */
+const MODELS: ModelOut[] = [
+  model("ds-id", "DeepSeek Flash"),
+  model("haiku-id", "Claude Haiku 4.5"),
+  model("nr-grok", "Grok 4.6"),
+];
+
+function renderView(
+  n: MessageOut,
+  tree: TreeState = emptyTree(),
+  running = false,
+  busy = false,
+  onRetry: (messageId: string) => void = vi.fn(),
+) {
   return render(
     <MessageItem
       node={n}
       tree={tree}
+      models={MODELS}
       notes={[]}
       running={running}
       busy={busy}
-      selectedModel={null}
-      onRetry={vi.fn()}
+      onRetry={onRetry}
       onFeedback={vi.fn()}
       onEdit={vi.fn()}
       onSwitchBranch={vi.fn()}
@@ -65,19 +100,21 @@ describe("bon trang thai", () => {
     expect(container.querySelector("ul")).toBeNull();
   });
 
-  it("3 — xong: hien chip model va khong con chu 'dang cho'", () => {
-    const { container } = renderView(
-      node({ status: "completed", content: "Xong roi.", model_id: "mot-model-nao-do" }),
-    );
+  it("3 — xong: hien chip model (ten hien thi) va khong con chu 'dang cho'", () => {
+    const { container } = renderView(node({ status: "completed", content: "Xong roi.", model_id: "ds-id" }));
     expect(screen.queryByText("Đang chờ Scarlet trả lời")).toBeNull();
-    expect(container.textContent).toContain("mot-model-nao-do");
+    expect(container.textContent).toContain("DeepSeek Flash");
   });
 
-  it("4 — loi: hien ma loi nguyen van va mot nut Thu lai", () => {
-    renderView(node({ status: "failed", error_code: "CONTEXT_TOO_LARGE" }));
+  it("4 — loi: hien ma loi nguyen van va MOT nut Thu lai, gui dung id message", async () => {
+    const onRetry = vi.fn();
+    renderView(node({ status: "failed", error_code: "CONTEXT_TOO_LARGE" }), emptyTree(), false, false, onRetry);
     expect(screen.getByText("CONTEXT_TOO_LARGE")).toBeInTheDocument();
     expect(screen.getByText("Không nhận được câu trả lời")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /thử lại/i })).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole("button", { name: "Thử lại" }));
+    expect(onRetry).toHaveBeenCalledWith("m1");
   });
 
   it("5 — loi GIU lai phan chu da chay duoc (ban T-HD3)", () => {
@@ -127,5 +164,92 @@ describe("bong bong nguoi dung co nhanh", () => {
 
     expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Thôi" })).toBeEnabled();
+  });
+});
+
+/**
+ * T-S.15 — chip "model · muc" (ban T-HD3-v2 3c) va khoi "Suy luan" (3d).
+ *
+ * Chip doc model va muc DA DUNG cua chinh message (`MessageOut`), khong doc
+ * picker — nen bong bong nay khong nhan prop nao ve picker ca.
+ */
+describe("chip model · muc (ban T-HD3-v2 3c)", () => {
+  function chip() {
+    const list = screen.getAllByRole("list")[0];
+    return within(list).getAllByRole("listitem")[0];
+  }
+
+  it("11 — ten hien thi cua catalog · nhan muc tieng Anh; hai manh la hai span, dau '·' aria-hidden", () => {
+    renderView(node({ status: "completed", content: "x", model_id: "ds-id", reasoning_effort: "high" }));
+    const spans = chip().querySelectorAll("span");
+    expect([...spans].map((s) => s.textContent)).toEqual(["DeepSeek Flash", "·", "High"]);
+    expect(spans[1]).toHaveAttribute("aria-hidden", "true");
+    // Khong bao gio in id tho khi catalog co ten.
+    expect(chip().textContent).not.toContain("ds-id");
+  });
+
+  it("12 — muc 'off' VAN hien 'Off' (model co hang muc, nguoi dung chon tat)", () => {
+    renderView(node({ status: "completed", content: "x", model_id: "haiku-id", reasoning_effort: "off" }));
+    expect(chip()).toHaveTextContent("Claude Haiku 4.5·Off");
+  });
+
+  it("13 — khong co muc ⇒ chi ten model, khong dau '·'", () => {
+    renderView(node({ status: "completed", content: "x", model_id: "nr-grok", reasoning_effort: null }));
+    expect(chip().textContent).toBe("Grok 4.6");
+  });
+
+  it("14 — model da bien mat khoi catalog ⇒ chip hien `model_id` tho, khong o trong", () => {
+    renderView(node({ status: "completed", content: "x", model_id: "model-da-go", reasoning_effort: "low" }));
+    expect(chip()).toHaveTextContent("model-da-go·Low");
+  });
+
+  it("15 — hai anh em cung cha: moi bong bong ve chip cua CHINH no (UC-04 dong 4)", () => {
+    const { rerender } = renderView(
+      node({ status: "completed", content: "x", model_id: "ds-id", reasoning_effort: "high", sibling_count: 2 }),
+    );
+    expect(chip()).toHaveTextContent("DeepSeek Flash·High");
+
+    rerender(
+      <MessageItem
+        node={node({ status: "completed", content: "x", model_id: "nr-grok", sibling_index: 1, sibling_count: 2 })}
+        tree={emptyTree()}
+        models={MODELS}
+        notes={[]}
+        running={false}
+        busy={false}
+        onRetry={vi.fn()}
+        onFeedback={vi.fn()}
+        onEdit={vi.fn()}
+        onSwitchBranch={vi.fn()}
+      />,
+    );
+    expect(chip().textContent).toBe("Grok 4.6");
+  });
+});
+
+describe("khoi Suy luan (ban T-HD3-v2 3d)", () => {
+  it("16 — `reasoning` NULL ⇒ khong dung khoi (khong nut, khong khoi rong)", () => {
+    renderView(node({ status: "completed", content: "x", reasoning: null }));
+    expect(screen.queryByRole("button", { name: "Suy luận" })).toBeNull();
+    expect(screen.queryByText("Suy luận")).toBeNull();
+  });
+
+  it("17 — `reasoning` chi co khoang trang ⇒ cung khong dung (dieu kien la `trim()`)", () => {
+    renderView(node({ status: "completed", content: "x", reasoning: "  \n " }));
+    expect(screen.queryByRole("button", { name: "Suy luận" })).toBeNull();
+  });
+
+  it("18 — co suy luan ⇒ nut `aria-expanded` gap san; bam mo ra dung chu, bam lai gap", async () => {
+    renderView(node({ status: "completed", content: "x", reasoning: "buoc 1\nbuoc 2" }));
+    const toggle = screen.getByRole("button", { name: "Suy luận" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/buoc 1/)).toBeNull();
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/buoc 1/)).toBeInTheDocument();
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
   });
 });

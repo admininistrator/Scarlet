@@ -1,0 +1,334 @@
+import { AppWindow, ChartColumn, Check, FileCode, FileText, Image, LoaderCircle, type IconNode } from "lucide";
+import { useState } from "react";
+
+import { t, type TextKey } from "../../lib/i18n";
+import { ComingSoon } from "../ui/ComingSoon";
+import { StaticIcon } from "../ui/Icon";
+import { formatBytes } from "./Attachments";
+import { safeUrl } from "./markdownPolicy";
+
+/**
+ * Bon thanh phan cua bong bong DUNG SAN, CHUA MOUNT — T-S.15, §7b.2, NQ-121.
+ *
+ * KH tham chieu: §24.2b·S12, S15 (P4–P7) · ban T-HD3-v2 muc 3e, 3h ·
+ * tasks.md T-S.15 (Cam bay ②).
+ *
+ * | `data-planned` | Thanh phan                               | Ai se gan |
+ * |----------------|------------------------------------------|-----------|
+ * | `T-6.7`        | Chip "Dang tim web…" + chip nguon/favicon | P6        |
+ * | `T-7.9`        | Chip "Dang chay code…"                   | P7        |
+ * | `T-5.3`        | The artifact (nut "Mo" la nut cho)       | P5        |
+ * | `T-4.7`        | Anh / tep trong bong bong nguoi dung     | P4        |
+ *
+ * Chua co du lieu nao de chung hien — tool, artifact, tep dinh kem deu chua ton
+ * tai. Chung co mat o day de phase sau chi con viec GAN vao `MessageItem`
+ * (ban ve dat chip cong cu va nguon TREN chu tra loi, the artifact duoi chu,
+ * tep dinh kem tren chu cua nguoi dung) — va co test render voi fixture de
+ * hinh dang khong muc trong luc cho. KHONG file nao ngoai test import file nay.
+ *
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║  DU LIEU THAT KHONG TIN DUOC — LOC NGAY TU BAY GIO (Cam bay ②)         ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ *
+ * Tieu de trang web do trang web dat; ten tep do nguoi dung dat; URL nguon do
+ * mot model — da doc noi dung web — dua ra (§20 dong "Prompt injection").
+ * Nen:
+ *
+ * - **Chu** (tieu de, ten tep) di vao JSX nhu CHU — React tu thoat, khong bao
+ *   gio `dangerouslySetInnerHTML` — VA qua `plainText()`: bo ky tu dieu khien
+ *   va ky tu dao chieu (`U+202E`…). `hoa-don‮fdp.exe` hien la
+ *   "hoa-donexe.pdf" neu de nguyen — mot ten tep gia dang.
+ * - **Link nguon** qua `sourceHref()`: `safeUrl` cua bien XSS (T-3.5) roi CHI
+ *   `http:`/`https:` tuyet doi. `javascript:`/`data:`/tuong doi ⇒ chip van
+ *   hien nhung KHONG la link.
+ * - **Anh** (favicon, thumbnail) qua `sameOriginSrc()`: chi URL cung origin
+ *   voi Scarlet. Ban ve 3e: *"Favicon that la anh 16 px tu may chu Scarlet
+ *   (khong goi thang ra ngoai)"* — mot `<img src>` tro ra ngoai la mot lan
+ *   trinh duyet tu GET, dung duong ro ri ma T-3.5 da loai `img` khoi markdown
+ *   (B-235). URL la ⇒ o chu cai du phong (favicon) / icon anh (thumbnail).
+ */
+
+// ─────────────────────────── bo loc dung chung ───────────────────────────
+
+/**
+ * Ky tu dieu khien C0/C1 va ky tu dinh dang dao chieu (bidi): LRM/RLM, ALM,
+ * LRE…RLO (`U+202A–U+202E`), LRI…PDI (`U+2066–U+2069`).
+ */
+const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/g;
+
+/** Chu tho de hien: bo ky tu nguy hiem, gop khoang trang, cat hai dau. */
+export function plainText(raw: string): string {
+  return raw.replace(UNSAFE_CHARS, "").replace(/\s+/g, " ").trim();
+}
+
+/** URL mo trong tab moi, hoac `null` khi khong phai `http(s)` tuyet doi. */
+export function sourceHref(raw: string): string | null {
+  const url = safeUrl(raw);
+  if (url === "") {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+  } catch {
+    // Khong co giao thuc (duong dan tuong doi) — khong phai mot nguon web.
+    return null;
+  }
+}
+
+/** `src` cua anh neu no nam tren CHINH origin cua Scarlet, khong thi `null`. */
+export function sameOriginSrc(raw: string | undefined): string | null {
+  if (raw === undefined || safeUrl(raw) === "") {
+    return null;
+  }
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    return parsed.origin === window.location.origin ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// ───────────────────── chip trang thai cong cu (T-6.7, T-7.9) ─────────────────────
+
+export type ToolKind = "webSearch" | "codeRun";
+export type ToolStatus = { kind: ToolKind; running: boolean };
+
+const TOOL_TEXT: Record<ToolKind, { running: TextKey; done: TextKey }> = {
+  webSearch: { running: "chat.tool.searchingWeb", done: "chat.tool.searchedWeb" },
+  codeRun: { running: "chat.tool.runningCode", done: "chat.tool.ranCode" },
+};
+
+/** Cot `data-planned` cua §7b.2: task se gan tung loai chip. */
+const TOOL_PLANNED: Record<ToolKind, "T-6.7" | "T-7.9"> = {
+  webSearch: "T-6.7",
+  codeRun: "T-7.9",
+};
+
+/**
+ * Chip "Dang tim web…" / "Dang chay code…" — ban ve 3e. Vong quay la icon
+ * `loader-circle` trong MOT span rieng mang `.motion-spin`; chu dung yen. Nam
+ * ngoai phan chu dang chay nen 300 lan re-render khong cham toi no. Khong bam
+ * duoc.
+ */
+export function ToolChips({ tools }: { tools: readonly ToolStatus[] }) {
+  if (tools.length === 0) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap gap-2">
+      {tools.map((tool) => (
+        <span
+          key={tool.kind}
+          role="status"
+          data-planned={TOOL_PLANNED[tool.kind]}
+          className={
+            tool.running
+              ? "inline-flex h-chip items-center gap-2 rounded-full border border-border bg-background pr-3 pl-2.5 text-sm text-foreground"
+              : "inline-flex h-chip items-center gap-2 rounded-full border border-border bg-background pr-3 pl-2.5 text-sm text-muted"
+          }
+        >
+          {tool.running ? (
+            <span aria-hidden="true" className="motion-spin grid size-4 place-items-center text-accent-text">
+              <StaticIcon icon={LoaderCircle} size={16} />
+            </span>
+          ) : (
+            <StaticIcon icon={Check} size={16} />
+          )}
+          {t(tool.running ? TOOL_TEXT[tool.kind].running : TOOL_TEXT[tool.kind].done)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────── chip nguon (T-6.7) ───────────────────────────
+
+export type Source = { url: string; title: string; faviconUrl?: string };
+
+/**
+ * Hang chip nguon — ban ve 3e. Chip VE cao 32 (`h-chip`), vung bam la the
+ * `<a>` cao 44 (`min-h-touch`) bao quanh, nen hang xuong dong khong can khoang
+ * cach doc. Rong toi da 192 (`max-w-source-chip`), ten dai cat bang "…"; ten
+ * day du o `title` va `aria-label`. Mo tab moi, `rel="noopener noreferrer"`.
+ */
+export function SourceList({ sources }: { sources: readonly Source[] }) {
+  if (sources.length === 0) {
+    return null;
+  }
+  return (
+    <ul aria-label={t("chat.sources")} data-planned="T-6.7" className="mt-0.5 flex flex-wrap gap-x-1.5">
+      {sources.map((source, index) => {
+        const title = plainText(source.title);
+        const href = sourceHref(source.url);
+        const chip = (
+          <span className="motion-control inline-flex h-chip max-w-source-chip min-w-0 items-center gap-1.5 rounded-full border border-border bg-background pr-2.5 pl-1.5 group-hover:border-border-strong">
+            <Favicon src={source.faviconUrl} title={title} href={href} />
+            <span className="truncate text-xs group-hover:underline">{title}</span>
+          </span>
+        );
+        return (
+          <li key={`${index}:${source.url}`} className="flex max-w-full min-w-0">
+            {href === null ? (
+              <span title={title} className="inline-flex min-h-touch min-w-0 items-center text-foreground">
+                {chip}
+              </span>
+            ) : (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={title}
+                aria-label={title}
+                className="group inline-flex min-h-touch min-w-0 items-center text-foreground no-underline"
+              >
+                {chip}
+              </a>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Favicon 16 px tu may chu Scarlet; loi hoac URL la ⇒ o chu cai du phong. */
+function Favicon({ src, title, href }: { src: string | undefined; title: string; href: string | null }) {
+  const [failed, setFailed] = useState(false);
+  const safeSrc = sameOriginSrc(src);
+  if (safeSrc !== null && !failed) {
+    return (
+      <img
+        src={safeSrc}
+        alt=""
+        onError={() => setFailed(true)}
+        className="size-favicon shrink-0 rounded-sm"
+      />
+    );
+  }
+  const letter = (title.charAt(0) || (href === null ? "" : new URL(href).hostname.charAt(0))).toUpperCase();
+  return (
+    <span
+      aria-hidden="true"
+      className="grid size-favicon shrink-0 place-items-center rounded-sm bg-surface-code text-[0.625rem] font-bold text-muted"
+    >
+      {letter}
+    </span>
+  );
+}
+
+// ─────────────────────────── the artifact (T-5.3) ───────────────────────────
+
+export type ArtifactKind = "code" | "document" | "html" | "chart";
+/** `version` la SO phien ban tu may chu (§14.2) — "v3" khong phai chuoi dich. */
+export type ArtifactSummary = { kind: ArtifactKind; title: string; version: number };
+
+const ARTIFACT_ICON: Record<ArtifactKind, IconNode> = {
+  code: FileCode,
+  document: FileText,
+  html: AppWindow,
+  chart: ChartColumn,
+};
+
+const ARTIFACT_TYPE: Record<ArtifactKind, TextKey> = {
+  code: "artifact.type.code",
+  document: "artifact.type.document",
+  html: "artifact.type.html",
+  chart: "artifact.type.chart",
+};
+
+/**
+ * The artifact trong bong bong — ban ve 3e. Rong toi da 480 (`max-w-artifact`),
+ * co theo bong bong o 375 px: tieu de cat "…", nut "Mo" KHONG co. Ca the
+ * khong bam duoc — chi nut "Mo", va nut ay la nut cho (`ComingSoon`, S12) cho
+ * toi khi T-5.3 mo panel.
+ */
+export function ArtifactCard({ artifact }: { artifact: ArtifactSummary }) {
+  return (
+    <div
+      data-planned="T-5.3"
+      className="mt-3 flex max-w-artifact items-center gap-3 rounded-lg border border-border bg-background py-2 pr-2 pl-2.5"
+    >
+      <span
+        aria-hidden="true"
+        className="grid size-artifact-icon shrink-0 place-items-center rounded-md bg-accent-subtle text-accent-text"
+      >
+        <StaticIcon icon={ARTIFACT_ICON[artifact.kind]} size={20} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-base font-semibold">{plainText(artifact.title)}</span>
+          <span className="shrink-0 rounded-sm border border-border-strong px-1.5 font-mono text-2xs text-muted">
+            v{artifact.version}
+          </span>
+        </span>
+        <span className="text-xs text-muted">{t(ARTIFACT_TYPE[artifact.kind])}</span>
+      </span>
+      <span className="flex shrink-0">
+        <ComingSoon planned="T-5.3" label={t("artifact.open")} />
+      </span>
+    </div>
+  );
+}
+
+// ──────────────────── tep dinh kem trong bong bong nguoi dung (T-4.7) ────────────────────
+
+export type SentAttachment = {
+  id: string;
+  kind: "image" | "file";
+  name: string;
+  bytes: number;
+  /** Anh thu nho do may chu Scarlet phuc vu (P4). Vang mat / la ⇒ icon. */
+  thumbnailUrl?: string;
+};
+
+/**
+ * Anh / tep trong bong bong nguoi dung — ban ve 3e. Anh la thumbnail 96 × 96
+ * (`size-thumb`, `object-cover`), `alt` = ten tep. Chip tep dung lai hinh cua
+ * khay dinh kem o o nhap (cao 56, toi da 240) nhung KHONG co nut xoa — tep da
+ * gui roi. Hom nay chua bam duoc; ngay co xem truoc anh thi thumbnail thanh nut.
+ */
+export function UserAttachments({ items }: { items: readonly SentAttachment[] }) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <ul aria-label={t("chat.attachments")} data-planned="T-4.7" className="flex flex-wrap gap-2">
+      {items.map((item) => {
+        const name = plainText(item.name);
+        if (item.kind === "image") {
+          const src = sameOriginSrc(item.thumbnailUrl);
+          return (
+            <li
+              key={item.id}
+              className="grid size-thumb shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-surface-code text-muted"
+            >
+              {src === null ? (
+                <StaticIcon icon={Image} size={22} label={name} />
+              ) : (
+                <img src={src} alt={name} className="size-full object-cover" />
+              )}
+            </li>
+          );
+        }
+        return (
+          <li
+            key={item.id}
+            className="flex h-attachment max-w-60 min-w-0 items-center gap-2.5 rounded-md border border-border bg-background pr-3.5 pl-2.5"
+          >
+            <span
+              aria-hidden="true"
+              className="grid size-8 shrink-0 place-items-center rounded-sm bg-danger-subtle text-danger-text"
+            >
+              <StaticIcon icon={FileText} size={18} />
+            </span>
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-sm font-medium">{name}</span>
+              <span className="tabular text-xs text-muted">{formatBytes(item.bytes)}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

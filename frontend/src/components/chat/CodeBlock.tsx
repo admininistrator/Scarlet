@@ -1,7 +1,9 @@
+import { Copy } from "lucide";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { copyText } from "../../lib/clipboard";
 import { t } from "../../lib/i18n";
+import { StaticIcon } from "../ui/Icon";
 import { highlightLines, plainLines, type CodeLine } from "./highlight";
 
 /**
@@ -77,7 +79,14 @@ export function CodeBlock({
           : "my-3 overflow-hidden rounded-lg border border-border bg-surface-code"
       }
     >
-      <figcaption className="flex h-touch items-center gap-2 border-b border-border px-3">
+      {/* Ban T-HD3-v2 3g: khoi da dong chua 4 px ben phai cho nut Sao chep (co icon). */}
+      <figcaption
+        className={
+          open
+            ? "flex h-touch items-center gap-2 border-b border-border px-3"
+            : "flex h-touch items-center gap-2 border-b border-border pr-1 pl-3"
+        }
+      >
         <span className="font-mono text-2xs tracking-wider uppercase text-muted">
           {language === "" ? t("code.plain") : language}
         </span>
@@ -87,8 +96,9 @@ export function CodeBlock({
           <button
             type="button"
             onClick={onCopy}
-            className="ml-auto h-touch rounded-md px-3 text-sm font-medium text-foreground hover:bg-surface-hover motion-press"
+            className="motion-press ml-auto inline-flex h-touch items-center gap-1.5 rounded-md px-3 text-sm font-medium text-foreground hover:bg-surface-hover"
           >
+            <StaticIcon icon={Copy} size={16} />
             {copied ? t("code.copied") : t("code.copy")}
           </button>
         )}

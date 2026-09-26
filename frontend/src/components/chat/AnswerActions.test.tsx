@@ -1,32 +1,28 @@
 /**
- * Hang nam nut duoi cau tra loi — DoD dong 1 cua T-3.7.
+ * Hang nut duoi cau tra loi — DoD dong 1 cua T-3.7, ban T-HD3-v2 (T-S.15).
  *
  * File nay do HAI tang, va chung tra loi hai cau khac nhau:
  *
  *   `describe("hang nut")`   — bam mot nut thi component GOI GI. Spy la
  *                              `vi.fn()`, khong co mang.
- *   `describe("duong ra HTTP")` — cung nhung nut ay, nhung `onRetry` /
- *                              `onFeedback` noi vao `api` THAT (chi `fetch` bi
- *                              thay). Day la cho dong DoD *"Retry goi dung
- *                              endpoint"* va *"gui `model_id` khac"* duoc do:
- *                              mot spy khong biet gi ve chuoi URL that.
+ *   `describe("duong ra HTTP")` — `onFeedback` noi vao `api` THAT (chi `fetch`
+ *                              bi thay). Duong Thu lai dau-cuoi (picker →
+ *                              `useChat.retry` → `fetch`) do o
+ *                              `RetryFlow.test.tsx`: body cua no do `useChat`
+ *                              dung, khong phai component nay.
  *
- * Doan noi o tang hai chep dung mot dong cua `useChat.retry`/`sendFeedback`. No
- * khong the lech trong im lang: `tsc` buoc ca hai ben dung mot chu ky, va chu
- * ky ay (`thuLai(messageId, body, khoa)`) la thu B-231 vua doi.
- *
- * KH tham chieu: UC-02, UC-04, §18.2, §11.4 · tasks.md T-3.7, B-231, B-244.
+ * KH tham chieu: UC-02, UC-04, §18.2, §11.4, §24.2b·S4, S12 · tasks.md T-3.7,
+ * T-S.15, B-231, B-244.
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type Feedback } from "../../lib/api";
 import { AnswerActions } from "./AnswerActions";
 
-const OLD_MODEL = "model-da-sinh-ra-cau-nay";
-const SELECTED_MODEL = "model-dang-chon-tren-picker";
 const ID = "msg-1";
 
 const writeClipboard = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
@@ -34,33 +30,40 @@ const writeClipboard = vi.fn<(text: string) => Promise<void>>(() => Promise.reso
 beforeEach(() => {
   // `navigator.clipboard` khong ton tai trong jsdom (cung ly do no khong ton
   // tai ngoai secure context — xem `lib/clipboard.ts`).
-  vi.stubGlobal("navigator", { clipboard: { writeText: writeClipboard } });
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: writeClipboard } });
 });
 
 function renderView(overrides: Partial<Parameters<typeof AnswerActions>[0]> = {}) {
   const props = {
     text: "noi dung cau tra loi",
     feedback: null,
-    usedModel: OLD_MODEL,
-    selectedModel: SELECTED_MODEL,
+    collapse: false,
     onFeedback: vi.fn(),
     onRetry: vi.fn(),
-    onRetryWithModel: vi.fn(),
     ...overrides,
   };
   return { ...render(<AnswerActions {...props} />), props };
 }
 
 /**
- * `fireEvent` chu khong `userEvent` — khac voi `Composer.test.tsx`, va co ly do.
- *
- * `userEvent.setup()` **tu dat mot ban gia cua `navigator.clipboard`** de mo
- * phong copy/paste cua ban phim; o file nay chinh `navigator.clipboard` la thu
- * dang duoc do, nen no se do ban gia cua thu vien chu khong phai lan goi cua
- * `lib/clipboard.ts`. `fireEvent` khong cham vao `navigator`.
+ * `fireEvent` chu khong `userEvent` o cac ca clipboard — `userEvent.setup()`
+ * **tu dat mot ban gia cua `navigator.clipboard`**, tuc no se do ban gia cua
+ * thu vien chu khong phai lan goi cua `lib/clipboard.ts`.
  */
 function clickButton(name: string): void {
   fireEvent.click(screen.getByRole("button", { name: name }));
+}
+
+/**
+ * Mo menu "…" bang chuot. Dat tieu diem vao nut TRUOC — cung tat cua jsdom da
+ * ghi o `openMenu` cua `AccountMenu.test.tsx`: khong co no, jsdom ban `blur`
+ * len `window` va `Menu` cua Radix tu dong ngay khi vua mo.
+ */
+async function openMore(): Promise<HTMLElement> {
+  const trigger = screen.getByRole("button", { name: "Thêm thao tác" });
+  act(() => trigger.focus());
+  await userEvent.click(trigger);
+  return screen.findByRole("menu");
 }
 
 describe("hang nut", () => {
@@ -93,14 +96,12 @@ describe("hang nut", () => {
         <AnswerActions
           text="x"
           feedback={value}
-          usedModel={OLD_MODEL}
-          selectedModel={null}
+          collapse={false}
           onFeedback={(next) => {
             sent.push(next);
             setValue(next);
           }}
           onRetry={vi.fn()}
-          onRetryWithModel={vi.fn()}
         />
       );
     }
@@ -122,58 +123,96 @@ describe("hang nut", () => {
 
   it("nut sang/toi doc tu prop `feedback`, khong tu state rieng", () => {
     const { rerender } = renderView({ feedback: null });
-    expect(screen.getByRole("button", { name: "Thích" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    expect(screen.getByRole("button", { name: "Thích" })).toHaveAttribute("aria-pressed", "false");
 
-    rerender(
-      <AnswerActions
-        text="x"
-        feedback="like"
-        usedModel={OLD_MODEL}
-        selectedModel={null}
-        onFeedback={vi.fn()}
-        onRetry={vi.fn()}
-        onRetryWithModel={vi.fn()}
-      />,
-    );
+    rerender(<AnswerActions text="x" feedback="like" collapse={false} onFeedback={vi.fn()} onRetry={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Đã thích" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByRole("button", { name: "Đã thích" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("Thu lai tron KHONG kem model nao", () => {
+  it("MOT nut Thu lai, goi `onRetry()` khong tham so; khong con nut 'Doi model & thu lai'", () => {
     const { props } = renderView();
+
+    expect(screen.getAllByRole("button", { name: /thử lại/i })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /đổi model/i })).toBeNull();
+    expect(screen.queryByText(/đổi model/i)).toBeNull();
 
     clickButton("Thử lại");
 
     expect(props.onRetry).toHaveBeenCalledTimes(1);
     expect(props.onRetry).toHaveBeenCalledWith();
-    expect(props.onRetryWithModel).not.toHaveBeenCalled();
   });
 
-  it("'Doi model & thu lai' gui model KHAC model da sinh ra cau tra loi", () => {
-    const { props } = renderView({ usedModel: OLD_MODEL, selectedModel: SELECTED_MODEL });
+  it("Cam bay ① — tooltip cua Thu lai noi no dung model DANG CHON, noi qua `aria-describedby`", async () => {
+    renderView();
+    const retry = screen.getByRole("button", { name: "Thử lại" });
 
-    clickButton("Đổi model & thử lại");
+    await userEvent.tab();
+    await userEvent.tab();
+    await userEvent.tab();
+    await userEvent.tab();
+    expect(retry).toHaveFocus();
 
-    expect(props.onRetryWithModel).toHaveBeenCalledWith(SELECTED_MODEL);
-    expect(props.onRetryWithModel).not.toHaveBeenCalledWith(OLD_MODEL);
+    const tip = await screen.findByRole("tooltip");
+    expect(tip).toHaveTextContent("Tạo lại bằng model đang chọn");
+    expect(retry).toHaveAttribute("aria-describedby", tip.id);
   });
 
-  it("nut doi model TAT khi picker dang chi dung model cu", () => {
-    renderView({ usedModel: OLD_MODEL, selectedModel: OLD_MODEL });
+  it("Doc to la nut cho T-8.4: `aria-disabled`, khong `disabled`, khong handler", () => {
+    renderView();
+    const readAloud = screen.getByRole("button", { name: "Đọc to" });
 
-    expect(screen.getByRole("button", { name: "Đổi model & thử lại" })).toBeDisabled();
+    expect(readAloud).toHaveAttribute("aria-disabled", "true");
+    expect(readAloud).toHaveAttribute("data-planned", "T-8.4");
+    expect(readAloud).not.toBeDisabled();
+    fireEvent.click(readAloud);
+  });
+});
+
+describe("375 px — gap vao '…' khi co nhanh (ban T-HD3-v2 3f)", () => {
+  it("khong nhanh ⇒ khong co nut '…'; Thich/Khong thich/Doc to khong bi an o bat ky be rong nao", () => {
+    renderView({ collapse: false });
+
+    expect(screen.queryByRole("button", { name: "Thêm thao tác" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Thích" }).parentElement).not.toHaveClass("hidden");
+    expect(screen.getByRole("button", { name: "Đọc to" }).parentElement).not.toHaveClass("hidden");
   });
 
-  it("nut doi model TAT khi chua biet model nao dang chon", () => {
-    renderView({ selectedModel: null });
+  it("co nhanh ⇒ ba nut an duoi `sm`, '…' chi hien duoi `sm`; menu co Thich/Khong thich (loai tru) + Doc to cho", async () => {
+    const { props } = renderView({ collapse: true, feedback: "like" });
 
-    expect(screen.getByRole("button", { name: "Đổi model & thử lại" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Đã thích" }).parentElement).toHaveClass("hidden", "sm:flex");
+    expect(screen.getByRole("button", { name: "Đọc to" }).parentElement).toHaveClass("hidden", "sm:block");
+    const more = screen.getByRole("button", { name: "Thêm thao tác" });
+    expect(more).toHaveClass("sm:hidden");
+    // Sao chep va Thu lai KHONG bao gio gap.
+    expect(screen.getByRole("button", { name: "Sao chép" }).parentElement).not.toHaveClass("hidden");
+    expect(screen.getByRole("button", { name: "Thử lại" }).parentElement).not.toHaveClass("hidden");
+
+    const menu = await openMore();
+    const liked = within(menu).getByRole("menuitemcheckbox", { name: "Đã thích" });
+    expect(liked).toHaveAttribute("aria-checked", "true");
+    expect(within(menu).getByRole("menuitemcheckbox", { name: "Không thích" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    const pending = within(menu).getByRole("menuitem", { name: "Đọc to" });
+    expect(pending).toHaveAttribute("aria-disabled", "true");
+    expect(pending).toHaveAttribute("data-planned", "T-8.4");
+
+    await userEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "Không thích" }));
+    expect(props.onFeedback).toHaveBeenCalledWith("dislike");
+  });
+
+  it("bam Doc to trong menu KHONG lam gi va KHONG dong menu", async () => {
+    const { props } = renderView({ collapse: true });
+
+    const menu = await openMore();
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Đọc to" }));
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(props.onFeedback).not.toHaveBeenCalled();
+    expect(props.onRetry).not.toHaveBeenCalled();
   });
 });
 
@@ -197,51 +236,23 @@ function initOfCall(n: number): RequestInit {
 describe("duong ra HTTP", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fakeFetch);
-    fakeFetch.mockResolvedValue(respond(202, {}));
   });
 
   afterEach(() => {
     fakeFetch.mockReset();
   });
 
-  /** Noi y het `useChat`: nut tron khong truyen model, nut kia truyen. */
   function renderReal(feedback: Feedback | null = null) {
     return render(
       <AnswerActions
         text="x"
         feedback={feedback}
-        usedModel={OLD_MODEL}
-        selectedModel={SELECTED_MODEL}
+        collapse={false}
         onFeedback={(value) => void api.sendFeedback(ID, value)}
-        onRetry={() => void api.retry(ID, {}, "khoa-cua-lan-bam")}
-        onRetryWithModel={(modelId) => void api.retry(ID, { model_id: modelId }, "khoa-cua-lan-bam")}
+        onRetry={vi.fn()}
       />,
     );
   }
-
-  it("Thu lai ⇒ `POST /messages/{id}/retry` kem `Idempotency-Key` (B-231)", () => {
-    renderReal();
-
-    clickButton("Thử lại");
-
-    expect(String(fakeFetch.mock.calls[0][0])).toBe(`/api/v1/messages/${ID}/retry`);
-    const init = initOfCall(0);
-    expect(init.method).toBe("POST");
-    // Thieu header nay la `400 IDEMPOTENCY_KEY_REQUIRED` ke tu NQ-93.
-    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("khoa-cua-lan-bam");
-    expect(init.body).toBe("{}");
-  });
-
-  it("'Doi model & thu lai' ⇒ cung endpoint, body mang `model_id` KHAC", () => {
-    renderReal();
-
-    clickButton("Đổi model & thử lại");
-
-    expect(String(fakeFetch.mock.calls[0][0])).toBe(`/api/v1/messages/${ID}/retry`);
-    const sent = JSON.parse(String(initOfCall(0).body)) as { model_id: string };
-    expect(sent.model_id).toBe(SELECTED_MODEL);
-    expect(sent.model_id).not.toBe(OLD_MODEL);
-  });
 
   it("Thich ⇒ `POST /messages/{id}/feedback` `{value:'like'}`, KHONG khoa §11.4", () => {
     fakeFetch.mockResolvedValue(respond(200, { message_id: ID, feedback: "like", feedback_reason: null }));

@@ -37,6 +37,7 @@ function node(patch: Partial<MessageOut> = {}): MessageOut {
     sibling_index: 0,
     sibling_count: 1,
     feedback: null,
+    reasoning_effort: null,
     ...patch,
   };
 }

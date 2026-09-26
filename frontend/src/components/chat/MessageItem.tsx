@@ -1,9 +1,13 @@
+import { ChevronDown, ChevronRight, Pencil, RotateCcw } from "lucide";
 import { useState } from "react";
 
-import type { Feedback, MessageOut } from "../../lib/api";
+import { effortLabel } from "../../features/models/reasoning";
+import type { Feedback, MessageOut, ModelOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { hasSiblings, content, reasoningOf, type TreeState } from "../../lib/tree";
+import { Icon, StaticIcon } from "../ui/Icon";
 import { BranchNav, Divider } from "./BranchNav";
+import { Hint } from "./Hint";
 import { Markdown } from "./Markdown";
 import { AnswerActions } from "./AnswerActions";
 
@@ -45,24 +49,39 @@ import { AnswerActions } from "./AnswerActions";
  * `<Markdown>` da `memo`, va khong mot phan tu nao tren duong chu mang
  * `transition`/`animation`.
  *
- * Nam nut duoi cau tra loi (Copy · Thich · Khong thich · Thu lai · Doi model)
- * nam trong `AnswerActions` (T-3.7). Chung o mot file rieng chu khong noi
- * tiep vao day vi mot ly do doc duoc: file nay tra loi cau "bong bong nao ve
- * cai gi" (bon trang thai), con file kia tra loi "bam mot nut thi gui gi len
- * server" — va chi cau thu hai can mot bo test rieng.
+ * Hang nut duoi cau tra loi (Sao chep · Thich · Khong thich · Thu lai · Doc
+ * to) nam trong `AnswerActions` (T-3.7, T-S.15). Chung o mot file rieng chu
+ * khong noi tiep vao day vi mot ly do doc duoc: file nay tra loi cau "bong
+ * bong nao ve cai gi" (bon trang thai), con file kia tra loi "bam mot nut thi
+ * gui gi len server" — va chi cau thu hai can mot bo test rieng.
  *
  * `‹ n/m ›` roi sang `BranchNav.tsx` o T-3.8, va cung luc do no moc them duoi
  * bong bong NGUOI DUNG: sua mot cau hoi sinh anh em cua message user (§8.2),
  * nen bo hang duoi nghia la nhanh vua tao khong co duong nao quay lai tu giao
  * dien. Xem docstring cua chinh file ay.
+ *
+ * ┌──────────────────────────────────────────────────────────────────────┐
+ * │  T-S.15 — BAN T-HD3-v2                                               │
+ * └──────────────────────────────────────────────────────────────────────┘
+ *
+ * - **Chip "model · muc"** (ban ve 3c): model va muc DA DUNG de sinh chinh cau
+ *   tra loi nay — `model_id`, `reasoning_effort` cua `MessageOut`, tuc cua
+ *   Postgres — KHONG phai lua chon hien tai tren picker. Nho vay bam `‹` ve
+ *   nhanh cu van thay chip cua model cu (UC-04 dong 4). Ten la `display_name`
+ *   cua catalog (khong bao gio ten duong trung gian, NQ-119); hai manh ten va
+ *   muc la hai `<span>`, dau "·" `aria-hidden`, khong ghep chuoi.
+ * - **Khoi "Suy luan" chi dung khi co noi dung** (ban ve 3d): `reasoning?.trim()`
+ *   — muc Off, model khong ho tro hay chuoi rong cho cung mot ket qua.
+ * - **Mot nut Thu lai**, ca o hang nut lan o bong bong loi: model + muc dang
+ *   chon tren picker (xem `AnswerActions`).
  */
 export function MessageItem({
   node,
   tree,
+  models,
   notes,
   running,
   busy,
-  selectedModel,
   onRetry,
   onFeedback,
   onEdit,
@@ -70,6 +89,11 @@ export function MessageItem({
 }: {
   node: MessageOut;
   tree: TreeState;
+  /**
+   * Danh muc `GET /models` — chi de doi `model_id` cua message thanh ten hien
+   * thi cho chip. Model da bien mat khoi catalog thi chip hien `model_id` tho.
+   */
+  models: readonly ModelOut[];
   notes: string[];
   running: boolean;
   /**
@@ -79,10 +103,8 @@ export function MessageItem({
    * don. Day la mot lop chan o FE chu khong phai mot ban va cho khe ay.
    */
   busy: boolean;
-  /** Model dang chon tren picker — nut "Doi model & thu lai" gui no (T-3.6). */
-  selectedModel: string | null;
-  /** `modelId` vang mat = giu nguyen model cu. Xem `useChat.retry`. */
-  onRetry: (messageId: string, modelId?: string) => void;
+  /** Sinh lai bang model + muc tren picker. Xem `useChat.retry`. */
+  onRetry: (messageId: string) => void;
   onFeedback: (messageId: string, value: Feedback | null) => void;
   onEdit: (messageId: string, newContent: string) => void;
   onSwitchBranch: (node: MessageOut, direction: -1 | 1) => void;
@@ -113,10 +135,11 @@ export function MessageItem({
       aria-label={t("chat.assistantLabel")}
       // T-3.9 / Cam bay ①: hoat anh o VUNG, chay mot lan khi bong bong mount.
       // Hai nhanh chung mot `animation` nen doi sang trang thai loi khong kich lai.
+      // Ban T-HD3-v2 3f: o 375 px dem 14/16 (bong bong 343, long 311).
       className={
         isError
-          ? "motion-enter w-full rounded-bubble border border-danger bg-danger-subtle px-5 py-4"
-          : "motion-enter w-full rounded-bubble border border-border bg-surface-assistant px-5 py-4"
+          ? "motion-enter w-full max-w-measure rounded-bubble border border-danger bg-danger-subtle px-4 py-3.5 sm:px-5 sm:py-4"
+          : "motion-enter w-full max-w-measure rounded-bubble border border-border bg-surface-assistant px-4 py-3.5 sm:px-5 sm:py-4"
       }
     >
       <h3 className="mb-2 flex items-center gap-2 text-2xs font-semibold tracking-wider uppercase text-muted">
@@ -151,42 +174,41 @@ export function MessageItem({
 
       {isError && (
         <div className="flex flex-col gap-3">
-          <p className="text-body font-medium text-danger-text">{t("chat.errorTitle")}</p>
+          <p className="text-body font-semibold text-danger-text">{t("chat.errorTitle")}</p>
           {node.error_code !== null && (
             <p className="font-mono text-sm text-foreground">{node.error_code}</p>
           )}
-          <button
-            type="button"
-            onClick={() => onRetry(node.id)}
-            className="h-touch self-start rounded-md bg-danger px-4 text-base font-semibold text-danger-foreground hover:bg-danger-hover motion-press"
-          >
-            {t("chat.errorRetry")}
-          </button>
+          {/* Ban ve 3a/4: cung hanh vi, cung tooltip voi Thu lai o hang nut. */}
+          <Hint label={t("chat.retryHint")}>
+            <button
+              type="button"
+              onClick={() => onRetry(node.id)}
+              className="motion-press inline-flex h-touch items-center gap-2 self-start rounded-md bg-danger pr-4 pl-3.5 text-base font-semibold text-danger-foreground hover:bg-danger-hover"
+            >
+              <StaticIcon icon={RotateCcw} size={16} />
+              {t("chat.retry")}
+            </button>
+          </Hint>
         </div>
       )}
 
       {done && (
-        <div className="text-body text-foreground">
+        <div className="motion-none mt-1 min-h-6 text-body text-foreground">
           <Markdown text={text} streaming={false} />
         </div>
       )}
 
-      {done && reasoning !== "" && (
-        <details className="mt-3 rounded-md border border-border bg-background">
-          <summary className="flex h-touch cursor-pointer list-none items-center gap-2 px-3 text-base font-medium">
-            <span aria-hidden="true">▸</span>
-            {t("chat.reasoning")}
-          </summary>
-          <div className="border-t border-border px-3 py-3 text-base whitespace-pre-wrap text-muted">
-            {reasoning}
-          </div>
-        </details>
-      )}
+      {done && reasoning.trim() !== "" && <ReasoningBlock text={reasoning} />}
 
       {done && (
         <>
           <ul className="mt-3 flex flex-wrap gap-2">
-            {node.model_id !== null && <Chip label={node.model_id} mono />}
+            {node.model_id !== null && (
+              <ModelChip
+                name={models.find((m) => m.id === node.model_id)?.display_name ?? node.model_id}
+                effort={node.reasoning_effort}
+              />
+            )}
             {node.finish_reason !== null && node.finish_reason !== "stop" && (
               <Chip label={node.finish_reason} mono />
             )}
@@ -195,7 +217,7 @@ export function MessageItem({
             ))}
           </ul>
 
-          <div className="mt-2 flex flex-wrap items-center gap-1">
+          <div className="mt-2 flex items-center gap-1">
             {hasSiblings(node) && (
               <>
                 <BranchNav
@@ -209,16 +231,70 @@ export function MessageItem({
             <AnswerActions
               text={text}
               feedback={node.feedback}
-              usedModel={node.model_id}
-              selectedModel={selectedModel}
+              collapse={hasSiblings(node)}
               onFeedback={(value) => onFeedback(node.id, value)}
               onRetry={() => onRetry(node.id)}
-              onRetryWithModel={(modelId) => onRetry(node.id, modelId)}
             />
           </div>
         </>
       )}
     </article>
+  );
+}
+
+/**
+ * Khoi "Suy luan" gap/mo — ban T-HD3-v2 3d. `button[aria-expanded]` cao 44
+ * thay cho `<details>` cua v1; mui ten `chevron-right` ↔ `chevron-down` bien
+ * hinh qua `morphicons` (S10). Ban ve khong ghi vai tro lo xo nao cho mui ten
+ * nay — dung `submenuChevron` (gentle), vai tro cua mui ten "mo them" gan nhat.
+ *
+ * `whitespace-pre-wrap` giu tu v1: suy luan la chu tho nhieu dong, khong qua
+ * markdown.
+ */
+function ReasoningBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3 rounded-md border border-border bg-background">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={
+          open
+            ? "motion-control flex h-touch w-full items-center gap-2 rounded-t-md border-b border-border px-3 text-base font-medium text-foreground hover:bg-surface-hover"
+            : "motion-control flex h-touch w-full items-center gap-2 rounded-md px-3 text-base font-medium text-foreground hover:bg-surface-hover"
+        }
+      >
+        <Icon
+          icon={open ? ChevronDown : ChevronRight}
+          spring="submenuChevron"
+          size={16}
+          className="motion-icon text-muted"
+        />
+        {t("chat.reasoning")}
+      </button>
+      {open && <div className="motion-panel px-3 py-3 text-base whitespace-pre-wrap text-muted">{text}</div>}
+    </div>
+  );
+}
+
+/**
+ * Chip "<model> · <muc>" — ban T-HD3-v2 3c. Khong co muc (model khong co khoi
+ * `reasoning`) ⇒ chi ten model. "Off" VAN hien: model co hang muc va nguoi
+ * dung da chon tat. Nhan muc qua `effortLabel` (tieng Anh trong `vi.json`,
+ * NQ-118). Khong bam duoc, khong con tro tay.
+ */
+function ModelChip({ name, effort }: { name: string; effort: string | null }) {
+  return (
+    <li className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted">
+      <span>{name}</span>
+      {effort !== null && (
+        <>
+          <span aria-hidden="true">·</span>
+          <span>{effortLabel(effort)}</span>
+        </>
+      )}
+    </li>
   );
 }
 
@@ -308,7 +384,8 @@ function UserBubble({
   return (
     <article
       aria-label={t("chat.userLabel")}
-      className="mr-0 ml-auto flex w-full max-w-bubble-user flex-col gap-1 rounded-bubble bg-surface-user px-4 py-3"
+      // Ban T-HD3-v2 3g "giu nguyen v1"; dem 12/14 o 375 px, 14/16 tu `sm` (3f, 3g).
+      className="mr-0 ml-auto flex w-full max-w-bubble-user flex-col gap-1 rounded-bubble bg-surface-user px-3.5 py-3 sm:px-4 sm:py-3.5"
     >
       {/* Tin nhan cua nguoi dung la chu tho: no khong di qua mot model nao,
           va render markdown o day nghia la nguoi go ``` bi mat dau ```. */}
@@ -328,14 +405,16 @@ function UserBubble({
             <Divider />
           </>
         )}
+        {/* Ban T-HD3-v2 3g: nut chu co them icon Lucide `pencil`. */}
         <button
           type="button"
           onClick={() => {
             setDraft(text);
             setEditing(true);
           }}
-          className="h-touch rounded-md px-3 text-base font-medium text-muted hover:bg-surface-hover motion-press"
+          className="motion-press inline-flex h-touch items-center gap-1.5 rounded-md px-3 text-base font-medium text-muted hover:bg-surface-hover"
         >
+          <StaticIcon icon={Pencil} size={16} />
           {t("chat.edit")}
         </button>
       </div>

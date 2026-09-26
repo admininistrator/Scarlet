@@ -53,8 +53,9 @@
  * nen nut Thu lai cung phai cam mot khoa. Khoa ay o lai `useChat` chu khong
  * di ra component, va ly do la don vi cua no khac han o nhap:
  *
- *   • Don vi la mot cap **(message, model)** — "thu lai cau tra loi nay bang
- *     model nay". `useChat` la cho duy nhat biet ca hai.
+ *   • Don vi la mot bo **(message, model, muc)** — "thu lai cau tra loi nay
+ *     bang model va muc nay" (T-S.15: model + muc lay tu picker). `useChat` la
+ *     cho duy nhat biet ca ba.
  *   • Hang nut song va chet theo duong di: sau mot lan thu lai thanh cong,
  *     `active_leaf_id` doi sang anh em MOI nen bong bong cu bien mat khoi
  *     `path` va component cua no unmount. Mot `ref` trong component se chet
@@ -211,12 +212,8 @@ export interface ChatState {
    */
   defaultPick: DefaultPick;
   /**
-   * Loi tat cua `defaultPick.modelId` — model cho lan GUI ke tiep.
-   *
-   * Tu T-3.7 no **khong** con di kem moi lan `retry`: hai nut Thu lai canh
-   * nhau chi khac nhau o cho ay, nen nut tron giu model cu con nut "Doi model
-   * & thu lai" truyen `modelId` tuong minh. Gia tri nay van la thu nut thu hai
-   * gui di — no la model dang chon tren picker.
+   * Loi tat cua `defaultPick.modelId` — model dang chon tren picker, tuc model
+   * cua lan GUI ke tiep **va** cua moi lan `retry` (T-S.15: mot nut Thu lai).
    */
   effectiveModel: string | null;
   /**
@@ -253,15 +250,14 @@ export interface ChatState {
   send: (content: string, keys: SendKeys) => Promise<SendResult>;
   stop: () => Promise<void>;
   /**
-   * §8.2 — sinh lai cau tra loi `messageId` thanh mot anh em cua no.
-   *
-   * `modelId` vang mat (nut "Thu lai" tron) ⇒ **khong** gui `model_id`, va
-   * backend dung lai dung model cua chinh cau tra loi ay (`_pick_model`).
-   * Truyen mot id (nut "Doi model & thu lai") la cho duy nhat doi model.
+   * §8.2 — sinh lai cau tra loi `messageId` thanh mot anh em cua no, bang
+   * model VA muc dang chon tren picker (`effectiveModel`, `effectiveEffort` —
+   * T-S.15, §24.2b·S4). Khong con tham so model: doi model la doi tren picker
+   * roi bam Thu lai (UC-02 dong 5, UC-04 dong 4).
    *
    * Khoa §11.4 khong o chu ky nay: xem khoi C22 o docstring module.
    */
-  retry: (messageId: string, modelId?: string) => Promise<void>;
+  retry: (messageId: string) => Promise<void>;
   /**
    * §18.2 — Like/Dislike. `gia === null` la **go** danh gia (bam lai lan hai).
    *
@@ -398,13 +394,13 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
   const treeRef = useRef<TreeState>(emptyTree());
   const streamRef = useRef<StreamHandle | null>(null);
   /*
-    C22 cho nut Thu lai (B-231): `${messageId}:${modelId}` → khoa §11.4.
+    C22 cho nut Thu lai (B-231): `${messageId}:${modelId}:${muc}` → khoa §11.4.
 
     `Map` chu khong mot chuoi duy nhat: hai bong bong khac nhau tren cung mot
-    man hinh la hai y dinh khac nhau, va hai nut cua CUNG mot bong bong ("Thu
-    lai" va "Doi model & thu lai") cung vay — dung chung mot khoa se lam nut
-    thu hai nhan lai ban phat lai cua nut thu nhat, tuc doi model khong co tac
-    dung gi.
+    man hinh la hai y dinh khac nhau. Model va muc nam TRONG khoa (T-S.15):
+    bam Thu lai, hong, doi model tren picker roi bam lai la mot y dinh MOI —
+    dung lai khoa cu se lam lan bam sau nhan ban phat lai cua lan truoc (§11.4
+    tra lai response da luu), tuc doi model khong co tac dung gi.
 
     `ref` chu khong `state`: hai lan bam trong cung mot luot render phai doc
     duoc CUNG mot gia tri (cai bay S5, y het `keyRef` cua `Composer`).
@@ -851,29 +847,35 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
   /**
    * §8.2 — mot anh em moi cho cung mot cau hoi. Xem khoi C22 o docstring module.
    *
-   * **Khong con nhet `effectiveModel` vao moi lan thu lai** (ban T-3.6 lam vay).
-   * T-3.7 dung HAI nut canh nhau, va chung chi khac nhau o dung diem ay: "Thu
-   * lai" giu nguyen model cu, "Doi model & thu lai" moi doi. Gui model dang
-   * chon cho ca hai la lam nut thu nhat lang le doi model — dung thu
-   * `_pick_model` cua backend viet ro la khong duoc ("bam Retry ma khong chon
-   * gi phai sinh lai bang dung model cu").
+   * T-S.15 (§24.2b·S4, NQ-118) — **MOT nut Thu lai**, gui model **va** muc dang
+   * chon tren picker: dung hai gia tri `send` dat vao lan gui, nen thu nguoi
+   * dung thay tren picker la thu duoc sinh. Ban T-3.7 co hai nut va nut tron
+   * co y KHONG gui model (giu model cu); nay "doi model & thu lai" la "doi tren
+   * picker roi bam Thu lai" (UC-02 dong 5), va tooltip cua nut noi dieu ay.
+   *
+   * Model khong co khoi `reasoning` ⇒ `reasoning_effort` vang mat — mot `id`
+   * bat ky la `400 REASONING_UNSUPPORTED` (cung luat `send`). Chua biet model
+   * nao (`GET /models` chua ve) ⇒ body rong, backend giu model cu.
    */
   const retry = useCallback(
-    async (messageId: string, modelId?: string) => {
+    async (messageId: string) => {
       const conversationId = treeRef.current.conversationId;
       if (conversationId === null) {
         return;
       }
-      // Mot cap (message, model) = mot y dinh = mot khoa. Hai lan bam nhanh
+      // Mot bo (message, model, muc) = mot y dinh = mot khoa. Hai lan bam nhanh
       // doc cung gia tri nay vi no la `ref` chu khong `state` (cai bay S5).
-      const identity = `${messageId}:${modelId ?? ""}`;
+      const identity = `${messageId}:${effectiveModel ?? ""}:${effort ?? ""}`;
       const key = retryKeysRef.current.get(identity) ?? newKey();
       retryKeysRef.current.set(identity, key);
       setBusy(true);
       try {
         const output = await api.retry(
           messageId,
-          modelId === undefined ? {} : { model_id: modelId },
+          {
+            ...(effectiveModel === null ? {} : { model_id: effectiveModel }),
+            ...(effort === null ? {} : { reasoning_effort: effort }),
+          },
           key,
         );
         // Luat 3 cua C22: bo khoa KHI VA CHI KHI `202` ve. Lan bam sau tren
@@ -891,7 +893,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
         setBusy(false);
       }
     },
-    [reportQuotaWarning, reportQuotaError, reload, openStreamFor],
+    [reportQuotaWarning, reportQuotaError, reload, openStreamFor, effectiveModel, effort],
   );
 
   /**

@@ -172,6 +172,13 @@ export interface MessageOut {
    * ca hang ve). Xem B-244.
    */
   feedback: Feedback | null;
+  /**
+   * T-S.15 — muc suy luan DA DUNG de sinh cau tra loi nay (`messages.reasoning_effort`,
+   * §24.2b·S4/S14), mot `id` cua bo tu vung S3b. `null` = model khong co khoi
+   * `reasoning`, hoac message cua nguoi dung. Chip "model · muc" doc tu day —
+   * khong tu picker: nhanh cu phai giu muc cu (UC-04 dong 4).
+   */
+  reasoning_effort: string | null;
 }
 
 export interface ConversationOut {
@@ -867,13 +874,15 @@ export const api = {
    * lan bam nhanh mang hai khoa khac nhau, tuc luat §11.4 vo dung dung luc no
    * can chay. Chu so huu khoa la `useChat.retry`.
    *
+   * T-S.15 — MOT nut Thu lai (§24.2b·S4, NQ-118): FE gui model **va** muc dang
+   * chon tren picker (`useChat.retry`). Hai truong van tuy chon o hop dong:
    * `model_id` vang mat ⇒ backend dung lai `messages.model_id` cua chinh cau
-   * tra loi dang thu lai (xem `_pick_model`), tuc nut "Thu lai" tron. Nut
-   * "Doi model & thu lai" la cho duy nhat truyen mot `model_id` khac.
+   * tra loi (`_pick_model`); `reasoning_effort` vang mat ⇒ muc cua cau tra loi
+   * dang thu lai (neu model hieu luc khai muc ay), roi muc da nho, roi mac dinh.
    */
   retry: (
     messageId: string,
-    body: { model_id?: string | null },
+    body: { model_id?: string | null; reasoning_effort?: string | null },
     idempotencyKey: string,
   ) =>
     request<RetryOut>(`/messages/${messageId}/retry`, {

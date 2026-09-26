@@ -10,18 +10,21 @@
  *
  * Ba dong luat duoc do rieng tung dong:
  *
- *   1. sinh o lan bam dau cho mot cap `(message, model)`;
+ *   1. sinh o lan bam dau cho mot bo `(message, model, muc)` (T-S.15);
  *   2. GIU nguyen qua moi lan hong;
  *   3. BO khi va chi khi `202` ve — lan bam sau la mot anh em that (§8.2).
  *
- * KH tham chieu: §11.4, §8.2, C22, S5 · tasks.md B-231, T-3.7, T-3.4.
+ * T-S.15 them mot khoi: MOT nut Thu lai gui model + muc cua picker (§24.2b·S4).
+ *
+ * KH tham chieu: §11.4, §8.2, §24.2b·S4, C22, S5 · tasks.md B-231, T-3.7,
+ * T-3.4, T-S.15.
  */
 
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useChat } from "./useChat";
-import { api, type ConversationDetail, type MessageOut } from "../../lib/api";
+import { useChat, type ChatOptions } from "./useChat";
+import { api, type ConversationDetail, type MessageOut, type ModelOut } from "../../lib/api";
 
 vi.mock("../../lib/api", async (original) => {
   const actual = await original<typeof import("../../lib/api")>();
@@ -46,7 +49,35 @@ vi.mock("../../lib/sse", async (original) => {
 
 const CONVERSATION = "conv-1";
 const ANSWER_ID = "msg-assistant";
-const OTHER_MODEL = "mot-model-khac";
+const PICKED_MODEL = "model-co-muc";
+const PLAIN_MODEL = "model-khong-muc";
+
+function model(id: string, reasoning: ModelOut["reasoning"]): ModelOut {
+  return {
+    id,
+    display_name: id,
+    provider: "Hang",
+    provider_id: "hang",
+    capabilities: [],
+    context_window: 1000,
+    max_output: 100,
+    default: false,
+    badge: null,
+    available: true,
+    unavailable_reason: null,
+    reasoning,
+    pricing: null,
+    pricing_mode: "unmetered",
+    checked_at: null,
+    stale_after_s: 30,
+  };
+}
+
+/** Danh muc gia: mot model co muc (mac dinh `high`), mot model khong co khoi `reasoning`. */
+const MODELS: ModelOut[] = [
+  model(PICKED_MODEL, { default: "high", options: [{ id: "low" }, { id: "high" }] }),
+  model(PLAIN_MODEL, null),
+];
 
 function node(overrides: Partial<MessageOut> = {}): MessageOut {
   return {
@@ -63,6 +94,7 @@ function node(overrides: Partial<MessageOut> = {}): MessageOut {
     sibling_index: 0,
     sibling_count: 1,
     feedback: null,
+    reasoning_effort: null,
     ...overrides,
   };
 }
@@ -133,6 +165,18 @@ async function hookWithOpenConversation() {
   return result;
 }
 
+/**
+ * Nhu tren, nhung picker co that: `options` doi duoc giua chung bang
+ * `rerender` — dung duong `ChatScreen` day model/muc moi xuong sau mot lan chon.
+ */
+async function hookWithPicker(initial: ChatOptions) {
+  const hook = renderHook((options: ChatOptions) => useChat(options), { initialProps: initial });
+  await act(async () => {
+    await hook.result.current.openConversation(CONVERSATION);
+  });
+  return hook;
+}
+
 describe("khoa idempotency cua nut Thu lai (B-231)", () => {
   it("1 — moi lan goi deu MANG mot khoa (route nay bat buoc tu NQ-93)", async () => {
     const result = await hookWithOpenConversation();
@@ -195,24 +239,73 @@ describe("khoa idempotency cua nut Thu lai (B-231)", () => {
     expect(keyOfCall(0)).toBe(keyOfCall(1));
   });
 
-  it("5 — hai model KHAC nhau la hai y dinh, tuc hai khoa", async () => {
-    const result = await hookWithOpenConversation();
-    const held = holdOneCall();
+  it("5 — hong, DOI model tren picker roi bam lai ⇒ khoa MOI (mot y dinh moi)", async () => {
+    const { result, rerender } = await hookWithPicker({ models: MODELS, accountDefaultModel: PICKED_MODEL });
+    retry.mockRejectedValueOnce(new Error("mang rot"));
 
     await act(async () => {
-      void result.current.retry(ANSWER_ID);
-      void result.current.retry(ANSWER_ID, OTHER_MODEL);
-      held.release();
+      await result.current.retry(ANSWER_ID);
+    });
+    rerender({ models: MODELS, accountDefaultModel: PLAIN_MODEL });
+    await act(async () => {
+      await result.current.retry(ANSWER_ID);
     });
 
-    // Cung mot khoa se lam lan goi thu hai nhan BAN PHAT LAI cua lan dau, tuc
-    // "Doi model & thu lai" khong doi duoc model nao ca.
+    // Cung mot khoa se lam lan goi thu hai nhan BAN PHAT LAI cua lan dau (§11.4),
+    // tuc doi model tren picker roi bam Thu lai khong doi duoc model nao ca.
+    expect(retry.mock.calls[1][1]).toEqual({ model_id: PLAIN_MODEL });
+    expect(keyOfCall(0)).not.toBe(keyOfCall(1));
+  });
+
+  it("6 — hong, DOI MUC tren picker roi bam lai ⇒ khoa MOI", async () => {
+    const { result, rerender } = await hookWithPicker({
+      models: MODELS,
+      accountDefaultModel: PICKED_MODEL,
+      reasoningPrefs: { [PICKED_MODEL]: "low" },
+    });
+    retry.mockRejectedValueOnce(new Error("mang rot"));
+
+    await act(async () => {
+      await result.current.retry(ANSWER_ID);
+    });
+    rerender({ models: MODELS, accountDefaultModel: PICKED_MODEL, reasoningPrefs: { [PICKED_MODEL]: "high" } });
+    await act(async () => {
+      await result.current.retry(ANSWER_ID);
+    });
+
+    expect(retry.mock.calls[1][1]).toEqual({ model_id: PICKED_MODEL, reasoning_effort: "high" });
     expect(keyOfCall(0)).not.toBe(keyOfCall(1));
   });
 });
 
-describe("hai nut Thu lai gui hai body khac nhau (T-3.7)", () => {
-  it("nut tron KHONG gui `model_id` — backend dung lai model cu", async () => {
+describe("MOT nut Thu lai gui model + muc cua picker (T-S.15, §24.2b·S4)", () => {
+  it("model co muc ⇒ body mang `model_id` VA `reasoning_effort` dang hien tren picker", async () => {
+    const { result } = await hookWithPicker({
+      models: MODELS,
+      accountDefaultModel: PICKED_MODEL,
+      reasoningPrefs: { [PICKED_MODEL]: "low" },
+    });
+
+    await act(async () => {
+      await result.current.retry(ANSWER_ID);
+    });
+
+    // Muc DA NHO (`low`), khong phai mac dinh catalog (`high`): cung muc `send` gui.
+    expect(result.current.effectiveEffort).toBe("low");
+    expect(retry.mock.calls[0][1]).toEqual({ model_id: PICKED_MODEL, reasoning_effort: "low" });
+  });
+
+  it("model KHONG co khoi `reasoning` ⇒ khong co truong `reasoning_effort` (mot `id` bat ky la `400`)", async () => {
+    const { result } = await hookWithPicker({ models: MODELS, accountDefaultModel: PLAIN_MODEL });
+
+    await act(async () => {
+      await result.current.retry(ANSWER_ID);
+    });
+
+    expect(retry.mock.calls[0][1]).toEqual({ model_id: PLAIN_MODEL });
+  });
+
+  it("chua biet model nao (`GET /models` chua ve) ⇒ body rong, backend giu model cu", async () => {
     const result = await hookWithOpenConversation();
 
     await act(async () => {
@@ -220,16 +313,6 @@ describe("hai nut Thu lai gui hai body khac nhau (T-3.7)", () => {
     });
 
     expect(retry.mock.calls[0][1]).toEqual({});
-  });
-
-  it("nut 'Doi model' gui dung id duoc truyen vao", async () => {
-    const result = await hookWithOpenConversation();
-
-    await act(async () => {
-      await result.current.retry(ANSWER_ID, OTHER_MODEL);
-    });
-
-    expect(retry.mock.calls[0][1]).toEqual({ model_id: OTHER_MODEL });
   });
 });
 

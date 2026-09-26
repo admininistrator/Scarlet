@@ -1,3 +1,5 @@
+import { ChevronLeft, ChevronRight } from "lucide";
+
 import type { MessageOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { displayIndex, canGoBack, canGoForward } from "../../lib/tree";
@@ -56,7 +58,7 @@ export function BranchNav({
     <div role="group" aria-label={label} className="flex items-center">
       <IconButton
         label={t("chat.branchPrev")}
-        glyph="‹"
+        icon={ChevronLeft}
         disabled={!canGoBack(node)}
         onClick={() => onSwitchBranch(-1)}
       />
@@ -69,7 +71,7 @@ export function BranchNav({
       </span>
       <IconButton
         label={t("chat.branchNext")}
-        glyph="›"
+        icon={ChevronRight}
         disabled={!canGoForward(node)}
         onClick={() => onSwitchBranch(1)}
       />
@@ -77,7 +79,11 @@ export function BranchNav({
   );
 }
 
-/** Vach ngan hai nhom cua ban T-HD3: dieu huong nhanh | hanh dong. */
+/**
+ * Vach ngan hai nhom cua ban T-HD3: dieu huong nhanh | hanh dong. Ban T-HD3-v2
+ * (3a, 3f): cach hai ben 6 px — so do nay nam trong phep cong 128 + 13 + 3 × 44
+ * + 4 × 4 = 289 ≤ 311 cua hang nut o 375 px.
+ */
 export function Divider() {
-  return <span aria-hidden="true" className="mx-1 h-6 w-px bg-border" />;
+  return <span aria-hidden="true" className="mx-1.5 h-6 w-px shrink-0 bg-border" />;
 }
