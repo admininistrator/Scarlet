@@ -31,8 +31,19 @@ import { createContext } from "react";
  */
 export const MenuDismissContext = createContext<(() => void) | null>(null);
 
-export const MENU_ITEM_CLASS =
-  "motion-control flex min-h-touch items-center gap-3 rounded-md px-2.5 text-base text-foreground outline-none data-highlighted:bg-surface-hover";
+const MENU_ITEM_BASE =
+  "motion-control flex min-h-touch items-center gap-3 rounded-md px-2.5 text-base outline-none data-highlighted:bg-surface-hover";
+
+export const MENU_ITEM_CLASS = `${MENU_ITEM_BASE} text-foreground`;
+
+/**
+ * T-S.13 — muc NGUY HIEM ("Xoa" cua menu hang hoi thoai, ban T-HD2-v2 H6):
+ * chu va icon (`currentColor`) mau `danger-text`. Mot hang rieng chu khong
+ * noi them `text-danger-text` vao `MENU_ITEM_CLASS`: hai tien ich mau tren
+ * cung phan tu thi cai thang la cai dung SAU trong CSS da bien dich, khong
+ * phai cai viet sau trong `className`.
+ */
+export const MENU_ITEM_DANGER_CLASS = `${MENU_ITEM_BASE} text-danger-text`;
 
 /**
  * Them cho muc CHO: mo `--disabled-opacity`, va khi toi bang ban phim thi hien

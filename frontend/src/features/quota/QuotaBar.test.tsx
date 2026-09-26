@@ -315,6 +315,7 @@ function profile(quota: QuotaWindow[]): ProfileOut {
     quota_warn_remaining_pct: THRESHOLD,
     last_login_at: null,
     limits_cache_ttl_s: 60,
+    stream_ttl_s: 3600,
     display_name_max_chars: 64,
     avatar_color: null,
     reasoning_prefs: {},

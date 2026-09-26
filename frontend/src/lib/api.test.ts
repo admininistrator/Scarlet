@@ -53,31 +53,45 @@ afterEach(() => {
 });
 
 describe("danhSachHoiThoai", () => {
-  it("khong co con tro ⇒ khong co query string nao", async () => {
-    fakeFetch.mockResolvedValue(respond(200, { items: [], next_cursor: null }));
+  const empty = { items: [], next_cursor: null, truncated: false };
 
-    await api.listConversations();
+  it("T-S.13: hai nguon — `?pinned=true` (du, khong trang) va `?pinned=false` (trang dau)", async () => {
+    fakeFetch.mockResolvedValue(respond(200, empty));
 
-    expect(urlOfCall(0)).toBe("/api/v1/conversations");
+    await api.listConversations({ pinned: true });
+    await api.listConversations({ pinned: false });
+
+    expect(urlOfCall(0)).toBe("/api/v1/conversations?pinned=true");
+    expect(urlOfCall(1)).toBe("/api/v1/conversations?pinned=false");
   });
 
   it("co con tro ⇒ `?updated_before=`, va dau `+` cua mui gio duoc ma hoa", async () => {
-    fakeFetch.mockResolvedValue(respond(200, { items: [], next_cursor: null }));
+    fakeFetch.mockResolvedValue(respond(200, empty));
 
-    await api.listConversations("2026-09-02T03:04:05.678901+00:00");
+    await api.listConversations({
+      pinned: false,
+      updatedBefore: "2026-09-02T03:04:05.678901+00:00",
+    });
 
     // `+` ⇒ `%2B`. Khong ma hoa thi server doc ra mot dau cach va tra 422.
     expect(urlOfCall(0)).toBe(
-      "/api/v1/conversations?updated_before=2026-09-02T03%3A04%3A05.678901%2B00%3A00",
+      "/api/v1/conversations?pinned=false&updated_before=2026-09-02T03%3A04%3A05.678901%2B00%3A00",
     );
   });
 
   it("`null` duoc doi xu nhu vang mat (khong gui `updated_before=null`)", async () => {
-    fakeFetch.mockResolvedValue(respond(200, { items: [], next_cursor: null }));
+    fakeFetch.mockResolvedValue(respond(200, empty));
 
-    await api.listConversations(null);
+    await api.listConversations({ pinned: false, updatedBefore: null });
 
-    expect(urlOfCall(0)).toBe("/api/v1/conversations");
+    expect(urlOfCall(0)).toBe("/api/v1/conversations?pinned=false");
+  });
+});
+
+describe("titleStreamUrl", () => {
+  it("T-S.13: duong SSE cua tieu de nam duoi `/api/v1` — khop location SSE cua nginx", () => {
+    expect(api.titleStreamUrl("abc")).toBe("/api/v1/conversations/abc/title/stream");
+    expect(fakeFetch).not.toHaveBeenCalled();
   });
 });
 

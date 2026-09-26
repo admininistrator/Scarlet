@@ -79,7 +79,7 @@ _ENGLISH = frozenset(
     get set put let run pop map min sum top tip pay sin
     can cap gap cat rep day dot bit hit hot cut net
     chat chip pin long lua via but trip that
-    sun
+    sun pen
     """.split()
 )
 

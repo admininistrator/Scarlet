@@ -81,6 +81,7 @@ const PROFILE: ProfileOut = {
   quota_warn_remaining_pct: 20,
   last_login_at: null,
   limits_cache_ttl_s: 60,
+  stream_ttl_s: 3600,
   display_name_max_chars: 64,
   avatar_color: null,
   reasoning_prefs: {},
@@ -151,7 +152,7 @@ beforeEach(() => {
   stream.status = null;
   stream.emit = null;
   vi.mocked(api.listModels).mockResolvedValue([]);
-  vi.mocked(api.listConversations).mockResolvedValue({ items: [], next_cursor: null });
+  vi.mocked(api.listConversations).mockResolvedValue({ items: [], next_cursor: null, truncated: false });
   vi.mocked(api.listProviderKeys).mockResolvedValue({ keys: [], byok_providers: [] });
   vi.mocked(api.getConversation).mockReset().mockResolvedValue(CONVERSATION);
   vi.mocked(api.createConversation).mockReset();

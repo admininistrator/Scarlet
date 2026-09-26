@@ -17,7 +17,7 @@
  *      chuot) — tieu diem van phai ve nut, khong roi ve `<body>`.
  */
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -102,7 +102,7 @@ function scrollIsBlocked(target: Element): boolean {
 beforeEach(() => {
   localStorage.clear();
   resetSidebarOpenForTest();
-  vi.mocked(api.listConversations).mockResolvedValue({ items: [CONVERSATION], next_cursor: null });
+  vi.mocked(api.listConversations).mockResolvedValue({ items: [CONVERSATION], next_cursor: null, truncated: false });
 });
 
 describe("Drawer duoi 1024 px", () => {
@@ -201,6 +201,31 @@ describe("Drawer duoi 1024 px", () => {
     });
     fireEvent.pointerDown(scrim as Element, { button: 0 });
     fireEvent.click(scrim as Element, { button: 0 });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  /**
+   * T-S.13 (B-307) — vo drawer v2, ban T-HD2-v2 F/F′: KHONG thanh tieu de 56 px;
+   * chi mot nut X 44 × 44 trong vung dem, goc tren-phai. Drawer van co ten cho
+   * trinh doc man hinh (`Dialog.Title` sr-only).
+   */
+  it("vo v2: khong thanh tieu de nhin thay, nut X trong drawer dong no va tra tieu diem ve nut mo", async () => {
+    stubViewport(true);
+    const user = userEvent.setup();
+    const { toggle } = renderShell();
+
+    await user.click(toggle);
+    const dialog = await screen.findByRole("dialog", { name: t("sidebar.title") });
+    expect(within(dialog).getByText(t("sidebar.title"))).toHaveClass("sr-only");
+
+    const close = within(dialog).getByRole("button", { name: t("header.closeSidebar") });
+    // Nut X nam TRONG `<nav>` (vung dem p-3), dung truoc "Hoi thoai moi".
+    const nav = within(dialog).getByRole("navigation", { name: t("sidebar.title") });
+    expect(nav.firstElementChild).toBe(close);
+    expect(close).toHaveClass("self-end", "size-touch");
+
+    await user.click(close);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(document.activeElement).toBe(toggle);
   });

@@ -124,7 +124,7 @@ function applyNormalToken(): void {
 beforeEach(() => {
   localStorage.clear();
   resetSidebarOpenForTest();
-  vi.mocked(api.listConversations).mockResolvedValue({ items: [], next_cursor: null });
+  vi.mocked(api.listConversations).mockResolvedValue({ items: [], next_cursor: null, truncated: false });
 });
 
 afterEach(() => {

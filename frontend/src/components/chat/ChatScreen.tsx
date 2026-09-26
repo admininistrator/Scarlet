@@ -178,6 +178,8 @@ export function ChatScreen() {
       <Sidebar
         openConversationId={tree.conversationId}
         createdConversationId={chat.createdConversationId}
+        // T-S.13: cua so nghe tieu de chay (`STREAM_TTL_S`, NQ-129).
+        streamTtlS={session.profile?.stream_ttl_s ?? null}
         onSelect={(id) => void chat.openConversation(id)}
         onNewChat={chat.newConversation}
         onOpenConversationDeleted={chat.closeConversation}

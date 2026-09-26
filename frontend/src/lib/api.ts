@@ -193,7 +193,18 @@ export interface ConversationDetail extends ConversationOut {
 export interface ConversationList {
   items: ConversationOut[];
   next_cursor: string | null;
+  /**
+   * T-S.8 — chi co nghia o `?pinned=true`: so hoi thoai ghim vuot
+   * `CONVERSATION_PINNED_MAX`, danh sach da bi cat (moi nhat truoc). Trang
+   * phan trang luon `false` — phan con lai cua no noi bang `next_cursor`.
+   */
+  truncated: boolean;
 }
+
+/** Hai nguon cua sidebar (T-S.13) — xem `api.listConversations`. */
+export type ConversationListQuery =
+  | { pinned: true }
+  | { pinned: false; updatedBefore?: string | null };
 
 /**
  * `QuotaWarning` cua backend — UC-07 dong 1, trong body `202` (T-2.11).
@@ -415,6 +426,12 @@ export interface ProfileOut extends UserOut {
    * trong vong N giay (§10.4). Tab Muc su dung doc N o day (A3).
    */
   limits_cache_ttl_s: number;
+  /**
+   * T-S.13 — `STREAM_TTL_S` (NQ-129): stream tieu de song bay lau sau
+   * `start`. Sidebar chi nghe tieu de chay cua hang `title: null` co
+   * `updated_at` con trong cua so nay; het cua so = het han (B-287).
+   */
+  stream_ttl_s: number;
   /** T-S.5 — tran do dai `display_name`, tinh bang ky tu (A3). */
   display_name_max_chars: number;
   /** T-S.5 — `null` hoac ten la ⇒ FE dung mau mac dinh (`avatarColor.ts`). */
@@ -672,6 +689,12 @@ export const api = {
    * §18.2 — mot TRANG cua sidebar. `updatedBefore` la `next_cursor` cua trang
    * truoc; bo trong de lay trang dau.
    *
+   * T-S.13 (§24.2b·S8, NQ-112): sidebar co HAI nguon, nen `pinned` bat buoc —
+   * `true` = MOI hoi thoai ghim trong mot lan (khong trang, co tran
+   * `CONVERSATION_PINNED_MAX` ⇒ `truncated`); `false` = phan con lai, phan
+   * trang nhu cu. Danh sach khong loc khong con ai can. `pinned: true` kem
+   * con tro la `400` o server, nen kieu `ConversationListQuery` khong cho viet.
+   *
    * Con tro di qua `URLSearchParams` chu khong noi chuoi: `next_cursor` la mot
    * `datetime` pydantic tuan tu hoa (`2026-09-22T01:02:03.456789+00:00`), va
    * dau `+` cua mui gio la mot KY TU CO NGHIA trong query string — noi thang
@@ -681,12 +704,23 @@ export const api = {
    * (`CONVERSATION_PAGE_SIZE`, A3). FE gui mot con so o day la chep mot han
    * muc sang phia khong so huu no.
    */
-  listConversations: (updatedBefore?: string | null) =>
-    request<ConversationList>(
-      updatedBefore === undefined || updatedBefore === null
-        ? "/conversations"
-        : `/conversations?${new URLSearchParams({ updated_before: updatedBefore }).toString()}`,
-    ),
+  listConversations: (query: ConversationListQuery) => {
+    const params = new URLSearchParams({ pinned: String(query.pinned) });
+    if (!query.pinned && query.updatedBefore !== undefined && query.updatedBefore !== null) {
+      params.set("updated_before", query.updatedBefore);
+    }
+    return request<ConversationList>(`/conversations?${params.toString()}`);
+  },
+
+  /**
+   * T-S.13 — URL cho `openStream` cua tieu de chay (§24.2b·S6, T-S.7, B-289).
+   * Stream cau tra loi den tu `stream_url` cua `202`; stream tieu de khong co
+   * response nao tra duong dan, nen no dung o day — file duy nhat biet
+   * `/api/v1/...` (dau file). Mo SAU `202` cua `POST …/messages`: truoc do job
+   * chua vao hang doi va server tra `error JOB_LOST` ngay.
+   */
+  titleStreamUrl: (conversationId: string) =>
+    `${BASE_URL}/conversations/${conversationId}/title/stream`,
 
   /**
    * §18.2 — tao hoi thoai RONG (`201`). Tu T-S.10 chi goi o cau DAU cua man

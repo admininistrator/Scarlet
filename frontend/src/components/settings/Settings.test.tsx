@@ -77,6 +77,7 @@ const PROFILE: ProfileOut = {
   message_max_chars: 24000,
   quota_warn_remaining_pct: 20,
   limits_cache_ttl_s: 45,
+  stream_ttl_s: 3600,
   display_name_max_chars: 64,
   avatar_color: null,
   reasoning_prefs: { "deepseek-flash": "high" },

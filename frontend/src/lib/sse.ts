@@ -90,6 +90,20 @@ export type StreamEvent =
 export type EventType = StreamEvent["event"];
 
 /**
+ * T-S.13 — bon event cua stream TIEU DE (`GET /conversations/{id}/title/stream`,
+ * §24.2b·S6, T-S.7, B-289). `start`/`delta`/`error` dung la ba loai cua §7.4;
+ * `done` mang tieu de DANG NAM TRONG DB — co the la ten nguoi dung tu dat giua
+ * chung — chu khong mang `finish_reason`/`usage`. Nguoi nghe THAY chu da chay
+ * bang dung chuoi nay. `error` gom ca `JOB_LOST` (tieu de `NULL`, khong stream,
+ * khong job).
+ */
+export type TitleStreamEvent =
+  | { event: "start"; data: { message_id: string; model_id: string } }
+  | { event: "delta"; data: { t: string } }
+  | { event: "done"; data: { title: string } }
+  | { event: "error"; data: { code: string; message: string } };
+
+/**
  * Tam loai dang ky bang vong lap. `error` KHONG o day — no co mot handler
  * rieng vi ten do dung chung voi su kien dut duong truyen (diem 1).
  */
@@ -130,10 +144,15 @@ const MAX_ATTEMPTS = 8;
  */
 export type ConnectionStatus = "dang-mo" | "dang-chay" | "dang-noi-lai" | "dong";
 
-export interface StreamParams {
+/**
+ * `E` = hinh dang event cua stream dang mo: `StreamEvent` (cau tra loi, mac
+ * dinh) hoac `TitleStreamEvent` (T-S.13). Dau doc khong doi: cung ten event,
+ * cung cursor, cung luat `done`/`error` ket thuc — chi kieu cua `data` khac.
+ */
+export interface StreamParams<E extends { event: EventType } = StreamEvent> {
   /** Duong dan tuong doi, lay nguyen tu `stream_url` cua `202`. */
   url: string;
-  onEvent: (event: StreamEvent) => void;
+  onEvent: (event: E) => void;
   onStatus?: (status: ConnectionStatus) => void;
   /** Da thu het `MAX_ATTEMPTS` lan ma khong len — xem diem 2. */
   onFatal?: (reason: string) => void;
@@ -155,7 +174,9 @@ export interface StreamHandle {
  * `done` hoac `error` dong duoc mot luot sinh; moi thu khac chi doi trang thai
  * duong day.
  */
-export function openStream(params: StreamParams): StreamHandle {
+export function openStream<E extends { event: EventType } = StreamEvent>(
+  params: StreamParams<E>,
+): StreamHandle {
   const warn = params.onWarning ?? ((reason: string) => console.error("[sse]", reason));
 
   let es: EventSource | null = null;
@@ -202,7 +223,9 @@ export function openStream(params: StreamParams): StreamHandle {
       return;
     }
 
-    params.onEvent({ event: kind, data } as StreamEvent);
+    // `data` la JSON chua kiem hinh dang — tin server nhu truoc T-S.13; `E` chi
+    // chon bang loai nao nguoi goi doc (cau tra loi hay tieu de).
+    params.onEvent({ event: kind, data } as unknown as E);
 
     if (kind === "done" || kind === "error") {
       finished = true;
