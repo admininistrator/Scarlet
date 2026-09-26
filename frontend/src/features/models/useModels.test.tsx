@@ -30,6 +30,9 @@ function model(checkedAt: string | null, id = "m1"): ModelOut {
     badge: null,
     available: true,
     unavailable_reason: null,
+    reasoning: null,
+    pricing: null,
+    pricing_mode: "unmetered",
     checked_at: checkedAt,
     stale_after_s: TTL_S,
   };

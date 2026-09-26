@@ -276,6 +276,43 @@ export interface CancelOut {
   cancel_requested: boolean;
 }
 
+/**
+ * `reasoning` cua `GET /models` (T-S.3, §24.2b·S3b) — CHI `id` + `default`.
+ *
+ * `params` (tham so gui provider) khong bao gio roi backend; FE chi can biet
+ * co nhung muc nao, theo dung thu tu catalog, va muc nao la mac dinh.
+ */
+export interface ModelReasoning {
+  default: string;
+  options: { id: string }[];
+}
+
+/** Hai khung gia cua `pricing_schedules` (DeepSeek cao/thap diem). */
+export type PriceWindow = "peak" | "off_peak";
+
+export interface PriceRates {
+  /** `null` = model mot gia, khong ban theo khung gio. */
+  window: PriceWindow | null;
+  /** USD / 1M token — CHUOI dung chu so cua catalog (T-S.3 Cam bay ③). */
+  input_per_1m: string;
+  output_per_1m: string;
+}
+
+/**
+ * `pricing` cua `GET /models` (§24.2b·S3c, NQ-120). Khung dang ap dung do
+ * BACKEND chon theo mui gio cua catalog — FE khong so gio (T-S.14 Cam bay ①).
+ */
+export interface ModelPricing {
+  current: PriceRates;
+  /** Khung con lai neu model co `pricing_schedules`, khong thi `null`. */
+  other: PriceRates | null;
+  /** `true` = gia nguoi van hanh tu dien (`manual_pricing`), khong niem yet. */
+  estimated: boolean;
+}
+
+/** §9.5 — provider bao chi phi dang tin toi dau. */
+export type PricingMode = "metered" | "unmetered" | "flat";
+
 export interface ModelOut {
   id: string;
   display_name: string;
@@ -309,6 +346,11 @@ export interface ModelOut {
    * cau 150+ ky tu), nen cho hien no phai tu xuong dong.
    */
   unavailable_reason: string | null;
+  /** T-S.3 — `null` = model khong co tuy chon suy luan (hang Thinking Effort mo). */
+  reasoning: ModelReasoning | null;
+  /** T-S.3 — `null` = model khong tinh phi theo token (Ollama, duong trung gian). */
+  pricing: ModelPricing | null;
+  pricing_mode: PricingMode;
   /**
    * T-S.4 — luc backend DO luot trang thai sinh ra `available` (ISO 8601),
    * giong nhau o moi phan tu. `null` = `api` vua khoi dong, luot do dau chua
@@ -790,10 +832,19 @@ export const api = {
    * DUNG mot khoa, nen khoa thuoc ve thao tac cua nguoi dung chu khong thuoc
    * ve loi goi HTTP. Sinh o day nghia la moi lan thu lai la mot khoa moi, va
    * middleware cua T-2.8 se vo dung truoc ca khi no ra doi (C22).
+   *
+   * T-S.14 — `reasoning_effort` (§24.2b·S4): muc dang hien tren picker cho
+   * model nay. Vang mat ⇒ backend lay muc da nho roi `reasoning.default`; mot
+   * muc model khong co ⇒ `400 REASONING_UNSUPPORTED` o bien vao.
    */
   sendMessage: (
     conversationId: string,
-    body: { content: string; parent_id?: string | null; model_id?: string | null },
+    body: {
+      content: string;
+      parent_id?: string | null;
+      model_id?: string | null;
+      reasoning_effort?: string | null;
+    },
     idempotencyKey: string,
   ) =>
     request<CreateMessageOut>(`/conversations/${conversationId}/messages`, {

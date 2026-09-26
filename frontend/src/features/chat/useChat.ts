@@ -96,6 +96,7 @@ import {
 } from "../../lib/api";
 import { newKey } from "../../lib/idempotency";
 import { pickDefault, type DefaultPick } from "../models/defaults";
+import { effectiveEffort } from "../models/reasoning";
 import { openStream, type StreamHandle, type ConnectionStatus, type UsageOut } from "../../lib/sse";
 import {
   startGeneration,
@@ -218,6 +219,13 @@ export interface ChatState {
    * gui di — no la model dang chon tren picker.
    */
   effectiveModel: string | null;
+  /**
+   * T-S.14 — muc suy luan cua `effectiveModel` cho lan GUI ke tiep
+   * (`features/models/reasoning.ts`), hoac `null` khi model ay khong co khoi
+   * `reasoning`. Cung gia tri picker in o hang Thinking Effort — mot phep tinh,
+   * hai nguoi doc, cung ly do `defaultPick` o tren.
+   */
+  effectiveEffort: string | null;
   /** `null` = khong co stream nao dang mo trong tab nay. */
   connection: ConnectionStatus | null;
   /** Id message assistant dang chay, hoac `null`. */
@@ -284,6 +292,11 @@ export interface ChatOptions {
   /** TANG 2: `users.default_model` tu `GET /auth/me`. */
   accountDefaultModel: string | null;
   /**
+   * T-S.14 — `reasoning_prefs` cua `GET /auth/me` (`{model_id: level}`).
+   * Vang mat = chua nho muc nao, moi model chay o `reasoning.default`.
+   */
+  reasoningPrefs?: Readonly<Record<string, string>>;
+  /**
    * T-3.11 — `quota_warning` cua mot `202` (gui, thu lai, sua). Nguon THU HAI
    * cua con so thanh quota dang hien; nguoi nghe quyet dinh ghep the nao.
    */
@@ -303,9 +316,11 @@ export interface ChatOptions {
  * tuc moi `useCallback` phu thuoc vao no deu dung lai o moi khung hinh.
  */
 const NO_OPTIONS: ChatOptions = { models: [], accountDefaultModel: null };
+/** Cung ly do `NO_OPTIONS`: mot `{}` literal la mot object moi moi lan render. */
+const NO_PREFS: Readonly<Record<string, string>> = {};
 
 export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
-  const { models, accountDefaultModel } = options;
+  const { models, accountDefaultModel, reasoningPrefs = NO_PREFS } = options;
   /*
     Hai callback quota di qua `ref`: `ChatScreen` truyen chung la closure moi
     moi lan render, va dua chung vao phu thuoc cua `openStreamFor`/`gui` se dung
@@ -370,6 +385,14 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     account: accountDefaultModel,
   });
   const effectiveModel = defaultPick.modelId;
+  /*
+    T-S.14 — chuoi (hoac `null`), khong phai object: `send` phu thuoc vao no
+    ma khong dung lai o moi khung hinh chi vi `reasoning_prefs` la object moi.
+  */
+  const effort = effectiveEffort(
+    models.find((m) => m.id === effectiveModel),
+    reasoningPrefs,
+  );
 
   //: Luat 4 — ban doc duoc ngay cua cung mot cay.
   const treeRef = useRef<TreeState>(emptyTree());
@@ -767,6 +790,9 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
             // cay rong, tuc `null` — cau dau la goc.
             parent_id: treeRef.current.activeLeafId,
             model_id: effectiveModel,
+            // T-S.14 — dung muc dang hien tren picker (§24.2b·S4: body thang).
+            // Model khong co muc ⇒ vang mat: mot `id` bat ky se la `400`.
+            ...(effort === null ? {} : { reasoning_effort: effort }),
           },
           keys.message,
         );
@@ -802,7 +828,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
         setBusy(false);
       }
     },
-    [reportQuotaWarning, reportQuotaError, reload, effectiveModel, openStreamFor, updateTree],
+    [reportQuotaWarning, reportQuotaError, reload, effectiveModel, effort, openStreamFor, updateTree],
   );
 
   /**
@@ -962,6 +988,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     conversationModel,
     defaultPick,
     effectiveModel,
+    effectiveEffort: effort,
     connection,
     running,
     busy,

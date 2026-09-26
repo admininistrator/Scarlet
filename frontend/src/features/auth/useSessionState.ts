@@ -91,6 +91,15 @@ export interface SessionState {
    */
   saveSettings: (patch: Partial<SettingsOut>) => Promise<void>;
   /**
+   * T-S.14 — nho muc suy luan `level` cho RIENG `modelId` (§24.2b·S4: nho
+   * theo user × model). Di qua `saveSettings`, nen body van du bon truong.
+   *
+   * Ghep len `reasoning_prefs` cua ban ho so MOI NHAT (`profileRef`), khong
+   * cua ban luc render: hai lan chon lien tiep cho hai model khac nhau ma doc
+   * ban cu thi lan sau xoa mat lan truoc.
+   */
+  changeReasoningPref: (modelId: string, level: string) => Promise<void>;
+  /**
    * T-3.11 — hoi lai `GET /auth/me` de lam tuoi thanh quota.
    *
    * Goi SAU moi luot sinh (`done`/`error`) va sau mot `429 QUOTA_EXCEEDED`,
@@ -208,41 +217,61 @@ export function useSessionState(): SessionState {
     }
   }, []);
 
-  const saveSettings = useCallback(async (patch: Partial<SettingsOut>): Promise<void> => {
-    let base = profileRef.current;
-    if (base === null) {
-      base = await api.me();
-      setProfileReadAt(Date.now());
-    }
-    const output = await api.updateSettings({
-      default_model: base.default_model,
-      display_name: base.display_name,
-      avatar_color: base.avatar_color,
-      reasoning_prefs: base.reasoning_prefs,
-      ...patch,
-    });
-    /*
-      Doc lai tu RESPONSE chu khong tu `patch` vua gui: server la noi quyet
-      dinh (vd. `display_name` da cat khoang trang, chuoi rong thanh `null` —
-      T-S.5 Cam bay ②), va no tra `SettingsOut` dung de ben goi khong phai suy ra.
+  /*
+    `build` nhan ban ho so se lam NEN cho body — de phan doi nao can doc nen
+    (T-S.14: ghep mot muc vao `reasoning_prefs`) doc dung ban ay, ke ca khi
+    no vua duoc hoi lai vi `hoSo` con `null`.
+  */
+  const saveWith = useCallback(
+    async (build: (base: ProfileOut) => Partial<SettingsOut>): Promise<void> => {
+      let base = profileRef.current;
+      if (base === null) {
+        base = await api.me();
+        setProfileReadAt(Date.now());
+      }
+      const output = await api.updateSettings({
+        default_model: base.default_model,
+        display_name: base.display_name,
+        avatar_color: base.avatar_color,
+        reasoning_prefs: base.reasoning_prefs,
+        ...build(base),
+      });
+      /*
+        Doc lai tu RESPONSE chu khong tu `patch` vua gui: server la noi quyet
+        dinh (vd. `display_name` da cat khoang trang, chuoi rong thanh `null` —
+        T-S.5 Cam bay ②), va no tra `SettingsOut` dung de ben goi khong phai
+        suy ra.
 
-      `default_model` va `display_name` la cot cua hang `users`, nen `user`
-      (`UserOut` cua login/refresh/me) cung mang — cap nhat mot cho roi de cho
-      kia lech la dung cai bay B-213 noi toi.
-    */
-    const next: ProfileOut = { ...base, ...output };
-    profileRef.current = next;
-    setProfile(next);
-    setUser((prev) =>
-      prev === null
-        ? prev
-        : { ...prev, default_model: output.default_model, display_name: output.display_name },
-    );
-  }, []);
+        `default_model` va `display_name` la cot cua hang `users`, nen `user`
+        (`UserOut` cua login/refresh/me) cung mang — cap nhat mot cho roi de
+        cho kia lech la dung cai bay B-213 noi toi.
+      */
+      const next: ProfileOut = { ...base, ...output };
+      profileRef.current = next;
+      setProfile(next);
+      setUser((prev) =>
+        prev === null
+          ? prev
+          : { ...prev, default_model: output.default_model, display_name: output.display_name },
+      );
+    },
+    [],
+  );
+
+  const saveSettings = useCallback(
+    (patch: Partial<SettingsOut>): Promise<void> => saveWith(() => patch),
+    [saveWith],
+  );
 
   const changeDefaultModel = useCallback(
     (modelId: string | null): Promise<void> => saveSettings({ default_model: modelId }),
     [saveSettings],
+  );
+
+  const changeReasoningPref = useCallback(
+    (modelId: string, level: string): Promise<void> =>
+      saveWith((base) => ({ reasoning_prefs: { ...base.reasoning_prefs, [modelId]: level } })),
+    [saveWith],
   );
 
   const refreshProfile = useCallback(async (): Promise<void> => {
@@ -266,6 +295,7 @@ export function useSessionState(): SessionState {
     logout,
     changeDefaultModel,
     saveSettings,
+    changeReasoningPref,
     refreshProfile,
   };
 }

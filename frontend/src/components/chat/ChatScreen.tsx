@@ -96,6 +96,8 @@ export function ChatScreen() {
   const chat = useChat({
     models: modelCatalog.models,
     accountDefaultModel: session.profile?.default_model ?? null,
+    // T-S.14 — muc da nho theo model (§24.2b·S4); `useChat` tinh muc hieu luc.
+    reasoningPrefs: session.profile?.reasoning_prefs,
     onQuotaWarning: quota.noteWarning,
     onQuotaStale: () => void session.refreshProfile(),
   });
@@ -134,18 +136,39 @@ export function ChatScreen() {
   };
 
   /*
-    B-242 — picker song trong thanh cong cu duoi o nhap (ban T-HD4: "trigger
-    o composer"; popover `side="top"` mo LEN tu day, duoi 640 px la sheet).
+    T-S.14 — chon muc Thinking Effort: nho cho RIENG model dang dung, bang
+    `PUT /settings` (du body — `useSessionState.changeReasoningPref`). Khong
+    co tang hoi thoai nao cho muc (S4: body › da nho › catalog); lan gui ke
+    tiep mang muc nay vi `useChat` doc lai `reasoning_prefs` vua ghi.
+  */
+  const selectEffort = async (level: string): Promise<void> => {
+    const modelId = chat.effectiveModel;
+    if (modelId === null) {
+      return;
+    }
+    try {
+      await session.changeReasoningPref(modelId, level);
+    } catch (e: unknown) {
+      chat.showError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /*
+    B-242 — picker song trong thanh cong cu duoi o nhap (ban T-HD4-v2 A: ten
+    model chu tron, duoi-phai; popover `side="top"` mo LEN tu day, duoi 640 px
+    la sheet).
   */
   const modelPicker = (
     <ModelPicker
       models={modelCatalog.models}
       defaultPick={chat.defaultPick}
+      effort={chat.effectiveEffort}
       checkedAtLabel={formatTime(modelCatalog.checkedAt)}
       loading={modelCatalog.loading}
       refreshing={modelCatalog.refreshing}
       onRefresh={() => void modelCatalog.refresh()}
       onPick={(id) => void selectModel(id)}
+      onPickEffort={(level) => void selectEffort(level)}
       onOpen={modelCatalog.refreshIfStale}
     />
   );
