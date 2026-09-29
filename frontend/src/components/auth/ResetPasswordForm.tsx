@@ -1,10 +1,14 @@
+import { CircleCheck, Link2Off } from "lucide";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 
 import { PATHS } from "../../app/paths";
 import { ApiError, ERROR_CODES, api } from "../../lib/api";
 import { t } from "../../lib/i18n";
-import { authErrorText } from "./authErrors";
+import { AuthField, AuthTitle, FormAlert, SubmitButton } from "./AuthForm";
+import { AuthActions, AuthLayout } from "./AuthLayout";
+import { AuthMessage, MessageText, PrimaryLink } from "./AuthMessage";
+import { placeAuthError, type PlacedAuthError } from "./authErrors";
 
 /**
  * Man `/dat-lai-mat-khau?token=` — §11.5, NQ-44. T-3.1b.
@@ -29,62 +33,70 @@ import { authErrorText } from "./authErrors";
  * mot lien ket moi. Nen no duoc ve thanh mot man hinh co LOI THOAT, khong
  * phai mot dong do duoi o mat khau — go lai mat khau khong sua duoc mot lien
  * ket het han, va de nguoi dung go them lan nua la de ho tu tim ra dieu do.
+ *
+ * ── T-S.16: o "Nhap lai" (ban T-HD8 4b) ───────────────────────────────────
+ *
+ * *"Kiem ngay tren may khi roi o thu hai. Loi dai/ngan/pho bien van den tu may
+ * chu."* Hai o khac nhau thi KHONG goi API — body gui di van la dung mot mat
+ * khau nhu truoc, nen hop dong voi backend khong doi.
  */
 export function ResetPasswordForm() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
 
   const [password, setPassword] = useState("");
+  const [again, setAgain] = useState("");
+  const [mismatch, setMismatch] = useState(false);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<PlacedAuthError | null>(null);
   const [tokenInvalid, setTokenInvalid] = useState(false);
   const [done, setDone] = useState(false);
 
   if (token === null || tokenInvalid) {
     return (
-      <main className="mx-auto w-full max-w-sm px-6 py-12">
-        <h2 className="text-lg font-semibold">{t("datLai.tieuDe")}</h2>
-        <p role="alert" className="mt-2 text-sm text-danger-text">
-          {token === null ? t("datLai.thieuToken") : t("datLai.tokenHong")}
-        </p>
-        <Link
-          to={PATHS.forgotPassword}
-          className="mt-6 inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
-        >
-          {t("datLai.xinLienKetMoi")}
-        </Link>
-      </main>
+      <AuthLayout>
+        <AuthMessage icon={Link2Off} title={t("auth.datMatKhauMoiTieuDe")}>
+          <FormAlert tone="danger">
+            {token === null ? t("datLai.thieuToken") : t("datLai.tokenHong")}
+          </FormAlert>
+          <PrimaryLink to={PATHS.forgotPassword}>{t("datLai.xinLienKetMoi")}</PrimaryLink>
+        </AuthMessage>
+      </AuthLayout>
     );
   }
 
   if (done) {
     return (
-      <main className="mx-auto w-full max-w-sm px-6 py-12">
-        <h2 className="text-lg font-semibold">{t("datLai.xong.tieuDe")}</h2>
-        <p className="mt-2 text-sm text-muted">{t("datLai.xong.moTa")}</p>
-        <Link
-          to={PATHS.login}
-          className="mt-6 inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
+      <AuthLayout>
+        <AuthMessage
+          icon={CircleCheck}
+          tone="success"
+          title={t("auth.daDoiMatKhau")}
+          body={<MessageText>{t("auth.phienCuDaThuHoi")}</MessageText>}
         >
-          {t("auth.dangNhap")}
-        </Link>
-      </main>
+          <PrimaryLink to={PATHS.login}>{t("auth.dangNhap")}</PrimaryLink>
+        </AuthMessage>
+      </AuthLayout>
     );
   }
 
   async function submit() {
+    if (password !== again) {
+      setMismatch(true);
+      return;
+    }
     setError(null);
     setSending(true);
     try {
       await api.resetPassword(token as string, password);
       setDone(true);
     } catch (e) {
-      // Token hong -> doi ca man hinh; mat khau qua ngan/yeu -> mot dong do
-      // canh o nhap, vi do la thu go lai duoc.
+      // Token hong -> doi ca man hinh; mat khau qua ngan/yeu -> thay dong goi
+      // y duoi o, vi do la thu go lai duoc.
       if (e instanceof ApiError && e.code === ERROR_CODES.TOKEN_INVALID) {
         setTokenInvalid(true);
       } else {
-        setError(authErrorText(e));
+        setError(placeAuthError(e));
       }
     } finally {
       setSending(false);
@@ -92,50 +104,52 @@ export function ResetPasswordForm() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-sm px-6 py-12">
-      <h2 className="mb-6 text-lg font-semibold">{t("datLai.tieuDe")}</h2>
-
+    <AuthLayout>
       <form
-        className="flex flex-col gap-3"
+        aria-busy={sending}
+        className="flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted">{t("datLai.matKhauMoi")}</span>
-          <input
-            type="password"
-            required
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
-          />
-        </label>
-        {/*
-          Goi y nam NGOAI `<label>`, khong trong: moi chu trong the `label`
-          deu chay vao ten truy cap duoc cua o nhap, nen mot dong goi y o
-          trong bien nhan cua o thanh "Mat khau Dung mot mat khau dai, ..." —
-          va moi `getByLabelText("Mật khẩu")` (test, lan trinh doc man hinh)
-          khong con tim thay no.
-        */}
-        <span className="-mt-2 text-xs text-muted">{t("auth.matKhauGoiY")}</span>
+        <AuthTitle title={t("auth.datMatKhauMoiTieuDe")} />
 
-        {error !== null && (
-          <p role="alert" className="text-sm text-danger-text">
-            {error}
-          </p>
-        )}
+        {error !== null && error.slot !== "password" && <FormAlert tone={error.tone}>{error.text}</FormAlert>}
 
-        <button
-          type="submit"
-          disabled={sending}
-          className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-        >
-          {sending ? t("auth.dangXuLy") : t("datLai.dat")}
-        </button>
+        <AuthField
+          id="reset-new"
+          label={t("auth.matKhauMoi")}
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(v) => {
+            setPassword(v);
+            setMismatch(false);
+          }}
+          readOnly={sending}
+          hint={t("auth.matKhauGoiY")}
+          error={error?.slot === "password" ? error.text : null}
+        />
+        <AuthField
+          id="reset-again"
+          label={t("auth.nhapLaiMatKhau")}
+          type="password"
+          autoComplete="new-password"
+          value={again}
+          onChange={(v) => {
+            setAgain(v);
+            setMismatch(false);
+          }}
+          onBlur={() => setMismatch(again !== "" && again !== password)}
+          readOnly={sending}
+          error={mismatch ? t("auth.matKhauKhongKhop") : null}
+        />
+
+        <AuthActions>
+          <SubmitButton busy={sending} label={t("auth.datMatKhau")} />
+        </AuthActions>
       </form>
-    </main>
+    </AuthLayout>
   );
 }

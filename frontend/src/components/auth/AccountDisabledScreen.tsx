@@ -1,13 +1,17 @@
-import { Link } from "react-router";
+import { Lock } from "lucide";
+import { useNavigate } from "react-router";
 
+import { useSession } from "../../app/Layout";
 import { PATHS } from "../../app/paths";
 import { t } from "../../lib/i18n";
+import { AuthLayout } from "./AuthLayout";
+import { AuthMessage, LogoutButton, MessageText } from "./AuthMessage";
 
 /**
  * Man giai thich cho `rejected` / `suspended` — hai hang cuoi cua §11.1.
  * T-3.1b.
  *
- * KH tham chieu: §11.1, §11.3 · tasks.md T-3.1b.
+ * KH tham chieu: §11.1, §11.3 · tasks.md T-3.1b, T-S.16.
  *
  * ╔════════════════════════════════════════════════════════════════════════╗
  * ║  VI SAO DAY LA MOT MAN HINH CHU KHONG MOT LAN DANG XUAT IM LANG        ║
@@ -28,18 +32,27 @@ import { t } from "../../lib/i18n";
  *
  * Duong duy nhat ra khoi day di qua admin (§16.3): `rejected`/`suspended` la
  * hai trang thai CUOI cua §11.1, khong co canh nao tu no di ra.
+ *
+ * T-S.16 (ban T-HD8 7a, 7b): *"Cung cau voi loi o 1c. Khong noi ly do: ly do
+ * nam o quan tri vien."* Man nay chi hien khi `/auth/me` tra `403` — tuc CON
+ * cookie phien — nen nut phu la "Dang xuat" that (NQ-131 c).
  */
 export function AccountDisabledScreen() {
+  const session = useSession();
+  const navigate = useNavigate();
+
   return (
-    <main className="mx-auto w-full max-w-md px-6 py-16 text-center">
-      <h2 className="text-lg font-semibold">{t("biKhoa.tieuDe")}</h2>
-      <p className="mt-2 text-sm text-muted">{t("biKhoa.moTa")}</p>
-      <Link
-        to={PATHS.login}
-        className="mt-6 inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
+    <AuthLayout>
+      <AuthMessage
+        icon={Lock}
+        title={t("auth.biKhoaTieuDe")}
+        body={<MessageText>{t("auth.taiKhoanBiKhoa")}</MessageText>}
       >
-        {t("choDuyet.veDangNhap")}
-      </Link>
-    </main>
+        <LogoutButton
+          label={t("auth.dangXuat")}
+          onClick={() => void session.logout().then(() => navigate(PATHS.login))}
+        />
+      </AuthMessage>
+    </AuthLayout>
   );
 }

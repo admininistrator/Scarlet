@@ -137,9 +137,9 @@ describe("bang route", () => {
     [PATHS.settings, "Cài đặt"],
     [PATHS.register, "Đăng ký"],
     [PATHS.forgotPassword, "Quên mật khẩu"],
-    [PATHS.resetPassword, "Đặt lại mật khẩu"],
+    [PATHS.resetPassword, "Đặt mật khẩu mới"],
     [PATHS.verifyEmail, "Email chưa được xác thực"],
-    [PATHS.pendingApproval, "Đang chờ quản trị duyệt"],
+    [PATHS.pendingApproval, "Đang chờ duyệt"],
   ])("%s ra dung man hinh cua no, khong phai 404", async (path, name) => {
     renderAt(path);
 
@@ -181,7 +181,7 @@ describe("bang route", () => {
 
     expect(await screen.findByRole("heading", { name: "Cài đặt" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Khoá API" })).toHaveAttribute("aria-current", "page");
-    expect(screen.queryByRole("heading", { name: "Đang chờ quản trị duyệt" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Đang chờ duyệt" })).toBeNull();
   });
 
   it("nguoi khong phai admin bi day khoi /admin ve man chat", async () => {

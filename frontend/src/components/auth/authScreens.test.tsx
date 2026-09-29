@@ -88,6 +88,8 @@ vi.mock("../../lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       me: vi.fn(),
+      login: vi.fn(),
+      logout: vi.fn(),
       listModels: vi.fn(),
       listConversations: vi.fn(),
       register: vi.fn(),
@@ -160,6 +162,8 @@ function renderAt(path: string) {
  * `Layout` co san mot lien ket "Đăng nhập" o header khi chua co phien, nen
  * mot `getByRole("link", { name: "Đăng nhập" })` khong pham vi se tim thay
  * hai phan tu va bao mot loi noi ve SO LUONG chu khong ve thu dang duoc kiem.
+ * T-S.16 bo header khoi sau man auth, nhung chu Scarlet (ve trang chu) va lien
+ * ket duoi the van nam ngoai `main` — pham vi van la dung pham vi.
  */
 function view() {
   return within(screen.getByRole("main"));
@@ -252,6 +256,13 @@ describe("/dang-ky", () => {
     );
     // Van con o form de go lai — khong nhay sang man "da gui thu".
     expect(screen.getByLabelText("Mật khẩu")).toBeInTheDocument();
+    // Ban T-HD8 2c: loi THAY dung cho dong goi y, duoi o mat khau — khong len
+    // hop canh bao dau form.
+    expect(screen.getByLabelText("Mật khẩu")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Mật khẩu")).toHaveAccessibleDescription(
+      "Mật khẩu này quá phổ biến. Chọn mật khẩu khác.",
+    );
+    expect(screen.queryByText(/Dùng một mật khẩu dài/)).toBeNull();
   });
 
   it("MOI response loi keo theo mot lan Turnstile.reset() (Cam bay T-2.6)", async () => {
@@ -274,6 +285,45 @@ describe("/dang-ky", () => {
   });
 });
 
+// ──────────────────── /dang-nhap — ban T-HD8 1b, 1d ─────────────────────────
+
+describe("/dang-nhap", () => {
+  it("sai thong tin: MOT cau loi, khong o nao bi to, mat khau bi xoa va nhan tieu diem", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.login).mockRejectedValue(error(401, "INVALID_CREDENTIALS"));
+    renderAt(PATHS.login);
+
+    await user.type(await screen.findByLabelText("Email"), "a@scarlet.test");
+    await user.type(screen.getByLabelText("Mật khẩu"), PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Email hoặc mật khẩu không đúng.");
+    // To mot o la noi o do sai — tuc noi ra email ay co ton tai.
+    expect(screen.getByLabelText("Email")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByLabelText("Mật khẩu")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByLabelText("Mật khẩu")).toHaveValue("");
+    expect(screen.getByLabelText("Mật khẩu")).toHaveFocus();
+    expect(screen.getByLabelText("Email")).toHaveValue("a@scarlet.test");
+    // Ban T-HD8 A: man auth khong co header ung dung (NQ-131 d).
+    expect(screen.queryByRole("banner")).toBeNull();
+  });
+
+  it("qua han muc la mau CANH BAO, khong phai mau loi, va mat khau giu nguyen", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.login).mockRejectedValue(error(429, "RATE_LIMITED"));
+    renderAt(PATHS.login);
+
+    await user.type(await screen.findByLabelText("Email"), "a@scarlet.test");
+    await user.type(screen.getByLabelText("Mật khẩu"), PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Bạn đã thử quá nhiều lần. Đợi một lúc rồi thử lại.");
+    expect(alert).toHaveAttribute("data-tone", "warning");
+    expect(screen.getByLabelText("Mật khẩu")).toHaveValue(PASSWORD);
+  });
+});
+
 // ─────────────────── /quen-mat-khau — §11.5 cung mot cau ────────────────────
 
 describe("/quen-mat-khau", () => {
@@ -284,7 +334,7 @@ describe("/quen-mat-khau", () => {
 
     await user.type(await screen.findByLabelText("Email"), "khong-ai@scarlet.test");
     await user.click(screen.getByRole("button", { name: ts.buttonLabel }));
-    await user.click(screen.getByRole("button", { name: "Gửi liên kết đặt lại" }));
+    await user.click(screen.getByRole("button", { name: "Gửi thư đặt lại" }));
 
     expect(await screen.findByText("Kiểm tra hộp thư của bạn")).toBeInTheDocument();
     expect(api.forgotPassword).toHaveBeenCalledWith("khong-ai@scarlet.test", ts.token);
@@ -297,7 +347,7 @@ describe("/quen-mat-khau", () => {
 
     await user.type(await screen.findByLabelText("Email"), "a@scarlet.test");
     await user.click(screen.getByRole("button", { name: ts.buttonLabel }));
-    await user.click(screen.getByRole("button", { name: "Gửi liên kết đặt lại" }));
+    await user.click(screen.getByRole("button", { name: "Gửi thư đặt lại" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Bạn đã thử quá nhiều lần. Đợi một lúc rồi thử lại.",
@@ -314,10 +364,11 @@ describe("/dat-lai-mat-khau", () => {
     renderAt(`${PATHS.resetPassword}?token=mot-token-that`);
 
     await user.type(await screen.findByLabelText("Mật khẩu mới"), PASSWORD);
-    await user.click(screen.getByRole("button", { name: "Đặt mật khẩu mới" }));
+    await user.type(screen.getByLabelText("Nhập lại mật khẩu mới"), PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Đặt mật khẩu" }));
 
     expect(api.resetPassword).toHaveBeenCalledWith("mot-token-that", PASSWORD);
-    expect(await screen.findByText("Đã đặt lại mật khẩu")).toBeInTheDocument();
+    expect(await screen.findByText("Đã đổi mật khẩu")).toBeInTheDocument();
     // Khong roi ve man chat: duong di tiep duy nhat la mot lan dang nhap moi.
     expect(view().getByRole("link", { name: "Đăng nhập" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Hội thoại mới" })).toBeNull();
@@ -329,7 +380,8 @@ describe("/dat-lai-mat-khau", () => {
     renderAt(`${PATHS.resetPassword}?token=het-han`);
 
     await user.type(await screen.findByLabelText("Mật khẩu mới"), PASSWORD);
-    await user.click(screen.getByRole("button", { name: "Đặt mật khẩu mới" }));
+    await user.type(screen.getByLabelText("Nhập lại mật khẩu mới"), PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Đặt mật khẩu" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.",
@@ -337,6 +389,23 @@ describe("/dat-lai-mat-khau", () => {
     // Go lai mat khau khong sua duoc mot lien ket het han — o nhap bien mat.
     expect(screen.queryByLabelText("Mật khẩu mới")).toBeNull();
     expect(view().getByRole("link", { name: "Xin liên kết mới" })).toBeInTheDocument();
+  });
+
+  it("hai o KHONG khop: bao ngay khi roi o thu hai va KHONG goi API (T-HD8 4b)", async () => {
+    const user = userEvent.setup();
+    renderAt(`${PATHS.resetPassword}?token=mot-token-that`);
+
+    await user.type(await screen.findByLabelText("Mật khẩu mới"), PASSWORD);
+    await user.type(screen.getByLabelText("Nhập lại mật khẩu mới"), `${PASSWORD}x`);
+    await user.tab();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Hai mật khẩu không giống nhau.");
+    expect(screen.getByLabelText("Nhập lại mật khẩu mới")).toHaveAttribute("aria-invalid", "true");
+    // O thu nhat khong bi to: no khong sai gi ca.
+    expect(screen.getByLabelText("Mật khẩu mới")).not.toHaveAttribute("aria-invalid");
+
+    await user.click(screen.getByRole("button", { name: "Đặt mật khẩu" }));
+    expect(api.resetPassword).not.toHaveBeenCalled();
   });
 });
 
@@ -347,8 +416,8 @@ describe("/verify-email", () => {
     vi.mocked(api.verifyEmail).mockResolvedValue({ status: "expired" });
     renderAt(`${PATHS.verifyEmail}?token=het-han`);
 
-    expect(await screen.findByText("Liên kết đã hết hạn")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Gửi lại email xác thực" })).toBeInTheDocument();
+    expect(await screen.findByText("Link xác thực đã hết hạn")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gửi lại thư" })).toBeInTheDocument();
     // "Khong phai loi 500": khong mot `role="alert"` nao, khong trang 500.
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText("500")).toBeNull();
@@ -361,23 +430,60 @@ describe("/verify-email", () => {
     renderAt(`${PATHS.verifyEmail}?token=het-han`);
 
     await user.type(await screen.findByLabelText("Email"), "a@scarlet.test");
-    await user.click(screen.getByRole("button", { name: "Gửi lại email xác thực" }));
+    await user.click(screen.getByRole("button", { name: "Gửi lại thư" }));
 
     // *"Mot nut bam duoc ma khong co chuyen gi xay ra la cach chac chan nhat
     // de nguoi dung bam them bon lan."*
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Bạn đã xin gửi lại quá nhiều lần trong một giờ. Hãy đợi rồi thử lại.",
+      "Bạn đã gửi lại thư quá số lần cho phép trong một giờ.",
     );
+    // Ban T-HD8 5f: nut TAT vi dieu kien, ly do nam ngay phia tren.
+    expect(screen.getByRole("button", { name: "Gửi lại thư" })).toBeDisabled();
+  });
+
+  it("429 kem `retry_after` noi ra GIO thu lai, lay tu may chu (T-HD8 5f)", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.verifyEmail).mockResolvedValue({ status: "expired" });
+    vi.mocked(api.resendVerification).mockRejectedValue(
+      new ApiError(429, "RATE_LIMITED", "goi qua nhieu lan", { retry_after: 600 }),
+    );
+    renderAt(`${PATHS.verifyEmail}?token=het-han`);
+
+    await user.type(await screen.findByLabelText("Email"), "a@scarlet.test");
+    await user.click(screen.getByRole("button", { name: "Gửi lại thư" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Thử lại được lúc");
+    // Moc gio = bay gio + 600 s, khong phai con so "3" nao cua giao dien.
+    const at = new Date(alert.querySelector("time")?.getAttribute("datetime") ?? "").getTime();
+    expect(Math.abs(at - (Date.now() + 600_000))).toBeLessThan(5_000);
+  });
+
+  it("gui lai xong: dong trang thai xanh, nut VAN bam duoc (T-HD8 5e)", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.verifyEmail).mockResolvedValue({ status: "expired" });
+    vi.mocked(api.resendVerification).mockResolvedValue(ANTI_ENUMERATION_REPLY);
+    renderAt(`${PATHS.verifyEmail}?token=het-han`);
+
+    await user.type(await screen.findByLabelText("Email"), "a@scarlet.test");
+    await user.click(screen.getByRole("button", { name: "Gửi lại thư" }));
+
+    expect(await screen.findByText("Đã gửi thư mới. Kiểm tra hộp thư của bạn.")).toBeInTheDocument();
+    expect(api.resendVerification).toHaveBeenCalledWith("a@scarlet.test");
+    expect(screen.getByRole("button", { name: "Gửi lại thư" })).toBeEnabled();
   });
 
   it("lan bam DAU bao da xac thuc roi tu sang /cho-duyet (DoD dong 1)", async () => {
     vi.mocked(api.verifyEmail).mockResolvedValue({ status: "verified" });
     renderAt(`${PATHS.verifyEmail}?token=lan-dau`);
 
-    expect(await screen.findByText("Email đã được xác thực")).toBeInTheDocument();
+    expect(await screen.findByText("Đã xác thực email")).toBeInTheDocument();
     expect(
-      await screen.findByRole("heading", { name: "Đang chờ quản trị duyệt" }, { timeout: 3000 }),
+      await screen.findByRole("heading", { name: "Đang chờ duyệt" }, { timeout: 3000 }),
     ).toBeInTheDocument();
+    // Duong UC-01 KHONG co phien: khong co gi de dang xuat (NQ-131 c).
+    expect(view().getByRole("link", { name: "Quay lại đăng nhập" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Đăng xuất" })).toBeNull();
   });
 
   it("lan bam THU HAI ve thang /dang-nhap, khong phai loi (UC-01 dong 5)", async () => {
@@ -397,7 +503,7 @@ describe("/verify-email", () => {
     vi.mocked(api.verifyEmail).mockResolvedValue({ status: "verified" });
     renderAt(`${PATHS.verifyEmail}?token=chi-mot-lan`);
 
-    await screen.findByText("Email đã được xác thực");
+    await screen.findByText("Đã xác thực email");
 
     expect(api.verifyEmail).toHaveBeenCalledTimes(1);
   });
@@ -414,17 +520,18 @@ describe("dieu huong theo status cua §11.1", () => {
   it("pending_approval khong vao man chat ma sang /cho-duyet", async () => {
     openChat("pending_approval");
 
-    expect(
-      await screen.findByRole("heading", { name: "Đang chờ quản trị duyệt" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Đang chờ duyệt" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Hội thoại mới" })).toBeNull();
+    // Co phien: hien email dang cho va nut Dang xuat (ban T-HD8 6a, NQ-131 c).
+    expect(screen.getByText(USER.email)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Đăng xuất" })).toBeInTheDocument();
   });
 
   it("man /cho-duyet BIEN MAT sau khi duoc duyet (DoD dong 2)", async () => {
     openChat("active");
 
     expect(await screen.findByRole("button", { name: "Hội thoại mới" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Đang chờ quản trị duyệt" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Đang chờ duyệt" })).toBeNull();
   });
 
   it("pending_email sang /verify-email chu khong vao man chat", async () => {
@@ -440,10 +547,10 @@ describe("dieu huong theo status cua §11.1", () => {
     vi.mocked(api.me).mockRejectedValue(error(403, "ACCOUNT_DISABLED"));
     renderAt(PATHS.home);
 
-    expect(
-      await screen.findByRole("heading", { name: "Tài khoản không dùng được" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Không đăng nhập được" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Hội thoại mới" })).toBeNull();
+    // Con cookie phien (403, khong phai 401) nen nut phu la Dang xuat that.
+    expect(screen.getByRole("button", { name: "Đăng xuất" })).toBeInTheDocument();
   });
 
   it("401 (chua dang nhap) sang /dang-nhap, KHONG ra man chat (T-3.1c)", async () => {

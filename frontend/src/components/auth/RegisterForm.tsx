@@ -1,11 +1,13 @@
+import { Mail } from "lucide";
 import { useState } from "react";
-import { Link } from "react-router";
 
 import { PATHS } from "../../app/paths";
 import { api } from "../../lib/api";
 import { t } from "../../lib/i18n";
-import { Turnstile } from "./Turnstile";
-import { authErrorText } from "./authErrors";
+import { AuthField, AuthTitle, FormAlert, SubmitButton, TurnstileSlot } from "./AuthForm";
+import { AuthActions, AuthFooterLink, AuthLayout } from "./AuthLayout";
+import { AuthMessage, MessageNote, MessageText, SecondaryLink } from "./AuthMessage";
+import { placeAuthError, type PlacedAuthError } from "./authErrors";
 import { useTurnstile } from "./useTurnstile";
 
 /**
@@ -32,6 +34,11 @@ import { useTurnstile } from "./useTurnstile";
  * — mot ngay nao do ai do doi cau chu cua backend cung khong lam lo ra email
  * nao da dang ky.
  *
+ * T-S.16 (ban T-HD8 2e): man ay in lai email NGUOI DUNG VUA GO — thu ho da co
+ * trong tay, nen khong lo gi — va noi "chung toi vua gui thu". Voi email da
+ * co, backend hom nay KHONG gui thu nao; ban ve gia dinh mot thu "ban da co tai
+ * khoan" (NQ-131 b, Backlog).
+ *
  * ── `reset()` SAU MOI LOI ─────────────────────────────────────────────────
  *
  * Cloudflare tieu token ngay lan `siteverify` dau tien. Sau mot `422` vi mat
@@ -42,106 +49,92 @@ export function RegisterForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [error, setError] = useState<PlacedAuthError | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
   const turnstile = useTurnstile();
 
-  if (done) {
+  if (sentTo !== null) {
     return (
-      <main className="mx-auto w-full max-w-sm px-6 py-12">
-        <h2 className="text-lg font-semibold">{t("dangKy.daGui.tieuDe")}</h2>
-        <p className="mt-2 text-sm text-muted">{t("dangKy.daGui.moTa")}</p>
-        <Link
-          to={PATHS.login}
-          className="mt-6 inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
+      <AuthLayout>
+        <AuthMessage
+          icon={Mail}
+          title={t("auth.kiemTraHopThu")}
+          body={
+            <>
+              <MessageText>{t("auth.daGuiThuToi")}</MessageText>
+              <MessageText strong>{sentTo}</MessageText>
+              <MessageText>{t("auth.moThuDeTiepTuc")}</MessageText>
+            </>
+          }
         >
-          {t("auth.dangNhap")}
-        </Link>
-      </main>
+          <SecondaryLink to={PATHS.login}>{t("auth.quayLaiDangNhap")}</SecondaryLink>
+          <MessageNote>{t("auth.khongThayThu")}</MessageNote>
+        </AuthMessage>
+      </AuthLayout>
     );
   }
 
   async function submit() {
     if (turnstile.missingToken) {
-      setError(t("auth.turnstileChua"));
+      setError({ slot: "turnstile", tone: "danger", text: t("auth.turnstileChua") });
       return;
     }
     setError(null);
     setSending(true);
     try {
       await api.register(email, password, turnstile.token);
-      setDone(true);
+      setSentTo(email);
     } catch (e) {
-      setError(authErrorText(e));
+      setError(placeAuthError(e));
       turnstile.reset();
     } finally {
       setSending(false);
     }
   }
 
-  return (
-    <main className="mx-auto w-full max-w-sm px-6 py-12">
-      <h2 className="mb-6 text-lg font-semibold">{t("auth.dangKy")}</h2>
+  const errorAt = (slot: PlacedAuthError["slot"]) => (error?.slot === slot ? error.text : null);
 
+  return (
+    <AuthLayout footer={<AuthFooterLink to={PATHS.login}>{t("auth.daCoTaiKhoan")}</AuthFooterLink>}>
       <form
-        className="flex flex-col gap-3"
+        aria-busy={sending}
+        className="flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted">{t("auth.email")}</span>
-          <input
-            type="email"
-            required
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
-          />
-        </label>
+        <AuthTitle title={t("auth.dangKy")} />
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted">{t("auth.matKhau")}</span>
-          <input
-            type="password"
-            required
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
-          />
-        </label>
-        {/*
-          Goi y nam NGOAI `<label>`, khong trong: moi chu trong the `label`
-          deu chay vao ten truy cap duoc cua o nhap, nen mot dong goi y o
-          trong bien nhan cua o thanh "Mat khau Dung mot mat khau dai, ..." —
-          va moi `getByLabelText("Mật khẩu")` (test, lan trinh doc man hinh)
-          khong con tim thay no.
-        */}
-        <span className="-mt-2 text-xs text-muted">{t("auth.matKhauGoiY")}</span>
+        {error !== null && error.slot === "form" && <FormAlert tone={error.tone}>{error.text}</FormAlert>}
 
-        <Turnstile onToken={turnstile.onToken} ref={turnstile.ref} className="my-1" />
+        <AuthField
+          id="register-email"
+          label={t("auth.email")}
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={setEmail}
+          readOnly={sending}
+        />
+        <AuthField
+          id="register-password"
+          label={t("auth.matKhau")}
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={setPassword}
+          readOnly={sending}
+          hint={t("auth.matKhauGoiY")}
+          error={errorAt("password")}
+        />
 
-        {error !== null && (
-          <p role="alert" className="text-sm text-danger-text">
-            {error}
-          </p>
-        )}
+        <TurnstileSlot turnstile={turnstile} error={errorAt("turnstile")} />
 
-        <button
-          type="submit"
-          disabled={sending}
-          className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-        >
-          {sending ? t("auth.dangXuLy") : t("auth.dangKy")}
-        </button>
+        <AuthActions>
+          <SubmitButton busy={sending} label={t("auth.dangKy")} />
+        </AuthActions>
       </form>
-
-      <Link to={PATHS.login} className="mt-6 inline-flex min-h-touch items-center text-sm text-muted underline">
-        {t("auth.daCoTaiKhoan")}
-      </Link>
-    </main>
+    </AuthLayout>
   );
 }

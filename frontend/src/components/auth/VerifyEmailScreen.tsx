@@ -1,9 +1,15 @@
+import { CircleCheck, Clock, Link2Off, LoaderCircle, Mail } from "lucide";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
+import { useSession } from "../../app/Layout";
 import { PATHS } from "../../app/paths";
+import { Moment } from "../../features/quota/Moment";
 import { ApiError, ERROR_CODES, api } from "../../lib/api";
 import { t } from "../../lib/i18n";
+import { AuthField, FormAlert, SubmitButton } from "./AuthForm";
+import { AuthLayout } from "./AuthLayout";
+import { AuthMessage, MessageStatus, MessageText, SecondaryLink } from "./AuthMessage";
 import { authErrorText } from "./authErrors";
 
 /**
@@ -33,7 +39,7 @@ import { authErrorText } from "./authErrors";
  * `localStorage`) sai ngay khi nguoi dung mo lien ket tren may khac. Xem
  * docstring `VerifyEmailResponse.status` cua backend.
  *
- * ── `daGoi` LA VI `StrictMode`, KHONG PHAI VI CAN THAN QUA ────────────────
+ * ── `calledRef` LA VI `StrictMode`, KHONG PHAI VI CAN THAN QUA ────────────
  *
  * `main.tsx` boc app trong `<StrictMode>`, tuc React chay effect -> cleanup ->
  * effect lai tren CUNG mot instance o ban dev. Khong co co nay thi lan mount
@@ -42,6 +48,15 @@ import { authErrorText } from "./authErrors";
  * day toi `/dang-nhap` thay vi `/cho-duyet`, dung o ban dev va chi o ban dev.
  * Co khoa theo GIA TRI token chu khong mot `boolean`, de mot token khac (neu
  * URL doi) van chay lai duoc.
+ *
+ * ── T-S.16: ban T-HD8 (5a–5f) ─────────────────────────────────────────────
+ *
+ * Ban ve bo o email (*"May chu biet email tu link"*), nhung `POST
+ * /auth/resend-verification` doi `email` va `verify-email` tra `expired` khong
+ * kem email nao — nen o email O LAI (NQ-131 a, Backlog "gui lai theo token");
+ * co phien (`pending_email` bi `StatusGate` dua toi) thi dien san email cua
+ * phien. Moi thu khac theo ban ve: nut con bam duoc sau khi da gui, cham han
+ * muc thi nut tat va gio thu lai lay tu `retry_after` cua `429`.
  */
 
 /**
@@ -53,14 +68,14 @@ import { authErrorText } from "./authErrors";
  */
 const REDIRECT_AFTER_MS = 1200;
 
-type Outcome = "dang-goi" | "verified" | "already_verified" | "expired" | "loi";
+type Outcome = "calling" | "verified" | "already_verified" | "expired" | "invalid";
 
 export function VerifyEmailScreen() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
   const navigate = useNavigate();
 
-  const [outcome, setOutcome] = useState<Outcome>(token === null ? "expired" : "dang-goi");
+  const [outcome, setOutcome] = useState<Outcome>(token === null ? "expired" : "calling");
   const [error, setError] = useState<string | null>(null);
   const calledRef = useRef<string | null>(null);
 
@@ -75,7 +90,7 @@ export function VerifyEmailScreen() {
         const output = await api.verifyEmail(token);
         setOutcome(output.status);
       } catch (e) {
-        setOutcome("loi");
+        setOutcome("invalid");
         setError(
           e instanceof ApiError && e.code === ERROR_CODES.TOKEN_INVALID
             ? t("verify.tokenHong")
@@ -83,12 +98,12 @@ export function VerifyEmailScreen() {
         );
       }
     })();
-    // KHONG co cleanup, va day khong phai mot cho quen — xem khoi "daGoi" o
-    // docstring dau file. Mot co `mounted` bi cleanup dat ve `false` (loi
+    // KHONG co cleanup, va day khong phai mot cho quen — xem khoi "calledRef"
+    // o docstring dau file. Mot co `mounted` bi cleanup dat ve `false` (loi
     // quen thuoc cua moi effect goi mang) se hong CHINH XAC o day: lan chay
-    // thu hai cua `StrictMode` bi `daGoi` chan lai TRUOC khi kip dung mot co
-    // moi, nen ket qua cua loi goi duy nhat roi vao mot co da tat va man hinh
-    // dung mai o "Dang xac thuc email...". Do duoc tren Chrome 2026-09-20.
+    // thu hai cua `StrictMode` bi `calledRef` chan lai TRUOC khi kip dung mot
+    // co moi, nen ket qua cua loi goi duy nhat roi vao mot co da tat va man
+    // hinh dung mai o "Dang xac thuc email...". Do duoc tren Chrome 2026-09-20.
   }, [token]);
 
   useEffect(() => {
@@ -102,46 +117,59 @@ export function VerifyEmailScreen() {
     return () => clearTimeout(timer);
   }, [outcome, navigate]);
 
-  if (outcome === "dang-goi") {
+  if (outcome === "calling") {
     return (
-      <main className="mx-auto w-full max-w-sm px-6 py-12 text-center">
-        <p className="text-sm text-muted">{t("verify.dangKiemTra")}</p>
-      </main>
+      <AuthLayout>
+        <AuthMessage icon={LoaderCircle} spinning title={t("auth.dangXacThuc")} />
+      </AuthLayout>
     );
   }
 
-  if (outcome === "verified") {
+  if (outcome === "verified" || outcome === "already_verified") {
+    const first = outcome === "verified";
     return (
-      <main className="mx-auto w-full max-w-sm px-6 py-12 text-center">
-        <h2 className="text-lg font-semibold">{t("verify.xong.tieuDe")}</h2>
-        <p className="mt-2 text-sm text-muted">{t("verify.xong.moTa")}</p>
-      </main>
-    );
-  }
-
-  if (outcome === "already_verified") {
-    return (
-      <main className="mx-auto w-full max-w-sm px-6 py-12 text-center">
-        <h2 className="text-lg font-semibold">{t("verify.xong.tieuDe")}</h2>
-        <p className="mt-2 text-sm text-muted">{t("verify.daXongTruocDo")}</p>
-      </main>
+      <AuthLayout>
+        <AuthMessage
+          icon={CircleCheck}
+          tone="success"
+          title={t("auth.daXacThuc")}
+          body={<MessageText>{first ? t("auth.dangChuyenChoDuyet") : t("verify.daXongTruocDo")}</MessageText>}
+        >
+          {/* Lien ket du phong neu khong tu chuyen (5b). */}
+          <SecondaryLink to={first ? PATHS.pendingApproval : PATHS.login}>
+            {first ? t("auth.moManChoDuyet") : t("auth.dangNhap")}
+          </SecondaryLink>
+        </AuthMessage>
+      </AuthLayout>
     );
   }
 
   return (
-    <main className="mx-auto w-full max-w-sm px-6 py-12">
-      <h2 className="text-lg font-semibold">
-        {token === null ? t("verify.chuaXacThuc.tieuDe") : t("verify.hetHan.tieuDe")}
-      </h2>
-      {error !== null && (
-        <p role="alert" className="mt-2 text-sm text-danger-text">
-          {error}
-        </p>
-      )}
-      <p className="mt-2 text-sm text-muted">{t("verify.hetHan.moTa")}</p>
-      <ResendBlock />
-    </main>
+    <AuthLayout>
+      <AuthMessage
+        icon={token === null ? Mail : Link2Off}
+        title={token === null ? t("verify.chuaXacThuc.tieuDe") : t("auth.linkHetHan")}
+        body={<MessageText>{t("auth.linkHetHanMoTa")}</MessageText>}
+      >
+        {error !== null && <FormAlert tone="danger">{error}</FormAlert>}
+        <ResendBlock />
+      </AuthMessage>
+    </AuthLayout>
   );
+}
+
+type Resend =
+  | { kind: "idle" }
+  | { kind: "busy" }
+  | { kind: "sent" }
+  | { kind: "limited"; retryAt: number | null }
+  | { kind: "failed"; text: string };
+
+/** Giay cho cua `429` (`details.retry_after`, §10.6) -> moc gio; khong co thi `null`. */
+function retryAtOf(error: ApiError): number | null {
+  const details = error.details as { retry_after?: unknown } | null | undefined;
+  const seconds = details?.retry_after;
+  return typeof seconds === "number" ? Date.now() + seconds * 1000 : null;
 }
 
 /**
@@ -155,70 +183,79 @@ export function VerifyEmailScreen() {
  * khong mang email nao, va man hinh nay con phai chay duoc khi nguoi dung
  * CHUA dang nhap (vua bam mot lien ket het han trong hop thu).
  *
- * Thanh cong tra ve mot cau CO DINH cua §11.5 — "neu email nay ton tai va
- * chua duoc xac thuc" — nen o day khong co nhanh nao noi "da gui" mot cach
- * chac chan hon thuc te.
+ * Ban ve 5f: *"Giao dien khong tu dem, khong in so 3"* — con so nam o may chu,
+ * o day chi doc `retry_after` ra mot moc gio.
  */
 function ResendBlock() {
-  const [email, setEmail] = useState("");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
+  const session = useSession();
+  // `null` = nguoi dung chua go gi: lay email cua phien NEU co, ke ca khi phien
+  // ve SAU lan ve dau (mo thang `/verify-email` luc `/auth/me` con dang hoi).
+  const [typed, setTyped] = useState<string | null>(null);
+  const email = typed ?? session.user?.email ?? "";
+  const [resend, setResend] = useState<Resend>({ kind: "idle" });
 
   async function submit() {
-    setError(null);
-    setSending(true);
+    setResend({ kind: "busy" });
     try {
       await api.resendVerification(email);
-      setSent(true);
+      setResend({ kind: "sent" });
     } catch (e) {
-      setError(
+      setResend(
         e instanceof ApiError && e.code === ERROR_CODES.TOO_MANY_ATTEMPTS
-          ? t("verify.guiLaiQuaNhieu")
-          : authErrorText(e),
+          ? { kind: "limited", retryAt: retryAtOf(e) }
+          : { kind: "failed", text: authErrorText(e) },
       );
-    } finally {
-      setSending(false);
     }
-  }
-
-  if (sent) {
-    return <p className="mt-6 text-sm text-muted">{t("verify.daGuiLai")}</p>;
   }
 
   return (
     <form
-      className="mt-6 flex flex-col gap-3"
+      aria-busy={resend.kind === "busy"}
+      className="flex flex-col gap-5"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
       }}
     >
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted">{t("auth.email")}</span>
-        <input
-          type="email"
-          required
-          autoComplete="username"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
-        />
-      </label>
+      <AuthField
+        id="resend-email"
+        label={t("auth.email")}
+        type="email"
+        autoComplete="email"
+        value={email}
+        onChange={setTyped}
+        readOnly={resend.kind === "busy"}
+      />
 
-      {error !== null && (
-        <p role="alert" className="text-sm text-danger-text">
-          {error}
-        </p>
+      {resend.kind === "limited" && (
+        <FormAlert tone="warning" icon={Clock}>
+          <span className="flex flex-col gap-0.5">
+            <span>{t("auth.guiLaiQuaGioiHan")}</span>
+            {resend.retryAt !== null && (
+              <span className="flex gap-1">
+                <span>{t("auth.thuLaiLuc")}</span>
+                <Moment ms={resend.retryAt} now={Date.now()} className="font-semibold" />
+              </span>
+            )}
+          </span>
+        </FormAlert>
       )}
+      {resend.kind === "failed" && <FormAlert tone="danger">{resend.text}</FormAlert>}
+      {resend.kind === "sent" && <MessageStatus>{t("auth.daGuiLaiThu")}</MessageStatus>}
 
-      <button
-        type="submit"
-        disabled={sending}
-        className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-      >
-        {sending ? t("auth.dangXuLy") : t("verify.guiLai")}
-      </button>
+      {resend.kind === "limited" ? (
+        // Tat vi DIEU KIEN, ly do nam ngay phia tren — nen `.control-disabled`
+        // (mo) chu khong nhu nut dang gui.
+        <button
+          type="button"
+          disabled
+          className="control-disabled min-h-touch w-full rounded-md bg-accent text-body font-semibold text-accent-foreground"
+        >
+          {t("auth.guiLaiThu")}
+        </button>
+      ) : (
+        <SubmitButton busy={resend.kind === "busy"} label={t("auth.guiLaiThu")} />
+      )}
     </form>
   );
 }

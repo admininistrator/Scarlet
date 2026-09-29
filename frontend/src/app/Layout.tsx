@@ -36,6 +36,16 @@ export function useSession(): SessionState {
   return useOutletContext<SessionState>();
 }
 
+/** Sau duong auth cua T-3.1b — ve bang `AuthLayout`, khong header (T-S.16). */
+const AUTH_PATHS: ReadonlySet<string> = new Set([
+  PATHS.login,
+  PATHS.register,
+  PATHS.forgotPassword,
+  PATHS.resetPassword,
+  PATHS.verifyEmail,
+  PATHS.pendingApproval,
+]);
+
 export function Layout() {
   const session = useSessionState();
   const { pathname } = useLocation();
@@ -54,6 +64,14 @@ export function Layout() {
     `/cai-dat` khong co hoi thoai nao (NQ-128 c).
   */
   const hasSidebar = pathname === PATHS.home;
+  /*
+    T-S.16 — ban T-HD8 ve sau man auth KHONG co header: chu Scarlet nam trong
+    cot form va la loi ve trang chu duy nhat (NQ-131 d). Man "bi khoa" cung
+    vay — no hien o bat ky duong nao `StatusGate`/`SignedInOnly` canh, nen
+    hoi `session.locked` chu khong hoi duong. Nut sang/toi vi vay khong co o
+    day; theme van theo lua chon da luu hoac theo he thong (index.html).
+  */
+  const bare = AUTH_PATHS.has(pathname) || session.locked;
 
   return (
     /*
@@ -78,60 +96,62 @@ export function Layout() {
         sang/toi · nut cho panel artifact, nen `surface-panel`, le 8 (desktop)
         / 6 (mobile), nhom phai sat mep phai.
       */}
-      <header className="flex h-header shrink-0 items-center gap-1 border-b border-border bg-surface-panel px-1.5 lg:gap-2 lg:px-2">
-        {hasSidebar && <SidebarToggle />}
-        <h1 className="text-lg font-semibold lg:tracking-[-0.01em]">
-          <Link to={PATHS.home} className="inline-flex min-h-touch items-center text-foreground no-underline">
-            {t("app.title")}
-          </Link>
-        </h1>
-
-        <div className="ml-auto flex shrink-0 items-center gap-0.5 lg:gap-1">
-          {/*
-            An nut nay khi khong phai admin la mot phep lich su voi nguoi
-            dung, KHONG phai phan quyen — cung cau ma `AdminOnly` va
-            `AdminScreen` deu chep lai. Lop chan that la `require_admin` o
-            tang router cua backend (T-2.16).
-
-            Ban T-HD2-v2: desktop la chu "Quan tri" mau accent-text, mobile la
-            icon `shield` (cung ten truy cap). Chon bang `useDrawerMode` chu
-            khong bang hai phan tu an/hien bang CSS: mot link, mot ten.
-          */}
-          {isAdmin &&
-            (drawerMode ? (
-              <Link
-                to={PATHS.admin}
-                aria-label={t("admin.tieuDe")}
-                className="grid size-touch place-items-center rounded-md text-accent-text hover:bg-surface-hover"
-              >
-                <StaticIcon icon={Shield} size={20} />
-              </Link>
-            ) : (
-              <Link
-                to={PATHS.admin}
-                className="inline-flex h-touch items-center whitespace-nowrap rounded-md px-3 text-base font-medium text-accent-text no-underline hover:bg-surface-hover"
-              >
-                {t("admin.tieuDe")}
-              </Link>
-            ))}
-          {session.user === null && (
-            <Link
-              to={PATHS.login}
-              className="motion-press inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
-            >
-              {t("auth.dangNhap")}
+      {!bare && (
+        <header className="flex h-header shrink-0 items-center gap-1 border-b border-border bg-surface-panel px-1.5 lg:gap-2 lg:px-2">
+          {hasSidebar && <SidebarToggle />}
+          <h1 className="text-lg font-semibold lg:tracking-[-0.01em]">
+            <Link to={PATHS.home} className="inline-flex min-h-touch items-center text-foreground no-underline">
+              {t("app.title")}
             </Link>
-          )}
-          <ThemeToggle />
-          {hasSidebar && session.user !== null && (
-            <ComingSoon
-              planned="T-5.4"
-              label={t("header.artifactPanel")}
-              icon={<StaticIcon icon={PanelRight} size={20} />}
-            />
-          )}
-        </div>
-      </header>
+          </h1>
+
+          <div className="ml-auto flex shrink-0 items-center gap-0.5 lg:gap-1">
+            {/*
+              An nut nay khi khong phai admin la mot phep lich su voi nguoi
+              dung, KHONG phai phan quyen — cung cau ma `AdminOnly` va
+              `AdminScreen` deu chep lai. Lop chan that la `require_admin` o
+              tang router cua backend (T-2.16).
+
+              Ban T-HD2-v2: desktop la chu "Quan tri" mau accent-text, mobile la
+              icon `shield` (cung ten truy cap). Chon bang `useDrawerMode` chu
+              khong bang hai phan tu an/hien bang CSS: mot link, mot ten.
+            */}
+            {isAdmin &&
+              (drawerMode ? (
+                <Link
+                  to={PATHS.admin}
+                  aria-label={t("admin.tieuDe")}
+                  className="grid size-touch place-items-center rounded-md text-accent-text hover:bg-surface-hover"
+                >
+                  <StaticIcon icon={Shield} size={20} />
+                </Link>
+              ) : (
+                <Link
+                  to={PATHS.admin}
+                  className="inline-flex h-touch items-center whitespace-nowrap rounded-md px-3 text-base font-medium text-accent-text no-underline hover:bg-surface-hover"
+                >
+                  {t("admin.tieuDe")}
+                </Link>
+              ))}
+            {session.user === null && (
+              <Link
+                to={PATHS.login}
+                className="motion-press inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
+              >
+                {t("auth.dangNhap")}
+              </Link>
+            )}
+            <ThemeToggle />
+            {hasSidebar && session.user !== null && (
+              <ComingSoon
+                planned="T-5.4"
+                label={t("header.artifactPanel")}
+                icon={<StaticIcon icon={PanelRight} size={20} />}
+              />
+            )}
+          </div>
+        </header>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Outlet context={session} />

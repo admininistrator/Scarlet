@@ -33,9 +33,8 @@
  * khoa nguoi dung ra khoi trang dang ky tren may dev.
  */
 
-import { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import type { Ref } from "react";
-import { t } from "../../lib/i18n";
 
 /**
  * Duong dan script cua Cloudflare. Mot HANG, khong phai mot nut van.
@@ -109,6 +108,12 @@ interface Props {
   onToken: (token: string | null) => void;
   ref?: Ref<TurnstileHandle>;
   className?: string;
+  /**
+   * Script cua Cloudflare khong nap duoc. T-S.16 (ban T-HD8): cau loi nam
+   * DUOI khung chu khong thay cho khung — khung giu nguyen 336 × 71 du widget
+   * chua tai, da hien hay loi — nen chu la viec cua `TurnstileSlot`.
+   */
+  onLoadError?: () => void;
 }
 
 /** Turnstile co bat khong — dung de an ca khoi captcha trong form. */
@@ -116,18 +121,19 @@ export function turnstileEnabled(): boolean {
   return SITE_KEY.trim() !== "";
 }
 
-export function Turnstile({ onToken, ref, className }: Props) {
+export function Turnstile({ onToken, ref, className, onLoadError }: Props) {
   const oRef = useRef<HTMLDivElement | null>(null);
   const widgetRef = useRef<string | null>(null);
-  const [error, setError] = useState(false);
 
   // `onToken` giu trong ref: caller thuong truyen mot arrow function moi o moi
   // lan render, va de no vao mang phu thuoc cua useEffect se thao/dung lai
   // widget sau moi lan go phim trong form.
   const onTokenRef = useRef(onToken);
+  const onLoadErrorRef = useRef(onLoadError);
   useEffect(() => {
     onTokenRef.current = onToken;
-  }, [onToken]);
+    onLoadErrorRef.current = onLoadError;
+  }, [onToken, onLoadError]);
 
   const reset = useCallback(() => {
     if (widgetRef.current !== null && window.turnstile !== undefined) {
@@ -163,7 +169,7 @@ export function Turnstile({ onToken, ref, className }: Props) {
       })
       .catch(() => {
         if (alive) {
-          setError(true);
+          onLoadErrorRef.current?.();
           onTokenRef.current(null);
         }
       });
@@ -179,13 +185,6 @@ export function Turnstile({ onToken, ref, className }: Props) {
 
   if (!turnstileEnabled()) {
     return null;
-  }
-  if (error) {
-    return (
-      <p className={className} role="alert">
-        {t("auth.turnstileLoi")}
-      </p>
-    );
   }
   return <div ref={oRef} className={className} />;
 }

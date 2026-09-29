@@ -1,11 +1,13 @@
+import { Mail } from "lucide";
 import { useState } from "react";
-import { Link } from "react-router";
 
 import { PATHS } from "../../app/paths";
 import { api } from "../../lib/api";
 import { t } from "../../lib/i18n";
-import { Turnstile } from "./Turnstile";
-import { authErrorText } from "./authErrors";
+import { AuthField, AuthTitle, FormAlert, SubmitButton, TurnstileSlot } from "./AuthForm";
+import { AuthActions, AuthFooterLink, AuthLayout } from "./AuthLayout";
+import { AuthMessage, MessageNote, MessageText, SecondaryLink } from "./AuthMessage";
+import { placeAuthError, type PlacedAuthError } from "./authErrors";
 import { useTurnstile } from "./useTurnstile";
 
 /**
@@ -23,32 +25,37 @@ import { useTurnstile } from "./useTurnstile";
  *
  * Han muc 3/gio theo IP (§10.6, NQ-43) tinh ca luot bi captcha chan — nen
  * `RATE_LIMITED` phai co mot cau rieng, khong roi vao duong lui.
+ *
+ * T-S.16: ban T-HD8 (3a–3c) KHONG ve o Turnstile o man nay. §11.6 dat captcha
+ * o dung form nay va `forgot-password` van kiem token, nen bo khung ay la mot
+ * form dep ma backend tu choi bang `400` — khung GIU nguyen, cung vi tri nhu
+ * man Dang ky (bao lai ban ve, Backlog).
  */
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<PlacedAuthError | null>(null);
   const [done, setDone] = useState(false);
   const turnstile = useTurnstile();
 
   if (done) {
     return (
-      <main className="mx-auto w-full max-w-sm px-6 py-12">
-        <h2 className="text-lg font-semibold">{t("quenMatKhau.daGui.tieuDe")}</h2>
-        <p className="mt-2 text-sm text-muted">{t("quenMatKhau.daGui.moTa")}</p>
-        <Link
-          to={PATHS.login}
-          className="mt-6 inline-flex min-h-touch items-center rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground"
+      <AuthLayout>
+        <AuthMessage
+          icon={Mail}
+          title={t("auth.kiemTraHopThu")}
+          body={<MessageText>{t("auth.daGuiThuDatLai")}</MessageText>}
         >
-          {t("auth.dangNhap")}
-        </Link>
-      </main>
+          <SecondaryLink to={PATHS.login}>{t("auth.quayLaiDangNhap")}</SecondaryLink>
+          <MessageNote>{t("auth.khongThayThu")}</MessageNote>
+        </AuthMessage>
+      </AuthLayout>
     );
   }
 
   async function submit() {
     if (turnstile.missingToken) {
-      setError(t("auth.turnstileChua"));
+      setError({ slot: "turnstile", tone: "danger", text: t("auth.turnstileChua") });
       return;
     }
     setError(null);
@@ -57,7 +64,7 @@ export function ForgotPasswordForm() {
       await api.forgotPassword(email, turnstile.token);
       setDone(true);
     } catch (e) {
-      setError(authErrorText(e));
+      setError(placeAuthError(e));
       turnstile.reset();
     } finally {
       setSending(false);
@@ -65,49 +72,37 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-sm px-6 py-12">
-      <h2 className="mb-2 text-lg font-semibold">{t("quenMatKhau.tieuDe")}</h2>
-      <p className="mb-6 text-sm text-muted">{t("quenMatKhau.moTa")}</p>
-
+    <AuthLayout footer={<AuthFooterLink to={PATHS.login}>{t("auth.quayLaiDangNhap")}</AuthFooterLink>}>
       <form
-        className="flex flex-col gap-3"
+        aria-busy={sending}
+        className="flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted">{t("auth.email")}</span>
-          <input
-            type="email"
-            required
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
-          />
-        </label>
+        <AuthTitle title={t("auth.quenMatKhauTieuDe")} lead={t("auth.quenMatKhauMoTa")} />
 
-        <Turnstile onToken={turnstile.onToken} ref={turnstile.ref} className="my-1" />
-
-        {error !== null && (
-          <p role="alert" className="text-sm text-danger-text">
-            {error}
-          </p>
+        {error !== null && error.slot !== "turnstile" && (
+          <FormAlert tone={error.tone}>{error.text}</FormAlert>
         )}
 
-        <button
-          type="submit"
-          disabled={sending}
-          className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-        >
-          {sending ? t("auth.dangXuLy") : t("quenMatKhau.gui")}
-        </button>
-      </form>
+        <AuthField
+          id="forgot-email"
+          label={t("auth.email")}
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={setEmail}
+          readOnly={sending}
+        />
 
-      <Link to={PATHS.login} className="mt-6 inline-flex min-h-touch items-center text-sm text-muted underline">
-        {t("auth.dangNhap")}
-      </Link>
-    </main>
+        <TurnstileSlot turnstile={turnstile} error={error?.slot === "turnstile" ? error.text : null} />
+
+        <AuthActions>
+          <SubmitButton busy={sending} label={t("auth.guiThuDatLai")} />
+        </AuthActions>
+      </form>
+    </AuthLayout>
   );
 }

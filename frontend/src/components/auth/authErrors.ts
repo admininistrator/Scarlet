@@ -45,3 +45,36 @@ export function authErrorText(error: unknown): string {
   // gia tri. Khoa sai se lo ra ngay o man hinh — `t()` tra lai chinh khoa.
   return key === undefined ? error.message : t(key as never);
 }
+
+/**
+ * Cau loi nam O DAU tren form — T-S.16, ban T-HD8 (2c, 1d).
+ *
+ * *"Loi mat khau thay dung cho dong goi y. Loi Turnstile nam duoi o xac
+ * minh, khop chu 'phia tren'."* Con lai len hop canh bao dau form; han muc la
+ * mau CANH BAO chu khong phai mau loi (*"cho la het"*, 1d).
+ *
+ * Cung mot bang cho ca ba form, cung ly le `BY_CODE`: ba ban chep cua mot
+ * chuoi `if` la ba cho de mot man dat loi mot noi, hai man kia dat noi khac.
+ */
+export type AuthErrorSlot = "password" | "turnstile" | "form";
+
+export interface PlacedAuthError {
+  slot: AuthErrorSlot;
+  tone: "danger" | "warning";
+  text: string;
+}
+
+const SLOT_BY_CODE: Record<string, AuthErrorSlot> = {
+  [ERROR_CODES.PASSWORD_TOO_SHORT]: "password",
+  [ERROR_CODES.PASSWORD_TOO_WEAK]: "password",
+  [ERROR_CODES.TURNSTILE_FAILED]: "turnstile",
+};
+
+export function placeAuthError(error: unknown): PlacedAuthError {
+  const code = error instanceof ApiError ? error.code : null;
+  return {
+    slot: (code !== null ? SLOT_BY_CODE[code] : undefined) ?? "form",
+    tone: code === ERROR_CODES.TOO_MANY_ATTEMPTS ? "warning" : "danger",
+    text: authErrorText(error),
+  };
+}

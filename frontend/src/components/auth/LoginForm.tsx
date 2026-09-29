@@ -1,6 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
+
+import { PATHS } from "../../app/paths";
 import { ERROR_CODES, type ApiError } from "../../lib/api";
 import { t } from "../../lib/i18n";
+import { AuthField, AuthTitle, FormAlert, SubmitButton } from "./AuthForm";
+import { AuthActions, AuthFooterLink, AuthLayout } from "./AuthLayout";
+import { placeAuthError } from "./authErrors";
 
 /**
  * Form dang nhap TOI THIEU cua T-2.19 — §11.2.
@@ -23,6 +29,13 @@ import { t } from "../../lib/i18n";
  * `register`/`forgot-password`, con `POST /auth/login` khong doc
  * `turnstile_token` (xem `api/v1/auth.py`). Chong do mat khau o duong nay la
  * viec cua rate limit §10.6, da co tu T-2.9.
+ *
+ * ── T-S.16: ban T-HD8 (1a–1e) ─────────────────────────────────────────────
+ *
+ * *"Mot cau loi cho ca sai email lan sai mat khau"*, va **khong o nao bi to
+ * do**: to mot o la noi o do sai, tuc noi ra email ay co ton tai. Sai thong
+ * tin thi xoa mat khau va dua tieu diem ve o mat khau; bi khoa cung cho, cung
+ * kieu; qua han muc la mau canh bao. Dang gui: hai o chi doc, nut khoa.
  */
 export function LoginForm({
   onSend,
@@ -34,61 +47,76 @@ export function LoginForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [sending, setSending] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  /*
+    Chi phan ung voi loi cua MOT lan gui trong chinh man nay: `error` song o
+    `useSessionState` (Layout), nen quay lai `/dang-nhap` sau mot lan sai van
+    thay loi cu — xoa o va keo tieu diem luc mo man la mot hanh vi khong ai
+    yeu cau.
+  */
+  const awaitingRef = useRef(false);
+
+  useEffect(() => {
+    if (!awaitingRef.current || error === null) {
+      return;
+    }
+    awaitingRef.current = false;
+    if (error.code === ERROR_CODES.WRONG_PASSWORD) {
+      setPassword("");
+      passwordRef.current?.focus();
+    }
+  }, [error]);
+
+  const alert = error === null ? null : placeAuthError(error);
 
   return (
-    <main className="mx-auto w-full max-w-sm px-6 py-12">
-      <h2 className="mb-6 text-lg font-semibold">{t("auth.dangNhap")}</h2>
-
+    <AuthLayout footer={<AuthFooterLink to={PATHS.register}>{t("auth.chuaCoTaiKhoan")}</AuthFooterLink>}>
       <form
-        className="flex flex-col gap-3"
+        aria-busy={sending}
+        className="flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
+          awaitingRef.current = true;
           setSending(true);
           void onSend(email, password).finally(() => setSending(false));
         }}
       >
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted">{t("auth.email")}</span>
-          <input
-            type="email"
-            required
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
-          />
-        </label>
+        <AuthTitle title={t("auth.dangNhap")} />
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted">{t("auth.matKhau")}</span>
-          <input
-            type="password"
-            required
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="min-h-touch rounded-sm border border-border bg-background px-2 text-foreground"
-          />
-        </label>
+        {alert !== null && <FormAlert tone={alert.tone}>{alert.text}</FormAlert>}
 
-        {error !== null && (
-          <p role="alert" className="text-sm text-danger-text">
-            {error.code === ERROR_CODES.WRONG_PASSWORD
-              ? t("auth.saiMatKhau")
-              : error.code === ERROR_CODES.ACCOUNT_DISABLED
-                ? t("auth.taiKhoanBiKhoa")
-                : error.message}
-          </p>
-        )}
+        <AuthField
+          id="login-email"
+          label={t("auth.email")}
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={setEmail}
+          readOnly={sending}
+        />
+        <AuthField
+          id="login-password"
+          label={t("auth.matKhau")}
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={setPassword}
+          readOnly={sending}
+          inputRef={passwordRef}
+          after={
+            <Link
+              to={PATHS.forgotPassword}
+              className="-mt-1.5 -mb-3 inline-flex min-h-touch items-center self-end text-sm font-medium"
+            >
+              {t("auth.quenMatKhau")}
+            </Link>
+          }
+        />
 
-        <button
-          type="submit"
-          disabled={sending}
-          className="motion-press min-h-touch rounded-md border border-border px-3 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
-        >
-          {t("auth.dangNhap")}
-        </button>
+        <AuthActions>
+          <SubmitButton busy={sending} label={t("auth.dangNhap")} />
+        </AuthActions>
       </form>
-    </main>
+    </AuthLayout>
   );
 }
