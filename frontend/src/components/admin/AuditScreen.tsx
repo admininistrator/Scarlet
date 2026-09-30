@@ -10,6 +10,7 @@ import {
   describeActor,
   describeChanges,
   describeTarget,
+  limitWindows,
   type AuditChange,
   type AuditValue,
 } from "./auditView";
@@ -187,7 +188,14 @@ function ChangeLine({ change }: { change: AuditChange }) {
 function ChangeCell({ entry }: { entry: AuditEntry }) {
   return (
     <span className="flex min-w-0 flex-col gap-0.5">
-      <span className="text-foreground">{t(ACTION_LABEL[entry.action])}</span>
+      <span className="flex flex-wrap items-baseline gap-1.5 text-foreground">
+        <span>{t(ACTION_LABEL[entry.action])}</span>
+        {limitWindows(entry).map((key) => (
+          <span key={key} className="rounded-sm border border-border-strong px-1.5 text-2xs font-semibold">
+            {t(key)}
+          </span>
+        ))}
+      </span>
       {describeChanges(entry).map((change, i) => (
         <ChangeLine key={i} change={change} />
       ))}

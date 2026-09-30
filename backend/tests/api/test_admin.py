@@ -1074,6 +1074,48 @@ async def test_usage_key_source_filter_also_applies_to_purpose_split(
     assert byok["by_day"] == []
 
 
+async def test_usage_title_cost_is_server_sum_of_both_title_columns(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """T-S.17: `title_cost_usd` = SUM(cost_usd) WHERE purpose='title' — cả hai cột, mọi hàng."""
+    user_id = await _chat_and_title(client, session_factory)
+    # Lượt đặt tên thứ hai rơi vào cột `unmetered`: tổng phải qua cả hai cột.
+    await _write_ledger(
+        session_factory,
+        user_id=user_id,
+        model_id="m",
+        cost="0.005",
+        confidence=CostConfidence.LOW,
+        purpose=UsagePurpose.TITLE,
+    )
+    window = _open_window()
+    since, until = (datetime.fromisoformat(window[k]) for k in ("since", "until"))
+
+    body = (await client.get(USAGE_PATH, params=window)).json()
+
+    async with session_factory() as session:
+        ledger = (
+            await session.execute(
+                select(func.sum(UsageEvent.cost_usd)).where(
+                    UsageEvent.purpose == UsagePurpose.TITLE,
+                    UsageEvent.created_at >= since,
+                    UsageEvent.created_at < until,
+                )
+            )
+        ).scalar_one()
+    assert ledger == Decimal("0.025")
+    for split in (
+        body["totals"],
+        body["by_day"][0],
+        body["by_model"][0],
+        {h["key"]: h for h in body["by_user"]}[str(user_id)],
+        {h["key"]: h for h in body["by_key_source"]}["system"],
+    ):
+        assert Decimal(split["title_cost_usd"]) == ledger
+    # Chuỗi, không số thực: tiền không đi qua float ở JSON.
+    assert isinstance(body["totals"]["title_cost_usd"], str)
+
+
 def test_purpose_split_fields_equal_UsagePurpose() -> None:
     """`PurposeSplit` khai tay `chat`/`title`; enum mọc thêm việc thì test này đỏ."""
     assert set(admin_api.PurposeSplit.model_fields) == {p.value for p in UsagePurpose}

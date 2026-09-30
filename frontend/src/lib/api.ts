@@ -703,7 +703,22 @@ export interface MeteredSplit {
   unmetered: UsageAmount;
 }
 
-export interface CostRow extends MeteredSplit {
+/**
+ * T-S.8 — hai cot C16 tach them theo VIEC. `metered`/`unmetered` cua `UsageSplit`
+ * la tong moi viec (gom dat ten); phan `chat` la dung hai cot ay tru dat ten.
+ */
+export interface PurposeSplit {
+  chat: MeteredSplit;
+  title: MeteredSplit;
+}
+
+export interface UsageSplit extends MeteredSplit {
+  by_purpose: PurposeSplit;
+  /** T-S.17 — tien dat ten (ca hai cot) do SERVER cong. FE khong cong tien. */
+  title_cost_usd: string;
+}
+
+export interface CostRow extends UsageSplit {
   key: string;
   label: string | null;
 }
@@ -716,7 +731,7 @@ export interface CostsOut {
   until: string;
   /** Bo loc dang ap cho `totals`/`by_day`/`by_user`/`by_model`. `null` = moi nguon. */
   key_source: KeySource | null;
-  totals: MeteredSplit;
+  totals: UsageSplit;
   by_day: CostRow[];
   by_user: CostRow[];
   by_model: CostRow[];
@@ -727,6 +742,39 @@ export interface CostsOut {
 export interface ReloadCatalogOut {
   models: number;
   version: number;
+}
+
+/**
+ * T-S.8 — `GET /admin/models`: duong di THAT cua tung model (NQ-119). Chi man
+ * quan tri doc; `GET /models` cua nguoi dung khong bao gio co ten duong trung gian.
+ */
+export interface AdminModelRoute {
+  /** Khoa provider trong catalog (`ninerouter`). */
+  id: string;
+  /** Nhan duong di (`9Router (local)`). */
+  label: string;
+  /** `false` = duong trung gian, ten no khong toi nguoi dung. */
+  user_visible: boolean;
+  availability: "host-dependent" | "always";
+}
+
+export interface AdminModelOut {
+  id: string;
+  display_name: string;
+  /** Ten HANG — dung chuoi nguoi dung thay o `GET /models`. */
+  provider: string;
+  route: AdminModelRoute;
+  /** Luot do nen gan nhat cua DUONG DI; `reason` goi ten duong, `null` khi song. */
+  health: { available: boolean; reason: string | null };
+  /** Chi doc (B-258). `false` = co trong catalog nhung tat. */
+  enabled: boolean;
+}
+
+export interface AdminModelListOut {
+  models: AdminModelOut[];
+  /** Luc luot do nen bat dau; `null` = chua luot nao xong. */
+  checked_at: string | null;
+  stale_after_s: number;
 }
 
 // ────────────────────────────── cac loi goi ──────────────────────────────
@@ -1015,6 +1063,8 @@ export const api = {
     const query = params.toString();
     return request<CostsOut>(query === "" ? "/admin/usage" : `/admin/usage?${query}`);
   },
+
+  adminModels: () => request<AdminModelListOut>("/admin/models"),
 
   adminReloadCatalog: () =>
     request<ReloadCatalogOut>("/admin/catalog/reload", { method: "POST" }),

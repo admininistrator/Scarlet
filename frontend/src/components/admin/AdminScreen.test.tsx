@@ -7,7 +7,9 @@
  *   - He thong: ly do rong van noi duoc dieu gi do (B-193); `503` cua chinh API
  *     quan tri (Redis chet, C21) ⇒ roi ve `/health/deep` (B-190/Cam bay ①).
  *   - Nhat ky: "voi ai" bang chu, khong UUID (B-191).
- *   - Chi phi: tong la chuoi cua server, khong co phep cong nao.
+ *   - Chi phi: tong la chuoi cua server, khong co phep cong nao; khoan "Dat
+ *     ten" la `title_cost_usd` cua server, tach khoi hai cot (T-S.17).
+ *   - Model: hang + "qua <duong>" cho duong an; hong ghi TEN duong (T-S.17).
  */
 
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -28,6 +30,7 @@ vi.mock("../../lib/api", async (importOriginal) => {
       adminListTiers: vi.fn(),
       adminSystem: vi.fn(),
       adminAuditLogs: vi.fn(),
+      adminModels: vi.fn(),
       healthDeep: vi.fn(),
     },
   };
@@ -37,6 +40,7 @@ import type { SessionState } from "../../features/auth/useSessionState";
 import {
   ApiError,
   api,
+  type AdminModelListOut,
   type AdminUserListItem,
   type AuditEntry,
   type CostsOut,
@@ -186,8 +190,11 @@ describe("Nguoi dung", () => {
   });
 
   it("KHONG ve cong tac `is_default` (Cam bay ③ / B-152)", async () => {
+    const nd = userEvent.setup();
     renderAt("/admin?screen=users");
 
+    // Ban v2 muc 1c: bang tier la TAB thu hai cua man Nguoi dung.
+    await nd.click(await screen.findByRole("tab", { name: "Hạn mức theo tier" }));
     await screen.findByRole("region", { name: "Hạn mức theo tier" });
     expect(screen.queryByText(/mặc định/i)).toBeNull();
   });
@@ -272,28 +279,40 @@ describe("Nhat ky", () => {
 });
 
 describe("Chi phi", () => {
-  it("tong la chuoi cua SERVER (khong cong hai cot); nhan 'Cao nhat' la chuoi goc", async () => {
-    const zero = { cost_usd: "0", prompt_tokens: 0, completion_tokens: 0, events: 0 };
-    const report: CostsOut = {
-      since: "2026-09-16T00:00:00Z",
-      until: "2026-09-23T00:00:00Z",
-      key_source: "system",
-      totals: {
-        metered: { cost_usd: "0.3", prompt_tokens: 10, completion_tokens: 20, events: 2 },
-        unmetered: { cost_usd: "0.2", prompt_tokens: 10, completion_tokens: 20, events: 1 },
+  const zero = { cost_usd: "0", prompt_tokens: 0, completion_tokens: 0, events: 0 };
+  const amount = (cost_usd: string, events = 1) => ({ cost_usd, prompt_tokens: 10, completion_tokens: 20, events });
+  // Tong hai cot GOM ca dat ten (0.32 = 0.3 chat + 0.02 dat ten) — dung nghia backend.
+  const split = {
+    metered: amount("0.32", 3),
+    unmetered: amount("0.2"),
+    by_purpose: {
+      chat: { metered: amount("0.3", 2), unmetered: amount("0.2") },
+      title: { metered: amount("0.02"), unmetered: zero },
+    },
+    title_cost_usd: "0.02",
+  };
+  const report: CostsOut = {
+    since: "2026-09-16T00:00:00Z",
+    until: "2026-09-23T00:00:00Z",
+    key_source: "system",
+    totals: split,
+    by_day: [{ key: "2026-09-22", label: null, ...split }],
+    by_user: [],
+    by_model: [],
+    by_key_source: [
+      { key: "system", label: null, ...split },
+      {
+        key: "byok",
+        label: null,
+        metered: zero,
+        unmetered: zero,
+        by_purpose: { chat: { metered: zero, unmetered: zero }, title: { metered: zero, unmetered: zero } },
+        title_cost_usd: "0",
       },
-      by_day: [
-        {
-          key: "2026-09-22",
-          label: null,
-          metered: { cost_usd: "0.3", prompt_tokens: 10, completion_tokens: 20, events: 2 },
-          unmetered: { cost_usd: "0.2", prompt_tokens: 10, completion_tokens: 20, events: 1 },
-        },
-      ],
-      by_user: [],
-      by_model: [],
-      by_key_source: [{ key: "byok", label: null, metered: zero, unmetered: zero }],
-    };
+    ],
+  };
+
+  it("tong la chuoi cua SERVER (khong cong hai cot); nhan 'Cao nhat' la chuoi goc", async () => {
     vi.mocked(api.adminCosts).mockResolvedValue(report);
     renderAt("/admin?screen=cost");
 
@@ -304,7 +323,76 @@ describe("Chi phi", () => {
     expect(screen.queryByText("0.500000")).toBeNull();
     // Mac dinh B-178: loc tien he thong, 7 ngay.
     expect(vi.mocked(api.adminCosts).mock.calls[0][0]).toBe("system");
-    // Truc theo nguon KHONG bi loc — van ke dong BYOK.
-    expect(screen.getByRole("region", { name: /Theo nguồn tiền/ })).toHaveTextContent("BYOK");
+    // Truc theo nguon KHONG bi loc — van ke dong khoa rieng.
+    expect(screen.getByRole("region", { name: "Theo nguồn" })).toHaveTextContent("Khoá riêng");
+  });
+
+  it("T-S.17: 'Dat ten' la `title_cost_usd` cua server, KHONG nam trong the/cot Metered", async () => {
+    vi.mocked(api.adminCosts).mockResolvedValue(report);
+    renderAt("/admin?screen=cost");
+
+    const card = (await screen.findAllByText("Đặt tên hội thoại"))[0].closest("div") as HTMLElement;
+    expect(within(card).getByText("0.020000")).toBeInTheDocument();
+    expect(card).toHaveTextContent("Không trừ vào hạn mức người dùng.");
+    // Hai cot doc phan `chat`: 0.32 (tong gom dat ten) khong hien o dau ca.
+    expect(screen.queryByText("0.320000")).toBeNull();
+    // Hang khoa rieng: o dat ten la "—", khong phai 0 (luot dat ten luon la tien he thong).
+    const bySource = screen.getByRole("region", { name: "Theo nguồn" });
+    const byokRow = within(bySource).getByRole("row", { name: /Khoá riêng/ });
+    expect(within(byokRow).getByText("—")).toBeInTheDocument();
+  });
+
+  it("chon nguon 'Khoa rieng' ⇒ the dat ten noi 'Khong co trong nguon nay', khong in so 0", async () => {
+    const nd = userEvent.setup();
+    vi.mocked(api.adminCosts).mockResolvedValue(report);
+    renderAt("/admin?screen=cost");
+
+    const group = await screen.findByRole("radiogroup", { name: "Nguồn tiền" });
+    await nd.click(within(group).getByRole("radio", { name: "Khoá riêng" }));
+
+    expect(vi.mocked(api.adminCosts).mock.lastCall?.[0]).toBe("byok");
+    expect(await screen.findByText("Không có trong nguồn này")).toBeInTheDocument();
+  });
+});
+
+describe("Model", () => {
+  const MODELS: AdminModelListOut = {
+    models: [
+      {
+        id: "deepseek-flash",
+        display_name: "DeepSeek Flash",
+        provider: "DeepSeek",
+        route: { id: "deepseek", label: "DeepSeek AI", user_visible: true, availability: "always" },
+        health: { available: true, reason: null },
+        enabled: true,
+      },
+      {
+        id: "nr-gemini-flash",
+        display_name: "Gemini Flash",
+        provider: "Google AI",
+        route: { id: "ninerouter", label: "9Router (local)", user_visible: false, availability: "host-dependent" },
+        health: { available: false, reason: "9Router (local) đang không phản hồi." },
+        enabled: true,
+      },
+    ],
+    checked_at: "2026-09-30T07:32:10Z",
+    stale_after_s: 30,
+  };
+
+  it("DoD dong 2: 'Google AI · qua 9Router (local)'; hong ghi TEN duong, hang goi thang khong co 'qua'", async () => {
+    vi.mocked(api.adminModels).mockResolvedValue(MODELS);
+    renderAt("/admin?screen=models");
+
+    const table = await screen.findByRole("region", { name: "Model" });
+    const gemini = within(table).getByRole("row", { name: /Gemini Flash/ });
+    expect(gemini).toHaveTextContent("Google AI · qua 9Router (local)");
+    expect(gemini).toHaveTextContent("Lỗi ở đường 9Router (local)");
+    const deepseek = within(table).getByRole("row", { name: /DeepSeek Flash/ });
+    expect(deepseek).toHaveTextContent("DeepSeek");
+    expect(deepseek).not.toHaveTextContent("qua");
+    expect(deepseek).toHaveTextContent("Hoạt động");
+    // The duong di: ly do cua server nguyen van, loai "Trung gian" cho duong an.
+    expect(screen.getByText("9Router (local) đang không phản hồi.")).toBeInTheDocument();
+    expect(screen.getByText("Trung gian")).toBeInTheDocument();
   });
 });

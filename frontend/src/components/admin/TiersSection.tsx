@@ -4,7 +4,7 @@ import { toApiError } from "../../features/admin/useResource";
 import { ApiError, api, type TierPatch, type TierRow } from "../../lib/api";
 import { t, type TextKey } from "../../lib/i18n";
 import { TableScroll } from "../ui/TableScroll";
-import { EffectNotice, ErrorNotice, Switch, TD, TH, TH_NUMBER } from "./adminUi";
+import { EffectNotice, ErrorNotice, PendingBadge, Switch, TD, TH, TH_NUMBER } from "./adminUi";
 import { formatClock, formatCount } from "./format";
 import { AdminDialog, DialogButtons } from "./AdminDialog";
 
@@ -14,11 +14,9 @@ import { AdminDialog, DialogButtons } from "./AdminDialog";
  * KH tham chieu: §10.4, §16.3 · tasks.md T-2.20, T-3.12 (Cam bay ② ③), B-152,
  * NQ-51.
  *
- * Ban T-HD7 khong ve man rieng cho tier (sau muc dieu huong, khong co "Tier"),
- * nhung T-2.20 giao UI cua hai endpoint nay cho T-3.12. Dat o CUOI man "Nguoi
- * dung" — cot "Tier" cua bang tren tro toi chinh cac hang nay — va dung LAI
- * cac manh cua ban ve (bang cuon, dialog, cau 60 giay) thay vi tu nghi mot bo
- * cuc thu bay.
+ * Ban T-HD7-v2 (muc 1c, B-262 ③) chot cho cua no: TAB thu hai cua man "Nguoi
+ * dung" (T-S.17). Ban v2 chi ve hai cot han muc + "So nguoi dung"; o day giu du
+ * tam truong (nguoi dung chot o T-S.17) va khong co cot dem — server khong gui.
  *
  * Hai luat cua task:
  *
@@ -54,11 +52,14 @@ const FIELD_LABEL: Record<MoneyField | IntField | BoolField | "allowed_model_tag
 export function TiersSection({
   tiers,
   ttlSeconds,
+  pendingSince,
   onSaved,
 }: {
   tiers: readonly TierRow[];
   ttlSeconds: number | null;
-  onSaved: () => Promise<void>;
+  /** T-S.17 (ban v2 muc 1c): luc luu cua tier con "cho hieu luc", hoac `null`. */
+  pendingSince: (tierName: string) => number | null;
+  onSaved: (tierName: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<TierRow | null>(null);
 
@@ -68,7 +69,6 @@ export function TiersSection({
 
   return (
     <>
-      <h3 className="text-xl font-semibold text-foreground">{t("admin.tiers.title")}</h3>
       <TableScroll label={t("admin.tiers.title")}>
         <thead>
           <tr>
@@ -99,10 +99,15 @@ export function TiersSection({
           </tr>
         </thead>
         <tbody>
-          {tiers.map((tier) => (
+          {tiers.map((tier) => {
+            const since = pendingSince(tier.name);
+            return (
             <tr key={tier.name}>
               <th scope="row" className={`${TD} sticky-col w-sticky-col text-left font-normal`}>
-                <span className="rounded-sm border border-border px-1.5 font-mono text-xs">{tier.name}</span>
+                <span className="flex flex-col items-start gap-1">
+                  <span className="rounded-sm border border-border-strong px-1.5 font-mono text-sm">{tier.name}</span>
+                  {since !== null && <PendingBadge savedAtLabel={formatClock(since)} />}
+                </span>
               </th>
               {MONEY_FIELDS.map((f) => (
                 <td key={f} className={`${TD} money`}>
@@ -133,7 +138,8 @@ export function TiersSection({
                 </button>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </TableScroll>
 
@@ -196,7 +202,7 @@ function TierEditDialog({
   tier: TierRow;
   ttlSeconds: number | null;
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: (tierName: string) => Promise<void>;
 }) {
   const [money, setMoney] = useState<Record<MoneyField, string>>({
     limit_5h_usd: tier.limit_5h_usd,
@@ -223,7 +229,7 @@ function TierEditDialog({
     try {
       await api.adminUpdateTier(tier.name, tierPatch(tier, { money, ints, bools, tags }));
       setSavedAt(Date.now());
-      await onSaved();
+      await onSaved(tier.name);
     } catch (e) {
       setError(toApiError(e));
     } finally {
@@ -232,7 +238,11 @@ function TierEditDialog({
   };
 
   return (
-    <AdminDialog title={t("admin.tiers.dialogTitle")} subtitle={tier.name} onClose={onClose}>
+    <AdminDialog
+      title={t("admin.tiers.dialogTitle")}
+      subtitle={`${t("admin.tiers.subtitlePrefix")} ${tier.name}`}
+      onClose={onClose}
+    >
       {MONEY_FIELDS.map((f) => (
         <div key={f} className="flex flex-col gap-1.5">
           <label htmlFor={`${baseId}-${f}`} className="text-sm font-medium text-foreground">

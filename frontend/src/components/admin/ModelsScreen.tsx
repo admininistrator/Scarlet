@@ -1,59 +1,106 @@
 import { useState } from "react";
 
 import { toApiError, useResource } from "../../features/admin/useResource";
-import { ApiError, api, type ModelOut, type ReloadCatalogOut } from "../../lib/api";
+import { ApiError, api, type AdminModelOut, type ReloadCatalogOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { TableScroll } from "../ui/TableScroll";
 import { ErrorNotice, FailureReason, HealthDot, LoadingNote, ScreenTitle, TD, TH } from "./adminUi";
 import { formatClock } from "./format";
 
 /**
- * Man 1d "Model" — §16.3, ban T-HD7 · T-3.12.
+ * Man 1e "Model" — §16.3, ban T-HD7-v2 · T-3.12 → T-S.17.
  *
- * KH tham chieu: §16.3, §9.2, §9.3, UC-05, RR-5 · tasks.md T-2.19 (nut
- * reload), T-3.6 (`core/provider_health.py`), T-3.12.
+ * KH tham chieu: §16.3, §9.2, §9.5, §24.2b·S3a · tasks.md T-2.19 (nut
+ * reload), T-S.8 (`GET /admin/models`), T-S.17, B-262 ④, NQ-119.
  *
- * **Health tung provider doc tu `GET /models`**, cung nguon ma Model Picker
- * doc (`available` + `unavailable_reason`, §18.3) — hai man hinh noi hai
- * chuyen khac nhau ve cung mot provider la cach chac nhat de khong ai tin man
- * nao. Provider `always` KHONG duoc do (xem `provider_health.py`): chung luon
- * "hoat dong" o day, va man hinh noi ro dieu ay thay vi de nguoi doc tuong la
- * da kiem. Do tre / "kiem luc" cua ban ve server khong gui, nen o ay vang mat
- * (cung luat voi o tong cua man Chi phi).
+ * **Health thuoc ve DUONG DI** (§9.5): doc `GET /admin/models` — hang + duong
+ * di that + luot do nen gan nhat cua duong ay. `GET /models` cua nguoi dung co
+ * y giau duong trung gian (NQ-119), nen man nay KHONG doc no nua: "Google AI
+ * xam" chi hieu duoc khi biet no di qua 9Router.
  *
- * **Khong co cong tac bat/tat tung model.** §16.3 co hang ay va ban T-HD7 co
- * ve, nhung KHONG endpoint nao doi `enabled` cua mot model — catalog la file
- * (§9.2), doi bang cach sua `model_catalog.json` roi bam "Tai lai catalog".
- * Mot cong tac khong noi voi gi te hon khong co cong tac (Cam bay ③, cung ly
- * le). Ghi Backlog.
+ * **"qua <duong>" chi hien cho duong AN voi nguoi dung** (`route.user_visible
+ * === false`). Nhan duong la nguyen van `providers[].label` cua catalog
+ * ("9Router (local)"). Backend khong phan biet "goi thang" voi "self-host",
+ * va so chuoi hang voi nhan duong khong dung duoc ("DeepSeek" / "DeepSeek AI")
+ * — nen the duong di chi ghi loai "Trung gian" cho duong an (T-S.17, nguoi
+ * dung chot).
+ *
+ * B-262 ④ theo ban v2: the khong co do tre, bang khong co cot "Bat" — khong
+ * endpoint nao cho hai thu ay (B-258). "Kiem luc" la `checked_at` cua server.
+ * Model `enabled: false` van co mat (server tra ca model tat): hang ghi "Dang
+ * tat" thay cho tinh trang duong — mot model tat khong "hoat dong" du duong
+ * cua no song.
  */
 
-interface ProviderCard {
+interface RouteCard {
+  id: string;
   label: string;
+  intermediary: boolean;
   ok: boolean;
   reason: string | null;
+  /** Ten hien thi cua cac model DANG BAT di qua duong nay. */
+  serves: string[];
 }
 
-/** Gom `GET /models` theo provider — provider hong khi CO model cua no bi xam. */
-export function providerCards(models: readonly ModelOut[]): ProviderCard[] {
-  const byProvider = new Map<string, ProviderCard>();
+/** Gom `GET /admin/models` theo duong di, giu thu tu xuat hien trong catalog. */
+export function routeCards(models: readonly AdminModelOut[]): RouteCard[] {
+  const byRoute = new Map<string, RouteCard>();
   for (const m of models) {
-    // T-S.3: model cua duong trung gian co `provider_id: null` — gom theo ten
-    // hang de hai duong khong dinh vao mot the. Duong di that tro lai o
-    // `GET /admin/models` (T-S.8).
-    const key = m.provider_id ?? m.provider;
-    const existing = byProvider.get(key) ?? { label: m.provider, ok: true, reason: null };
-    if (!m.available) {
-      existing.ok = false;
-      existing.reason = existing.reason ?? m.unavailable_reason;
+    const card = byRoute.get(m.route.id) ?? {
+      id: m.route.id,
+      label: m.route.label,
+      intermediary: !m.route.user_visible,
+      ok: true,
+      reason: null,
+      serves: [],
+    };
+    if (!m.health.available) {
+      card.ok = false;
+      card.reason = card.reason ?? m.health.reason;
     }
-    byProvider.set(key, existing);
+    if (m.enabled) {
+      card.serves.push(m.display_name);
+    }
+    byRoute.set(m.route.id, card);
   }
-  return [...byProvider.values()];
+  return [...byRoute.values()];
 }
+
+/** "Google AI · qua 9Router (local)" — hang va duong la hai manh rieng. */
+function VendorRoute({ model }: { model: AdminModelOut }) {
+  return (
+    <span>
+      <span className="font-medium">{model.provider}</span>
+      {!model.route.user_visible && (
+        <>
+          <span className="text-muted"> · {t("admin.models.via")} </span>
+          <span className="font-medium">{model.route.label}</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+function RouteHealth({ model }: { model: AdminModelOut }) {
+  if (!model.enabled) {
+    return <span className="text-sm text-muted">{t("admin.models.disabled")}</span>;
+  }
+  return (
+    <>
+      <HealthDot ok={model.health.available} />
+      {!model.health.available && (
+        <span className="block text-xs text-foreground">
+          {t("admin.models.failedOnRoute")} <strong>{model.route.label}</strong>
+        </span>
+      )}
+    </>
+  );
+}
+
+const isFailed = (m: AdminModelOut) => m.enabled && !m.health.available;
 
 export function ModelsScreen() {
-  const models = useResource(api.listModels);
+  const models = useResource(api.adminModels);
   const [reloading, setReloading] = useState(false);
   const [lastReload, setLastReload] = useState<{ at: number; result: ReloadCatalogOut } | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
@@ -71,6 +118,8 @@ export function ModelsScreen() {
       setReloading(false);
     }
   };
+
+  const checkedAt = models.data?.checked_at ?? null;
 
   return (
     <>
@@ -125,53 +174,112 @@ export function ModelsScreen() {
       {models.data === null ? (
         models.loading && <LoadingNote />
       ) : (
-        <>
-          <h3 className="text-xl font-semibold text-foreground">{t("admin.models.providers")}</h3>
-          <ul className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
-            {providerCards(models.data).map((p) => (
-              <li
-                key={p.label}
-                className={
-                  p.ok
-                    ? "flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-surface-panel p-4"
-                    : "flex min-w-0 flex-col gap-2 rounded-lg border border-danger bg-surface-panel p-4"
-                }
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-sm font-medium text-foreground">{p.label}</span>
-                  <HealthDot ok={p.ok} />
-                </div>
-                {!p.ok && <FailureReason reason={p.reason} />}
-              </li>
-            ))}
-          </ul>
-          <p className="text-xs text-muted">{t("admin.models.healthNote")}</p>
-
-          <h3 className="text-xl font-semibold text-foreground">{t("admin.models.catalog")}</h3>
-          <TableScroll label={t("admin.models.catalog")}>
-            <thead>
-              <tr>
-                <th scope="col" className={`${TH} sticky-col w-sticky-col`}>
-                  {t("admin.col.model")}
-                </th>
-                <th scope="col" className={TH}>
-                  {t("admin.col.provider")}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {models.data.map((m) => (
-                <tr key={m.id}>
-                  <th scope="row" className={`${TD} sticky-col w-sticky-col text-left font-normal`}>
-                    <span className="block font-semibold">{m.display_name}</span>
-                    <span className="block font-mono text-xs text-muted">{m.id}</span>
-                  </th>
-                  <td className={`${TD} text-muted`}>{m.provider}</td>
-                </tr>
+        // Ban v2 muc 1i: duoi `md` danh sach model dung TRUOC the duong di —
+        // cau hoi thuong gap la "model nao dang hong".
+        <div className="flex min-w-0 flex-col gap-5">
+          <section className="order-2 flex min-w-0 flex-col gap-3 md:order-1">
+            <h3 className="text-lg font-semibold text-foreground md:text-xl">{t("admin.models.routes")}</h3>
+            <ul className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2 md:gap-3 lg:grid-cols-3">
+              {routeCards(models.data.models).map((p) => (
+                <li
+                  key={p.id}
+                  className={
+                    p.ok
+                      ? "flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-surface-panel px-3.5 py-3 md:gap-2 md:p-4"
+                      : "flex min-w-0 flex-col gap-1.5 rounded-lg border border-danger bg-surface-panel px-3.5 py-3 md:gap-2 md:p-4"
+                  }
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="flex min-w-0 flex-wrap items-baseline gap-x-1 md:flex-col md:gap-0.5">
+                      <span className="text-base font-semibold text-foreground md:text-body">{p.label}</span>
+                      {p.intermediary && (
+                        <span className="text-xs text-muted">
+                          <span aria-hidden="true" className="md:hidden">
+                            ·{" "}
+                          </span>
+                          {t("admin.models.kind.intermediary")}
+                        </span>
+                      )}
+                    </span>
+                    <HealthDot ok={p.ok} />
+                  </div>
+                  {!p.ok && <FailureReason reason={p.reason} />}
+                  <p className="hidden text-xs text-muted md:block">
+                    {t("admin.models.servesPrefix")}{" "}
+                    <span className="text-foreground">{p.serves.length > 0 ? p.serves.join(", ") : "—"}</span>
+                  </p>
+                  {checkedAt !== null && (
+                    <p className="hidden text-xs text-muted md:block">
+                      {t("admin.system.checkedAtPrefix")} <span className="tabular">{formatClock(checkedAt)}</span>
+                    </p>
+                  )}
+                </li>
               ))}
-            </tbody>
-          </TableScroll>
-        </>
+            </ul>
+            <p className="text-xs text-muted">{t("admin.models.healthNote")}</p>
+          </section>
+
+          <section className="order-1 flex min-w-0 flex-col gap-3 md:order-2">
+            <h3 className="text-lg font-semibold text-foreground md:sr-only">{t("admin.models.catalog")}</h3>
+            <div className="hidden min-w-0 md:block">
+              <TableScroll label={t("admin.models.catalog")}>
+                <thead>
+                  <tr>
+                    <th scope="col" className={TH}>
+                      {t("admin.col.model")}
+                    </th>
+                    <th scope="col" className={TH}>
+                      {t("admin.col.vendorRoute")}
+                    </th>
+                    <th scope="col" className={TH}>
+                      {t("admin.col.routeHealth")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {models.data.models.map((m) => (
+                    <tr key={m.id} className={isFailed(m) ? "bg-danger-subtle" : undefined}>
+                      <th scope="row" className={`${TD} py-3 text-left font-semibold`}>
+                        {m.display_name}
+                      </th>
+                      <td className={`${TD} py-3`}>
+                        <VendorRoute model={m} />
+                      </td>
+                      <td className={`${TD} py-3`}>
+                        <RouteHealth model={m} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </TableScroll>
+            </div>
+            <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface-panel md:hidden">
+              {models.data.models.map((m) => (
+                <li
+                  key={m.id}
+                  className={`flex flex-col gap-1 px-3.5 py-3 text-sm ${isFailed(m) ? "bg-danger-subtle" : ""}`}
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-base font-semibold text-foreground">{m.display_name}</span>
+                    <span className="flex-none">
+                      {m.enabled ? (
+                        <HealthDot ok={m.health.available} />
+                      ) : (
+                        <span className="text-sm text-muted">{t("admin.models.disabled")}</span>
+                      )}
+                    </span>
+                  </div>
+                  <VendorRoute model={m} />
+                  {isFailed(m) && (
+                    <span className="text-xs text-foreground">
+                      {t("admin.models.failedOnRoute")} <strong>{m.route.label}</strong>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
       )}
     </>
   );

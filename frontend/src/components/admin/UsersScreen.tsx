@@ -65,12 +65,28 @@ import {
  * ── Khong co thao tac hang loat ──────────────────────────────────────────
  *
  * Ban ve: *"mot quan tri vien, 20 nguoi"*. Menu ⋯ moi hang, khong checkbox.
+ *
+ * ── Hai tab (ban T-HD7-v2 muc 1b/1c, B-262 ③) ──────────────────────────────
+ *
+ * "Han muc theo tier" la TAB thu hai cua man nay, khong phai man thu bay: tier
+ * la thuoc tinh cua nguoi dung. Bang tier giu du tam truong sua duoc (T-S.17,
+ * nguoi dung chot — ban v2 chi ve hai cot han muc); cot "So nguoi dung" vang
+ * vi server khong gui. Tier vua sua mang nhan "Cho hieu luc" nhu hang nguoi
+ * dung — chung mot hen gio, khoa `tier:<ten>` trong cung bang `savedAt`.
  */
 
 const LIMIT_LABEL: Record<LimitKey, TextKey> = {
   limit_5h_usd: "admin.quota.label5h",
   limit_7d_usd: "admin.quota.label7d",
 };
+type Tab = "list" | "tiers";
+const TABS: { id: Tab; label: TextKey; short: TextKey }[] = [
+  { id: "list", label: "admin.users.tab.list", short: "admin.users.tab.listShort" },
+  { id: "tiers", label: "admin.tiers.title", short: "admin.tiers.title" },
+];
+
+const tierKey = (name: string) => `tier:${name}`;
+
 const LIMIT_SHORT: Record<LimitKey, TextKey> = {
   limit_5h_usd: "admin.limit.5h",
   limit_7d_usd: "admin.limit.7d",
@@ -99,9 +115,12 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
   const ttl = tiers.data?.limits_cache_ttl_s ?? null;
   const tierRows = tiers.data?.tiers ?? [];
 
-  /** userId → luc luu thay doi han muc gan nhat (ms). */
+  const [tab, setTab] = useState<Tab>("list");
+  const tabsId = useId();
+  /** userId | `tier:<ten>` → luc luu thay doi han muc gan nhat (ms). */
   const [savedAt, setSavedAt] = useState<Record<string, number>>({});
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [lastTierSavedAt, setLastTierSavedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
@@ -163,6 +182,9 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
     [users],
   );
 
+  const pendingSince = (key: string): number | null =>
+    savedAt[key] !== undefined && isPending(savedAt[key], now, ttl) ? savedAt[key] : null;
+
   const dialogUser =
     dialog === null ? null : (users.data?.find((u) => u.id === dialog.userId) ?? null);
 
@@ -178,10 +200,73 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
       )}
       {actionError && <ErrorNotice title={t("admin.actionError")} error={actionError} />}
 
-      <EffectNotice
-        savedAtLabel={lastSavedAt !== null ? formatClock(lastSavedAt) : undefined}
-        ttlSeconds={ttl}
-      />
+      <div role="tablist" aria-label={t("admin.users.title")} className="flex gap-1 border-b border-border">
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            id={`${tabsId}-${item.id}`}
+            aria-selected={tab === item.id}
+            aria-label={t(item.label)}
+            aria-controls={`${tabsId}-${item.id}-panel`}
+            tabIndex={tab === item.id ? 0 : -1}
+            onClick={() => setTab(item.id)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                const next = tab === "list" ? "tiers" : "list";
+                setTab(next);
+                document.getElementById(`${tabsId}-${next}`)?.focus();
+              }
+            }}
+            className={
+              tab === item.id
+                ? "motion-press -mb-px flex min-h-touch flex-1 items-center justify-center border-b-2 border-accent-text px-3.5 text-base font-semibold text-foreground sm:flex-none"
+                : "motion-press flex min-h-touch flex-1 items-center justify-center px-3.5 text-base text-muted hover:text-foreground sm:flex-none"
+            }
+          >
+            <span className="sm:hidden">{t(item.short)}</span>
+            <span className="hidden sm:inline">{t(item.label)}</span>
+          </button>
+        ))}
+      </div>
+
+      {tab === "tiers" ? (
+        <div
+          role="tabpanel"
+          id={`${tabsId}-tiers-panel`}
+          aria-labelledby={`${tabsId}-tiers`}
+          className="flex min-w-0 flex-col gap-5"
+        >
+          <p className="max-w-prose text-sm text-muted">{t("admin.tiers.intro")}</p>
+          <EffectNotice
+            savedAtLabel={lastTierSavedAt !== null ? formatClock(lastTierSavedAt) : undefined}
+            ttlSeconds={ttl}
+          />
+          <TiersSection
+            tiers={tierRows}
+            ttlSeconds={ttl}
+            pendingSince={(name) => pendingSince(tierKey(name))}
+            onSaved={async (name) => {
+              const at = Date.now();
+              setSavedAt((prev) => ({ ...prev, [tierKey(name)]: at }));
+              setLastTierSavedAt(at);
+              setNow(at);
+              await tiers.reload();
+            }}
+          />
+        </div>
+      ) : (
+        <div
+          role="tabpanel"
+          id={`${tabsId}-list-panel`}
+          aria-labelledby={`${tabsId}-list`}
+          className="flex min-w-0 flex-col gap-5"
+        >
+          <EffectNotice
+            savedAtLabel={lastSavedAt !== null ? formatClock(lastSavedAt) : undefined}
+            ttlSeconds={ttl}
+          />
 
       {users.data === null ? (
         users.loading && <LoadingNote />
@@ -196,7 +281,7 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
                 {t("admin.col.status")}
               </th>
               <th scope="col" className={TH}>
-                {t("admin.col.tier")}
+                {t("admin.col.tierLimits")}
               </th>
               <th scope="col" className={TH_NUMBER}>
                 {t("admin.col.spend7d")}
@@ -218,11 +303,7 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
                 key={u.id}
                 user={u}
                 tiers={tierRows}
-                pendingSince={
-                  savedAt[u.id] !== undefined && isPending(savedAt[u.id], now, ttl)
-                    ? savedAt[u.id]
-                    : null
-                }
+                pendingSince={pendingSince(u.id)}
                 busy={busyId !== null}
                 isSelf={u.id === currentUserId}
                 menuOpen={menuFor === u.id}
@@ -251,6 +332,8 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
           </tbody>
         </TableScroll>
       )}
+        </div>
+      )}
 
       {dialogUser !== null && dialog?.kind === "tier" && (
         <TierDialog
@@ -274,14 +357,6 @@ export function UsersScreen({ currentUserId }: { currentUserId: string | null })
           }
         />
       )}
-
-      <TiersSection
-        tiers={tierRows}
-        ttlSeconds={ttl}
-        onSaved={async () => {
-          await tiers.reload();
-        }}
-      />
     </>
   );
 }
@@ -341,11 +416,10 @@ function UserRow({
           <span className="rounded-sm border border-border px-1.5 font-mono text-xs">{user.tier_name}</span>
           {pendingSince !== null && <PendingBadge savedAtLabel={formatClock(pendingSince)} />}
           {overridden.length > 0 && (
-            <span className="text-2xs text-muted">
-              {t("admin.override.label")}
+            <span className="flex flex-col text-2xs text-muted">
+              <span className="font-semibold">{t("admin.override.label")}</span>
               {overridden.map((k) => (
                 <span key={k}>
-                  {" · "}
                   {t(LIMIT_SHORT[k])}{" "}
                   <span className="tabular text-foreground">
                     {padMoney(overrideLimit(user.limit_override_json, k), 4)}
@@ -376,10 +450,21 @@ function UserRow({
               disabled={busy}
               className="motion-press flex size-touch items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
             >
-              <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" className="fill-current">
-                <circle cx="4" cy="9" r="1.5" />
-                <circle cx="9" cy="9" r="1.5" />
-                <circle cx="14" cy="9" r="1.5" />
+              {/* Ban v2: `ellipsis` dang NET (lucide) — ba cham dac cua v1 trai rang buoc 14. */}
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="stroke-current"
+              >
+                <circle cx="12" cy="12" r="1" />
+                <circle cx="19" cy="12" r="1" />
+                <circle cx="5" cy="12" r="1" />
               </svg>
             </button>
           </Popover.Trigger>
@@ -518,7 +603,11 @@ function QuotaOverrideDialog({
   };
 
   return (
-    <AdminDialog title={t("admin.quota.dialogTitle")} subtitle={user.display_name ?? user.email} onClose={onClose}>
+    <AdminDialog
+      title={t("admin.quota.dialogTitle")}
+      subtitle={`${user.display_name ?? user.email} · ${t("admin.tierPrefix")} ${user.tier_name}`}
+      onClose={onClose}
+    >
       {LIMIT_KEYS.map((key) => (
         <div key={key} className="flex flex-col gap-1.5">
           <label htmlFor={`${baseId}-${key}`} className="text-sm font-medium text-foreground">
@@ -529,6 +618,9 @@ function QuotaOverrideDialog({
             inputMode="decimal"
             autoComplete="off"
             value={values[key]}
+            // Ban v2: o trong hien chu mo, KHONG dien san so cua tier — luu
+            // xong khong vo tinh bien thanh mot ban ghi de.
+            placeholder={t("admin.quota.placeholder")}
             onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
             className="motion-control min-h-touch rounded-md border border-border-strong bg-background px-3 text-right text-base tabular text-foreground"
           />

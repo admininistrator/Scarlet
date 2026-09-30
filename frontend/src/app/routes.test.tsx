@@ -65,7 +65,15 @@ const EMPTY_COSTS: CostsOut = {
   since: "2026-09-13T00:00:00Z",
   until: "2026-09-20T00:00:00Z",
   key_source: "system",
-  totals: { metered: ZERO_AMOUNT, unmetered: ZERO_AMOUNT },
+  totals: {
+    metered: ZERO_AMOUNT,
+    unmetered: ZERO_AMOUNT,
+    by_purpose: {
+      chat: { metered: ZERO_AMOUNT, unmetered: ZERO_AMOUNT },
+      title: { metered: ZERO_AMOUNT, unmetered: ZERO_AMOUNT },
+    },
+    title_cost_usd: "0",
+  },
   by_day: [],
   by_user: [],
   by_model: [],

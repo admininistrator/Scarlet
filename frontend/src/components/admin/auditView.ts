@@ -21,7 +21,7 @@
 import type { AuditActionName, AuditEntry, UserStatus } from "../../lib/api";
 import type { TextKey } from "../../lib/i18n";
 import { shortId } from "./format";
-import { STATUS_LABEL } from "./usersView";
+import { LIMIT_KEYS, STATUS_LABEL, type LimitKey } from "./usersView";
 
 /** Ten bang cua `target_type` — khop `TARGET_*` cua `db/models/audit_log.py`. */
 const TARGET_USERS = "users";
@@ -146,6 +146,33 @@ function plain(value: unknown): string {
     return `[${value.map(String).join(", ")}]`;
   }
   return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+const WINDOW_LABEL: Record<LimitKey, TextKey> = {
+  limit_5h_usd: "admin.limit.5h",
+  limit_7d_usd: "admin.limit.7d",
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+/**
+ * Ban T-HD7-v2 muc 1g: hanh dong han muc mang nhan CUA SO no cham toi (5 gio /
+ * 7 ngay) thanh the rieng canh nhan hanh dong. Sua tier: truong `limit_*` co
+ * trong `changed`; ghi de: khoa `limit_*` cua ban ghi de khac nhau giua cu/moi.
+ */
+export function limitWindows(entry: AuditEntry): TextKey[] {
+  if (entry.action !== "user.update" && entry.action !== "tier.update") {
+    return [];
+  }
+  const changed = asRecord(entry.details?.changed);
+  const override = asRecord(changed.limit_override_json);
+  const hasOverride = "limit_override_json" in changed;
+  return LIMIT_KEYS.filter(
+    (field) =>
+      field in changed ||
+      (hasOverride && asRecord(override.from)[field] !== asRecord(override.to)[field]),
+  ).map((field) => WINDOW_LABEL[field]);
 }
 
 /** Cac dong "cu → moi" cua mot dong so, theo dung hinh dang `details` cua tung hanh dong. */

@@ -366,6 +366,12 @@ class UsageSplit(MeteredSplit):
     """
 
     by_purpose: PurposeSplit
+    #: T-S.17 — tiền đặt tên của hàng: `by_purpose.title` cộng qua hai cột, do
+    #: SERVER cộng (Cạm bẫy ① T-S.17: FE không cộng tiền). Ngoại lệ có chủ ý
+    #: với luật "không có trường tổng" của `MeteredSplit`: khoản đặt tên là một
+    #: con số trên màn Chi phí (bản T-HD7-v2, thẻ + cột "Đặt tên hội thoại"),
+    #: và hai phần của nó vẫn nằm nguyên trong `by_purpose.title` cho ai cần tách.
+    title_cost_usd: Decimal
 
 
 class UsageRow(UsageSplit):
@@ -660,10 +666,12 @@ def _split_fields(by_purpose: dict[UsagePurpose, MeteredSplit]) -> dict[str, Any
     """
     parts = {p: by_purpose.get(p, _ZERO_SPLIT) for p in UsagePurpose}
     total = _sum_splits(list(parts.values()))
+    title = parts[UsagePurpose.TITLE]
     return {
         "metered": total.metered,
         "unmetered": total.unmetered,
         "by_purpose": PurposeSplit(**{p.value: split for p, split in parts.items()}),
+        "title_cost_usd": title.metered.cost_usd + title.unmetered.cost_usd,
     }
 
 

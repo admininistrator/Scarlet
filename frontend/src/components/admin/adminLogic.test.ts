@@ -13,10 +13,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { AdminUserOut, AuditEntry, ModelOut, TierRow } from "../../lib/api";
-import { describeActor, describeChanges, describeTarget, describeValue } from "./auditView";
+import type { AdminModelOut, AdminUserOut, AuditEntry, TierRow } from "../../lib/api";
+import { describeActor, describeChanges, describeTarget, describeValue, limitWindows } from "./auditView";
 import { formatDateTime, formatDayKey, formatShortDateTime, padMoney, shortId } from "./format";
-import { providerCards } from "./ModelsScreen";
+import { routeCards } from "./ModelsScreen";
 import { tierPatch } from "./TiersSection";
 import {
   effectiveSkills,
@@ -265,38 +265,71 @@ describe("tierPatch — chi gui truong THAT SU doi", () => {
   });
 });
 
-describe("providerCards — health tung provider tu `GET /models`", () => {
-  function model(p: Partial<ModelOut>): ModelOut {
+describe("routeCards — health thuoc ve DUONG DI (`GET /admin/models`, T-S.17)", () => {
+  function model(p: Partial<AdminModelOut>): AdminModelOut {
     return {
       id: "m",
       display_name: "M",
-      provider: "Nhan",
-      provider_id: "khoa",
-      capabilities: [],
-      context_window: 1,
-      max_output: 1,
-      default: false,
-      badge: null,
-      available: true,
-      unavailable_reason: null,
-      reasoning: null,
-      pricing: null,
-      pricing_mode: "unmetered",
-      checked_at: null,
-      stale_after_s: 30,
+      provider: "Hang",
+      route: { id: "khoa", label: "Nhan", user_visible: true, availability: "always" },
+      health: { available: true, reason: null },
+      enabled: true,
       ...p,
     };
   }
+  const nineRouter = {
+    id: "ninerouter",
+    label: "9Router (local)",
+    user_visible: false,
+    availability: "host-dependent",
+  } as const;
 
-  it("gom theo KHOA provider; hong khi CO model bi xam, kem ly do", () => {
-    const the = providerCards([
-      model({ id: "a", provider: "DeepSeek AI", provider_id: "deepseek" }),
-      model({ id: "b", provider: "9Router (local)", provider_id: "ninerouter", available: false, unavailable_reason: "tat" }),
-      model({ id: "c", provider: "9Router (local)", provider_id: "ninerouter", available: false, unavailable_reason: "tat" }),
+  it("gom theo KHOA duong; hong khi CO model bi xam, kem ly do; 'Dung cho' chi model dang bat", () => {
+    const cards = routeCards([
+      model({ id: "a", display_name: "DeepSeek Flash", route: { ...model({}).route, id: "deepseek", label: "DeepSeek AI" } }),
+      model({
+        id: "b",
+        display_name: "Gemini Flash",
+        provider: "Google AI",
+        route: nineRouter,
+        health: { available: false, reason: "9Router (local) dang khong phan hoi" },
+      }),
+      model({ id: "c", display_name: "Gemini Tat", route: nineRouter, enabled: false }),
     ]);
-    expect(the).toEqual([
-      { label: "DeepSeek AI", ok: true, reason: null },
-      { label: "9Router (local)", ok: false, reason: "tat" },
+    expect(cards).toEqual([
+      { id: "deepseek", label: "DeepSeek AI", intermediary: false, ok: true, reason: null, serves: ["DeepSeek Flash"] },
+      {
+        id: "ninerouter",
+        label: "9Router (local)",
+        intermediary: true,
+        ok: false,
+        reason: "9Router (local) dang khong phan hoi",
+        serves: ["Gemini Flash"],
+      },
     ]);
+  });
+});
+
+describe("limitWindows — nhat ky gan the cua so (ban v2 muc 1g)", () => {
+  it("sua tier: dung cua so co trong `changed`", () => {
+    expect(
+      limitWindows(
+        entry({
+          action: "tier.update",
+          target_type: "tiers",
+          details: { changed: { limit_7d_usd: { from: "10", to: "12" } } },
+        }),
+      ),
+    ).toEqual(["admin.limit.7d"]);
+  });
+
+  it("ghi de: chi cua so co gia tri KHAC giua cu va moi; bat skill thi khong gan cua so nao", () => {
+    const override = (from: unknown, to: unknown) =>
+      entry({ action: "user.update", details: { changed: { limit_override_json: { from, to } } } });
+    expect(limitWindows(override({ limit_5h_usd: "1" }, { limit_5h_usd: "1", limit_7d_usd: "20" }))).toEqual([
+      "admin.limit.7d",
+    ]);
+    expect(limitWindows(override(null, { can_execute_skills: true }))).toEqual([]);
+    expect(limitWindows(entry({}))).toEqual([]);
   });
 });
