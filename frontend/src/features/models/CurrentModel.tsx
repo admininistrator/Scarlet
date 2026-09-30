@@ -56,7 +56,7 @@ export function CurrentModel({
         dung vao, khong phai doi bo cuc. (Khung net dut cua ban ve la chu
         thich, khong phai phan tu giao dien.)
       */}
-      <div data-slot="capability-warning" aria-live="polite" className="empty:hidden" />
+      <div data-slot="capability-warning" data-planned="T-4.5" aria-live="polite" className="empty:hidden" />
     </div>
   );
 }

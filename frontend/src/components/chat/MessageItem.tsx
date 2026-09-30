@@ -142,7 +142,7 @@ export function MessageItem({
           : "motion-enter w-full max-w-measure rounded-bubble border border-border bg-surface-assistant px-4 py-3.5 sm:px-5 sm:py-4"
       }
     >
-      <h3 className="mb-2 flex items-center gap-2 text-2xs font-semibold tracking-wider uppercase text-muted">
+      <h3 className="mb-2 flex items-center gap-2 text-2xs font-semibold tracking-[0.08em] uppercase text-muted">
         <span
           aria-hidden="true"
           className={isError ? "size-2 rounded-full bg-danger" : "size-2 rounded-full bg-accent"}
@@ -286,7 +286,7 @@ function ReasoningBlock({ text }: { text: string }) {
  */
 function ModelChip({ name, effort }: { name: string; effort: string | null }) {
   return (
-    <li className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted">
+    <li className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs leading-4 text-muted">
       <span>{name}</span>
       {effort !== null && (
         <>

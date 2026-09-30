@@ -195,9 +195,9 @@ function AccountForm({ profile }: { profile: ProfileOut }) {
 
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] border-t border-divider">
         <dt className="border-b border-divider py-3 pr-6 text-sm text-muted">{t("account.email")}</dt>
-        <dd className="border-b border-divider py-3 text-base break-all">{profile.email}</dd>
+        <dd className="border-b border-divider py-3 text-base leading-5 break-all">{profile.email}</dd>
         <dt className="border-b border-divider py-3 pr-6 text-sm text-muted">{t("account.tier")}</dt>
-        <dd className="border-b border-divider py-3 text-base">{tierLabel(profile.tier_name)}</dd>
+        <dd className="border-b border-divider py-3 text-base leading-5">{tierLabel(profile.tier_name)}</dd>
       </dl>
 
       <SaveRow dirty={dirty} saving={saving} saved={saved} error={error} />

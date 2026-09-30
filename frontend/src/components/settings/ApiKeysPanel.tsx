@@ -84,7 +84,8 @@ export function ApiKeysPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="mb-2 text-base text-muted">{t("apiKeys.intro")}</p>
+      {/* Ban T-HD9 D: tieu de → loi dan 16 (cac tab khac 24) ⇒ `lg:-mt-2`. */}
+      <p className="mb-2 text-base text-muted lg:-mt-2">{t("apiKeys.intro")}</p>
 
       {keys.error && (
         <p role="alert" className="text-sm text-danger-text">

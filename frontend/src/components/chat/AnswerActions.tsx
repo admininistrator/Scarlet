@@ -142,7 +142,7 @@ export function AnswerActions({
             <DropdownMenu.Content
               align="end"
               sideOffset={6}
-              className="motion-popover z-50 w-56 rounded-lg border border-border bg-surface-panel p-1.5 shadow-popover"
+              className="motion-popover z-50 w-55 rounded-lg border border-border bg-surface-panel p-1.5 shadow-popover"
             >
               {/* Esc khi dang o muc cho (tooltip mo) dong CA menu — B-308 ②. */}
               <MenuDismissContext.Provider value={closeMenu}>

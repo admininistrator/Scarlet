@@ -243,7 +243,10 @@ export function Composer({
               disabled={!enabled}
               aria-invalid={overLimit}
               placeholder={t("chat.oNhap")}
-              className="block max-h-composer-max w-full resize-none overflow-y-auto rounded-t-xl bg-transparent px-4 pt-3.5 pb-1.5 text-body text-foreground placeholder:text-muted focus-visible:outline-none disabled:opacity-50"
+              // `text-input` 16 px (T-HD5-v2, token T-HD8) chu khong `text-body`
+              // 15 px cua T-HD2-v2: nho hon 16 thi iOS phong to trang khi focus
+              // (B-295 ②, NQ-133 ①).
+              className="block max-h-composer-max w-full resize-none overflow-y-auto rounded-t-xl bg-transparent px-4 pt-3.5 pb-1.5 text-input text-foreground placeholder:text-muted focus-visible:outline-none disabled:opacity-50"
             />
           </label>
 

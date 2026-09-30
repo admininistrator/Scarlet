@@ -623,7 +623,8 @@ function ConversationSection({
   }
   return (
     <section>
-      <h2 className="mt-4 px-2 pb-1.5 text-2xs font-semibold tracking-wider text-muted uppercase">
+      {/* `.08em` dung ban T-HD2-v2 `ShellSidebar` (B-310 ⑥, T-S.18). */}
+      <h2 className="mt-4 px-2 pb-1.5 text-2xs font-semibold tracking-[0.08em] text-muted uppercase">
         {label}
       </h2>
       <ul className="flex flex-col gap-0.5">

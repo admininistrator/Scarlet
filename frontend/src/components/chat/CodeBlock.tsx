@@ -83,11 +83,11 @@ export function CodeBlock({
       <figcaption
         className={
           open
-            ? "flex h-touch items-center gap-2 border-b border-border px-3"
-            : "flex h-touch items-center gap-2 border-b border-border pr-1 pl-3"
+            ? "flex h-touch items-center gap-2.5 border-b border-border px-3"
+            : "flex h-touch items-center gap-2.5 border-b border-border pr-1 pl-3"
         }
       >
-        <span className="font-mono text-2xs tracking-wider uppercase text-muted">
+        <span className="font-mono text-2xs tracking-[0.08em] uppercase text-muted">
           {language === "" ? t("code.plain") : language}
         </span>
         {open ? (

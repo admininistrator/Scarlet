@@ -67,9 +67,13 @@ export type SettingsTabPath = (typeof SETTINGS_TABS)[number]["path"];
 const PAGE_WIDTH =
   "lg:max-w-[calc(var(--spacing-settings-nav)_+_var(--spacing)_*_12_+_var(--spacing-settings-form))]";
 
-/** Header man con / danh sach tab duoi 1024 px — cao 56, dan sat mep tren. */
+/**
+ * Header man con / danh sach tab duoi 1024 px — cao 56, dan sat mep tren. Duoi
+ * no: 12 toi danh sach tab (ban F, `nav` dem 12), 20 toi noi dung man con (ban
+ * G/H, `main` dem 20 — khe `gap-5` cua `section`).
+ */
 const MOBILE_HEADER =
-  "-mx-gutter -mt-5 mb-1 flex h-header shrink-0 items-center gap-1 border-b border-border px-1.5 lg:hidden";
+  "-mx-gutter -mt-5 flex h-header shrink-0 items-center gap-1 border-b border-border px-1.5 lg:hidden";
 
 export function SettingsLayout({ tab, children }: { tab: SettingsTabPath; children: ReactNode }) {
   const current = SETTINGS_TABS.find((x) => x.path === tab) ?? SETTINGS_TABS[0];
@@ -106,7 +110,7 @@ export function SettingsLayout({ tab, children }: { tab: SettingsTabPath; childr
               );
             })}
           </nav>
-          <section aria-label={label} className="flex min-w-0 flex-1 flex-col gap-6 lg:max-w-settings-form">
+          <section aria-label={label} className="flex min-w-0 flex-1 flex-col gap-5 lg:max-w-settings-form lg:gap-6">
             <header className={MOBILE_HEADER}>
               <Link
                 to={PATHS.settings}
