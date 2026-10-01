@@ -2,7 +2,6 @@ import {
   ArrowRight,
   BookOpen,
   ChevronDown,
-  GripHorizontal,
   GripVertical,
   LoaderCircle,
   MessageSquare,
@@ -14,7 +13,7 @@ import {
   SquarePen,
   type IconNode,
 } from "lucide";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { Link } from "react-router";
 
 import { PATHS } from "../../app/paths";
@@ -27,18 +26,21 @@ import { AccountMenu } from "../sidebar/AccountMenu";
 import { ComingSoon } from "../ui/ComingSoon";
 import { StaticIcon } from "../ui/Icon";
 import { ThemeToggle } from "../ui/ThemeToggle";
-import { useIslandPhysics, type Anchor } from "./useIslandPhysics";
+import { setIslandAnchor, useIslandAnchor, type Anchor } from "./islandAnchor";
+import { useIslandPhysics } from "./useIslandPhysics";
 
 /**
  * Dao dieu huong — T-S.19a, ban Khung chinh v3 (`DynamicIsland.tsx`). Thay
  * header 56 + sidebar 256 + drawer cua v2 tren `/`, `/cai-dat/*`, `/admin`.
  *
- * Nam hinh, MOT khoi:
+ * Bon hinh, MOT khoi:
  *   pill     neo tren, thu   — icon + ten ngu canh (+ trang thai ket noi)
  *   bar      neo tren, mo    — dieu huong, 6 hoi thoai gan day, tai khoan, theme, artifact (cho)
- *   capsule  neo hai ben, thu — vien thuoc doc 56, nhan viet doc
- *   side     neo hai ben, mo — sidebar v2 (256), noi de, khong day cot chat
+ *   side     neo hai ben     — sidebar v2 (256), LUON mo; `Layout` day noi dung vao 16 + 256
  *   orb      dang keo        — 56 × 56
+ * NQ-136 (nguoi dung, 2026-10-01): neo hai ben KHONG con vien thuoc doc cho re
+ * chuot — theo ban v3-beta (`shape = top ? (mo ? bar : pill) : side`, `contentL`).
+ * Muon gon thi keo (hoac ⋮⋮ + ↑) ve neo tren.
  * < 640 px: chi neo tren, khong keo; neo trai / phai da luu duoc giu cho man rong.
  *
  * Moi lop luon o trong DOM; lop khong hien mang `inert` (khong nhan Tab, khong
@@ -47,28 +49,8 @@ import { useIslandPhysics, type Anchor } from "./useIslandPhysics";
  */
 
 export type IslandContext = "chat" | "settings" | "admin";
-type Shape = "pill" | "bar" | "capsule" | "side" | "orb";
+type Shape = "pill" | "bar" | "side" | "orb";
 export type RecentConversation = { id: string; title: string; pinned: boolean; untitled: boolean };
-
-/** Neo luu o `localStorage` — tien ich tung may (T-S.19a). Doc/ghi hong ⇒ neo tren. */
-export const ANCHOR_STORAGE_KEY = "island.anchor";
-
-function readAnchor(): Anchor {
-  try {
-    const saved = localStorage.getItem(ANCHOR_STORAGE_KEY);
-    return saved === "left" || saved === "right" ? saved : "top";
-  } catch {
-    return "top";
-  }
-}
-
-function writeAnchor(anchor: Anchor): void {
-  try {
-    localStorage.setItem(ANCHOR_STORAGE_KEY, anchor);
-  } catch {
-    // che do rieng tu co the chan localStorage — neo van doi trong phien nay
-  }
-}
 
 const CONTEXT_ICON: Record<IslandContext, IconNode> = { chat: MessageSquare, settings: Settings, admin: Shield };
 const CONTEXT_LABEL: Record<IslandContext, TextKey> = {
@@ -111,22 +93,16 @@ export function DynamicIsland(props: {
   sidebar: ReactNode;
 }) {
   const compact = useMediaQuery(ISLAND_COMPACT_QUERY);
-  const [storedAnchor, setStoredAnchorState] = useState<Anchor>(readAnchor);
-  const setStoredAnchor = (next: Anchor) => {
-    writeAnchor(next);
-    setStoredAnchorState(next);
-  };
-  const anchor: Anchor = compact ? "top" : storedAnchor;
+  const anchor = useIslandAnchor();
+  /** Chi co nghia o neo tren (vien thuoc ↔ thanh mo); hai ben luon la sidebar. */
   const [expanded, setExpanded] = useState(false);
 
   const islandRef = useRef<HTMLElement>(null);
   const glassRef = useRef<HTMLDivElement>(null);
   const trailRef = useRef<HTMLCanvasElement>(null);
   const pillRef = useRef<HTMLDivElement>(null);
-  const capsuleRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const pillTriggerRef = useRef<HTMLButtonElement>(null);
-  const capsuleTriggerRef = useRef<HTMLButtonElement>(null);
   const barGripRef = useRef<HTMLButtonElement>(null);
   const sideGripRef = useRef<HTMLButtonElement>(null);
   const hovered = useRef(false);
@@ -138,7 +114,7 @@ export function DynamicIsland(props: {
    * `relatedTarget = null`): lan `blur` ay KHONG phai nguoi dung roi dao, va
    * `focus()` chi goi duoc SAU commit — goi truoc la goi vao mot nut `inert`.
    *   layer   vao lop vua mo: nut ⋮⋮ (hoac muc dau o man hep)
-   *   trigger ve nut mo cua hinh thu gon (Esc, sau mot thao tac)
+   *   trigger ve nut mo cua vien thuoc (Esc, sau mot thao tac)
    *   grip    sang ⋮⋮ cua neo moi (doi neo bang phim)
    */
   const pendingFocus = useRef<"layer" | "trigger" | "grip" | null>(null);
@@ -152,26 +128,17 @@ export function DynamicIsland(props: {
     compact,
     measure: () => ({
       pillWidth: pillRef.current?.offsetWidth ?? 0,
-      capsuleHeight: capsuleRef.current?.offsetHeight ?? 0,
       barHeight: barRef.current?.offsetHeight ?? 0,
     }),
     onRelease: (next) => {
       waitLeave.current = true; // con tro van tren dao sau khi tha — chua no lai
       setExpanded(false);
-      setStoredAnchor(next);
+      setIslandAnchor(next);
     },
   });
 
-  const shape: Shape = dragging
-    ? "orb"
-    : anchor === "top"
-      ? expanded
-        ? "bar"
-        : "pill"
-      : expanded
-        ? "side"
-        : "capsule";
-  const trigger = anchor === "top" ? pillTriggerRef : capsuleTriggerRef;
+  const shape: Shape = dragging ? "orb" : anchor !== "top" ? "side" : expanded ? "bar" : "pill";
+  const atTop = anchor === "top";
 
   /**
    * Mot menu Radix mo tu TRONG dao (menu tai khoan, menu ⋯ cua hang) song o
@@ -208,7 +175,7 @@ export function DynamicIsland(props: {
     }
     const grip = (anchor === "top" ? barGripRef : sideGripRef).current;
     if (pending === "trigger") {
-      trigger.current?.focus({ preventScroll: true });
+      pillTriggerRef.current?.focus({ preventScroll: true });
     } else if (grip !== null) {
       grip.focus({ preventScroll: true });
     } else {
@@ -218,7 +185,7 @@ export function DynamicIsland(props: {
     }
     // Ha co SAU `focus()`: `onFocus` cua chinh lan nay khong duoc mo lai dao (Esc).
     pendingFocus.current = null;
-  }, [shape, anchor, trigger]);
+  }, [shape, anchor]);
   useEffect(() => () => window.clearTimeout(linger.current), []);
 
   /*
@@ -245,7 +212,11 @@ export function DynamicIsland(props: {
     if (next !== anchor) {
       pendingFocus.current = "grip";
     }
-    setStoredAnchor(next);
+    // Ve neo tren bang phim: mo thanh, de tieu diem sang duoc ⋮⋮ cua no.
+    if (next === "top") {
+      setExpanded(true);
+    }
+    setIslandAnchor(next);
   };
 
   const recent = props.recent.slice(0, compact ? RECENT_COMPACT : RECENT_WIDE);
@@ -254,12 +225,7 @@ export function DynamicIsland(props: {
     <>
       <canvas ref={trailRef} aria-hidden="true" className="pointer-events-none fixed inset-0 z-40 size-full" />
       {!compact && (
-        <AnchorHints
-          visible={dragging}
-          near={near}
-          pillWidth={pillRef.current?.offsetWidth ?? 0}
-          capsuleHeight={capsuleRef.current?.offsetHeight ?? 0}
-        />
+        <AnchorHints visible={dragging} near={near} pillWidth={pillRef.current?.offsetWidth ?? 0} />
       )}
       {props.reconnecting && anchor !== "top" && (
         <div
@@ -279,7 +245,7 @@ export function DynamicIsland(props: {
         data-shape={shape}
         {...handlers}
         onPointerEnter={(e) => {
-          if (e.pointerType !== "mouse") {
+          if (e.pointerType !== "mouse" || !atTop) {
             return;
           }
           hovered.current = true;
@@ -289,7 +255,7 @@ export function DynamicIsland(props: {
           }
         }}
         onPointerLeave={(e) => {
-          if (e.pointerType !== "mouse") {
+          if (e.pointerType !== "mouse" || !atTop) {
             return;
           }
           hovered.current = false;
@@ -305,7 +271,7 @@ export function DynamicIsland(props: {
           }, readDurationMs("--duration-island-linger"));
         }}
         onFocus={(e) => {
-          if (pendingFocus.current !== null || expanded || !e.target.matches(":focus-visible")) {
+          if (!atTop || pendingFocus.current !== null || expanded || !e.target.matches(":focus-visible")) {
             return;
           }
           if (e.target.hasAttribute("data-island-trigger")) {
@@ -326,14 +292,15 @@ export function DynamicIsland(props: {
           collapse();
         }}
         onKeyDown={(e) => {
-          if (e.key !== "Escape" || !expanded || menuOpenInside()) {
+          if (e.key !== "Escape" || !atTop || !expanded || menuOpenInside()) {
             return;
           }
           e.stopPropagation();
           pendingFocus.current = "trigger";
           setExpanded(false);
         }}
-        className="fixed top-0 left-0 z-50 cursor-grab touch-none select-none data-[dragging=true]:cursor-grabbing"
+        // Sidebar doc o man cam ung rong: vuot doc de cuon danh sach, vuot ngang van keo dao.
+        className="fixed top-0 left-0 z-50 cursor-grab touch-none select-none data-[dragging=true]:cursor-grabbing data-[shape=side]:touch-pan-y"
       >
         <div ref={glassRef} aria-hidden="true" data-dragging={dragging} className="island-glass absolute inset-0 rounded-[inherit]" />
         <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
@@ -350,18 +317,6 @@ export function DynamicIsland(props: {
               onOpen={open}
             />
             {props.reconnecting && <ConnectionSegment />}
-          </Layer>
-
-          <Layer on={shape === "capsule"} ref={capsuleRef} className="top-1/2 left-0 w-island-orb -translate-y-1/2">
-            <IslandTrigger
-              ref={capsuleTriggerRef}
-              vertical
-              context={props.context}
-              expanded={expanded}
-              grip
-              reconnecting={props.reconnecting}
-              onOpen={open}
-            />
           </Layer>
 
           <Layer on={shape === "orb"} className="inset-0 grid place-items-center text-accent-text">
@@ -496,7 +451,9 @@ export function DynamicIsland(props: {
                 ref={sideGripRef}
                 anchor={anchor}
                 onAnchor={onAnchorKey}
-                className="absolute top-3 right-3 z-10 rounded-md bg-surface-panel opacity-0 shadow-popover focus-visible:opacity-100"
+                // Vo hinh cho toi khi focus bang phim — va khong an chuot, khong thi no chan
+                // goc phai nut "Hoi thoai moi" ben duoi (sidebar nay luon mo, NQ-136).
+                className="pointer-events-none absolute top-3 right-3 z-10 rounded-md bg-surface-panel opacity-0 shadow-popover focus-visible:pointer-events-auto focus-visible:opacity-100"
               />
             )}
           </Layer>
@@ -535,17 +492,13 @@ function Layer({
 function IslandTrigger({
   context,
   expanded,
-  vertical = false,
   grip,
-  reconnecting = false,
   onOpen,
   ref,
 }: {
   context: IslandContext;
   expanded: boolean;
-  vertical?: boolean;
   grip: boolean;
-  reconnecting?: boolean;
   onOpen: () => void;
   ref?: Ref<HTMLButtonElement>;
 }) {
@@ -556,32 +509,15 @@ function IslandTrigger({
       aria-expanded={expanded}
       data-island-trigger
       onClick={onOpen}
-      className={
-        vertical
-          ? "flex w-island-orb flex-col items-center gap-2.5 rounded-island pt-3.5 pb-4.5 text-foreground"
-          : "flex h-island-pill items-center gap-2 rounded-full pr-4 pl-2.5 text-base font-semibold text-foreground"
-      }
+      className="flex h-island-pill items-center gap-2 rounded-full pr-4 pl-2.5 text-base font-semibold text-foreground"
     >
-      {grip && <StaticIcon icon={vertical ? GripHorizontal : GripVertical} size={18} className="text-muted" />}
-      <span
-        className={
-          vertical
-            ? "grid size-9 place-items-center rounded-full bg-accent-subtle text-accent-text"
-            : "grid size-7.5 place-items-center rounded-full bg-accent-subtle text-accent-text"
-        }
-      >
+      {grip && <StaticIcon icon={GripVertical} size={18} className="text-muted" />}
+      <span className="grid size-7.5 place-items-center rounded-full bg-accent-subtle text-accent-text">
         <StaticIcon icon={CONTEXT_ICON[context]} size={18} />
       </span>
-      <span className={vertical ? "text-sm font-semibold whitespace-nowrap [writing-mode:vertical-rl]" : undefined}>
-        {t(CONTEXT_LABEL[context])}
-      </span>
+      <span>{t(CONTEXT_LABEL[context])}</span>
       <span className="sr-only">{t("island.open")}</span>
-      {!vertical && <StaticIcon icon={ChevronDown} size={14} className="text-muted" />}
-      {vertical && reconnecting && (
-        <span aria-hidden="true" className="grid place-items-center text-muted">
-          <StaticIcon icon={LoaderCircle} size={16} className="motion-spin" />
-        </span>
-      )}
+      <StaticIcon icon={ChevronDown} size={14} className="text-muted" />
     </button>
   );
 }
@@ -675,38 +611,22 @@ function NavLink({
   return showLabel ? link : <Hint label={label} side="bottom">{link}</Hint>;
 }
 
-function AnchorHints({
-  visible,
-  near,
-  pillWidth,
-  capsuleHeight,
-}: {
-  visible: boolean;
-  near: Anchor | null;
-  pillWidth: number;
-  capsuleHeight: number;
-}) {
+/** O neo hien trong luc keo — hai ben la CA khoi sidebar (ban v3-beta), tren la vien thuoc. */
+function AnchorHints({ visible, near, pillWidth }: { visible: boolean; near: Anchor | null; pillWidth: number }) {
   const base =
     "motion-anchor-hint pointer-events-none fixed z-40 box-border border-[1.5px] border-dashed border-border-strong";
-  // So do that luc chay, khong phai mau hay thoi luong.
-  const size = { "--hint-pill": `${pillWidth}px`, "--hint-capsule": `${capsuleHeight}px` } as CSSProperties;
+  const side = `${base} top-island-gap bottom-island-gap w-sidebar rounded-island-side`;
   return (
-    <div aria-hidden="true" style={size}>
+    <div aria-hidden="true">
       <div
         data-visible={visible}
         data-near={near === "top"}
-        className={`${base} top-island-gap left-1/2 h-island-pill w-(--hint-pill) -translate-x-1/2 rounded-full`}
+        // So do that luc chay (be ngang vien thuoc), khong phai mau hay thoi luong.
+        style={{ width: pillWidth }}
+        className={`${base} top-island-gap left-1/2 h-island-pill -translate-x-1/2 rounded-full`}
       />
-      <div
-        data-visible={visible}
-        data-near={near === "left"}
-        className={`${base} top-1/2 left-island-gap h-(--hint-capsule) w-island-orb -translate-y-1/2 rounded-full`}
-      />
-      <div
-        data-visible={visible}
-        data-near={near === "right"}
-        className={`${base} top-1/2 right-island-gap h-(--hint-capsule) w-island-orb -translate-y-1/2 rounded-full`}
-      />
+      <div data-visible={visible} data-near={near === "left"} className={`${side} left-island-gap`} />
+      <div data-visible={visible} data-near={near === "right"} className={`${side} right-island-gap`} />
     </div>
   );
 }

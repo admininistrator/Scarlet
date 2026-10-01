@@ -1,6 +1,7 @@
 import { Outlet, useLocation, useOutletContext } from "react-router";
 
 import { AppIsland } from "../components/island/AppIsland";
+import { useIslandAnchor } from "../components/island/islandAnchor";
 import { useSessionState, type SessionState } from "../features/auth/useSessionState";
 import { PATHS } from "./paths";
 
@@ -41,6 +42,17 @@ const AUTH_PATHS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * NQ-136 — neo hai ben, sidebar LUON mo va DAY noi dung (ban v3-beta `contentL`):
+ * le phia co sidebar = le dao 16 + sidebar 256. Khong co chuyen dong: `theme.css`
+ * chua co `.motion-*` nao cho `padding` (B-326).
+ */
+const INSET = {
+  top: "",
+  left: " pl-[calc(var(--spacing-island-gap)_+_var(--spacing-sidebar))]",
+  right: " pr-[calc(var(--spacing-island-gap)_+_var(--spacing-sidebar))]",
+} as const;
+
+/**
  * T-S.19a — duong co dao dieu huong ngoai man chat. Man chat (`/`) dung dao
  * cua chinh no (`ChatScreen`), vi dao o do noi thang vao `useChat`.
  */
@@ -57,6 +69,7 @@ function islandContextOf(pathname: string): "settings" | "admin" | null {
 export function Layout() {
   const session = useSessionState();
   const { pathname } = useLocation();
+  const anchor = useIslandAnchor();
 
   /*
     T-S.16 — ban T-HD8 ve sau man auth KHONG co header: chu Scarlet nam trong
@@ -71,6 +84,8 @@ export function Layout() {
     nut "Ve trang chu" cua chinh no (NQ-135 ④).
   */
   const islandContext = bare || session.user === null ? null : islandContextOf(pathname);
+  // Man chat (`/`) dung dao cua chinh no nhung van nam trong khung nay.
+  const islandHere = islandContext !== null || (!bare && session.user !== null && pathname === PATHS.home);
 
   return (
     /*
@@ -82,7 +97,11 @@ export function Layout() {
     */
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       {islandContext !== null && <AppIsland session={session} context={islandContext} />}
-      <div className={`min-h-0 flex-1 overflow-y-auto${islandContext !== null ? " pt-island-clear" : ""}`}>
+      <div
+        className={`min-h-0 flex-1 overflow-y-auto${islandContext !== null ? " pt-island-clear" : ""}${
+          islandHere ? INSET[anchor] : ""
+        }`}
+      >
         <Outlet context={session} />
       </div>
     </div>

@@ -20,6 +20,9 @@
  *   Motion "khong reduce ⇒ co hoat anh"          → 10
  *   Drawer "mo ⇒ khoa cuon phia sau"             — MAT: dao khong modal, khong lop phu
  *   Drawer "vo v2: nut X trong drawer"           — MAT: dao khong co nut X
+ *
+ * NQ-136: neo hai ben LUON la sidebar doc (khong con vien thuoc doc) — ca 1b,
+ * 8 va 2b.
  */
 
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -38,7 +41,8 @@ import { api, type ConversationListQuery, type ConversationOut, type UserOut } f
 import { ISLAND_COMPACT_QUERY } from "../../lib/motion";
 import { AppIsland } from "./AppIsland";
 import { ConversationSearch, filterConversations, type SearchConversation } from "./ConversationSearch";
-import { ANCHOR_STORAGE_KEY, DynamicIsland, type RecentConversation } from "./DynamicIsland";
+import { DynamicIsland, type RecentConversation } from "./DynamicIsland";
+import { ANCHOR_STORAGE_KEY } from "./islandAnchor";
 import { step } from "./useIslandPhysics";
 
 const USER: UserOut = {
@@ -148,11 +152,12 @@ describe("dao — neo", () => {
     expect(localStorage.getItem(ANCHOR_STORAGE_KEY)).toBe("right");
   });
 
-  it("1b. neo da luu ⇒ mount lai (F5) van o neo ay", () => {
+  it("1b. neo da luu ⇒ mount lai (F5) van o neo ay, va hai ben thi MO SAN sidebar (NQ-136)", () => {
     localStorage.setItem(ANCHOR_STORAGE_KEY, "left");
     renderIsland();
     expect(nav()).toHaveAttribute("data-anchor", "left");
-    expect(nav()).toHaveAttribute("data-shape", "capsule");
+    expect(nav()).toHaveAttribute("data-shape", "side");
+    expect(screen.getByText("noi dung sidebar").closest("[data-active]")).toHaveAttribute("data-active", "true");
   });
 
   it("2. `localStorage` nem (che do rieng tu) ⇒ neo tren, doi neo van chay, khong vo app", async () => {
@@ -215,7 +220,7 @@ describe("dao — mo / thu", () => {
   it("6. bat dau THU; lop khong hien mang `inert`; khong dialog, khong khoa cuon", () => {
     renderIsland();
     const layers = Array.from(nav().querySelectorAll("[data-active]"));
-    expect(layers).toHaveLength(5);
+    expect(layers).toHaveLength(4);
     for (const layer of layers) {
       const on = layer.getAttribute("data-active") === "true";
       expect(layer.hasAttribute("inert")).toBe(!on);
@@ -255,7 +260,32 @@ describe("dao — man hep, keo", () => {
     fireEvent.pointerUp(window);
     expect(nav()).toHaveAttribute("data-dragging", "false");
     expect(nav()).toHaveAttribute("data-anchor", "left");
+    expect(nav()).toHaveAttribute("data-shape", "side");
     expect(localStorage.getItem(ANCHOR_STORAGE_KEY)).toBe("left");
+  });
+});
+
+describe("dao — neo hai ben (NQ-136)", () => {
+  it("2b. sidebar LUON mo: roi chuot, Esc, cham ra ngoai deu KHONG thu; ⋮⋮ + ↑ ve tren thi thanh mo, tieu diem o ⋮⋮ cua thanh", async () => {
+    localStorage.setItem(ANCHOR_STORAGE_KEY, "right");
+    const user = userEvent.setup();
+    renderIsland();
+    expect(nav()).toHaveAttribute("data-shape", "side");
+
+    fireEvent.pointerEnter(nav(), { pointerType: "mouse" });
+    fireEvent.pointerLeave(nav(), { pointerType: "mouse" });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Ngoài đảo" }));
+    const [barGrip, sideGrip] = grips();
+    act(() => sideGrip.focus());
+    await user.keyboard("{Escape}");
+    await new Promise((resolve) => setTimeout(resolve, 20)); // qua han --duration-island-linger (0 trong jsdom)
+    expect(nav()).toHaveAttribute("data-shape", "side");
+    expect(sideGrip).toHaveFocus();
+
+    await user.keyboard("{ArrowUp}");
+    expect(nav()).toHaveAttribute("data-anchor", "top");
+    expect(nav()).toHaveAttribute("data-shape", "bar");
+    expect(barGrip).toHaveFocus();
   });
 });
 

@@ -9,6 +9,7 @@ import {
   type IslandSpringRole,
   type SpringConfig,
 } from "../../lib/motion";
+import type { Anchor } from "./islandAnchor";
 
 /**
  * Vat ly cua dao dieu huong — T-S.19a, ban Khung chinh v3 (`useIslandPhysics.ts`).
@@ -22,8 +23,7 @@ import {
  * doi neo khong co khung hinh trung gian (DoD dong 4).
  */
 
-export type Anchor = "top" | "left" | "right";
-export type IslandMeasure = { pillWidth: number; capsuleHeight: number; barHeight: number };
+export type IslandMeasure = { pillWidth: number; barHeight: number };
 
 type Rect = { x: number; y: number; w: number; h: number; r: number };
 type Point = { x: number; y: number };
@@ -71,15 +71,7 @@ function restRect(anchor: Anchor, expanded: boolean, m: IslandMeasure, g: Geomet
     }
     return { x: (W - m.pillWidth) / 2, y: g.gap, w: m.pillWidth, h: g.pill, r: g.pill / 2 };
   }
-  if (!expanded) {
-    return {
-      x: anchor === "left" ? g.gap : W - g.gap - g.orb,
-      y: (H - m.capsuleHeight) / 2,
-      w: g.orb,
-      h: m.capsuleHeight,
-      r: g.orb / 2,
-    };
-  }
+  // Hai ben: LUON la sidebar doc (NQ-136, ban v3-beta) — `expanded` chi co nghia o neo tren.
   return { x: anchor === "left" ? g.gap : W - g.gap - g.side, y: g.gap, w: g.side, h: H - 2 * g.gap, r: g.sideRadius };
 }
 

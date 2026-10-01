@@ -44,7 +44,7 @@ vi.mock("../../lib/api", async (importOriginal) => {
 import { PATHS } from "../../app/paths";
 import { routes } from "../../app/routes";
 import { api, type ProfileOut } from "../../lib/api";
-import { ANCHOR_STORAGE_KEY } from "../island/DynamicIsland";
+import { ANCHOR_STORAGE_KEY } from "../island/islandAnchor";
 import { defaultAvatarColor } from "../ui/avatar";
 
 const USER_ID = "7c3e9a51-2b6d-4f08-8e1a-9d4c2b7f6a30";
@@ -363,5 +363,31 @@ describe("sidebar doc (neo trai — thay drawer < 1024 px)", () => {
     expect(menuSequence(menu)).toEqual(MENU_ORDER);
     await user.click(within(menu).getByRole("menuitem", { name: "Cài đặt" }));
     await waitFor(() => expect(router.state.location.pathname).toBe(PATHS.settingsAccount));
+  });
+});
+
+describe("neo hai ben day noi dung (NQ-136)", () => {
+  it("13. neo trai ⇒ vung noi dung lui vao 16 + 256 ben trai; phai ⇒ ben phai; neo tren ⇒ khong lui", async () => {
+    const inset = (side: "pl" | "pr") =>
+      document.querySelector(`[class*="${side}-[calc(var(--spacing-island-gap)_+_var(--spacing-sidebar))]"]`);
+
+    localStorage.setItem(ANCHOR_STORAGE_KEY, "left");
+    const first = renderAt(PATHS.settingsAccount);
+    await accountTrigger();
+    expect(inset("pl")).not.toBeNull();
+    expect(inset("pr")).toBeNull();
+    first.unmount();
+
+    localStorage.setItem(ANCHOR_STORAGE_KEY, "right");
+    const second = renderAt(PATHS.home);
+    await accountTrigger();
+    expect(inset("pr")).not.toBeNull();
+    second.unmount();
+
+    localStorage.setItem(ANCHOR_STORAGE_KEY, "top");
+    renderAt(PATHS.admin, { role: "admin" });
+    await accountTrigger();
+    expect(inset("pl")).toBeNull();
+    expect(inset("pr")).toBeNull();
   });
 });

@@ -42,6 +42,11 @@ export default defineConfig({
     // `src/**` thoi: khong de vitest di lac vao `node_modules` hay `dist`.
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     restoreMocks: true,
+    // T-S.19a: luong dung CA app (dao + sidebar doc + man chat) mat ~0.9 s/ca khi
+    // chay tuan tu, nhung ~6× khi 31 file chay song song ngay sau `pytest` cua
+    // `make test` — vuot han 5 s mac dinh, ca ke tiep do lay. Han dai hon chi lam
+    // ca HONG that bai cham hon (cung ly do `asyncUtilTimeout` o `test/setup.ts`).
+    testTimeout: 15000,
     // T-3.9: vitest mac dinh thay MOI file CSS bang chuoi rong, ke ca
     // `theme.css?raw`. `HoatAnh.test.tsx` phai doc that khoi
     // `@media (prefers-reduced-motion)` — jsdom khong tinh `@media`, nen day
