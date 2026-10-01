@@ -13,11 +13,21 @@ những dải đó vào `is_private`, nên chính `validate_url()` sẽ từ ch�
 from __future__ import annotations
 
 import socket
-from collections.abc import Sequence
+import ssl
+from collections.abc import Awaitable, Callable, Sequence
 
+import httpcore
+import httpx
 import pytest
 
-from app.tools.ssrf import CheckedUrl, UnsafeUrlError, validate_url
+from app.config.settings import settings
+from app.tools.ssrf import (
+    CheckedUrl,
+    UnsafeUrlError,
+    get_following_redirects,
+    pinned_client,
+    validate_url,
+)
 
 PUBLIC_V4 = "93.184.215.14"
 PUBLIC_V4_B = "1.1.1.1"
@@ -182,3 +192,206 @@ async def test_rejects_when_any_resolved_address_is_private() -> None:
 
     assert exc.reason == "address"
     _assert_no_ip_leak(exc, resolved)
+
+
+# ── T-6.3: nối tới IP đã kiểm + lớp 4 ─────────────────────────────────────────
+#
+# Đo ở chỗ socket được mở: `connect_tcp` của `httpcore` (host đối số) và
+# `start_tls` (`server_hostname`). Không dùng `MockTransport` — nó thay đúng tầng
+# đang được kiểm, nên một transport resolve lại tên vẫn xanh (Cạm bẫy ①).
+
+
+def _http(status: int, location: str | None = None) -> bytes:
+    head = f"HTTP/1.1 {status} X\r\nContent-Length: 2\r\n"
+    if location is not None:
+        head += f"Location: {location}\r\n"
+    return head.encode() + b"\r\nok"
+
+
+class _Stream(httpcore.AsyncMockStream):
+    def __init__(self, network: FakeNetwork, ip: str) -> None:
+        super().__init__([])
+        self._network, self._ip, self._sent = network, ip, b""
+
+    async def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self._sent += buffer
+
+    async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        if not self._sent:
+            return b""
+        sent, self._sent = self._sent, b""
+        path = sent.split(b" ", 2)[1].decode()
+        self._network.requests.append((self._ip, sent))
+        return self._network.routes[(self._ip, path)]
+
+    async def start_tls(
+        self,
+        ssl_context: ssl.SSLContext,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        self._network.tls_names.append(server_hostname)
+        return self
+
+
+class FakeNetwork:
+    def __init__(self) -> None:
+        self.routes: dict[tuple[str, str], bytes] = {}
+        self.unreachable: set[str] = set()
+        self.connects: list[str] = []
+        self.tls_names: list[str | None] = []
+        self.requests: list[tuple[str, bytes]] = []
+
+    def connect(self, host: str) -> _Stream:
+        self.connects.append(host)
+        if host in self.unreachable:
+            raise httpcore.ConnectError("unreachable")
+        return _Stream(self, host)
+
+
+@pytest.fixture
+def network(monkeypatch: pytest.MonkeyPatch) -> FakeNetwork:
+    fake = FakeNetwork()
+
+    async def connect_tcp(_backend: object, host: str, port: int, **_: object) -> _Stream:
+        return fake.connect(host)
+
+    monkeypatch.setattr(httpcore.AnyIOBackend, "connect_tcp", connect_tcp)
+    return fake
+
+
+class SequenceResolver:
+    """Trả lần lượt từng phần tử của `answers`, phần tử cuối lặp mãi."""
+
+    def __init__(self, *answers: list[str]) -> None:
+        self.answers = list(answers)
+        self.calls = 0
+
+    async def __call__(self, host: str, port: int) -> Sequence[str]:
+        self.calls += 1
+        return self.answers[min(self.calls, len(self.answers)) - 1]
+
+
+def _resolver_for(table: dict[str, list[str]]) -> Callable[[str, int], Awaitable[Sequence[str]]]:
+    async def resolve(host: str, port: int) -> Sequence[str]:
+        return table[host]
+
+    return resolve
+
+
+async def test_rebinding_connects_to_checked_ip_and_resolves_once(network: FakeNetwork) -> None:
+    resolver = SequenceResolver([PUBLIC_V4], ["127.0.0.1"])
+    network.routes[(PUBLIC_V4, "/a")] = _http(200)
+    network.routes[(PUBLIC_V4, "/b")] = _http(200)
+    checked = await validate_url("https://rebind.example/", resolver=resolver)
+
+    async with pinned_client(checked, timeout=5) as client:
+        await client.get("https://rebind.example/a")
+        await client.get("https://rebind.example/b")
+
+    assert network.connects and set(network.connects) == {PUBLIC_V4}
+    assert network.tls_names and set(network.tls_names) == {"rebind.example"}
+    assert resolver.calls == 1
+
+
+async def test_host_header_and_sni_carry_ascii_name_and_ip_does_not_leak(
+    network: FakeNetwork,
+) -> None:
+    network.routes[(PUBLIC_V4, "/x")] = _http(500)
+    checked = await validate_url("https://Bücher.Example./", resolver=FakeResolver([PUBLIC_V4]))
+
+    async with pinned_client(checked, timeout=5) as client:
+        response = await client.get("https://bücher.example/x")
+
+    assert network.connects == [PUBLIC_V4]
+    assert network.tls_names == ["xn--bcher-kva.example"]
+    assert b"\r\nhost: xn--bcher-kva.example\r\n" in network.requests[0][1].lower()
+    # `response.request` là request gốc mang tên ⇒ IP không vào thông điệp lỗi.
+    with pytest.raises(httpx.HTTPStatusError) as info:
+        response.raise_for_status()
+    assert PUBLIC_V4 not in str(info.value)
+
+
+@pytest.mark.parametrize(
+    "url", ["https://other.example/", "http://pinned.example/", "https://pinned.example:80/"]
+)
+async def test_pinned_client_refuses_other_host(network: FakeNetwork, url: str) -> None:
+    checked = await validate_url("https://pinned.example/", resolver=FakeResolver([PUBLIC_V4]))
+
+    async with pinned_client(checked, timeout=5) as client:
+        with pytest.raises(UnsafeUrlError) as info:
+            await client.get(url)
+
+    assert info.value.reason == "host"
+    assert network.connects == []
+
+
+async def test_unreachable_checked_ip_falls_back_to_next_checked_ip(network: FakeNetwork) -> None:
+    network.unreachable.add("2606:4700:4700::1111")
+    network.routes[(PUBLIC_V4, "/")] = _http(200)
+    resolver = FakeResolver(["2606:4700:4700::1111", PUBLIC_V4])
+    checked = await validate_url("https://dual.example/", resolver=resolver)
+
+    async with pinned_client(checked, timeout=5) as client:
+        response = await client.get("https://dual.example/")
+
+    assert response.status_code == 200
+    assert network.connects == ["2606:4700:4700::1111", PUBLIC_V4]
+
+
+# ── Lớp 4 ─────────────────────────────────────────────────────────────────────
+
+
+async def test_redirect_to_metadata_stops_before_second_request(network: FakeNetwork) -> None:
+    network.routes[(PUBLIC_V4, "/")] = _http(302, "http://169.254.169.254/latest/meta-data/")
+
+    with pytest.raises(UnsafeUrlError) as info:
+        await get_following_redirects(
+            "https://public.example/", timeout=5, resolver=FakeResolver([PUBLIC_V4])
+        )
+
+    assert info.value.reason == "address"
+    assert network.connects == [PUBLIC_V4]
+
+
+@pytest.mark.parametrize(("redirects", "allowed"), [(2, True), (3, False)])
+async def test_redirect_cap_reads_max_redirects_at_call_time(
+    network: FakeNetwork, monkeypatch: pytest.MonkeyPatch, redirects: int, allowed: bool
+) -> None:
+    monkeypatch.setattr(settings, "MAX_REDIRECTS", 2)
+    for step in range(redirects):
+        # `Location` tương đối — ghép theo URL hiện tại.
+        network.routes[(PUBLIC_V4, f"/{step}")] = _http(302, f"/{step + 1}")
+    network.routes[(PUBLIC_V4, f"/{redirects}")] = _http(200)
+    resolver = FakeResolver([PUBLIC_V4])
+
+    if allowed:
+        response = await get_following_redirects(
+            "https://loop.example/0", timeout=5, resolver=resolver
+        )
+        assert response.status_code == 200
+    else:
+        with pytest.raises(httpx.TooManyRedirects):
+            await get_following_redirects("https://loop.example/0", timeout=5, resolver=resolver)
+    assert len(network.connects) == min(redirects, 2) + 1
+    # Mỗi bước chạy lại `validate_url()`.
+    assert len(resolver.calls) == len(network.connects)
+
+
+async def test_redirect_to_other_host_drops_credentials(network: FakeNetwork) -> None:
+    network.routes[(PUBLIC_V4, "/")] = _http(302, "https://b.example/")
+    network.routes[(PUBLIC_V4_B, "/")] = _http(200)
+    resolver = _resolver_for({"a.example": [PUBLIC_V4], "b.example": [PUBLIC_V4_B]})
+
+    await get_following_redirects(
+        "https://a.example/",
+        headers={"Authorization": "Bearer k", "x-api-key": "k", "X-Trace": "t"},
+        timeout=5,
+        resolver=resolver,
+    )
+
+    first, second = (sent.lower() for _, sent in network.requests)
+    assert b"authorization:" in first and b"x-api-key:" in first
+    assert b"authorization:" not in second and b"x-api-key:" not in second
+    assert b"x-trace: t" in second
+    assert b"\r\nhost: b.example\r\n" in second
