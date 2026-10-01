@@ -1899,7 +1899,7 @@ Prompt đầy đủ cho từng bước nằm ở `docs/standardize-tutorial.md`.
 | **T-6.2** 🔒 | `validate_url()` — kéo lên từ P6 | — | 2.5 h |
 | **T-6.3** 🔒 | Transport `httpx` ghim IP — kéo lên từ P6 | T-6.2 ✅ | 3 h |
 | **T-6.4** 🔒 | `tests/tools/test_ssrf.py` ≥ 25 ca — kéo lên từ P6 | T-6.3 ✅ | 2 h |
-| **T-S.19b** | BYOK backend: chỉ đếm token, endpoint do người dùng nhập | T-6.4 | 12 h |
+| **T-S.19b** | BYOK backend: chỉ đếm token, endpoint do người dùng nhập | T-6.4 ✅ | 12 h |
 | **T-HD10** *(người)* | Bản vẽ tab BYOK — prompt ở báo cáo lập kế hoạch 2026-10-01 | — | — |
 | **T-S.19c** | Tab BYOK + Model Picker + admin | T-HD10, T-S.19b | 6 h |
 
@@ -1987,10 +1987,10 @@ Mỗi task một mình, một commit (G4). Mở rộng 2026-10-02 từ khung đ�
 - **Ghi nhận:** **Cạm bẫy ② chọn cách đúng chữ Việc** (đổi host URL thành IP + `Host` thủ công + `sni_hostname`) ⇒ không phải hỏi. Cả hai hệ quả đều tránh được: (a) một transport cho một host đã kiểm, request host khác bị từ chối; (b) transport dựng **bản sao** request mang IP, còn `AsyncClient._send_single_request` gán `response.request = request` gốc (đọc `httpx` 0.28.1) ⇒ `raise_for_status()` nói `https://bücher.example/x`, không IP — có ca khẳng định. Đo ở socket bằng cách thay `httpcore.AnyIOBackend.connect_tcp` (tên công khai) bằng mạng giả trả `AsyncMockStream`. Lớp 4 đọc trọn body mỗi bước — trần kích thước (C25) là việc của `fetcher` P6 (chú thích `ponytail:` trong code). `get_following_redirects` chỉ GET — người dùng đầu tiên là P6. **Ngoài commit, cố ý:** như mục Chung.
 
 ##### T-6.4 — 🔒 `tests/tools/test_ssrf.py` ≥ 25 ca (S10) — **KHÔNG ĐƯỢC GỘP**
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-6.3 ✅ · **Ước lượng:** 2 h
+- **Trạng thái:** ✅ (2026-10-02) — DoD 4/4 dòng đạt · **Phụ thuộc:** T-6.3 ✅ · **Ước lượng:** 2 h → **thực tế ~0.5 h**
 - **KH:** S10 (bảng tiêu chí: *"≥ 25 case, gồm cả redirect chain và DNS rebinding"*), §12.1 (bảng sáu URL), §12.2, §12.5 C23 · RR-3
 - **Việc:**
-  - [ ] Bổ sung `tests/tools/test_ssrf.py` tới khi **mỗi dòng** dưới đây có ít nhất một ca. Ca của T-6.2 / T-6.3 đã phủ dòng nào thì tính; không lấp 25 bằng biến thể của cùng một dòng:
+  - [x] Bổ sung `tests/tools/test_ssrf.py` tới khi **mỗi dòng** dưới đây có ít nhất một ca. Ca của T-6.2 / T-6.3 đã phủ dòng nào thì tính; không lấp 25 bằng biến thể của cùng một dòng:
     - metadata `169.254.169.254`, cả dạng `[::ffff:169.254.169.254]`
     - tên service Docker `redis`, `postgres`, `litellm`, `minio`, `api` — resolver giả trả địa chỉ dải Docker `172.16.0.0/12`, cổng mặc định (để tới được lớp 3)
     - loopback `127.0.0.1`, `[::1]`, `[::ffff:127.0.0.1]`
@@ -2005,19 +2005,20 @@ Mỗi task một mình, một commit (G4). Mở rộng 2026-10-02 từ khung đ�
     - redirect sang nội bộ, redirect vượt trần, rebinding
     - ca **nhận**: một tên resolve ra IP công khai, `https://[2606:4700:4700::1111]/` — để bộ test không xanh nhờ một hàm từ chối mọi thứ
 - **Xong khi (DoD):**
-  - [ ] `pytest tests/tools/test_ssrf.py -v` ≥ 25 passed — dán danh sách tên ca, ghi ca nào phủ dòng nào của Việc
-  - [ ] Kiểm ngược: gỡ nhánh mở `::ffff:` ⇒ đỏ — dán tên ca đỏ và phiên bản Python (Cạm bẫy ① của T-6.2); thêm: thay `validate_url()` bằng hàm từ chối mọi URL ⇒ ca **nhận** đỏ
-  - [ ] Stack thật, DNS thật, **trong container `api`**: `http://redis/`, `http://litellm/`, `http://169.254.169.254/latest/meta-data/`, `https://127.0.0.1.nip.io/` ⇒ mã `address`; `http://litellm:4000/v1/models` (dòng S10) ⇒ mã `port` — dán mã và thông điệp của từng URL, không thông điệp nào chứa IP
-  - [ ] `make test && make lint && make check-hardcode && docker compose ps`
+  - [x] `pytest tests/tools/test_ssrf.py -v` ≥ 25 passed — dán danh sách tên ca, ghi ca nào phủ dòng nào của Việc  — *`59 passed in 0.35s` (52 + 7). Dòng nào cũng có ca; mới: `test_rejects_docker_service_name_at_layer_3` × 6 (`redis`, `redis.`, `postgres`, `litellm`, `minio`, `api` — khẳng định resolver được gọi với `(tên đã chuẩn hoá, 80)`), `0x7f.1` / `127.1` vào `test_rejects_name_resolving_to_non_public_ip` (khẳng định thêm resolver được gọi đúng 1 lần — đi qua resolve, không parse như IP chữ). Bảng ca ↔ dòng ở báo cáo*
+  - [x] Kiểm ngược: gỡ nhánh mở `::ffff:` ⇒ đỏ — dán tên ca đỏ và phiên bản Python (Cạm bẫy ① của T-6.2); thêm: thay `validate_url()` bằng hàm từ chối mọi URL ⇒ ca **nhận** đỏ  — *gỡ nhánh, `.venv` **3.12.3** ⇒ 1 đỏ `test_accepts_ipv4_mapped_public_address`; container **3.12.14** (không có `tests/`, `app/` mount sẵn bản phá) ⇒ `validate_url("http://[::ffff:100.64.0.1]/")` **nhận** — tức ca `…_literal_without_resolving[[::ffff:100.64.0.1]]` đỏ ở đó. Từ chối mọi URL ⇒ 42 đỏ, gồm cả 4 ca nhận. Khôi phục `cp` + `touch`, `cmp` y hệt, `59 passed`, `git diff --stat` chỉ file test*
+  - [x] Stack thật, DNS thật, **trong container `api`**: `http://redis/`, `http://litellm/`, `http://169.254.169.254/latest/meta-data/`, `https://127.0.0.1.nip.io/` ⇒ mã `address`; `http://litellm:4000/v1/models` (dòng S10) ⇒ mã `port` — dán mã và thông điệp của từng URL, không thông điệp nào chứa IP  — *bốn URL đầu `address` · "URL bị từ chối: tên miền trỏ tới địa chỉ không công khai"; `litellm:4000` `port` · "URL bị từ chối: chỉ nhận cổng 80/443". Đối chứng `getaddrinfo`: `redis` → `192.168.224.5`, `litellm` → `192.168.224.6`, `127.0.0.1.nip.io` → `127.0.0.1` — không IP nào trong `str`/`repr`*
+  - [x] `make test && make lint && make check-hardcode && docker compose ps`  — *backend `1588 passed` (1581 + 7); FE `31 passed · 454 passed`; `check-theme: OK`, `check-identifiers: OK`, ruff `All checks passed!`, mypy 93 file sạch; `check-hardcode: OK`; 9 service `Up … (healthy)`*
 - **Cạm bẫy:**
   - ① **25 là sàn của S10, không phải đích.** Mười ca `parametrize` của cùng một dòng đủ số mà không phủ thêm gì — DoD dòng 1 vì vậy đòi bảng ca ↔ dòng.
   - ② Vế *"không có request nào rời khỏi container `fetcher`"* của S10 là lớp 1 — T-6.5, P6. Đường BYOK không có lớp 1 (NQ-134 ①); đừng giả lập nó ở đây.
   - ③ `127.0.0.1.nip.io` trong pytest dùng resolver giả; bản DNS thật là DoD dòng 3. Lớp 2 không bắt được tên này, chỉ lớp 3 (T-S.19b Cạm bẫy ③).
   - ④ `http://redis:6379/` bị từ chối ở **lớp 2** (cổng) trước khi DNS được hỏi — ca "tên service Docker" phải đi cổng mặc định mới chứng minh được lớp 3. Cùng lý do, DoD dòng 3 tách `litellm` (mã `address`) khỏi `litellm:4000` (mã `port`).
   - ⑤ `0177.0.0.1`: `httpx` ném `InvalidURL` trước cả lớp 3 — ca khẳng định mã `host`, không "ném gì cũng được" (một `500` cũng là ném).
+- **Ghi nhận:** Không câu hỏi nào trước dòng code đầu; chỉ sửa file test, `ssrf.py` không đổi. Mạng Docker trên máy này là `192.168.224.0/20`, không phải `172.16.0.0/12` như Việc giả định — ca pytest giữ dải `172.18.x` của Việc (cả hai đều `is_private`), DoD 3 đo dải thật. **Ngoài commit, cố ý:** như mục Chung.
 
 #### T-S.19b — BYOK backend: chỉ đếm token, endpoint do người dùng nhập
-- **Trạng thái:** ☐ · **Phụ thuộc:** T-6.4 · **Ước lượng:** 12 h
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-6.4 ✅ · **Ước lượng:** 12 h
 - **Việc:**
   - [ ] **Chỉ đếm token (NQ-134 ③):** `record_usage` với `key_source='byok'` ghi đủ `prompt_tokens` / `completion_tokens` / `cached_tokens`, `cost_usd = 0`, `price_snapshot = {}` — cho cả provider catalog lẫn endpoint tự nhập; vẫn không `ZADD`. Dòng BYOK cũ giữ nguyên tiền đã ghi (A7)
   - [ ] Migration: bảng `user_byok_endpoints` (`id`, `user_id` FK `ON DELETE CASCADE`, `label`, `base_url`, `key_cipher`, `key_nonce`, `key_last4`, `models TEXT[]`, `verified_at`, `created_at`; `UNIQUE (user_id, label)`). Trần số endpoint mỗi người, số model mỗi endpoint, `context_window` / `max_output` của model tự nhập — ở `Settings` (A3)

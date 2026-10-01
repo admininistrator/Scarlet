@@ -1,4 +1,4 @@
-"""`app/tools/ssrf.py::validate_url()` — T-6.2 (lớp 2 + 3 của §12.2).
+"""`app/tools/ssrf.py` — T-6.2 (lớp 2 + 3), T-6.3 (ghim IP + lớp 4), T-6.4 (S10).
 
 Không ca nào chạm DNS thật (`make test` không ra Internet): resolver là hàm giả
 bơm vào. Vì thế mọi ca từ chối khẳng định **mã lý do** — trên host WSL `redis`
@@ -171,17 +171,45 @@ async def test_rejects_non_public_ip_literal_without_resolving(host: str) -> Non
 @pytest.mark.parametrize(
     ("url", "resolved"),
     [
-        ("http://redis/", ["172.18.0.5"]),
+        # IP dạng lạ là **tên** với `httpx.URL` ⇒ phải đi qua resolve (T-6.2 Cạm bẫy ③).
         ("https://2130706433/", ["127.0.0.1"]),
+        ("https://0x7f.1/", ["127.0.0.1"]),
+        ("https://127.1/", ["127.0.0.1"]),
         ("https://127.0.0.1.nip.io/", ["127.0.0.1"]),
         ("http://localhost./", ["::1", "127.0.0.1"]),
     ],
 )
 async def test_rejects_name_resolving_to_non_public_ip(url: str, resolved: list[str]) -> None:
-    exc = await _rejected(url, FakeResolver(resolved))
+    resolver = FakeResolver(resolved)
+
+    exc = await _rejected(url, resolver)
 
     assert exc.reason == "address"
+    assert len(resolver.calls) == 1
     _assert_no_ip_leak(exc, resolved)
+
+
+@pytest.mark.parametrize(
+    ("url", "resolved"),
+    [
+        ("http://redis/", "172.18.0.5"),
+        ("http://redis./", "172.18.0.5"),
+        ("http://postgres/", "172.18.0.2"),
+        ("http://litellm/", "172.18.0.3"),
+        ("http://minio/", "172.18.0.4"),
+        ("http://api/", "172.18.0.7"),
+    ],
+)
+async def test_rejects_docker_service_name_at_layer_3(url: str, resolved: str) -> None:
+    # Cổng mặc định: `redis:6379` đã chết ở lớp 2 (cổng) trước khi DNS được hỏi.
+    # Resolver được gọi với tên đã chuẩn hoá ⇒ ca này chứng minh lớp 3, không phải lớp 2.
+    resolver = FakeResolver([resolved])
+
+    exc = await _rejected(url, resolver)
+
+    assert exc.reason == "address"
+    assert resolver.calls == [(httpx.URL(url).host.rstrip("."), 80)]
+    _assert_no_ip_leak(exc, [resolved])
 
 
 async def test_rejects_when_any_resolved_address_is_private() -> None:
