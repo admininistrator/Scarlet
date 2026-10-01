@@ -582,19 +582,29 @@ Ghi link vào `design/README.md`, hàng T-HD3-v2. Task dùng bản này: T-S.15.
 
 ### 10.1 Dữ liệu thật mà picker phải hiện
 
-Bảng dưới đây là **dự kiến** từ tra cứu ngày 2026-09-23. **Trước khi dán, mở T-S.3 → "Ghi nhận"** và sửa theo
-kết quả đo thật (mức nào T-S.2 loại thì bỏ đi). Mức in đậm là mặc định.
+Bảng đã sửa theo kết quả đo của **T-S.2**, catalog v4 của **T-S.3** và trạng thái của **T-S.4** — chép từ
+`config/model_catalog.json` ngày 2026-09-24. Thứ tự hàng là thứ tự trong picker (`order`). Mức in đậm là mặc định.
 
 | Tên hiển thị | Hãng | Capability | Badge | Mức suy luận | Giá / 1M token vào · ra |
 |---|---|---|---|---|---|
-| DeepSeek Flash | DeepSeek | tools, vision, reasoning | Mặc định · Rẻ | Off · Low · **High** · Max | $0.30 · $1.20 — thấp điểm $0.15 · $0.60 |
-| Claude Haiku 4.5 | Anthropic | tools, vision | — | **Off** · Low · Medium · High | $1.00 · $5.00 |
-| Gemini 3.8 Flash | Google AI | tools | — | Low · **Medium** · High | không tính phí theo token |
-| Grok 4.6 | xAI | — | — | Low · Medium · **High** · Extra High | không tính phí theo token |
-| Qwen2.5 0.5B | Alibaba Qwen | — | Self-host | *(không có)* | không tính phí theo token |
+| DeepSeek Flash | DeepSeek | tools, vision, reasoning | Mặc định · Rẻ | Off · Low · **High** · Max | cao điểm $0.30 · $1.20 — thấp điểm $0.15 · $0.60 |
+| Claude Haiku 4.5 | Anthropic | tools, vision | — | **Off** · Low · High | $1.00 · $5.00 |
+| Gemini Flash | Google AI | tools | — | **Low** · High | Không tính phí theo token |
+| Qwen2.5 0.5B (Ollama) | Alibaba Qwen | — | Self-host | *(không có)* | Không tính phí theo token |
+| Grok 4.6 | xAI | — | — | *(không có)* | Không tính phí theo token |
 
-Gemini 3.8 Flash vẽ ở trạng thái **không dùng được**, lý do: *"Model này tạm thời không dùng được. Hãy thử lại
-sau ít phút."* — câu này không nhắc tên đường trung gian nào.
+- **Mức suy luận** chỉ gồm mức đã đo thấy có tác dụng (T-S.2). Haiku chỉ có hai mức đã đo; Gemini bỏ Medium (không
+  tách được khỏi Low); Grok **không** có mức nào — không chứng minh được tham số tới model. DeepSeek: T-S.2/T-S.3
+  chỉ còn Off · High, T-S.6 khai lại Low · Max theo tài liệu DeepSeek (NQ-126) — catalog hiện là bốn mức như bảng.
+- **Giá DeepSeek:** cao điểm = thứ Hai–thứ Sáu 08:00–11:00 và 13:00–17:00 giờ Việt Nam, ngoài khung đó là thấp
+  điểm. `GET /models` trả sẵn khung đang áp dụng và khung còn lại. Hiện không model nào có giá "ước lượng".
+- **Hãng** là hãng làm ra model, không bao giờ là đường trung gian. Gemini Flash và Grok 4.6 không có badge.
+- **Không dùng được:** chỉ Gemini Flash có thể xám (đường của nó được đo định kỳ). Vẽ nó ở trạng thái đó, lý do
+  đúng nguyên văn: *"Nguồn cung cấp model này đang không phản hồi, nên model tạm thời không chọn được. Hãy thử lại
+  sau ít phút, hoặc xem mục Hệ thống để biết chi tiết."* — câu này không nhắc tên hãng hay đường trung gian nào.
+- **Trạng thái (T-S.4):** "Trạng thái kiểm lúc 14:32" là giờ backend đo, tự làm tươi định kỳ (mặc định 30 s). Mở
+  picker khi dữ liệu đã cũ thì app hỏi lại ngầm, danh sách cũ vẫn bấm được — không có vòng quay chờ. Lần đọc đầu
+  chưa xong: nút mở ghi "Đang tải…", thân picker ghi "Đang tải danh sách mô hình…".
 
 ### 10.2 Dán gì vào
 

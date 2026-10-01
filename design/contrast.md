@@ -69,18 +69,6 @@ Không dùng lẫn.
 | `--color-disabled-foreground` | `--color-background` | 3.46 | 4.01 | 3:1 | ✅ |
 | `--color-disabled-foreground` | `--color-surface-panel` | 3.74 | 3.44 | 3:1 | ✅ |
 | `--color-disabled-foreground` | `--color-surface-sidebar` | 3.20 | 4.28 | 3:1 | ✅ |
-| `--color-disabled-foreground` | `--color-surface-disabled` | 3.23 | 3.86 | 3:1 | ✅ |
-| `--color-border-strong` (viền badge) | `--color-surface-disabled` | 3.15 | 4.03 | 3:1 | ✅ |
-
-`--color-surface-disabled` vào hệ ở T-3.6 (T-HD4): nền của hàng model không
-chọn được trong Model Picker. Hàng ấy vẫn **đọc được**, chỉ không bấm được —
-đó là lý do nó giữ ≥ 3:1 chứ không được miễn trừ hẳn.
-
-> **Lệch so với bản T-HD4.** Chú thích trong bản thiết kế ghi cặp này đạt
-> *4.6:1 (sáng) / 4.7:1 (tối)*. Tính lại từ chính hex trong `theme.css` thì
-> là **3.23 / 3.86**. Hai con số của bản vẽ không tái hiện được bằng bất kỳ
-> cặp nào trong hệ; số ở bảng này là số tính từ mã đang chạy. Vẫn đạt ngưỡng
-> 3:1 mà hàng "Chữ vô hiệu hoá" của bảng ngưỡng đặt ra, nên không đổi màu.
 
 ## 5. Thành phần đồ hoạ
 
@@ -128,63 +116,12 @@ là ≥ 1.05 cộng với viền hoặc shadow.
 | khối code ↔ bong bóng assistant | 1.266 | 1.190 | 1.05 | ✅ |
 | khối code ↔ bong bóng user | 1.108 | 1.320 | 1.05 | ✅ |
 | hover hàng ↔ nền app | 1.110 | 1.111 | 1.02 | ✅ |
-| hàng model bị khoá ↔ panel nổi | 1.157 | 1.115 | 1.05 | ✅ |
-| tooltip ↔ panel nổi | 16.230 | 1.303 | 1.05 | ✅ |
 
 Ở theme sáng, `surface-panel` và `surface-assistant` cùng là `#ffffff`: panel phân biệt
 bằng `--shadow-popover`, bong bóng assistant phân biệt bằng `--color-border`. Đây là
 lựa chọn có chủ đích — thêm một sắc trắng thứ hai chỉ tạo bẩn, không tạo thông tin.
 
-## 7b. Tooltip lý do của Model Picker (T-3.6)
-
-| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
-|---|---|---:|---:|---:|:--:|
-| `--color-tooltip-foreground` | `--color-surface-tooltip` | 16.23 | 11.09 | 4.5:1 | ✅ |
-
-Tooltip là chỗ **duy nhất** trong hệ đảo bề mặt ở theme sáng (chữ sáng trên
-nền tối). Ở theme **tối** nó không đảo lại thành nền sáng mà chỉ nổi lên một
-bậc so với panel (1.303): câu lý do do server trả dài không đoán trước — bản
-T-HD4 đo một câu 150+ ký tự — và ném một mảng trắng cỡ đó vào giữa màn hình
-tối là chói, không phải rõ.
-
-## 8. Tô màu cú pháp trong khối code (T-3.5)
-
-Sáu lớp, không hơn — `highlight.ts` gộp hàng chục tên token của Prism về đúng sáu tên này.
-Nền đối chiếu **luôn** là `--color-surface-code`: khối code không nằm trên bề mặt nào khác,
-và code nội dòng cũng dùng chính nền ấy.
-
-| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
-|---|---|---:|---:|---:|:--:|
-| `--color-code-keyword` | `--color-surface-code` | 5.61 | 9.38 | 4.5:1 | ✅ |
-| `--color-code-string` | `--color-surface-code` | 5.61 | 11.81 | 4.5:1 | ✅ |
-| `--color-code-number` | `--color-surface-code` | 5.05 | 9.17 | 4.5:1 | ✅ |
-| `--color-code-function` | `--color-surface-code` | 5.30 | 9.38 | 4.5:1 | ✅ |
-| `--color-code-comment` | `--color-surface-code` | 5.71 | 7.68 | 4.5:1 | ✅ |
-| `--color-code-punct` | `--color-surface-code` | 5.71 | 7.68 | 4.5:1 | ✅ |
-
-**Bốn hue không cách nhau về độ sáng** (chênh lệch giữa chúng chỉ 1.00–1.29:1), và điều đó
-**có chủ đích**. Màu cú pháp là trang trí: gỡ sạch màu đi thì code vẫn đọc được nguyên vẹn,
-không một thông tin nào chỉ được mang bằng màu (WCAG 1.4.1). Thứ phải đạt ngưỡng là từng màu
-so với **nền**, và cả sáu đều đạt ≥ 4.5:1 ở cả hai theme. Tách bạch giữa các lớp với nhau
-dựa vào **tông** — tím ↔ lục ↔ hổ phách ↔ lam — chứ không dựa vào độ sáng.
-
-`--color-code-comment` và `--color-code-punct` trùng giá trị với `--color-muted`, và đó là
-lý do chúng vẫn là hai biến riêng: một ngày nào đó đổi màu chú thích trong code không nên
-kéo theo màu chữ phụ của cả app.
-
-## 9. Con trỏ stream
-
-Con trỏ là một khối đặc màu `--color-accent`, tức một **thành phần đồ hoạ** (ngưỡng 3:1),
-không phải chữ.
-
-| Chữ / thành phần | Nền | Sáng | Tối | Ngưỡng | Đạt |
-|---|---|---:|---:|---:|:--:|
-| `--color-accent` (con trỏ) | `--color-surface-assistant` | 6.54 | 3.55 | 3:1 | ✅ |
-| `--color-accent` (con trỏ) | `--color-surface-code` | 5.17 | 4.22 | 3:1 | ✅ |
-
----
-
-## 10. Những chỗ đã cân nhắc và loại bỏ
+## 8. Những chỗ đã cân nhắc và loại bỏ
 
 - **Dùng thẳng đỏ son làm chữ.** `--color-accent` ở theme tối chỉ đạt
   3.89:1 trên nền app — dưới ngưỡng chữ.
@@ -200,3 +137,50 @@ không phải chữ.
 - **Sidebar sáng hơn nền app ở theme tối.** Đã thử, nhưng sidebar là tầng lùi về sau;
   hệ để sidebar tối hơn nền app (1.067)
   và dùng `--color-border` để cắt cạnh.
+
+---
+
+# v2.0 — bổ sung
+
+## 9. Avatar — chữ `--color-avatar-foreground` trên 8 nền
+
+Sáng: chữ `#ffffff`. Tối: chữ `#171514`. Chữ cái trong avatar là chữ thường (< 24px) nên ngưỡng 4.5:1.
+
+| Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---:|---:|---:|:--:|
+| `--color-avatar-1` hổ phách | 4.92 | 6.25 | 4.5:1 | ✅ |
+| `--color-avatar-2` ô liu | 4.84 | 6.45 | 4.5:1 | ✅ |
+| `--color-avatar-3` lục | 4.83 | 6.57 | 4.5:1 | ✅ |
+| `--color-avatar-4` lục lam | 4.80 | 6.60 | 4.5:1 | ✅ |
+| `--color-avatar-5` lam | 4.85 | 6.45 | 4.5:1 | ✅ |
+| `--color-avatar-6` xám đá | 4.86 | 6.32 | 4.5:1 | ✅ |
+| `--color-avatar-7` chàm | 4.99 | 6.18 | 4.5:1 | ✅ |
+| `--color-avatar-8` mận | 5.12 | 6.07 | 4.5:1 | ✅ |
+
+**Phân biệt với nhau** (khoảng cách OKLab, càng lớn càng khác): cặp gần nhất là
+lục lam ↔ lam, 0.067 (sáng) / 0.063 (tối). Tám màu còn khác độ bão hoà (xám đá thấp hẳn)
+nên không hai màu nào trùng nhau khi đứng cạnh.
+
+**Xa accent và danger**: hue OKLCH của accent 29°, danger 14°. Avatar gần nhất là
+hổ phách (75°, cách accent 46°) và mận (320°, cách danger 54°). Khoảng cách OKLab tới
+accent/danger nhỏ nhất: 0.139 (sáng) / 0.167 (tối), lớn hơn gấp đôi cặp avatar gần nhau nhất.
+
+## 10. Đường kẻ ngăn mục trong menu
+
+Đường kẻ là trang trí: mỗi nhóm mục còn tách nhau bằng khoảng trống, nên WCAG 1.4.11
+không đòi 3:1. Ngưỡng thực dụng của hệ cho đường kẻ trên panel: ≥ 1.3.
+
+| Đường kẻ | Nền | Sáng | Tối | Ngưỡng | Đạt |
+|---|---|---:|---:|---:|:--:|
+| `--color-border` (có sẵn) | `--color-surface-panel` | 1.40 | 1.18 | 1.3 | ❌ tối |
+| `--color-divider` (mới) | `--color-surface-panel` | 1.40 | 1.52 | 1.3 | ✅ |
+
+`--color-border` ở theme tối được chỉnh cho nền app `#171514`; trên panel `#262321`
+(sáng hơn) nó gần như biến mất. Vì vậy thêm `--color-divider`.
+
+## 11. Nút không bấm được
+
+Nút chờ và nút tắt vì điều kiện đều mờ về `--disabled-opacity` (0.45). WCAG 1.4.3
+miễn trừ tương phản cho thành phần bị khoá; axe-core cũng bỏ qua phần tử
+`disabled` / `aria-disabled="true"`. Vòng focus KHÔNG được miễn trừ: khi nút chờ nhận
+focus bàn phím nó trở lại opacity 1, vòng focus giữ 7.34 (sáng) / 6.86 (tối) trên panel.
