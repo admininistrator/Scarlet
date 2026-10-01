@@ -95,6 +95,7 @@ import {
   type ModelOut,
   type QuotaWarning,
 } from "../../lib/api";
+import { PATHS } from "../../app/paths";
 import { newKey } from "../../lib/idempotency";
 import { pickDefault, type DefaultPick } from "../models/defaults";
 import { effectiveEffort } from "../models/reasoning";
@@ -112,6 +113,14 @@ import {
 
 /** Tham so URL giu hoi thoai dang mo — de F5 quay lai dung cho (M3). */
 const CONVERSATION_PARAM = "c";
+
+/**
+ * T-S.19a — duong mo mot hoi thoai tu ngoai man chat (dao o `/cai-dat`,
+ * `/admin`): man chat mount la doc `?c=` (`readConversationParam`).
+ */
+export function conversationHref(id: string): string {
+  return `${PATHS.home}?${new URLSearchParams({ [CONVERSATION_PARAM]: id }).toString()}`;
+}
 
 function readConversationParam(): string | null {
   return new URLSearchParams(window.location.search).get(CONVERSATION_PARAM);

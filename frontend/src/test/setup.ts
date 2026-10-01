@@ -17,7 +17,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
 /*
@@ -72,6 +72,16 @@ if (typeof Element.prototype.hasPointerCapture !== "function") {
   Element.prototype.setPointerCapture = () => {};
   Element.prototype.releasePointerCapture = () => {};
 }
+
+/*
+  T-S.19a — han cho mac dinh cua `waitFor`/`findBy*` (1 s) qua sat cho cac luong
+  dung CA app: dao dieu huong mount them thanh mo + sidebar doc (do A/B:
+  `ReasoningFlow` 1.1 s → 1.65 s, `RetryFlow` 0.75 s → 1.15 s), va ngay sau
+  luot `pytest` cua `make test` may con tai nang ⇒ hai ca do luan phien. Han
+  dai hon chi lam ca HONG that bai cham hon; ca dat van xong ngay khi dieu kien
+  dung. Cung so voi tien le `{ timeout: 3000 }` cua `authScreens.test.tsx`.
+*/
+configure({ asyncUtilTimeout: 3000 });
 
 afterEach(() => {
   cleanup();

@@ -133,14 +133,10 @@ export function MessageItem({
   return (
     <article
       aria-label={t("chat.assistantLabel")}
-      // T-3.9 / Cam bay ①: hoat anh o VUNG, chay mot lan khi bong bong mount.
-      // Hai nhanh chung mot `animation` nen doi sang trang thai loi khong kich lai.
-      // Ban T-HD3-v2 3f: o 375 px dem 14/16 (bong bong 343, long 311).
-      className={
-        isError
-          ? "motion-enter w-full max-w-measure rounded-bubble border border-danger bg-danger-subtle px-4 py-3.5 sm:px-5 sm:py-4"
-          : "motion-enter w-full max-w-measure rounded-bubble border border-border bg-surface-assistant px-4 py-3.5 sm:px-5 sm:py-4"
-      }
+      // T-3.9 / Cam bay ①: hoat anh o VUNG, chay mot lan khi tin mount.
+      // T-S.19a (ban Tin nhan v3): KHONG bong bong — khong nen, vien, bo, dem
+      // trong; loi nhan ra qua cham do, tieu de chu do va nut Thu lai nen do.
+      className="motion-enter w-full max-w-measure"
     >
       <h3 className="mb-2 flex items-center gap-2 text-2xs font-semibold tracking-[0.08em] uppercase text-muted">
         <span
@@ -333,7 +329,7 @@ function UserBubble({
     return (
       <article
         aria-label={t("chat.editing")}
-        className="mr-0 ml-auto w-full max-w-bubble-user rounded-bubble border border-border-strong bg-surface-user px-4 py-3"
+        className="mr-0 ml-auto w-full max-w-bubble-user"
       >
         <form
           onSubmit={(e) => {
@@ -384,8 +380,9 @@ function UserBubble({
   return (
     <article
       aria-label={t("chat.userLabel")}
-      // Ban T-HD3-v2 3g "giu nguyen v1"; dem 12/14 o 375 px, 14/16 tu `sm` (3f, 3g).
-      className="mr-0 ml-auto flex w-full max-w-bubble-user flex-col gap-1 rounded-bubble bg-surface-user px-3.5 py-3 sm:px-4 sm:py-3.5"
+      // T-S.19a (ban Tin nhan v3): neo phai, rong theo chu (toi da 560), khong
+      // nen, khong vien, khong nhan.
+      className="mr-0 ml-auto flex w-fit max-w-bubble-user flex-col gap-1"
     >
       {/* Tin nhan cua nguoi dung la chu tho: no khong di qua mot model nao,
           va render markdown o day nghia la nguoi go ``` bi mat dau ```. */}

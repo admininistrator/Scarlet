@@ -120,20 +120,7 @@ import {
 import type { TitleStreamEvent } from "../../lib/sse";
 import locale from "../../locales/vi.json";
 import { Sidebar, sortConversations } from "./Sidebar";
-import { resetSidebarOpenForTest, toggleSidebar } from "./sidebarOpen";
 
-/**
- * `toggleSidebar()` la mot store NGOAI React, nen React khong biet no vua
- * bao moi nguoi nghe — thieu `act` thi cap nhat roi ra ngoai luot render cua
- * test va console day canh bao.
- */
-function toggle(): void {
-  act(() => {
-    toggleSidebar();
-  });
-}
-
-const STORAGE_KEY = "scarlet-sidebar";
 const TTL_S = 3600;
 const UNTITLED = "Hội thoại chưa đặt tên";
 
@@ -243,8 +230,6 @@ function headings(): string[] {
 
 beforeEach(() => {
   localStorage.clear();
-  // Store song o tam module nen no song sot qua `cleanup()`.
-  resetSidebarOpenForTest();
   streams.length = 0;
   serve({});
 });
@@ -428,52 +413,6 @@ describe("Sidebar — ghim va doi ten", () => {
   });
 });
 
-describe("Sidebar — an/hien", () => {
-  it("10a. an roi mount lai thi van an, va mo lai ghi duoc vao localStorage", async () => {
-    serve({ pages: [page([conversation({ id: "a", title: "Một" })])] });
-
-    const { unmount } = mount();
-    await screen.findByText("Một");
-
-    toggle();
-    await waitFor(() => {
-      expect(screen.queryByText("Một")).not.toBeInTheDocument();
-    });
-    expect(localStorage.getItem(STORAGE_KEY)).toBe("closed");
-
-    unmount();
-    resetSidebarOpenForTest();
-    mount();
-
-    expect(screen.queryByText("Một")).not.toBeInTheDocument();
-    toggle();
-    expect(await screen.findByText("Một")).toBeInTheDocument();
-    expect(localStorage.getItem(STORAGE_KEY)).toBe("open");
-  });
-
-  it("10b. `localStorage` nem (che do rieng tu) thi sidebar van chay, khong vo app", async () => {
-    serve({ pages: [page([conversation({ id: "a", title: "Một" })])] });
-    const readSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new DOMException("bi chan", "SecurityError");
-    });
-    const writeSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new DOMException("bi chan", "SecurityError");
-    });
-
-    resetSidebarOpenForTest();
-    mount();
-
-    expect(await screen.findByText("Một")).toBeInTheDocument();
-    toggle();
-    await waitFor(() => {
-      expect(screen.queryByText("Một")).not.toBeInTheDocument();
-    });
-
-    readSpy.mockRestore();
-    writeSpy.mockRestore();
-  });
-});
-
 describe("Sidebar — chon hoi thoai", () => {
   /**
    * Hai khang dinh NGUOC CHIEU nhau: doi sang mot id DA CO ⇒ **khong** goi
@@ -533,23 +472,6 @@ describe("sortConversations", () => {
     ]);
 
     expect(sorted.map((x) => x.id)).toEqual(["c", "b", "a2", "a1"]);
-  });
-});
-
-describe("Sidebar — ban T-HD2", () => {
-  it("13. dong = 0 px: khong `<nav>`, khong nut nao con lai trong sidebar", async () => {
-    serve({ pages: [page([conversation({ id: "a", title: "Một" })])] });
-
-    const { container } = mount();
-    await screen.findByText("Một");
-
-    toggle();
-
-    await waitFor(() => {
-      expect(container.querySelector("nav")).toBeNull();
-    });
-    expect(container.querySelectorAll("button")).toHaveLength(0);
-    expect(container).toBeEmptyDOMElement();
   });
 });
 

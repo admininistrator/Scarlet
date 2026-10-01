@@ -252,3 +252,37 @@ export type SpringRole = keyof typeof SPRINGS;
  * con so nay song canh no vi ca hai la token chuyen dong phia JS.
  */
 export const ACCOUNT_MENU_NUDGE_PX = 3;
+
+/**
+ * T-S.19a — vat ly cua dao dieu huong (ban Khung chinh v3, `springs.ts` khoi v3).
+ *
+ * Hinh cua dao la nam lo xo doc lap — x, y, w, h, bo goc — ghi thang vao
+ * `style` moi khung hinh (`useIslandPhysics`), khong transition, khong ms. Be
+ * ngang vien thuoc do tu noi dung, nen khi trang thai ket noi hien them, dao
+ * gian bang chinh lo xo `islandMorph`. Giam chuyen dong ⇒ dao nhay thang toi
+ * hinh dich (xem `useIslandPhysics`).
+ */
+/** Co khi vua nam, lun nhe roi dung. ζ ≈ 0.72 */
+export const SPRING_ISLAND_GRAB: SpringConfig = { stiffness: 700, damping: 38 };
+/** Bam chuot, tre kieu nam cham. ζ ≈ 0.73 */
+export const SPRING_ISLAND_FOLLOW: SpringConfig = { stiffness: 420, damping: 30 };
+/** Bay ve neo, vot ~4% roi dau. ζ ≈ 0.68 */
+export const SPRING_ISLAND_FLY: SpringConfig = { stiffness: 260, damping: 22 };
+/** No / thu khi hover, focus, doi noi dung. ζ ≈ 0.84 */
+export const SPRING_ISLAND_MORPH: SpringConfig = { stiffness: 320, damping: 30 };
+
+export const ISLAND_SPRINGS = {
+  islandGrab: SPRING_ISLAND_GRAB,
+  islandFollow: SPRING_ISLAND_FOLLOW,
+  islandFly: SPRING_ISLAND_FLY,
+  islandMorph: SPRING_ISLAND_MORPH,
+} as const satisfies Record<string, SpringConfig>;
+
+export type IslandSpringRole = keyof typeof ISLAND_SPRINGS;
+
+/** Giay, khong phai thoi luong: vi tri tha + van toc × he so nay → chon neo theo huong nem. */
+export const ISLAND_THROW_LOOKAHEAD = 0.14;
+/** Duoi nguong = bam, tren nguong = keo. */
+export const ISLAND_DRAG_THRESHOLD_PX = 6;
+/** < 640 px (= `sm`): chi neo tren, khong keo. Neo trai / phai da luu duoc giu cho man rong. */
+export const ISLAND_COMPACT_QUERY = "(max-width: 39.99rem)";

@@ -66,6 +66,11 @@ type ComingSoonProps =
       toggle?: false;
       leadingIcon?: undefined;
       menuItem?: false;
+      /**
+       * T-S.19a — nut icon trong dao (ban Khung chinh v3: tron, nen kinh) THAY
+       * hinh mac dinh. Nguoi goi tu kem `control-disabled`.
+       */
+      className?: string;
     }
   | {
       planned: Planned;
@@ -99,7 +104,9 @@ const TEXT_CLASS =
 const TOGGLE_CLASS =
   "control-disabled inline-flex min-h-touch shrink-0 items-center gap-1.5 rounded-full pr-3 pl-2.5 text-sm font-medium text-muted";
 
-export function ComingSoon({ planned, label, icon, toggle, leadingIcon, menuItem }: ComingSoonProps) {
+export function ComingSoon(props: ComingSoonProps) {
+  const { planned, label, icon, toggle, leadingIcon, menuItem } = props;
+  const iconClass = ("className" in props ? props.className : undefined) ?? ICON_CLASS;
   const dismissMenu = useContext(MenuDismissContext);
 
   if (menuItem === true) {
@@ -154,7 +161,7 @@ export function ComingSoon({ planned, label, icon, toggle, leadingIcon, menuItem
               toggle === true
                 ? TOGGLE_CLASS
                 : iconOnly
-                  ? ICON_CLASS
+                  ? iconClass
                   : leadingIcon === undefined
                     ? TEXT_CLASS
                     : `${TEXT_CLASS} inline-flex items-center gap-2`

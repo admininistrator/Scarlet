@@ -20,7 +20,6 @@ import { ComingSoon } from "../ui/ComingSoon";
 import { NudgeIcon, StaticIcon } from "../ui/Icon";
 import { MENU_ITEM_CLASS, MENU_SEPARATOR_CLASS, MenuDismissContext } from "../ui/menu";
 import { tierLabel } from "../ui/tierLabel";
-import { setDrawerOpen } from "./sidebarOpen";
 
 /**
  * Khoi tai khoan o chan sidebar + menu tai khoan — T-S.12, ban T-HD2-v2 muc D,
@@ -61,14 +60,13 @@ import { setDrawerOpen } from "./sidebarOpen";
  * menu va dat tieu diem vao muc dau, mui ten di giua cac muc, Esc dong va TRA
  * tieu diem ve khoi tai khoan (DoD dong 2).
  *
- * ── Drawer ────────────────────────────────────────────────────────────────
+ * ── Trong dao (T-S.19a, ban Khung chinh v3) ───────────────────────────────
  *
- * Chon Cai dat / Muc su dung / Dang xuat thi dong drawer: `/cai-dat` khong co
- * sidebar, nhung trang thai drawer la mot kho o cap module (`sidebarOpen.ts`),
- * de nguyen `true` thi quay lai `/` drawer tu bat ra. Truoc day `Sidebar` dong
- * drawer bang `onClickCapture` quanh chan sidebar — voi mot menu thi lan bam
- * MO menu cung bi bat, va su kien cua noi dung menu (portal) van noi bot qua
- * cay React toi do.
+ * `placement="island"`: cung bay muc, nhung khoi nam trong hang cuoi cua thanh
+ * mo (khong vien tren, nen kinh khi re chuot) va menu mo XUONG — dao o mep
+ * tren, phia tren khong du cho. Rong 240 (`w-60`), `.motion-popover`.
+ * `placement="sidebar"` (mac dinh) la khoi o chan sidebar v2, menu mo LEN —
+ * hinh "sidebar doc" cua dao dung lai nguyen.
  */
 
 interface AccountMenuProps {
@@ -77,9 +75,11 @@ interface AccountMenuProps {
   avatarColor: string | null;
   /** `useSessionState().logout` — xoa phien o FE ca khi loi goi mang hong. */
   onLogout: () => Promise<void>;
+  /** Chan sidebar v2 (mac dinh) hay hang cuoi cua dao (T-S.19a). */
+  placement?: "sidebar" | "island";
 }
 
-export function AccountMenu({ user, avatarColor, onLogout }: AccountMenuProps) {
+export function AccountMenu({ user, avatarColor, onLogout, placement = "sidebar" }: AccountMenuProps) {
   const navigate = useNavigate();
   const shown = user.display_name?.trim() || user.email;
   const color = avatarColorOf(avatarColor, user.id);
@@ -91,88 +91,93 @@ export function AccountMenu({ user, avatarColor, onLogout }: AccountMenuProps) {
   const [open, setOpen] = useState(false);
   const closeMenu = useCallback(() => setOpen(false), []);
 
-  return (
-    <div className="shrink-0 border-t border-border p-2">
-      <DropdownMenu.Root open={open} onOpenChange={setOpen}>
-        <DropdownMenu.Trigger className="motion-control flex min-h-14 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-foreground hover:bg-surface-hover data-[state=open]:bg-surface-hover">
-          <span
-            aria-hidden="true"
-            className={`grid size-8 shrink-0 place-items-center rounded-full text-base font-semibold text-avatar-foreground ${avatarBackground(color)}`}
-          >
-            {initialOf(shown)}
-          </span>
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-base leading-5 font-semibold">{shown}</span>
-            <span className="text-xs leading-4 text-muted">{tierLabel(user.tier_name)}</span>
-          </span>
-          <StaticIcon icon={ChevronsUpDown} size={16} className="shrink-0 text-muted" />
-        </DropdownMenu.Trigger>
+  const island = placement === "island";
+  const menu = (
+    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+      <DropdownMenu.Trigger
+        className={
+          island
+            ? "motion-control flex min-h-14 min-w-0 flex-1 items-center gap-2.5 rounded-island-item px-2.5 text-left text-foreground hover:bg-glass-hover data-[state=open]:bg-glass-hover"
+            : "motion-control flex min-h-14 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-foreground hover:bg-surface-hover data-[state=open]:bg-surface-hover"
+        }
+      >
+        <span
+          aria-hidden="true"
+          className={`grid size-8 shrink-0 place-items-center rounded-full text-base font-semibold text-avatar-foreground ${avatarBackground(color)}`}
+        >
+          {initialOf(shown)}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-base leading-5 font-semibold">{shown}</span>
+          <span className="text-xs leading-4 text-muted">{tierLabel(user.tier_name)}</span>
+        </span>
+        <StaticIcon icon={ChevronsUpDown} size={16} className="shrink-0 text-muted" />
+      </DropdownMenu.Trigger>
 
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content
-            side="top"
-            align="start"
-            sideOffset={4}
-            // Radix mac dinh gan ten menu = chu cua nut (`aria-labelledby`), tuc
-            // "Nguyen Thi An Mien phi"; ban ve dat ten "Menu tai khoan".
-            aria-labelledby={undefined}
-            aria-label={t("account.menu")}
-            className="motion-menu-up z-50 flex w-(--radix-dropdown-menu-trigger-width) flex-col rounded-lg border border-border bg-surface-panel p-1.5 shadow-popover"
-          >
-            <MenuDismissContext.Provider value={closeMenu}>
-              <MenuLink icon={Settings} label={t("account.settings")} to={PATHS.settings} />
-              <MenuLink icon={Gauge} label={t("account.usage")} to={PATHS.settingsUsage} />
-              <ComingSoon
-                menuItem
-                planned="B-264"
-                label={t("account.language")}
-                icon={<NudgeIcon icon={Languages} size={18} />}
-              />
-              <ComingSoon
-                menuItem
-                planned="B-264"
-                label={t("account.help")}
-                icon={<NudgeIcon icon={CircleHelp} size={18} />}
-              />
-              <DropdownMenu.Separator className={MENU_SEPARATOR_CLASS} />
-              <ComingSoon
-                menuItem
-                planned="B-264"
-                label={t("account.upgrade")}
-                icon={<NudgeIcon icon={CircleArrowUp} size={18} />}
-              />
-              <DropdownMenu.Separator className={MENU_SEPARATOR_CLASS} />
-              <DropdownMenu.Item
-                onSelect={() => {
-                  setDrawerOpen(false);
-                  void onLogout().then(() => navigate(PATHS.login));
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <NudgeIcon icon={LogOut} size={18} />
-                {t("account.logout")}
-              </DropdownMenu.Item>
-            </MenuDismissContext.Provider>
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
-      </DropdownMenu.Root>
-    </div>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          side={island ? "bottom" : "top"}
+          align="start"
+          sideOffset={island ? 8 : 4}
+          collisionPadding={island ? 16 : undefined}
+          // Radix mac dinh gan ten menu = chu cua nut (`aria-labelledby`), tuc
+          // "Nguyen Thi An Mien phi"; ban ve dat ten "Menu tai khoan".
+          aria-labelledby={undefined}
+          aria-label={t("account.menu")}
+          className={
+            island
+              ? "motion-popover z-50 flex w-60 flex-col rounded-lg border border-border bg-surface-panel p-1.5 shadow-popover"
+              : "motion-menu-up z-50 flex w-(--radix-dropdown-menu-trigger-width) flex-col rounded-lg border border-border bg-surface-panel p-1.5 shadow-popover"
+          }
+        >
+          <MenuDismissContext.Provider value={closeMenu}>
+            <MenuLink icon={Settings} label={t("account.settings")} to={PATHS.settings} />
+            <MenuLink icon={Gauge} label={t("account.usage")} to={PATHS.settingsUsage} />
+            <ComingSoon
+              menuItem
+              planned="B-264"
+              label={t("account.language")}
+              icon={<NudgeIcon icon={Languages} size={18} />}
+            />
+            <ComingSoon
+              menuItem
+              planned="B-264"
+              label={t("account.help")}
+              icon={<NudgeIcon icon={CircleHelp} size={18} />}
+            />
+            <DropdownMenu.Separator className={MENU_SEPARATOR_CLASS} />
+            <ComingSoon
+              menuItem
+              planned="B-264"
+              label={t("account.upgrade")}
+              icon={<NudgeIcon icon={CircleArrowUp} size={18} />}
+            />
+            <DropdownMenu.Separator className={MENU_SEPARATOR_CLASS} />
+            <DropdownMenu.Item
+              onSelect={() => {
+                void onLogout().then(() => navigate(PATHS.login));
+              }}
+              className={MENU_ITEM_CLASS}
+            >
+              <NudgeIcon icon={LogOut} size={18} />
+              {t("account.logout")}
+            </DropdownMenu.Item>
+          </MenuDismissContext.Provider>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
+  return island ? menu : <div className="shrink-0 border-t border-border p-2">{menu}</div>;
 }
 
 /**
  * Muc dan toi mot trang — `<a href>` that (mo tab moi, sao chep link van
  * dung); Enter tren muc goi `click()` cua chinh the `a` (Radix).
- *
- * Dong drawer trong `onClick` cua `Link`, KHONG trong `onSelect`: `Link` goi
- * `preventDefault()` truoc khi dieu huong, va Radix bo qua `onSelect` cua
- * mot lan bam da bi `preventDefault`. Menu tu dong vi trang dich khong co
- * sidebar (route doi ⇒ go ca cay).
  */
 function MenuLink({ icon, label, to }: { icon: IconNode; label: string; to: string }) {
   return (
     <DropdownMenu.Item asChild className={MENU_ITEM_CLASS}>
-      <Link to={to} onClick={() => setDrawerOpen(false)} className="no-underline">
+      <Link to={to} className="no-underline">
         <NudgeIcon icon={icon} size={18} />
         {label}
       </Link>

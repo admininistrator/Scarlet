@@ -225,14 +225,25 @@ describe("khong con dai trang thai (NQ-115)", () => {
     renderScreen();
     await waitFor(() => expect(stream.status).not.toBeNull());
 
+    const text = "Mất kết nối, đang nối lại…";
     act(() => stream.status?.("dang-mo"));
-    expect(screen.queryByText("Mất kết nối, đang nối lại…")).toBeNull();
+    expect(screen.queryAllByText(text)).toHaveLength(0);
 
+    /*
+      T-S.19a — trang thai vao thang dao (ban Khung chinh v3): vien thuoc va
+      thanh mo cung ve chu nay nhung `aria-hidden`; trinh doc man hinh nghe
+      MOT `role=status`.
+    */
     act(() => stream.status?.("dang-noi-lai"));
-    expect(screen.getByText("Mất kết nối, đang nối lại…").closest("[role=status]")).not.toBeNull();
+    const shown = screen.getAllByText(text);
+    const announced = shown.filter((el) => el.closest("[role=status]") !== null);
+    expect(announced).toHaveLength(1);
+    for (const el of shown.filter((x) => !announced.includes(x))) {
+      expect(el.closest('[aria-hidden="true"]')).not.toBeNull();
+    }
 
     act(() => stream.status?.("dang-chay"));
-    expect(screen.queryByText("Mất kết nối, đang nối lại…")).toBeNull();
+    expect(screen.queryAllByText(text)).toHaveLength(0);
   });
 });
 

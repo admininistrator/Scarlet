@@ -65,7 +65,7 @@ const COMPONENTS: Components = {
   },
 
   code: (props) => (
-    <code className="rounded-sm bg-surface-code px-1 py-0.5 font-mono text-sm">{props.children}</code>
+    <code className="rounded-sm bg-surface-code px-1.5 py-px font-mono text-sm">{props.children}</code>
   ),
 
   a: (props) => (
@@ -79,36 +79,42 @@ const COMPONENTS: Components = {
     </a>
   ),
 
-  p: (props) => <p className="my-2 first:mt-0 last:mb-0">{props.children}</p>,
-  h1: (props) => <h2 className="mt-4 mb-2 text-xl font-semibold first:mt-0">{props.children}</h2>,
-  h2: (props) => <h3 className="mt-4 mb-2 text-lg font-semibold first:mt-0">{props.children}</h3>,
-  h3: (props) => <h4 className="mt-3 mb-1 text-base font-semibold first:mt-0">{props.children}</h4>,
-  h4: (props) => <h5 className="mt-3 mb-1 text-base font-semibold first:mt-0">{props.children}</h5>,
-  h5: (props) => <h6 className="mt-3 mb-1 text-base font-semibold first:mt-0">{props.children}</h6>,
-  h6: (props) => <h6 className="mt-3 mb-1 text-base font-semibold first:mt-0">{props.children}</h6>,
-
-  ul: (props) => <ul className="my-2 list-disc pl-6">{props.children}</ul>,
-  ol: (props) => <ol className="my-2 list-decimal pl-6">{props.children}</ol>,
-  li: (props) => <li className="my-0.5">{props.children}</li>,
-
+  /*
+    T-S.19a (ban Tin nhan v3, `ChatStream.tsx` `markdownComponents`): khong
+    bong bong nen moi khoi nam thang tren nen luong. Tieu de: h2 17/24, h3
+    15/26 — `#` va `##` cung co h2 (ban ve: khong h1 trong tin nhan), the HTML
+    van lui mot bac vi nhan "Scarlet tra loi" la `<h3>`.
+  */
+  p: (props) => <p className="my-3 text-body first:mt-0 last:mb-0">{props.children}</p>,
+  h1: (props) => <h2 className="mt-6 mb-2 text-lg font-semibold first:mt-0">{props.children}</h2>,
+  h2: (props) => <h3 className="mt-6 mb-2 text-lg font-semibold first:mt-0">{props.children}</h3>,
+  h3: (props) => <h4 className="mt-5 mb-1.5 text-body font-semibold first:mt-0">{props.children}</h4>,
+  h4: (props) => <h5 className="mt-5 mb-1.5 text-body font-semibold first:mt-0">{props.children}</h5>,
+  h5: (props) => <h6 className="mt-5 mb-1.5 text-body font-semibold first:mt-0">{props.children}</h6>,
+  h6: (props) => <h6 className="mt-5 mb-1.5 text-body font-semibold first:mt-0">{props.children}</h6>,
+  ul: (props) => <ul className="my-3 list-disc pl-5 text-body marker:text-muted">{props.children}</ul>,
+  ol: (props) => <ol className="my-3 list-decimal pl-5 text-body marker:text-muted">{props.children}</ol>,
+  li: (props) => <li className="my-1 pl-1">{props.children}</li>,
   blockquote: (props) => (
-    <blockquote className="my-3 border-l-2 border-border-strong pl-3 text-muted">{props.children}</blockquote>
+    <blockquote className="my-3 border-l-3 border-border-strong pl-4 text-muted">{props.children}</blockquote>
   ),
-  hr: () => <hr className="my-4 border-border" />,
-
+  hr: () => <hr className="my-6 border-0 border-t border-divider" />,
   /*
     Bang cuon ngang TRONG khoi cua no. Khong co `overflow-x` o day thi mot
-    bang 8 cot lam CA TRANG cuon ngang o 375 px.
+    bang 8 cot lam CA TRANG cuon ngang o 375 px. v3: bang la khoi DUY NHAT co
+    nen rieng (`scroll-frame` = nen panel + bong mep phai), vi cot can mep.
   */
   table: (props) => (
-    <div className="my-3 overflow-x-auto overscroll-x-contain">
-      <table className="w-full border-collapse text-sm">{props.children}</table>
+    <div className="scroll-frame my-3 rounded-lg border border-border">
+      <table className="w-full border-collapse text-base">{props.children}</table>
     </div>
   ),
   th: (props) => (
-    <th className="border border-border bg-background px-2 py-1 text-left font-semibold">{props.children}</th>
+    <th className="border-b border-border px-3 py-2 text-left text-sm font-semibold whitespace-nowrap">
+      {props.children}
+    </th>
   ),
-  td: (props) => <td className="border border-border px-2 py-1 align-top">{props.children}</td>,
+  td: (props) => <td className="border-t border-divider px-3 py-2 align-top">{props.children}</td>,
 };
 
 /** Khoi chu tho cho phan markdown chua dong — ban T-HD3 hinh 2d. */

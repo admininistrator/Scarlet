@@ -1,4 +1,4 @@
-import { LoaderCircle } from "lucide";
+import { useMemo } from "react";
 
 import { useSession } from "../../app/Layout";
 import { t } from "../../lib/i18n";
@@ -9,9 +9,8 @@ import { useModels } from "../../features/models/useModels";
 import { QuotaNotice } from "../../features/quota/QuotaNotice";
 import { byokCovers, isSendBlocked, selectedProviderId } from "../../features/quota/quotaView";
 import { useQuota } from "../../features/quota/useQuota";
-import { AccountMenu } from "../sidebar/AccountMenu";
-import { Sidebar } from "../sidebar/Sidebar";
-import { StaticIcon } from "../ui/Icon";
+import { AppIsland } from "../island/AppIsland";
+import { ChatStream } from "./ChatStream";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 
@@ -69,13 +68,12 @@ function Greeting({ runKey }: { runKey: number }) {
  * server dung bang recursive CTE, va cac nhanh khac nam yen trong Postgres cho
  * toi khi nguoi dung bam `‹ n/m ›`.
  *
- * T-3.3 dat `Sidebar` canh no. Hai chieu day du lieu, khong hon: man chat noi
- * "toi dang mo hoi thoai nay" (`cay.conversationId`), sidebar noi "hay mo cai
- * kia" (`onSelect`) hoac "cai dang mo vua bi xoa" (`onOpenConversationDeleted`).
- * Sidebar tu giu danh sach cua no va KHONG doc `useChat` — hai man hinh hoi
- * server hai cau hoi khac nhau (`GET /conversations` va
- * `GET /conversations/{id}`), gop chung vao mot state la buoc ca hai phai lam
- * tuoi cung luc.
+ * T-3.3 dat `Sidebar` canh no; T-S.19a dua sidebar vao dao dieu huong
+ * (`AppIsland`). Hai chieu day du lieu, khong hon: man chat noi "toi dang mo
+ * hoi thoai nay" (`activeId`), dao noi "hay mo cai kia" (`onSelect`), "hoi
+ * thoai moi" hoac "cai dang mo vua bi xoa" (`onDeleted`). Danh sach hoi thoai
+ * KHONG doc `useChat` — hai man hinh hoi server hai cau hoi khac nhau
+ * (`GET /conversations` va `GET /conversations/{id}`).
  */
 export function ChatScreen() {
   /*
@@ -181,61 +179,36 @@ export function ChatScreen() {
   const quotaBlocked = isSendBlocked(quota.block, quota.byokProviders, selectedProvider);
   const draft = chat.phase === "draft";
 
-  /*
-    Bo cuc CO DINH (ban T-HD2, `AppShell.tsx`): header cua `Layout`, sidebar va
-    o nhap dung yen; CHI cot tin nhan cuon. Ca man hinh cao dung phan con lai
-    duoi header (`h-full` + `min-h-0` o moi tang flex), nen khong con thanh
-    cuon cua `window` nao keo ca ba thu kia di theo.
+  // On dinh giua cac lan render cua man chat (moi manh chu dang chay) — `AppIsland` la `memo`.
+  const { openConversation, newConversation, closeConversation, createdConversationId, connection } = chat;
+  const islandChat = useMemo(
+    () => ({
+      activeId: tree.conversationId,
+      createdId: createdConversationId,
+      reconnecting: connection === "dang-noi-lai",
+      onSelect: (id: string) => void openConversation(id),
+      onNewChat: newConversation,
+      onDeleted: closeConversation,
+    }),
+    [tree.conversationId, createdConversationId, connection, openConversation, newConversation, closeConversation],
+  );
 
-    T-S.10 (ban T-HD2-v2): khong con dai trang thai (ma hoi thoai · trang thai
-    ket noi · `in/out`, NQ-115) — chi con MOT thong bao noi o dinh cot khi
-    stream dang noi lai.
+  /*
+    Bo cuc CO DINH: o nhap dung yen, CHI luong tin nhan cuon; dao dieu huong
+    (T-S.19a, ban Khung chinh v3) noi de len tren — khong header, khong cot
+    sidebar. Trang thai "dang noi lai" nam trong dao (NQ-115: mot thong bao).
   */
   return (
     <div className="flex h-full min-h-0 bg-background text-foreground">
-      {/*
-        T-3.3 — sidebar dung canh man chat chu khong trong `Layout`: danh sach
-        hoi thoai chi co nghia sau `StatusGate`, va `/admin`, `/dang-nhap`
-        khong co gi de liet ke. Danh sach ben trong tu cuon (`overflow-y-auto`).
-      */}
-      <Sidebar
-        openConversationId={tree.conversationId}
-        createdConversationId={chat.createdConversationId}
-        // T-S.13: cua so nghe tieu de chay (`STREAM_TTL_S`, NQ-129).
-        streamTtlS={session.profile?.stream_ttl_s ?? null}
-        onSelect={(id) => void chat.openConversation(id)}
-        onNewChat={chat.newConversation}
-        onOpenConversationDeleted={chat.closeConversation}
-        footer={
-          /*
-            T-S.12 — khoi tai khoan o chan sidebar, ca trong drawer: loi vao
-            Cai dat, Muc su dung va Dang xuat (header v2 khong con email lan
-            nut Dang xuat, NQ-115). `StatusGate` chi cho qua phien `active`,
-            nen `user` o day co that; `null` (vua dang xuat) thi khong ve.
-          */
-          session.user !== null && (
-            <AccountMenu
-              user={session.user}
-              avatarColor={session.profile?.avatar_color ?? null}
-              onLogout={session.logout}
-            />
-          )
-        }
-      />
+      <AppIsland session={session} context="chat" chat={islandChat} />
 
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-        {chat.connection === "dang-noi-lai" && (
-          <div
-            role="status"
-            className="absolute top-3 left-1/2 z-10 flex max-w-[calc(100%-2*var(--spacing-gutter))] -translate-x-1/2 items-center gap-2 rounded-full border border-border-strong bg-surface-panel px-3.5 py-2 text-sm whitespace-nowrap shadow-popover"
-          >
-            <StaticIcon icon={LoaderCircle} size={16} className="motion-spin shrink-0 text-muted" />
-            <span className="truncate">{t("chat.ketNoi.dangNoiLai")}</span>
-          </div>
-        )}
-
+        {/*
+          Dai loi khong co trong ban v3: dat NGAY DUOI dao (`mt-island-clear`)
+          cho khong bi vien thuoc de len (B-322).
+        */}
         {chat.error !== null && (
-          <div className="flex shrink-0 items-center gap-3 border-b border-border px-gutter py-2 text-sm text-danger-text lg:px-gutter-lg">
+          <div className="mt-island-clear flex shrink-0 items-center gap-3 border-b border-border px-gutter py-2 text-sm text-danger-text lg:px-gutter-lg">
             <span className="min-w-0 break-words">{chat.error}</span>
             <button
               type="button"
@@ -272,39 +245,39 @@ export function ChatScreen() {
           )}
 
           {/*
-            T-3.5 — cot doc rong toi da `--spacing-measure` (736 px, ban T-HD3).
-            Cot nay phai o DAY chu khong trong tung bong bong: bong bong nguoi
-            dung neo phai bang `ml-auto`, va "phai" cua no la mep cot chu khong
-            phai mep man hinh.
+            T-3.5 — cot doc rong toi da `--spacing-measure` (736 px). T-S.19a
+            (ban Tin nhan v3): khong bong bong — `ChatStream` lo nhip luot va nut
+            "Ve tin moi nhat". `key` theo hoi thoai: doi hoi thoai la bam day lai.
           */}
           {!draft && (
-            <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-              <div className="mx-auto flex w-full max-w-measure flex-col gap-4 px-gutter pt-6 pb-4 lg:px-gutter-lg">
-                {tree.path.map((node) => (
+            <ChatStream
+              key={tree.conversationId ?? ""}
+              streaming={chat.running !== null}
+              items={tree.path.map((node) => ({
+                id: node.id,
+                role: node.role,
+                node: (
                   <MessageItem
-                    key={node.id}
                     node={node}
                     tree={tree}
                     // T-S.15 — ten hien thi cho chip "model · muc" (ban T-HD3-v2 3c).
                     models={modelCatalog.models}
                     notes={chat.notes[node.id] ?? []}
                     running={chat.running === node.id}
-                    // T-3.8 / B-232 — nut "Luu" cua bong bong nguoi dung tat
-                    // trong luc mot thao tac doi cay con bay. `PATCH
-                    // /messages/{id}` khong di qua §11.4 (NQ-93), nen bam hai
-                    // lan la hai nhanh va hai hoa don.
+                    // T-3.8 / B-232 — nut "Luu" cua tin nguoi dung tat trong luc
+                    // mot thao tac doi cay con bay. `PATCH /messages/{id}` khong
+                    // di qua §11.4 (NQ-93), nen bam hai lan la hai nhanh.
                     busy={chat.busy}
                     // T-S.15 — MOT nut Thu lai: `useChat.retry` tu doc model +
-                    // muc dang chon tren picker (§24.2b·S4). Bong bong khong
-                    // biet gi ve picker, nen khong co nguon thu hai de lech.
+                    // muc dang chon tren picker (§24.2b·S4).
                     onRetry={(id) => void chat.retry(id)}
                     onFeedback={(id, value) => void chat.sendFeedback(id, value)}
                     onEdit={(id, draft) => void chat.editQuestion(id, draft)}
                     onSwitchBranch={(n, direction) => void chat.switchBranch(n, direction)}
                   />
-                ))}
-              </div>
-            </main>
+                ),
+              }))}
+            />
           )}
 
           <Composer

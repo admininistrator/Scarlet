@@ -126,7 +126,7 @@ describe("bang route", () => {
   it("/ ra man chat", async () => {
     renderAt(PATHS.home);
 
-    expect(await screen.findByRole("button", { name: "Hội thoại mới" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Nhập tin nhắn cho Scarlet" })).toBeInTheDocument();
   });
 
   it("trang 404 co duong ve / va di duoc bang router, khong nap lai trang", async () => {
@@ -135,7 +135,7 @@ describe("bang route", () => {
 
     await user.click(await screen.findByRole("link", { name: "Về trang chủ" }));
 
-    expect(await screen.findByRole("button", { name: "Hội thoại mới" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Nhập tin nhắn cho Scarlet" })).toBeInTheDocument();
     expect(screen.queryByText("404")).toBeNull();
   });
 
@@ -197,7 +197,7 @@ describe("bang route", () => {
 
     renderAt(PATHS.admin);
 
-    expect(await screen.findByRole("button", { name: "Hội thoại mới" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Nhập tin nhắn cho Scarlet" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Mục quản trị" })).toBeNull();
   });
 

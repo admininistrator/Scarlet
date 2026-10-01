@@ -530,7 +530,7 @@ describe("dieu huong theo status cua §11.1", () => {
   it("man /cho-duyet BIEN MAT sau khi duoc duyet (DoD dong 2)", async () => {
     openChat("active");
 
-    expect(await screen.findByRole("button", { name: "Hội thoại mới" })).toBeInTheDocument();
+    expect(await screen.findByRole("textbox", { name: "Nhập tin nhắn cho Scarlet" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Đang chờ duyệt" })).toBeNull();
   });
 

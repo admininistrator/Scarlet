@@ -20,7 +20,8 @@ export function Hint({
   children,
 }: {
   label: string;
-  side?: "top" | "left";
+  /** T-S.19a: dao o mep tren ⇒ tooltip cua no mo XUONG (`bottom`). */
+  side?: "top" | "left" | "bottom";
   /** Mot phan tu nhan ref (nut) — `Tooltip.Trigger asChild`. */
   children: ReactElement;
 }) {

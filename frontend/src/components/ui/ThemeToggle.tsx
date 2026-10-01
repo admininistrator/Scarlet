@@ -180,9 +180,10 @@ export function ThemeToggle() {
       type="button"
       aria-label={dark ? t("theme.switchToLight") : t("theme.switchToDark")}
       onClick={() => setTheme(dark ? "light" : "dark")}
-      className="motion-press grid size-touch shrink-0 place-items-center rounded-md text-foreground hover:bg-surface-hover"
+      // T-S.19a — nut chi con trong dao (ban Khung chinh v3: tron, nen kinh, icon 18).
+      className="motion-control grid size-touch shrink-0 place-items-center rounded-full text-foreground hover:bg-glass-hover"
     >
-      <Icon icon={dark ? Sun : Moon} spring="themeToggle" size={20} />
+      <Icon icon={dark ? Sun : Moon} spring="themeToggle" size={18} />
     </button>
   );
 }

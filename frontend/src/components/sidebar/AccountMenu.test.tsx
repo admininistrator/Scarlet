@@ -1,20 +1,24 @@
 /**
- * Header v2 + khoi tai khoan + menu tai khoan — T-S.12 (DoD dong 1, dong 2).
+ * Dao dieu huong (thay header v2) + khoi tai khoan + menu tai khoan — T-S.12
+ * (DoD dong 1, dong 2), viet lai o T-S.19a (ban Khung chinh v3).
  *
  * Dung BANG ROUTE THAT (`routes` + `createMemoryRouter`) va `useSessionState`
  * THAT, chi lop `api` bi thay — cung khuon `Settings.test.tsx`. Nho vay
  * "Dang xuat xoa phien roi ve `/dang-nhap`" do tren chinh phien cua `Layout`
  * va chinh URL cua router, khong tren mot ham gia.
  *
- *   - Header: khong con email, khong con nut Dang xuat; nut cho T-5.4 chi o
- *     man chat (NQ-128 c); "Quan tri" chu (desktop) / icon (mobile).
+ *   - Dao: vien thuoc khong co email; nut cho T-5.4 chi o man chat (NQ-128 c);
+ *     "Quan tri" la muc cua dao, chi admin — icon o man khac, co nhan o `/admin`.
  *   - Khoi tai khoan: ten trong ⇒ NGUYEN email; ten la CHU, khong phai HTML;
  *     `truncate`; mau avatar; nhan tier (NQ-116).
  *   - Menu: dung thu tu bay `menuitem`, HAI `separator`; ba muc cho
  *     `aria-disabled` + `data-planned="B-264"`, bam khong lam gi.
  *   - Ban phim: Enter mo, mui ten di (ke ca qua muc cho), Esc dong va tra
  *     tieu diem ve khoi tai khoan.
- *   - Drawer: khoi nam trong drawer; chon mot muc thi drawer dong.
+ *   - Sidebar doc (neo trai): khoi tai khoan cua sidebar v2 mo LEN, cung bay muc.
+ *
+ * Dao giu MOI lop trong DOM (lop an mang `inert`, jsdom khong thi hanh `inert`),
+ * nen co HAI khoi tai khoan: thanh mo (`bar()`) va sidebar doc (`side()`).
  */
 
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -40,7 +44,7 @@ vi.mock("../../lib/api", async (importOriginal) => {
 import { PATHS } from "../../app/paths";
 import { routes } from "../../app/routes";
 import { api, type ProfileOut } from "../../lib/api";
-import { DRAWER_QUERY } from "../../lib/viewport";
+import { ANCHOR_STORAGE_KEY } from "../island/DynamicIsland";
 import { defaultAvatarColor } from "../ui/avatar";
 
 const USER_ID = "7c3e9a51-2b6d-4f08-8e1a-9d4c2b7f6a30";
@@ -84,23 +88,30 @@ function renderAt(path: string, profile: Partial<ProfileOut> = {}) {
   return { ...view, router };
 }
 
-/** Man hep (< 1024 px): chi truy van drawer cua `viewport.ts` khop. */
-function narrowScreen() {
-  vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: query === DRAWER_QUERY,
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  }));
+function island(): HTMLElement {
+  return screen.getByRole("navigation", { name: "Điều hướng chính" });
 }
 
-/** Nut mo menu = khoi tai khoan; ten truy cap la ten dang hien + tier. */
+/** Lop cua mot hinh trong dao — hang/nut dac trung cua hinh do nam trong no. */
+function layerOf(el: HTMLElement): HTMLElement {
+  return el.closest("[data-active]") as HTMLElement;
+}
+
+/** Thanh mo (neo tren): noi duy nhat co nut "Xem tat ca". */
+function bar(): HTMLElement {
+  return layerOf(within(island()).getByRole("button", { name: "Xem tất cả" }));
+}
+
+/** Sidebar doc (neo hai ben, mo): noi duy nhat co `nav` "Danh sach hoi thoai". */
+function side(): HTMLElement {
+  return layerOf(within(island()).getByRole("navigation", { name: "Danh sách hội thoại" }));
+}
+
+/** Nut mo menu = khoi tai khoan trong THANH MO; ten truy cap la ten dang hien + tier. */
 async function accountTrigger(name: string | RegExp = EMAIL): Promise<HTMLElement> {
-  return screen.findByRole("button", { name: typeof name === "string" ? new RegExp(escapeRegExp(name)) : name });
+  const pattern = typeof name === "string" ? new RegExp(escapeRegExp(name)) : name;
+  await screen.findByRole("navigation", { name: "Điều hướng chính" });
+  return within(bar()).getByRole("button", { name: pattern });
 }
 
 function escapeRegExp(text: string): string {
@@ -123,11 +134,6 @@ async function openMenu(user: ReturnType<typeof userEvent.setup>): Promise<HTMLE
   return screen.findByRole("menu", { name: "Menu tài khoản" });
 }
 
-/** Header cua `Layout` — trang Cai dat co them `<header>` rieng cua no ben duoi. */
-function appHeader(): HTMLElement {
-  return screen.getAllByRole("banner")[0];
-}
-
 /** Doc noi dung menu theo DUNG thu tu DOM: ten muc, hoac `──` cho duong ke. */
 function menuSequence(menu: HTMLElement): string[] {
   return Array.from(menu.querySelectorAll('[role="menuitem"], [role="separator"]')).map((el) =>
@@ -147,50 +153,49 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("header v2 (NQ-115, NQ-128 b/c)", () => {
-  it("1. man chat: khong email, khong nut Dang xuat; co nut cho T-5.4 aria-disabled", async () => {
+describe("dao thay header v2 (NQ-115, NQ-128 b/c, T-S.19a)", () => {
+  it("1. man chat: vien thuoc khong email; nut cho T-5.4 aria-disabled TRONG dao; sang/toi; khong Quan tri", async () => {
     renderAt(PATHS.home);
     await accountTrigger();
 
-    const header = appHeader();
-    expect(within(header).queryByText(EMAIL)).toBeNull();
-    expect(within(header).queryByRole("button", { name: "Đăng xuất" })).toBeNull();
-    expect(within(header).queryByRole("link", { name: /Cài đặt/ })).toBeNull();
+    const pill = layerOf(within(island()).getAllByRole("button", { name: /Mở menu điều hướng/ })[0]);
+    expect(within(pill).queryByText(EMAIL)).toBeNull();
+    expect(within(island()).queryByRole("button", { name: "Đăng xuất" })).toBeNull();
 
-    const artifact = within(header).getByRole("button", { name: "Mở panel artifact" });
+    const artifact = within(bar()).getByRole("button", { name: "Mở panel artifact" });
     expect(artifact).toHaveAttribute("aria-disabled", "true");
     expect(artifact).toHaveAttribute("data-planned", "T-5.4");
-    expect(within(header).getByRole("button", { name: "Chuyển sang theme tối" })).toBeInTheDocument();
+    expect(within(bar()).getByRole("button", { name: "Chuyển sang theme tối" })).toBeInTheDocument();
     // Nguoi dung thuong: khong co loi vao Quan tri.
-    expect(within(header).queryByRole("link", { name: "Quản trị" })).toBeNull();
+    expect(within(island()).queryByRole("link", { name: "Quản trị" })).toBeNull();
   });
 
-  it("2. /cai-dat: header KHONG co nut cho T-5.4 hay nut sidebar; Dang xuat chi o tab Tai khoan", async () => {
+  it("2. /cai-dat: dao KHONG co nut cho T-5.4, khong con nut sidebar; Dang xuat cua tab o ngoai dao", async () => {
     renderAt(PATHS.settingsAccount);
     const logout = await screen.findByRole("button", { name: "Đăng xuất" });
 
-    const header = appHeader();
-    expect(header).not.toContainElement(logout);
-    expect(within(header).queryByRole("button", { name: "Mở panel artifact" })).toBeNull();
-    expect(within(header).queryByRole("button", { name: "Mở thanh bên" })).toBeNull();
-    expect(within(header).queryByRole("button", { name: "Đóng thanh bên" })).toBeNull();
-    expect(within(header).queryByText(EMAIL)).toBeNull();
-    // Khong sidebar ⇒ khong khoi tai khoan (Cam bay ①).
-    expect(screen.queryByRole("button", { name: new RegExp(escapeRegExp(EMAIL)) })).toBeNull();
+    expect(island()).not.toContainElement(logout);
+    expect(within(island()).queryByRole("button", { name: "Mở panel artifact" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mở thanh bên" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Đóng thanh bên" })).toBeNull();
+    // v3: dao co khoi tai khoan o MOI duong co dao (khong con "khong sidebar ⇒ khong khoi").
+    expect(within(bar()).getByRole("button", { name: new RegExp(escapeRegExp(EMAIL)) })).toBeInTheDocument();
   });
 
-  it("3. admin: desktop la CHU 'Quan tri'; mobile la icon cung ten truy cap", async () => {
+  it("3. admin: Quan tri la muc cua dao — icon + ten truy cap o man chat, co nhan o /admin", async () => {
     const { unmount } = renderAt(PATHS.home, { role: "admin" });
-    const wide = await within(appHeader()).findByRole("link", { name: "Quản trị" });
-    expect(wide).toHaveTextContent("Quản trị");
-    expect(wide).toHaveAttribute("href", PATHS.admin);
+    await accountTrigger();
+    const icon = within(bar()).getByRole("link", { name: "Quản trị" });
+    expect(icon).toHaveAttribute("href", PATHS.admin);
+    expect(icon.textContent).toBe("");
+    expect(icon.querySelector("svg")).not.toBeNull();
     unmount();
 
-    narrowScreen();
-    renderAt(PATHS.home, { role: "admin" });
-    const narrow = await within(appHeader()).findByRole("link", { name: "Quản trị" });
-    expect(narrow.textContent).toBe("");
-    expect(narrow.querySelector("svg")).not.toBeNull();
+    renderAt(PATHS.admin, { role: "admin" });
+    await accountTrigger();
+    const labelled = within(bar()).getByRole("link", { name: "Quản trị" });
+    expect(labelled).toHaveTextContent("Quản trị");
+    expect(labelled).toHaveAttribute("aria-current", "page");
   });
 });
 
@@ -285,7 +290,8 @@ describe("menu tai khoan (S10, §7b.2)", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe(PATHS.login));
     expect(api.logout).toHaveBeenCalledTimes(1);
-    // Phien da xoa: khong con khoi tai khoan, header khong con nut cho T-5.4.
+    // Phien da xoa: khong con dao, nen khong khoi tai khoan, khong nut cho T-5.4.
+    expect(screen.queryByRole("navigation", { name: "Điều hướng chính" })).toBeNull();
     expect(screen.queryByRole("button", { name: new RegExp(escapeRegExp(EMAIL)) })).toBeNull();
     expect(screen.queryByRole("button", { name: "Mở panel artifact" })).toBeNull();
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
@@ -343,25 +349,19 @@ describe("ban phim (DoD dong 2)", () => {
   });
 });
 
-describe("drawer (< 1024 px)", () => {
-  it("12. khoi tai khoan nam TRONG drawer; chon Cai dat thi drawer dong", async () => {
-    narrowScreen();
+describe("sidebar doc (neo trai — thay drawer < 1024 px)", () => {
+  it("12. khoi tai khoan cua sidebar v2 nam TRONG hinh sidebar doc; Cai dat dieu huong", async () => {
+    localStorage.setItem(ANCHOR_STORAGE_KEY, "left");
     const user = userEvent.setup();
     const { router } = renderAt(PATHS.home);
+    await accountTrigger();
 
-    await user.click(await screen.findByRole("button", { name: "Mở thanh bên" }));
-    const drawer = await screen.findByRole("dialog");
-    const trigger = within(drawer).getByRole("button", { name: new RegExp(escapeRegExp(EMAIL)) });
-
+    const trigger = within(side()).getByRole("button", { name: new RegExp(escapeRegExp(EMAIL)) });
+    act(() => trigger.focus());
     await user.click(trigger);
     const menu = await screen.findByRole("menu", { name: "Menu tài khoản" });
     expect(menuSequence(menu)).toEqual(MENU_ORDER);
     await user.click(within(menu).getByRole("menuitem", { name: "Cài đặt" }));
-    await waitFor(() => expect(router.state.location.pathname).toBe(PATHS.settings));
-
-    // Quay lai man chat: drawer KHONG tu bat lai (kho trang thai da ve `false`).
-    await act(() => router.navigate(PATHS.home));
-    await screen.findByRole("button", { name: "Mở thanh bên" });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(router.state.location.pathname).toBe(PATHS.settingsAccount));
   });
 });

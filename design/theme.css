@@ -263,6 +263,44 @@
   /* ---------- KHÔNG BẤM ĐƯỢC (v2) ------------------------------------------------- */
   /* Dùng chung cho nút chờ ("Sắp có") và nút tắt vì điều kiện. Không phải màu. */
   --disabled-opacity: 0.45;
+
+  /* v3 ▸ KHUNG CHÍNH v3 · DYNAMIC ISLAND ------------------------------------
+   * Đảo điều hướng nổi thay header 56 + sidebar 256 của v2. Neo hai bên + mở:
+   * sidebar dùng lại --spacing-sidebar (256). Lò xo nằm ở springs.ts, không có ms. */
+  --spacing-island-gap: 1rem;        /* 16px — cách mép màn ở cả ba neo */
+  --spacing-island-pill: 3rem;       /* 48px — cao viên thuốc ngang */
+  --spacing-island-orb: 3.5rem;      /* 56px — viên tròn khi kéo = bề ngang viên thuốc dọc */
+  --spacing-island-bar: 40rem;       /* 640px — rộng tối đa khi mở ở trên */
+  --spacing-island-clear: 5.5rem;    /* 88px — đệm trên luồng chat: 16 + 48 + 24, tin đầu không nằm dưới đảo */
+  --radius-island: 1.75rem;          /* 28px — mở ngang, viên thuốc dọc */
+  --radius-island-side: 1.5rem;      /* 24px — sidebar dọc */
+  --radius-island-item: 0.875rem;    /* 14px — hàng hội thoại, khối tài khoản trong đảo */
+  --blur-glass: 24px;
+  --duration-island-linger: 240ms;   /* chuột rời đảo bao lâu thì thu gọn — JS đọc token */
+  --duration-trail: 560ms;           /* tuổi thọ một điểm của vệt kéo — JS đọc token */
+  --color-glass-fill: rgb(255 255 255 / 0.82);    /* đục đủ để muted ≥ 4.5:1 trên mọi nền phía sau */
+  --color-glass-edge: rgb(255 255 255 / 0.70);
+  --color-glass-rim: rgb(24 18 16 / 0.10);
+  --color-glass-highlight: rgb(255 255 255 / 0.95);
+  --color-glass-sheen: rgb(255 255 255 / 0.55);
+  --color-glass-specular: rgb(255 255 255 / 0.75);
+  --color-glass-tint: rgb(179 38 30 / 0.12);      /* ánh Scarlet ở đáy kính */
+  --color-glass-hover: rgb(24 18 16 / 0.06);
+  --shadow-island: 0 18px 40px -14px rgb(24 18 16 / 0.30), 0 4px 12px -4px rgb(24 18 16 / 0.12);
+  --shadow-island-lift: 0 30px 60px -16px rgb(24 18 16 / 0.42), 0 8px 18px -6px rgb(24 18 16 / 0.20);
+
+  /* Hộp tìm hội thoại (v3) */
+  --spacing-search: 35rem;           /* 560px — bề rộng tối đa; dưới đó = màn − 2 × island-gap */
+  --spacing-search-top: 6rem;        /* 96px — cách đỉnh ở ≥ 640px; dưới 640px dùng island-gap */
+  --spacing-search-input: 3.5rem;    /* 56px — ô nhập */
+  --spacing-row-search: 3rem;        /* 48px — hàng kết quả */
+
+  /* Tin nhắn v3 — không bong bóng */
+  --spacing-turn: 2.5rem;            /* 40px — từ câu trả lời tới câu hỏi kế tiếp; trong một lượt vẫn gap-6 = 24 */
+  --spacing-jump-gap: 0.75rem;       /* 12px — nút “Về tin mới nhất” cách mép trên ô nhập */
+  /* Không dùng từ v3, giữ nguyên tên + giá trị (ràng buộc 3):
+   *   --color-surface-assistant  --color-surface-user  --radius-bubble */
+  /* ◂ v3 */
 }
 
 [data-theme="dark"] {
@@ -344,6 +382,19 @@
 
   /* MENU (v2) */
   --color-divider: #45403b;
+
+  /* v3 ▸ KÍNH CỦA ĐẢO — theme tối */
+  --color-glass-fill: rgb(30 27 25 / 0.84);
+  --color-glass-edge: rgb(255 255 255 / 0.10);
+  --color-glass-rim: rgb(0 0 0 / 0.55);
+  --color-glass-highlight: rgb(255 255 255 / 0.16);
+  --color-glass-sheen: rgb(255 255 255 / 0.06);
+  --color-glass-specular: rgb(255 255 255 / 0.12);
+  --color-glass-tint: rgb(209 64 47 / 0.20);
+  --color-glass-hover: rgb(255 255 255 / 0.07);
+  --shadow-island: 0 18px 40px -14px rgb(0 0 0 / 0.75), 0 4px 12px -4px rgb(0 0 0 / 0.50);
+  --shadow-island-lift: 0 30px 60px -16px rgb(0 0 0 / 0.85), 0 8px 18px -6px rgb(0 0 0 / 0.60);
+  /* ◂ v3 */
 
   /* Shadow phải đậm hơn trên nền tối mới nhìn thấy tầng nổi. */
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
@@ -436,6 +487,7 @@
     --duration-dock: 0ms;
     --duration-fill: 0ms;
     --duration-type: 0ms;             /* lời chào hiện đủ ngay, không gõ */
+    /* v3 ▸ */ --duration-island-linger: 0ms; --duration-trail: 0ms; /* ◂ v3 — lò xo đảo: islandSpringFor() trả null → gán thẳng đích */
   }
   *,
   *::before,
@@ -784,6 +836,64 @@
     animation: scarlet-menu-up-out var(--duration-instant) var(--ease-exit) both;
   }
 }
+
+/* v3 ▸ KHUNG CHÍNH v3 + TIN NHẮN v3 ----------------------------------------
+ *  Chỗ                                Class                   Thời lượng / lò xo
+ *  ─────────────────────────────────  ──────────────────────  ─────────────────────
+ *  Hình đảo (x, y, w, h, bo)           JS ghi style            SPRING_ISLAND_* (springs.ts)
+ *  Lớp nội dung mỗi hình — vào         .motion-island-layer    normal 200ms enter, trễ instant
+ *  Lớp nội dung mỗi hình — ra          .motion-island-layer    fast 140ms exit
+ *  Ô neo khi kéo                       .motion-anchor-hint     normal / slow
+ *  Viền kính khi kéo                   .island-glass           normal 200ms move
+ *  Menu tài khoản trong đảo (mở xuống) .motion-popover         (có sẵn)
+ *  Hộp tìm hội thoại + nền mờ          .motion-panel / .motion-scrim (có sẵn)
+ *  Nút “Về tin mới nhất” — vào / ra    .motion-jump            fast enter / instant exit
+ */
+@utility island-glass {
+  background: linear-gradient(180deg, var(--color-glass-sheen), transparent 46%),
+    radial-gradient(120% 100% at 50% 130%, var(--color-glass-tint), transparent 62%), var(--color-glass-fill);
+  backdrop-filter: blur(var(--blur-glass)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(1.8);
+  box-shadow: inset 0 1px 0 var(--color-glass-highlight), inset 0 0 0 1px var(--color-glass-edge),
+    0 0 0 1px var(--color-glass-rim), var(--shadow-island);
+  transition: box-shadow var(--duration-normal) var(--ease-move);
+  &[data-dragging="true"] {
+    box-shadow: inset 0 1px 0 var(--color-glass-highlight), inset 0 0 0 1px var(--color-glass-edge),
+      0 0 0 1.5px var(--color-accent), var(--shadow-island-lift);
+  }
+}
+/* Lớp nội dung của MỖI hình. Thuộc tính `scale` riêng để không đè translate của Tailwind v4.
+ * Lớp ẩn mang `inert` (component) nên không nhận Tab, không vào cây a11y. */
+@utility motion-island-layer {
+  opacity: 0;
+  visibility: hidden;
+  scale: 0.94;
+  transition: opacity var(--duration-fast) var(--ease-exit), scale var(--duration-fast) var(--ease-exit),
+    visibility 0s linear var(--duration-fast);
+  &[data-active="true"] {
+    opacity: 1;
+    visibility: visible;
+    scale: 1;
+    transition: opacity var(--duration-normal) var(--ease-enter) var(--duration-instant),
+      scale var(--duration-slow) var(--ease-enter) var(--duration-instant), visibility 0s;
+  }
+}
+/* Ô neo hiện trong lúc kéo; ô gần nhất đổi sang accent. */
+@utility motion-anchor-hint {
+  opacity: 0;
+  transition: opacity var(--duration-normal) var(--ease-move), scale var(--duration-slow) var(--ease-enter),
+    background-color var(--duration-fast) var(--ease-move), border-color var(--duration-fast) var(--ease-move);
+  &[data-visible="true"] { opacity: 1; }
+  &[data-near="true"] { scale: 1.06; border-color: var(--color-accent); background-color: var(--color-accent-subtle); }
+}
+/* Nút “Về tin mới nhất”: hiện khi cách đáy > 1 màn. Unmount khi animationend của data-state="closed". */
+@utility motion-jump {
+  animation: scarlet-rise-in var(--duration-fast) var(--ease-enter) both;
+  &[data-state="closed"] {
+    animation: scarlet-fade-out var(--duration-instant) var(--ease-exit) both;
+  }
+}
+/* ◂ v3 */
 
 @utility tabular {
   font-variant-numeric: tabular-nums;

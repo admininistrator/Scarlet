@@ -1,4 +1,3 @@
-import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   Download,
@@ -9,7 +8,6 @@ import {
   Share2,
   SquarePen,
   Trash2,
-  X,
 } from "lucide";
 import {
   useCallback,
@@ -23,8 +21,6 @@ import {
 
 import { ApiError, api, type ConversationOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
-import { usePresence } from "../../lib/motion";
-import { useDrawerMode } from "../../lib/viewport";
 import { ComingSoon } from "../ui/ComingSoon";
 import { StaticIcon } from "../ui/Icon";
 import {
@@ -34,12 +30,6 @@ import {
   MenuDismissContext,
 } from "../ui/menu";
 import { groupByDay, useToday } from "./dayGroups";
-import {
-  SIDEBAR_TOGGLE_ID,
-  setDrawerOpen,
-  useDrawerOpen,
-  useSidebarOpen,
-} from "./sidebarOpen";
 import { useTitleStreams, type TitleView } from "./useTitleStreams";
 
 /**
@@ -89,18 +79,13 @@ import { useTitleStreams, type TitleView } from "./useTitleStreams";
  * nam trong vo `.motion-title` `max-width: 100%` (Cam bay ②): moi `delta` chi
  * doi chu trong o, khong doi hinh hop cua hang nao.
  *
- * ── Dong = 0 px, KHONG co dai icon (T-HD2, T-3.9) ─────────────────────────
+ * ── Trong dao dieu huong (T-S.19a, ban Khung chinh v3) ────────────────────
  *
- * Component tra `null` khi dong — SAU hoat anh (`usePresence` giu no them
- * `--duration-normal`, khoi ngoai mang `inert`). Nut bat/tat song o header;
- * trang thai di qua `sidebarOpen.ts`. Giam chuyen dong ⇒ go ngay.
- *
- * ── Duoi 1024 px: DRAWER (T-3.10), vo v2 (B-307) ──────────────────────────
- *
- * Cung noi dung trong `Dialog` cua Radix (Esc, cham lop phu, bay tieu diem,
- * khoa cuon). Ban T-HD2-v2 F/F′: KHONG thanh tieu de — chi mot nut X 44 × 44
- * goc tren-phai trong vung dem; ten cua drawer van co cho trinh doc man hinh
- * (`Dialog.Title` sr-only). Dong drawer ⇒ tieu diem ve NUT MO o header.
+ * Header 56, cot 256 bat/tat va drawer duoi 1024 px cua v2 da bi go: sidebar
+ * nay nay la NOI DUNG cua hinh "sidebar doc" cua dao (neo trai / phai, mo) —
+ * cao het lop cua no, khong vien phai (ban `ShellSidebar`). Dao giu no trong
+ * DOM o moi hinh (lop an mang `inert`), nen danh sach nap mot lan va
+ * `onItemsChange` cap cho thanh mo "6 hoi thoai gan day".
  *
  * ── Con tro phan trang den TU RESPONSE ─────────────────────────────────────
  *
@@ -147,6 +132,8 @@ export interface SidebarProps {
    * tu tu dong drawer khi can (xem docstring `AccountMenu`).
    */
   footer?: ReactNode;
+  /** T-S.19a — danh sach vua doi (nap, ghim, doi ten, xoa, tieu de chay xong). */
+  onItemsChange?: (items: readonly ConversationOut[]) => void;
 }
 
 // ───────────────────────────── ham thuan ──────────────────────────────────
@@ -253,12 +240,9 @@ export function Sidebar({
   onNewChat,
   onOpenConversationDeleted,
   footer,
+  onItemsChange,
 }: SidebarProps) {
   const searchId = useId();
-  const open = useSidebarOpen();
-  const drawerMode = useDrawerMode();
-  const drawerOpen = useDrawerOpen();
-  const presence = usePresence<HTMLDivElement>(open, "--duration-normal");
   const today = useToday();
 
   const [items, setItems] = useState<ConversationOut[]>([]);
@@ -295,6 +279,7 @@ export function Sidebar({
     [applyItems],
   );
   const titleViews = useTitleStreams(items, streamTtlS, applyTitle);
+  useEffect(() => onItemsChange?.(items), [items, onItemsChange]);
 
   /** Hai nguon cung luc; nap lai = thay CA danh sach (cac trang da tai them roi di). */
   const loadFirstPage = useCallback(async () => {
@@ -445,10 +430,7 @@ export function Sidebar({
     busy: busyId === item.id,
     renamingDraft: renaming?.id === item.id ? renaming.draft : null,
     confirmingDelete: confirming === item.id,
-    onSelect: () => {
-      setDrawerOpen(false);
-      onSelect(item.id);
-    },
+    onSelect: () => onSelect(item.id),
     onTogglePin: () => void togglePin(item),
     onStartRename: () => setRenaming({ id: item.id, draft: item.title ?? "" }),
     onChangeRenameDraft: (draft: string) => setRenaming({ id: item.id, draft }),
@@ -459,28 +441,12 @@ export function Sidebar({
     onConfirmDelete: () => void remove(item.id),
   });
 
-  const body = (
-    <div
-      className={`flex ${
-        drawerMode ? "min-h-0 w-full flex-1" : "w-sidebar shrink-0"
-      } flex-col border-r border-border bg-surface-sidebar motion-theme`}
-    >
+  return (
+    <div className="flex h-full flex-col bg-surface-sidebar motion-theme">
       <nav aria-label={t("sidebar.title")} className="flex min-h-0 flex-1 flex-col p-3">
-        {drawerMode && (
-          <Dialog.Close
-            aria-label={t("header.closeSidebar")}
-            className="motion-press mb-1 grid size-touch shrink-0 place-items-center self-end rounded-md text-foreground hover:bg-surface-hover"
-          >
-            <StaticIcon icon={X} size={20} />
-          </Dialog.Close>
-        )}
-
         <button
           type="button"
-          onClick={() => {
-            setDrawerOpen(false);
-            onNewChat();
-          }}
+          onClick={onNewChat}
           className="motion-press flex h-touch w-full shrink-0 items-center justify-center gap-2 rounded-md bg-accent px-3 text-base font-semibold text-accent-foreground hover:bg-accent-hover active:bg-accent-active"
         >
           <StaticIcon icon={SquarePen} size={18} />
@@ -546,59 +512,6 @@ export function Sidebar({
         </div>
       </nav>
       {footer}
-    </div>
-  );
-
-  if (drawerMode) {
-    /*
-      Drawer (T-3.10). `motion-drawer`/`motion-scrim` cua ban T-HD2 doc
-      `data-state` ma Radix tu dat, va Radix doi `animationend` roi moi go
-      khoi DOM — nen khong can `usePresence` o nhanh nay. Giam chuyen dong
-      thi `theme.css` tat animation, Radix go ngay.
-    */
-    return (
-      <Dialog.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="motion-scrim fixed inset-0 z-40 bg-scrim" />
-          <Dialog.Content
-            aria-describedby={undefined}
-            onCloseAutoFocus={(event) => {
-              event.preventDefault();
-              document.getElementById(SIDEBAR_TOGGLE_ID)?.focus();
-            }}
-            className="motion-drawer fixed inset-y-0 left-0 z-50 flex w-drawer max-w-full flex-col bg-surface-sidebar shadow-popover"
-          >
-            <Dialog.Title className="sr-only">{t("sidebar.title")}</Dialog.Title>
-            {body}
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-    );
-  }
-
-  // T-HD2: dong = 0 px, KHONG co dai icon. Nut bat/tat o header (`Layout.tsx`).
-  // Go khoi DOM sau khi hoat anh dong chay xong (T-3.9) — xem `usePresence`.
-  if (!presence.mounted) {
-    return null;
-  }
-
-  /*
-    Khoi ngoai mang chieu rong dang doi (0 ↔ `w-sidebar`) va cat phan thua;
-    `<nav>` ben trong giu nguyen be rong nen chu khong xuong dong lung tung
-    trong luc thu lai. `data-motion="none"` la thuoc tinh ma
-    `Motion.test.tsx` doc.
-  */
-  return (
-    <div
-      ref={presence.ref}
-      data-state={presence.state}
-      data-motion={presence.reduced ? "none" : undefined}
-      inert={presence.state === "closed"}
-      className={`${presence.reduced ? "" : "motion-sidebar "}flex shrink-0 overflow-hidden ${
-        presence.state === "open" ? "w-sidebar" : "w-0"
-      }`}
-    >
-      {body}
     </div>
   );
 }

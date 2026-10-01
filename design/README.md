@@ -1,7 +1,29 @@
 # Design Progress — Scarlet
+## v3 - Phase S - Task S.19
+| Design | Link Claude Design | Ngày chốt |
+|---|---|---|
+| Tin nhắn | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+Tin+nh%E1%BA%AFn+v3.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Tin nhắn v3.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Tin nhắn v3.dc.html` | 2026-10-01 |
+| Khung chính | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+Khung+ch%C3%ADnh+v3.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Khung chính v3.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Khung chính v3.dc.html` | 2026-10-01 |
 
 ## v2 — Phase S (Standardize)
-
 | Task | Link Claude Design | Ngày chốt | Đã đối chiếu (T-S.18) |
 |---|---|---|---|
 | T-HD1-v2 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
