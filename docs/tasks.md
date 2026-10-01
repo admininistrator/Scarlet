@@ -1897,7 +1897,7 @@ Prompt đầy đủ cho từng bước nằm ở `docs/standardize-tutorial.md`.
 |---|---|---|---|
 | **T-S.19a** | Áp bản v3: đảo điều hướng + tin nhắn không bong bóng | T-S.18 ✅ | 12 h |
 | **T-6.2** 🔒 | `validate_url()` — kéo lên từ P6 | — | 2.5 h |
-| **T-6.3** 🔒 | Transport `httpx` ghim IP — kéo lên từ P6 | T-6.2 | 3 h |
+| **T-6.3** 🔒 | Transport `httpx` ghim IP — kéo lên từ P6 | T-6.2 ✅ | 3 h |
 | **T-6.4** 🔒 | `tests/tools/test_ssrf.py` ≥ 25 ca — kéo lên từ P6 | T-6.3 | 2 h |
 | **T-S.19b** | BYOK backend: chỉ đếm token, endpoint do người dùng nhập | T-6.4 | 12 h |
 | **T-HD10** *(người)* | Bản vẽ tab BYOK — prompt ở báo cáo lập kế hoạch 2026-10-01 | — | — |
@@ -1929,10 +1929,91 @@ Prompt đầy đủ cho từng bước nằm ở `docs/standardize-tutorial.md`.
 - **Ghi nhận:** **Bốn câu hỏi trước dòng code đầu → NQ-135** (giữa hai lượt 64 theo mã kèm · `pt-island-clear` ở Cài đặt/Quản trị · Kiến thức = B-06 · 404 để trần). Bản vẽ đọc qua `DesignSync` (chỉ đọc). **Hai lỗi hành vi của mã kèm chỉ lộ trên Chrome** (jsdom không thi hành `inert`, test xanh vẫn hỏng thật): Tab/Esc làm rơi tiêu điểm về `body` và đảo tự thu — code chuyển tiêu điểm sau commit; kéo bắt đầu trên link kích kéo-thả gốc (`pointercancel`, đảo thả giữa chừng rồi tự nở) — `draggable={false}`. Thêm: chạm ra ngoài thu đảo (canvas A1); vòng vật lý chốt khi tới đích và không ghi `style` khi đứng yên; `AppIsland` `memo` (màn chat render theo từng mảnh chữ). **Báo lại người thiết kế:** B-322 (dải lỗi), B-323 (Khung chính v3), B-324 (Tin nhắn v3), B-325 (404). **Ngoài commit, cố ý:** `design/contrast.md` (B-292), `docs/standardize-tutorial.md`, `docs/account-test.txt`, hai `*:Zone.Identifier`. **Không** làm: tab BYOK / T-HD10 (T-S.19c), sửa bản vẽ.
 
 #### T-6.2 🔒 · T-6.3 🔒 · T-6.4 🔒 — kéo lên từ P6, chạy trước T-S.19b (NQ-134 ①)
-Mỗi task một mình, một commit. Việc và DoD đủ chép vào đây khi tới lượt (lối "mở rộng khi tới nơi" của P6); dưới đây là khung đã thống nhất. T-6.5 (`fetcher`, lớp 1 của §12.2) vẫn ở P6; P6 không làm lại ba task này.
-- **T-6.2** 🔒 — 2.5 h. `app/tools/ssrf.py::validate_url()` = lớp 2 + 3 của §12.2: chỉ `http`/`https`, cổng 80/443, từ chối userinfo, chuẩn hoá trước khi so; resolve DNS, từ chối nếu **bất kỳ** địa chỉ nào thuộc private / loopback / link-local / multicast / reserved / unspecified, IPv4 và IPv6, gồm `::ffff:`. Trả về host + các IP đã kiểm để T-6.3 ghim. DoD: test của chính hàm (≥ 10 ca) xanh; thông điệp lỗi không chứa IP đã resolve.
-- **T-6.3** 🔒 — 3 h. Transport `httpx` kết nối thẳng tới IP đã kiểm, đặt `Host` thủ công, TLS kiểm chứng chỉ theo **tên miền** (`sni_hostname`); `follow_redirects=False`; lớp 4 (đi từng hop, kiểm lại, trần số hop ở `Settings`) cho chỗ gọi cần theo redirect. DoD: test rebinding (lần resolve thứ hai trả IP nội bộ) ⇒ kết nối vẫn đi tới IP đã kiểm; một lượt HTTPS thật qua transport tới một endpoint công khai, chứng chỉ hợp lệ.
-- **T-6.4** 🔒 — 2 h. `tests/tools/test_ssrf.py` ≥ 25 ca (S10): metadata `169.254.169.254`, tên service Docker (`redis`, `postgres`, `litellm`), loopback v4/v6, `::ffff:127.0.0.1`, IP dạng thập phân / bát phân, `0.0.0.0`, `[::]`, CGNAT `100.64.0.0/10`, userinfo, cổng lạ, dấu chấm cuối, tên resolve về loopback (`*.nip.io`), redirect sang nội bộ, rebinding. DoD: `pytest tests/tools/test_ssrf.py` ≥ 25 passed; kiểm ngược: gỡ nhánh `::ffff:` ⇒ đỏ.
+Mỗi task một mình, một commit (G4). Mở rộng 2026-10-02 từ khung đã thống nhất, theo lối "mở rộng khi tới nơi" của P6 và những gì Phase S đã gặp. T-6.5 (`fetcher`, lớp 1 của §12.2) vẫn ở P6; P6 không làm lại ba task này. **Ước lượng giữ như bảng T-S.19:** Phase S bám ước lượng trong ±0.5 h (T-S.9, T-S.12, T-S.14, T-S.18) và chỉ vỡ khi câu hỏi nảy ra **giữa** phiên (T-S.17: 2 → 4 h, bốn câu NQ-132) — nên mọi chỗ còn ngỏ dưới đây được gọi tên sẵn, để hỏi **trước dòng code đầu**.
+
+**Chung cho cả ba:**
+- **Đường này không có lớp 1.** `api` / `worker` ở mạng `internal` (NQ-134 ①): lớp 2–4 là tất cả những gì đứng giữa một base URL người dùng gõ và `redis:6379`. Không có lưới đỡ nào phía sau như `fetcher` của P6.
+- **`make test` không chạm Internet** (lối `test_byok_verify.py`, `test_idor.py`): DNS là resolver bơm vào; lượt mạng thật là lệnh DoD chạy **trong container `api`**. Trên host WSL `redis` không resolve được ⇒ một ca "tên service Docker" chạy DNS thật sẽ xanh vì *DNS hỏng* chứ không vì *IP riêng* — mọi ca từ chối khẳng định **mã lý do**, không chỉ "có ném".
+- **Đừng lấy địa chỉ tài liệu làm "IP công khai" trong test:** đo 2026-10-02, `ipaddress` xếp `192.0.2.1`, `198.51.100.7`, `203.0.113.9`, `2001:db8::1` là `is_private = True` — ca "nhận" hay ca rebinding dùng chúng sẽ bị chính `validate_url()` từ chối. Dùng địa chỉ công khai thật (`1.1.1.1`, `93.184.215.14` — `is_global = True`); resolver giả nên không gói nào đi ra.
+- **`tests/` không có `__init__.py`** ⇒ tên file test phải duy nhất cả cây. Ca của cả ba task vào **`tests/tools/test_ssrf.py`** — đúng file S10 đếm.
+- **`check-identifiers` bắt từ tiếng Anh trùng âm tiết** (như `due`, `tray` ở Phase S) — đo 2026-10-02: `hop`, `next_hop`, `hop_count` (họp), `san` (SAN của chứng chỉ), `nat64`, `ban` ⇒ đỏ; `hops`, `max_hops`, `redirect`, `resolved_ips`, `sni_hostname`, `ipv4_mapped`, `pinned_ip` sạch.
+- **Kiểm ngược như T-S.7 / T-S.8:** mỗi phép phá một dòng trong báo cáo, cả N phải đỏ rồi khôi phục xanh. Khôi phục xong **`touch`** file (T-S.8: `copy2`/`move` giữ mtime cũ ⇒ `api`/`worker` chạy tiếp bản đã phá, DoD đo ra số sai); chạy kiểm ngược **trước** DoD trên stack thật; `git diff --stat` sạch sau cùng.
+- **Đầu phiên `docker compose ps`** (B-275) — DoD trên stack thật cần `api` `healthy`.
+- **Ngoài commit, cố ý** (như mọi task Phase S, theo `git status` 2026-10-02): `docs/account-test.txt`, `scripts/test_idempotency.sh`, `scripts/test_ratelimit.sh`, hai `*:Zone.Identifier`. `git add` từng file, từ WSL; soi `git diff --cached --stat` trước khi commit.
+
+##### T-6.2 — 🔒 `app/tools/ssrf.py::validate_url()`: lớp 2 + 3 của §12.2 — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ✅ (2026-10-02) — DoD 5/5 dòng đạt · **Phụ thuộc:** — · **Ước lượng:** 2.5 h → **thực tế ~2 h**
+- **KH:** §12.1 (bảng sáu URL), §12.2 lớp 2–3, §12.5 C23 · S10, RR-3 · CLAUDE.md A5 · NQ-134 ①
+- **Việc:**
+  - [x] `validate_url(url, *, resolver=…)` (async) phân tích bằng **`httpx.URL`** — cùng bộ phân tích mà transport T-6.3 dùng để quay số, để thứ được kiểm đúng là thứ được nối. Lớp 2: scheme `http` / `https`; cổng (vắng ⇒ theo scheme) chỉ 80 / 443; userinfo khác rỗng ⇒ từ chối (gồm `u:@`, `:p@` — `httpx` trả `b'u:'`, `b':p'`); host rỗng ⇒ từ chối. Chuẩn hoá host **trước** mọi phép so: chữ thường, bỏ một dấu chấm cuối, dạng ASCII (`raw_host`)
+  - [x] Lớp 3: host là IP chữ ⇒ kiểm thẳng; là tên ⇒ resolve **không chặn event loop** (`loop.getaddrinfo`, không `socket.getaddrinfo`), lấy **mọi** địa chỉ A + AAAA; từ chối nếu **bất kỳ** địa chỉ nào là private / loopback / link-local / multicast / reserved / unspecified / CGNAT `100.64.0.0/10`. Địa chỉ IPv6 bọc IPv4 (`::ffff:a.b.c.d`) mở `ipv4_mapped` ra **trước**, rồi kiểm phần IPv4 theo luật IPv4. DNS hỏng hoặc rỗng ⇒ từ chối (không chắc thì đóng)
+  - [x] Trả một giá trị bất biến: scheme, host đã chuẩn hoá, cổng, các IP đã kiểm (thứ tự `getaddrinfo`, bỏ trùng) — T-6.3 ghim đúng danh sách này, không resolve lại
+  - [x] Từ chối = **một** ngoại lệ riêng mang mã lý do cố định: `scheme` · `port` · `userinfo` · `host` · `dns` · `address`. Thông điệp và `repr` không chứa IP đã resolve. **Không** chạm HTTP — ánh xạ sang `400 URL_UNSAFE` là việc của T-S.19b
+  - [x] ≥ 10 ca trong `tests/tools/test_ssrf.py`, resolver giả — *13 hàm test, 42 ca sau `parametrize`*
+- **Xong khi (DoD):**
+  - [x] `pytest tests/tools/test_ssrf.py -v` ≥ 10 passed — mỗi ca từ chối khẳng định **mã lý do**; có ca một tên resolve ra hai địa chỉ (một công khai, một riêng) ⇒ `address`  — *`42 passed in 0.10s`; ca hai địa chỉ: `test_rejects_when_any_resolved_address_is_private` (công khai đứng **đầu**)*
+  - [x] Không lộ IP: trong test, với mọi ca `address`, `str(exc)` và `repr(exc)` không chứa địa chỉ nào resolver giả đã trả — dán tên ca  — *`_assert_no_ip_leak` trong `test_rejects_name_resolving_to_non_public_ip` (4 ca: `redis`, `2130706433`, `127.0.0.1.nip.io`, `localhost.`), `test_rejects_when_any_resolved_address_is_private`, và cả 16 ca IP chữ của `test_rejects_non_public_ip_literal_without_resolving`*
+  - [x] Bảng cờ `ipaddress` (`is_private`, `is_global`, `is_reserved`, `is_multicast`, `ipv4_mapped`) cho `::ffff:127.0.0.1`, `::ffff:100.64.0.1`, `::ffff:8.8.8.8`, `224.0.0.1`, `100.64.0.1` — trên **`.venv`** (Python của `make test`) **và** trong container `api`; dán cả hai, kèm phiên bản Python (Cạm bẫy ①)  — *`.venv` **3.12.3**: ba địa chỉ bọc đều `is_reserved=True`, `::ffff:100.64.0.1`/`::ffff:8.8.8.8` `is_global=True`. Container **3.12.14**: địa chỉ bọc hỏi cờ theo phần IPv4 — `is_reserved=False` cả ba, `::ffff:100.64.0.1` **mọi cờ `False`** (thiếu nhánh mở thì lọt). `224.0.0.1` / `100.64.0.1` giống nhau hai bên. ⇒ nhánh `::ffff:` **không** chết: sống trên container; trên `.venv` lộ qua ca nhận `test_accepts_ipv4_mapped_public_address` (bỏ nhánh ⇒ `[::ffff:8.8.8.8]` bị chặn oan ⇒ đỏ — đã chạy). Không phải hỏi*
+  - [x] Kiểm ngược, mỗi dòng đỏ: chỉ kiểm địa chỉ **đầu** của `getaddrinfo`; bỏ kiểm userinfo; bỏ vế CGNAT; bỏ vế multicast  — *chỉ `ips[0]` → 1 đỏ (`test_rejects_when_any_resolved_address_is_private`); bỏ userinfo → 4 đỏ; bỏ CGNAT → 2 (`100.64.0.1`, `[::ffff:100.64.0.1]`); bỏ multicast → 2 (`224.0.0.1`, `[ff02::1]`); thêm: bỏ nhánh `::ffff:` → 1 (`test_accepts_ipv4_mapped_public_address`). Khôi phục `cmp` y hệt + `touch`, `42 passed`*
+  - [x] `make test && make lint && make check-hardcode && docker compose ps` — backend `1529 passed` (T-S.19a) → 1529 + số ca mới  — *backend `1571 passed` (1529 + 42); FE `31 passed · 454 passed`; `check-theme: OK`, `check-identifiers: OK`, ruff `All checks passed!`, mypy 93 file sạch, `tsc` sạch; `check-hardcode: OK`; 9 service `Up … (healthy)`*
+- **Cạm bẫy:**
+  - ① **`ipaddress` xếp sai địa chỉ bọc IPv4 — đo 2026-10-02 trên `.venv` 3.12.3:** mọi `::ffff:x` đều `is_reserved = True` (nằm trong `::/8`), kể cả `::ffff:8.8.8.8`; `::ffff:100.64.0.1` lại `is_global = True`; `::ffff:127.0.0.1` `is_loopback = False`. Hệ quả: phép kiểm có vế `is_reserved` chặn **mọi** địa chỉ bọc một cách tình cờ ⇒ nhánh `::ffff:` thành code chết và kiểm ngược của T-6.4 **không thể đỏ**; phép kiểm chỉ dựa `is_global` thì để lọt `[::ffff:100.64.0.1]`. Vì vậy mở `ipv4_mapped` trước rồi mới hỏi cờ. Hành vi này khác giữa các bản vá 3.12 / 3.13, mà image là `python:3.12-slim` chứ không phải 3.12.3 ⇒ DoD dòng 3. Bảng hai bên cho thấy nhánh `::ffff:` vẫn là code chết ⇒ hỏi trước khi viết tiếp, đừng nới DoD của T-6.4.
+  - ② **Không cờ nào một mình đủ — đo cùng lúc:** `100.64.0.1` có `is_private = False` **và** `is_global = False` (bộ cờ của §12.2 để lọt CGNAT); `224.0.0.1`, `239.255.255.250`, `ff02::1` có `is_global = True` (`is_global` để lọt multicast). CGNAT và multicast phải là vế riêng — hai dòng kiểm ngược của DoD 4 canh đúng chỗ này.
+  - ③ **IP dạng lạ không phải việc của bộ phân tích:** `httpx.URL("https://2130706433/")` coi `2130706433` là **tên miền**, còn `getaddrinfo` của nó, của `0x7f.1`, của `127.1` đều ra `127.0.0.1`; `0177.0.0.1` thì `httpx` ném `InvalidURL`. Đừng "thử `ipaddress.ip_address`, không được thì coi là tên an toàn" — mọi host không phải IP chữ đều đi qua resolve; `InvalidURL` ⇒ mã `host`, không thành `500`.
+  - ④ **Cổng 80/443 và hai scheme là luật của §12.2, không phải núm chỉnh** — hằng trong `ssrf.py` có chú thích trỏ §12.2, không ra `.env` (cho chỉnh được là cho mở `6379`). Đọc A3 theo hướng khác ⇒ hỏi trước dòng code đầu.
+- **Ghi nhận:** Không câu hỏi nào trước dòng code đầu: Cạm bẫy ④ làm đúng chữ (hằng trong `ssrf.py`, chú thích trỏ §12.2); điều kiện hỏi của Cạm bẫy ① không xảy ra (xem DoD 3). Ngoại lệ tên `UnsafeUrlError(reason)`, kết quả `CheckedUrl(scheme, host, port, ips)` (`frozen`), resolver bơm vào có kiểu `(host, port) -> Awaitable[Sequence[str]]`; mặc định gọi `loop.getaddrinfo(..., type=SOCK_STREAM)`. Thông điệp cố định theo mã, **không** chép host; mọi `raise` trong `except` dùng `from None` để traceback không mang `gaierror`. Resolver trả chuỗi không phải IP ⇒ `dns` (đóng). Dạng IPv4 nhúng khác (NAT64 `64:ff9b::/96`, 6to4 `2002::/16`, Teredo) đo trên cả hai Python: đã rơi vào `is_private`/`is_reserved` ⇒ không cần nhánh riêng. Bộ test đã chạm sẵn nhiều dòng của T-6.4 (scheme lạ, cổng lạ, userinfo, loopback v4/v6/bọc, metadata, CGNAT, multicast, `2130706433`, `0177.0.0.1`, `nip.io`, dấu chấm cuối) — T-6.4 tính được. `app/tools/.gitkeep` thay bằng `__init__.py`. Thời gian chờ DNS: B-327. **Ngoài commit, cố ý:** như mục Chung.
+
+##### T-6.3 — 🔒 Transport `httpx` ghim IP đã kiểm + lớp 4 — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-6.2 ✅ · **Ước lượng:** 3 h
+- **KH:** §12.2 lớp 4 + đoạn "DNS rebinding", §12.5 C23 · CLAUDE.md A3, A5 · C20 · NQ-134 ① · người dùng đầu tiên là T-S.19b (`probe`, liệt kê model, `ByokAdapter` — Cạm bẫy ② của nó)
+- **Việc:**
+  - [ ] Transport `httpx` (async) dựng từ kết quả của `validate_url()`: socket nối tới **một trong các IP đã kiểm**, không resolve lại; `Host` = host đã chuẩn hoá (ASCII); TLS kiểm chứng chỉ theo **tên miền** (`sni_hostname`), `verify` mặc định — không bao giờ `verify=False`. Request tới host khác host đã ghim ⇒ từ chối, không âm thầm nối
+  - [ ] Một hàm dựng `httpx.AsyncClient` cho chỗ gọi: `follow_redirects=False`, `trust_env=False` (biến proxy của môi trường không được bẻ đường đi), timeout do chỗ gọi truyền — dùng thẳng được làm `http_client=` của `AsyncOpenAI`
+  - [ ] Lớp 4, cho chỗ gọi **cần** theo redirect (P6 `fetcher`; BYOK **không** theo): tự đi từng bước — `Location` tương đối ghép theo URL hiện tại; mỗi bước chạy lại `validate_url()` và dựng transport mới cho host mới; trần = `settings.MAX_REDIRECTS` (**đã có**: `settings.py:450`, `.env.example:234` — không thêm biến); vượt trần ⇒ lỗi riêng. Đổi host ⇒ bỏ `Authorization` (`httpx` cũng bỏ) **và** `x-api-key` (`httpx` không biết header này — `auth_style` của catalog, T-2.14)
+  - [ ] Ca vào `tests/tools/test_ssrf.py`: rebinding, `Host` / SNI, từ chối host lạ, các bước redirect
+- **Xong khi (DoD):**
+  - [ ] Rebinding: resolver giả trả `93.184.215.14` lần 1, `127.0.0.1` từ lần 2 ⇒ socket nối tới IP lần 1, resolver được gọi **đúng 1** lần — đo ở chỗ socket được mở (host đối số của `connect_tcp`, `server_hostname` của `start_tls`), không qua `MockTransport` (Cạm bẫy ①)
+  - [ ] Stack thật, **trong container `api`**: một lượt HTTPS qua client này tới một endpoint công khai không cần khoá ⇒ có status, chứng chỉ hợp lệ; dán host, các IP đã kiểm, và `response.extensions["network_stream"].get_extra_info("server_addr")` — IP của socket nằm trong danh sách đã kiểm
+  - [ ] Đối chứng TLS: cùng IP ấy, ghim cho một tên miền **không** có trong chứng chỉ ⇒ lỗi TLS ở bước bắt tay — bằng chứng kiểm theo tên (với `verify=False` cả hai lượt đều qua)
+  - [ ] Lớp 4 (pytest): bước 1 công khai `302` → `Location: http://169.254.169.254/latest/meta-data/` ⇒ dừng với mã `address`, **không** request nào gửi tới bước 2; `MAX_REDIRECTS + 1` bước ⇒ lỗi trần; đổi host ⇒ request bước sau không mang `Authorization` / `x-api-key`
+  - [ ] Kiểm ngược, mỗi dòng đỏ: transport để `httpx` resolve lại tên (ca rebinding); `verify=False` (chạy lại DoD 3 — lượt đối chứng qua); bước sau không gọi `validate_url()`; giữ `x-api-key` khi đổi host
+  - [ ] `make test && make lint && make check-hardcode && docker compose ps`
+- **Cạm bẫy:**
+  - ① **`MockTransport` thay đúng tầng đang được kiểm.** Lối `_client()` + `MockTransport` của `test_byok_verify.py` / `test_turnstile.py` bỏ qua mọi thứ dưới `httpx` ⇒ ca rebinding đi qua nó xanh kể cả khi transport resolve lại. C23 chỉ bắt được ở chỗ socket được mở.
+  - ② **Đổi host của URL thành IP kéo theo hai hệ quả.** (a) Pool của `httpcore` khoá theo `(scheme, host, port)` của URL ⇒ hai tên miền chung một IP (CDN) dùng chung một kết nối TLS đã kiểm cho tên **đầu** — một transport cho **một** host đã kiểm, không chung pool. (b) `response.request.url` mang IP ⇒ IP vào thông điệp `raise_for_status()` của `httpx` (`… for url 'https://<IP>/…'`) và lỗi của SDK ở tầng trên — ngược tinh thần DoD 2 của T-6.2. Ghim ở chỗ nối socket (URL giữ tên, `Host` / SNI tự đúng) tránh cả hai nhưng **lệch chữ Việc** ("đặt `Host` thủ công", khung NQ-134) ⇒ chọn một trong hai **trước dòng code đầu**; chọn cách ghim ở socket thì hỏi.
+  - ③ **`settings.MAX_REDIRECTS` đọc lúc gọi**, không làm giá trị mặc định của tham số hay hằng module — bài học T-S.8: `Query(le=settings.X)` đóng băng trần cho cả tiến trình pytest ngay khi một ca monkeypatch nó.
+  - ④ Lượt HTTPS thật là lệnh DoD, **không** là ca pytest (mục Chung). Endpoint công khai chọn lúc chạy, ghi ở báo cáo; không literal URL provider trong `.py` (A3).
+  - ⑤ IDNA: `Host` và SNI dùng dạng ASCII (`raw_host`, `xn--…`) — `httpx.URL(...).host` trả dạng Unicode (`xn--bcher-kva.example` → `bücher.example`, đo 2026-10-02).
+
+##### T-6.4 — 🔒 `tests/tools/test_ssrf.py` ≥ 25 ca (S10) — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-6.3 · **Ước lượng:** 2 h
+- **KH:** S10 (bảng tiêu chí: *"≥ 25 case, gồm cả redirect chain và DNS rebinding"*), §12.1 (bảng sáu URL), §12.2, §12.5 C23 · RR-3
+- **Việc:**
+  - [ ] Bổ sung `tests/tools/test_ssrf.py` tới khi **mỗi dòng** dưới đây có ít nhất một ca. Ca của T-6.2 / T-6.3 đã phủ dòng nào thì tính; không lấp 25 bằng biến thể của cùng một dòng:
+    - metadata `169.254.169.254`, cả dạng `[::ffff:169.254.169.254]`
+    - tên service Docker `redis`, `postgres`, `litellm`, `minio`, `api` — resolver giả trả địa chỉ dải Docker `172.16.0.0/12`, cổng mặc định (để tới được lớp 3)
+    - loopback `127.0.0.1`, `[::1]`, `[::ffff:127.0.0.1]`
+    - IP thập phân `2130706433`, bát phân `0177.0.0.1`, hex `0x7f.1`, rút gọn `127.1`
+    - `0.0.0.0`, `[::]`
+    - CGNAT `100.64.0.1` và `[::ffff:100.64.0.1]`; multicast `224.0.0.1`
+    - userinfo `https://u@h/`, `https://u:p@h/`
+    - cổng lạ `:6379`, `:4000`, `:8080`; scheme `file://`, `gopher://`, `ftp://`
+    - dấu chấm cuối `localhost.`, `redis.`
+    - tên resolve về loopback `127.0.0.1.nip.io`
+    - một tên, nhiều địa chỉ, một trong số đó riêng
+    - redirect sang nội bộ, redirect vượt trần, rebinding
+    - ca **nhận**: một tên resolve ra IP công khai, `https://[2606:4700:4700::1111]/` — để bộ test không xanh nhờ một hàm từ chối mọi thứ
+- **Xong khi (DoD):**
+  - [ ] `pytest tests/tools/test_ssrf.py -v` ≥ 25 passed — dán danh sách tên ca, ghi ca nào phủ dòng nào của Việc
+  - [ ] Kiểm ngược: gỡ nhánh mở `::ffff:` ⇒ đỏ — dán tên ca đỏ và phiên bản Python (Cạm bẫy ① của T-6.2); thêm: thay `validate_url()` bằng hàm từ chối mọi URL ⇒ ca **nhận** đỏ
+  - [ ] Stack thật, DNS thật, **trong container `api`**: `http://redis/`, `http://litellm/`, `http://169.254.169.254/latest/meta-data/`, `https://127.0.0.1.nip.io/` ⇒ mã `address`; `http://litellm:4000/v1/models` (dòng S10) ⇒ mã `port` — dán mã và thông điệp của từng URL, không thông điệp nào chứa IP
+  - [ ] `make test && make lint && make check-hardcode && docker compose ps`
+- **Cạm bẫy:**
+  - ① **25 là sàn của S10, không phải đích.** Mười ca `parametrize` của cùng một dòng đủ số mà không phủ thêm gì — DoD dòng 1 vì vậy đòi bảng ca ↔ dòng.
+  - ② Vế *"không có request nào rời khỏi container `fetcher`"* của S10 là lớp 1 — T-6.5, P6. Đường BYOK không có lớp 1 (NQ-134 ①); đừng giả lập nó ở đây.
+  - ③ `127.0.0.1.nip.io` trong pytest dùng resolver giả; bản DNS thật là DoD dòng 3. Lớp 2 không bắt được tên này, chỉ lớp 3 (T-S.19b Cạm bẫy ③).
+  - ④ `http://redis:6379/` bị từ chối ở **lớp 2** (cổng) trước khi DNS được hỏi — ca "tên service Docker" phải đi cổng mặc định mới chứng minh được lớp 3. Cùng lý do, DoD dòng 3 tách `litellm` (mã `address`) khỏi `litellm:4000` (mã `port`).
+  - ⑤ `0177.0.0.1`: `httpx` ném `InvalidURL` trước cả lớp 3 — ca khẳng định mã `host`, không "ném gì cũng được" (một `500` cũng là ném).
 
 #### T-S.19b — BYOK backend: chỉ đếm token, endpoint do người dùng nhập
 - **Trạng thái:** ☐ · **Phụ thuộc:** T-6.4 · **Ước lượng:** 12 h
@@ -2418,6 +2499,7 @@ P1 **nghiêng hẳn về nhóm B** (Redis stream, SSE qua Nginx, trình duyệt,
 | B-324 | **Bản vẽ Tin nhắn v3: ba chỗ báo lại cho người thiết kế.** ① Khoảng giữa hai lượt: canvas 3j = 40, `ChatStream.tsx` = `gap-6` + `pt-turn` = 64 ⇒ code 64 theo NQ-135 ①. ② Ô bảng markdown: canvas 3l `white-space: nowrap` ("chữ trong ô không xuống dòng để số còn thẳng cột"), `markdownComponents.td` không có ⇒ code theo mã (chỉ `th` nowrap). ③ Nhãn nhóm trong hộp tìm: `ConversationSearch.tsx` `tracking-wider` (.05em), canvas Khung chính v3 `.08em` ⇒ code `tracking-[0.08em]`, như mọi nhãn chữ hoa nhỏ đã thống nhất ở T-S.18 (B-321 ④) | T-S.19a, 2026-10-01 |
 | B-325 | **Trang 404 không đảo, không header, không nút sáng/tối (NQ-135 ④).** Chỉ còn nút "Về trang chủ" của chính nó; theme vẫn theo lựa chọn đã lưu. Người thiết kế quyết 404 có cần đảo (hay một thanh nhỏ) không | T-S.19a, 2026-10-01 |
 | B-326 | **Neo hai bên (NQ-136): nội dung dời 272 px TỨC THÌ, không chuyển động.** Bản v3-beta trượt `left`/`right` của vùng nội dung bằng `normal 200ms · move`; `theme.css` không có `.motion-*` nào cho `padding`/`left`, và component không tự viết transition (T-3.9). Cần người thiết kế thêm một `@utility` (vd. `motion-inset`) vào khối v3. **Kèm:** B-323 ① nay là trạng thái MẶC ĐỊNH của người neo hai bên — sidebar dọc không có lối vào Quản trị, công tắc sáng/tối, nút panel artifact; chỉ Cài đặt qua menu tài khoản | NQ-136, 2026-10-01 |
+| B-327 | **`validate_url()` không có trần thời gian cho DNS.** `loop.getaddrinfo` chạy trong executor và chờ theo resolver hệ thống (glibc: `timeout` × `attempts` × số nameserver — vài giây tới hơn chục giây), nằm **ngoài** timeout của `httpx` vì DNS xảy ra trước khi client được dựng. T-6.2 cố ý không thêm biến `.env` (Việc không có). **Cần:** T-S.19b bọc lời gọi trong `asyncio.timeout(...)` với trần của chính nó (vd. timeout probe đã có) và ánh xạ hết giờ sang mã `dns`, hoặc chốt một biến riêng | T-6.2 |
 
 **Ghi chú lệch nhỏ:** B-28 ghi "chưa nghiệm thu được vì `ANTHROPIC_API_KEY` rỗng" — **đã cũ**, key nay có giá trị (kiểm hôm nay, không in giá trị). T-1.3 không còn bị chặn vì lý do đó.
 
