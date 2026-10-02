@@ -97,15 +97,15 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from app.config.catalog import ModelEntry, ReasoningOption, get_model, reasoning_to_send
+from app.config.catalog import ModelEntry, ReasoningOption, reasoning_to_send
 from app.config.settings import settings
 from app.db.models import KeySource, MessageStatus
 from app.db.repositories import MessageRepository
 from app.db.session import session_scope
-from app.llm import context
+from app.llm import byok_endpoints, context
 from app.llm.adapters.byok import ByokAdapter
 from app.llm.client import Chunk, LLMClient, ToolCall, Usage
-from app.llm.credentials import Credential, resolve_credential
+from app.llm.credentials import Credential, CredentialUnavailable, resolve_credential
 from app.quota import meter
 from app.streaming.cancel import FINISH_REASON_CANCELLED, is_cancel_requested
 from app.streaming.events import (
@@ -120,6 +120,7 @@ from app.streaming.events import (
     UsageEvent,
 )
 from app.streaming.producer import StreamProducer
+from app.tools.ssrf import UnsafeUrlError, pinned_client
 
 logger = logging.getLogger(__name__)
 
@@ -427,11 +428,23 @@ async def _turn_client(ctx: dict[str, Any], credential: Credential) -> AsyncIter
       treo tới lúc timeout, và với BYOK thì đó là kết nối *mang khoá của
       người dùng* nằm mở.
     """
-    if credential.provider is None or credential.api_key is None:
+    if credential.base_url is not None and credential.api_key is not None:
+        # Endpoint người dùng tự nhập (T-S.19b): A5 kiểm lại mỗi lượt — DNS có
+        # thể đã đổi từ lúc lưu — rồi nối qua đúng các IP đã kiểm (T-6.3).
+        try:
+            checked = await byok_endpoints.check_base_url(credential.base_url)
+        except UnsafeUrlError as exc:
+            raise GenerationError(ErrorCode.UPSTREAM_ERROR, str(exc)) from None
+        adapter = ByokAdapter.for_endpoint(
+            credential.base_url,
+            api_key=credential.api_key,
+            http_client=pinned_client(checked, timeout=settings.LLM_REQUEST_TIMEOUT_S),
+        )
+    elif credential.provider is None or credential.api_key is None:
         yield ctx[CTX_LLM_CLIENT]
         return
-
-    adapter = ByokAdapter.for_provider(credential.provider, api_key=credential.api_key)
+    else:
+        adapter = ByokAdapter.for_provider(credential.provider, api_key=credential.api_key)
     try:
         yield adapter
     finally:
@@ -461,7 +474,9 @@ async def _prepare(
         if owned is None:
             raise GenerationError(ErrorCode.MESSAGE_NOT_FOUND, "message khong con trong DB")
 
-        model_meta = get_model(owned.message.model_id or "")
+        model_meta = await byok_endpoints.resolve_model(
+            session, user_id=owned.user_id, model_id=owned.message.model_id or ""
+        )
         if model_meta is None:
             raise GenerationError(
                 ErrorCode.MODEL_UNKNOWN,
@@ -485,7 +500,10 @@ async def _prepare(
         # mã được) chỉ là "đi bằng system key", nhưng một ngoại lệ Postgres ở
         # đây mà đứng sau `mark_streaming` sẽ để lại một message `streaming`
         # không ai sinh — đúng món ăn của reaper §7.6.
-        credential = await resolve_credential(session, user_id=owned.user_id, model=model_meta)
+        try:
+            credential = await resolve_credential(session, user_id=owned.user_id, model=model_meta)
+        except CredentialUnavailable as exc:
+            raise GenerationError(ErrorCode.UPSTREAM_ERROR, str(exc)) from None
 
         # Mức sẽ gửi (T-S.6). Khác mức API đã ghi chỉ khi catalog vừa bỏ mức
         # ấy lúc job còn trong hàng đợi — khi đó rơi về `reasoning.default` và

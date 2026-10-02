@@ -82,10 +82,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Response, status
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints
+from sqlalchemy.exc import IntegrityError
 
 from app.config import catalog
 from app.config.catalog import Provider
@@ -94,10 +95,19 @@ from app.core.crypto import DecryptionError, Sealed, mask_secret, seal, unseal
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.user_prefs import UserPrefs
-from app.db.models import UserProviderKey
-from app.db.repositories import ProviderKeyRepository, UserRepository, UserSettingsRepository
+from app.db.models import UserByokEndpoint, UserProviderKey
+from app.db.repositories import (
+    ByokEndpointRepository,
+    ProviderKeyRepository,
+    UsageEventRepository,
+    UserRepository,
+    UserSettingsRepository,
+)
 from app.db.session import session_scope
+from app.llm import byok_endpoints
+from app.llm.byok_endpoints import BaseUrlRejected, ProbeOutcome, ProbeResult, ProbeUnavailable
 from app.llm.byok_verify import VerifyOutcome, VerifyUnavailable, verify_key
+from app.tools.ssrf import UnsafeUrlError
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -126,6 +136,9 @@ class ProviderKeyOut(BaseModel):
     #: Giải mã được bằng `MASTER_ENCRYPTION_KEY` hiện tại hay không. `False` =
     #: bảo người dùng nhập lại — xem docstring module.
     usable: bool
+    #: Tổng token mọi lượt BYOK của provider này (NQ-134 ③) — BYOK không tính tiền.
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class ByokProviderOut(BaseModel):
@@ -183,7 +196,7 @@ def _find_provider(provider: str) -> Provider:
     return record
 
 
-def _is_readable(row: UserProviderKey) -> bool:
+def _is_readable(row: UserProviderKey | UserByokEndpoint) -> bool:
     """`MASTER_ENCRYPTION_KEY` hiện tại còn mở được hàng này không.
 
     Bản rõ **không** được gán vào biến nào: nó chỉ tồn tại trong khung của
@@ -196,13 +209,15 @@ def _is_readable(row: UserProviderKey) -> bool:
     return True
 
 
-def _to_out(row: UserProviderKey) -> ProviderKeyOut:
+def _to_out(row: UserProviderKey, tokens: tuple[int, int] = (0, 0)) -> ProviderKeyOut:
     return ProviderKeyOut(
         provider=row.provider,
         masked_key=row.key_last4,
         verified_at=row.verified_at,
         created_at=row.created_at,
         usable=_is_readable(row),
+        prompt_tokens=tokens[0],
+        completion_tokens=tokens[1],
     )
 
 
@@ -228,8 +243,12 @@ async def list_provider_keys(
         if p.byok_supported
     ]
     async with session_scope() as session:
-        row = await ProviderKeyRepository(session).list_for_user(user_id)
-        return ProviderKeyListOut(keys=[_to_out(h) for h in row], byok_providers=byok_providers)
+        rows = await ProviderKeyRepository(session).list_for_user(user_id)
+        tokens = await UsageEventRepository(session).byok_tokens_by_provider(user_id)
+        return ProviderKeyListOut(
+            keys=[_to_out(r, tokens.get(r.provider, (0, 0))) for r in rows],
+            byok_providers=byok_providers,
+        )
 
 
 @router.put(
@@ -529,3 +548,273 @@ async def put_settings(
         avatar_color=prefs.avatar_color,
         reasoning_prefs=prefs.reasoning,
     )
+
+
+# ═══════ Endpoint BYOK người dùng tự nhập (NQ-134 ②, A5) — T-S.19b ═══════════
+
+#: Tên route của `POST /settings/byok-endpoints` — `api/v1/__init__.py` bắt
+#: buộc `Idempotency-Key` cho nó (A8). Gắn `name=` tường minh ở decorator.
+CREATE_BYOK_ENDPOINT_ROUTE_NAME = "create_byok_endpoint"
+
+#: Khoá API: ASCII in được, không khoảng trắng — nó đi vào một header HTTP.
+_KEY_PATTERN = r"^[\x21-\x7e]+$"
+
+_Key = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, pattern=_KEY_PATTERN)]
+#: Tên endpoint và tên model: một dòng, không ký tự điều khiển.
+_Name = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=settings.BYOK_ENDPOINT_NAME_MAX_CHARS,
+        pattern=_DISPLAY_NAME_PATTERN,
+    ),
+]
+_Models = Annotated[list[_Name], Field(min_length=1, max_length=settings.BYOK_ENDPOINT_MODELS_MAX)]
+
+
+class ByokProbeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str = Field(min_length=1)
+    key: _Key
+
+
+class ByokProbeOut(BaseModel):
+    #: `data[].id` của `GET {base}/models`; rỗng ⇒ FE cho gõ tay (C42).
+    models: list[str]
+    #: `False` = endpoint không có `/models`, khoá chưa kiểm được (C42).
+    verified: bool
+
+
+class ByokEndpointIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: _Name
+    base_url: str = Field(min_length=1)
+    key: _Key
+    models: _Models
+
+
+class ByokEndpointPatch(BaseModel):
+    """Chỉ `label`, `models` — đổi URL hay khoá là xoá rồi thêm (§10.5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: _Name | None = None
+    models: _Models | None = None
+
+
+class ByokEndpointOut(BaseModel):
+    """Một endpoint, dạng UI được phép thấy. Model id để chat là
+    `byok:<id>/<model>` (xem `app/llm/byok_endpoints.py`)."""
+
+    id: uuid.UUID
+    label: str
+    base_url: str
+    masked_key: str
+    models: list[str]
+    verified_at: datetime | None
+    created_at: datetime
+    usable: bool
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class ByokEndpointListOut(BaseModel):
+    endpoints: list[ByokEndpointOut]
+
+
+def _endpoint_out(row: UserByokEndpoint, tokens: dict[str, tuple[int, int]]) -> ByokEndpointOut:
+    prompt, completion = tokens.get(byok_endpoints.provider_for(row.id), (0, 0))
+    return ByokEndpointOut(
+        id=row.id,
+        label=row.label,
+        base_url=row.base_url,
+        masked_key=row.key_last4,
+        models=list(row.models),
+        verified_at=row.verified_at,
+        created_at=row.created_at,
+        usable=_is_readable(row),
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+    )
+
+
+def _not_found() -> ApiError:
+    return ApiError(
+        status.HTTP_404_NOT_FOUND,
+        ApiErrorCode.BYOK_ENDPOINT_NOT_FOUND,
+        "khong tim thay endpoint BYOK",
+    )
+
+
+def _label_taken() -> ApiError:
+    return ApiError(
+        status.HTTP_409_CONFLICT,
+        ApiErrorCode.BYOK_ENDPOINT_LABEL_TAKEN,
+        "da co mot endpoint cung ten",
+    )
+
+
+async def _checked_probe(raw_base_url: str, key: str) -> tuple[str, ProbeResult]:
+    """Chuẩn hoá + A5 + `GET {base}/models`. Trả `(base_url đã chuẩn hoá, kết quả)`.
+
+    Raises:
+        ApiError 400 `URL_UNSAFE`, 400 `PROVIDER_KEY_REJECTED`, 503 `SERVICE_UNAVAILABLE`.
+    """
+    try:
+        base_url = byok_endpoints.normalize_base_url(raw_base_url)
+        result = await byok_endpoints.probe(base_url, key)
+    except (BaseUrlRejected, UnsafeUrlError) as exc:
+        # Thông điệp cố định theo mã — không host, không IP (T-6.2).
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ApiErrorCode.URL_UNSAFE,
+            str(exc),
+            details={"reason": exc.reason},
+        ) from None
+    except ProbeUnavailable:
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            ApiErrorCode.SERVICE_UNAVAILABLE,
+            "khong hoi duoc endpoint de kiem khoa, hay thu lai",
+        ) from None
+    if result.outcome is ProbeOutcome.REJECTED:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST, ApiErrorCode.PROVIDER_KEY_REJECTED, _KEY_REJECTED_MSG
+        )
+    return base_url, result
+
+
+_ENDPOINT_ERRORS: dict[int | str, dict[str, Any]] = {
+    400: {
+        "model": ErrorEnvelope,
+        "description": "base URL bi tu choi (URL_UNSAFE) hoac khoa bi tu choi "
+        "(PROVIDER_KEY_REJECTED)",
+    },
+    503: {"model": ErrorEnvelope, "description": "khong hoi duoc endpoint (SERVICE_UNAVAILABLE)"},
+}
+
+
+@router.post(
+    "/byok-endpoints/probe",
+    status_code=status.HTTP_200_OK,
+    response_model=ByokProbeOut,
+    responses=_ENDPOINT_ERRORS,
+)
+async def probe_byok_endpoint(body: ByokProbeIn) -> ByokProbeOut:
+    """Nút "Kiểm tra kết nối": kiểm khoá + liệt kê model. Không tạo tài nguyên
+    nên không cần `Idempotency-Key`."""
+    _, result = await _checked_probe(body.base_url, body.key)
+    return ByokProbeOut(models=result.models, verified=result.outcome is ProbeOutcome.ALIVE)
+
+
+@router.post(
+    "/byok-endpoints",
+    name=CREATE_BYOK_ENDPOINT_ROUTE_NAME,
+    status_code=status.HTTP_201_CREATED,
+    response_model=ByokEndpointOut,
+    responses={
+        **_ENDPOINT_ERRORS,
+        409: {"model": ErrorEnvelope, "description": "trung ten (BYOK_ENDPOINT_LABEL_TAKEN)"},
+    },
+)
+async def create_byok_endpoint(
+    body: ByokEndpointIn,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> ByokEndpointOut:
+    """Thêm endpoint — **kiểm lại trước khi lưu** (§10.5); khoá mã hoá như
+    `user_provider_keys`. `Idempotency-Key` bắt buộc (A8, `api/v1/__init__.py`).
+
+    Raises:
+        ApiError 400 `BYOK_ENDPOINT_LIMIT`: đã đủ `BYOK_ENDPOINTS_MAX_PER_USER`.
+    """
+    base_url, result = await _checked_probe(body.base_url, body.key)
+    verified_at = datetime.now(UTC) if result.outcome is ProbeOutcome.ALIVE else None
+
+    async with session_scope() as session:
+        repo = ByokEndpointRepository(session)
+        # ponytail: đếm rồi ghi — hai request đua nhau có thể vượt trần một hàng.
+        if await repo.count_for_user(user_id) >= settings.BYOK_ENDPOINTS_MAX_PER_USER:
+            raise ApiError(
+                status.HTTP_400_BAD_REQUEST,
+                ApiErrorCode.BYOK_ENDPOINT_LIMIT,
+                "da dat so endpoint BYOK toi da",
+                details={"max": settings.BYOK_ENDPOINTS_MAX_PER_USER},
+            )
+        try:
+            row = await repo.create(
+                user_id=user_id,
+                label=body.label,
+                base_url=base_url,
+                sealed=seal(body.key),
+                masked=mask_secret(body.key),
+                models=list(dict.fromkeys(body.models)),
+                verified_at=verified_at,
+            )
+        except IntegrityError:
+            raise _label_taken() from None
+        out = _endpoint_out(row, {})
+        await session.commit()
+    return out
+
+
+@router.get("/byok-endpoints", status_code=status.HTTP_200_OK, response_model=ByokEndpointListOut)
+async def list_byok_endpoints(
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> ByokEndpointListOut:
+    """Endpoint của chính mình — khoá chỉ ở dạng che, kèm tổng token (NQ-134 ③)."""
+    async with session_scope() as session:
+        rows = await ByokEndpointRepository(session).list_for_user(user_id)
+        tokens = await UsageEventRepository(session).byok_tokens_by_provider(user_id)
+        return ByokEndpointListOut(endpoints=[_endpoint_out(r, tokens) for r in rows])
+
+
+@router.patch(
+    "/byok-endpoints/{endpoint_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=ByokEndpointOut,
+    responses={
+        404: {"model": ErrorEnvelope, "description": "BYOK_ENDPOINT_NOT_FOUND"},
+        409: {"model": ErrorEnvelope, "description": "BYOK_ENDPOINT_LABEL_TAKEN"},
+    },
+)
+async def patch_byok_endpoint(
+    endpoint_id: uuid.UUID,
+    body: ByokEndpointPatch,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> ByokEndpointOut:
+    models = list(dict.fromkeys(body.models)) if body.models is not None else None
+    async with session_scope() as session:
+        try:
+            row = await ByokEndpointRepository(session).update(
+                user_id=user_id, endpoint_id=endpoint_id, label=body.label, models=models
+            )
+        except IntegrityError:
+            raise _label_taken() from None
+        if row is None:
+            raise _not_found()
+        tokens = await UsageEventRepository(session).byok_tokens_by_provider(user_id)
+        out = _endpoint_out(row, tokens)
+        await session.commit()
+    return out
+
+
+@router.delete(
+    "/byok-endpoints/{endpoint_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"model": ErrorEnvelope, "description": "BYOK_ENDPOINT_NOT_FOUND"}},
+)
+async def delete_byok_endpoint(
+    endpoint_id: uuid.UUID,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> Response:
+    """Xoá **cứng** (§10.5). Dòng `usage_events` cũ giữ nguyên (A7)."""
+    async with session_scope() as session:
+        if not await ByokEndpointRepository(session).delete(
+            user_id=user_id, endpoint_id=endpoint_id
+        ):
+            raise _not_found()
+        await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

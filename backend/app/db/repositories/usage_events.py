@@ -255,6 +255,23 @@ class UsageEventRepository:
             low=by_confidence.get(CostConfidence.LOW, Decimal(0)),
         )
 
+    async def byok_tokens_by_provider(self, user_id: uuid.UUID) -> dict[str, tuple[int, int]]:
+        """`provider → (prompt_tokens, completion_tokens)` của mọi lượt BYOK của
+        một người — tổng token ở tab BYOK (NQ-134 ③). Endpoint tự nhập có
+        `provider = 'byok:<endpoint_id>'`.
+        """
+        stmt = (
+            select(
+                UsageEvent.provider,
+                func.sum(UsageEvent.prompt_tokens),
+                func.sum(UsageEvent.completion_tokens),
+            )
+            .where(UsageEvent.user_id == user_id, UsageEvent.key_source == KeySource.BYOK)
+            .group_by(UsageEvent.provider)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {provider: (int(p), int(c)) for provider, p, c in rows}
+
     async def list_since(self, *, user_id: uuid.UUID, since: datetime) -> Sequence[LedgerEntry]:
         """Mọi dòng sổ của một người kể từ `since`, cũ nhất trước — T-2.13, §10.3.
 

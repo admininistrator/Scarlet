@@ -67,7 +67,12 @@ from app.core.idempotency import require_idempotency
 #: `PATCH /messages/{id}` **vẫn ngoài vùng phủ** (B-232): nó không phải POST, và
 #: `GUARDED_METHOD` giữ nguyên `POST` theo đúng chữ §11.4/A8 — xem NQ-93.
 IDEMPOTENCY_REQUIRED_ROUTES = frozenset(
-    {messages.CREATE_MESSAGE_ROUTE_NAME, messages.RETRY_ROUTE_NAME}
+    {
+        messages.CREATE_MESSAGE_ROUTE_NAME,
+        messages.RETRY_ROUTE_NAME,
+        # T-S.19b: tạo một endpoint BYOK là tạo tài nguyên (A8).
+        settings_router.CREATE_BYOK_ENDPOINT_ROUTE_NAME,
+    }
 )
 
 _idempotency = require_idempotency(IDEMPOTENCY_REQUIRED_ROUTES)

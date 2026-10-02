@@ -21,6 +21,7 @@ from app.db.models.refresh_token import RefreshToken
 from app.db.models.tier import Tier
 from app.db.models.usage_event import CostConfidence, KeySource, UsageEvent, UsagePurpose
 from app.db.models.user import User, UserRole, UserStatus
+from app.db.models.user_byok_endpoint import UserByokEndpoint
 from app.db.models.user_provider_key import UserProviderKey
 from app.db.models.user_settings import UserSettings
 
@@ -45,6 +46,7 @@ __all__ = [
     "UsageEvent",
     "UsagePurpose",
     "User",
+    "UserByokEndpoint",
     "UserProviderKey",
     "UserRole",
     "UserSettings",

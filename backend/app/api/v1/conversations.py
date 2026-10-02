@@ -61,7 +61,6 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import catalog
 from app.config.settings import CONVERSATION_TITLE_MAX_CHARS, settings
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
@@ -74,6 +73,7 @@ from app.db.repositories import (
 from app.db.repositories.conversations import EDITABLE_FIELDS
 from app.db.repositories.messages import PathNode
 from app.db.session import session_scope
+from app.llm import byok_endpoints
 
 router = APIRouter(tags=["conversations"])
 
@@ -347,15 +347,8 @@ async def create_conversation(
     tại đầy đủ ngay khi response về. `202` của `POST .../messages` mang nghĩa
     khác hẳn — "đã nhận, câu trả lời còn đang sinh".
     """
-    if body.default_model is not None and catalog.get_model(body.default_model) is None:
-        raise ApiError(
-            status.HTTP_400_BAD_REQUEST,
-            ApiErrorCode.MODEL_UNKNOWN,
-            f"model khong co trong catalog hoac da tat: {body.default_model}",
-            details={"model_id": body.default_model},
-        )
-
     async with session_scope() as session:
+        await _check_model(session, user_id, body.default_model)
         conversation = await ConversationRepository(session).create_conversation(
             user_id=user_id,
             title=body.title,
@@ -456,16 +449,8 @@ async def update_conversation(
             ApiErrorCode.BAD_REQUEST,
             "pinned khong nhan null; gui true hoac false",
         )
-    new_model: str | None = changes.get("default_model")
-    if new_model is not None and catalog.get_model(new_model) is None:
-        raise ApiError(
-            status.HTTP_400_BAD_REQUEST,
-            ApiErrorCode.MODEL_UNKNOWN,
-            f"model khong co trong catalog hoac da tat: {new_model}",
-            details={"model_id": new_model},
-        )
-
     async with session_scope() as session:
+        await _check_model(session, user_id, changes.get("default_model"))
         conversations = ConversationRepository(session)
         conversation = await conversations.get_conversation(conversation_id, user_id=user_id)
         if conversation is None:
@@ -578,3 +563,21 @@ async def _path(
         return []
     nodes = await MessageRepository(session).get_path(conversation.active_leaf_id, user_id=user_id)
     return [PathMessage.from_path_node(node) for node in nodes]
+
+
+async def _check_model(session: AsyncSession, user_id: uuid.UUID, model_id: str | None) -> None:
+    """`default_model` của hội thoại: model catalog, hoặc model của một endpoint
+    BYOK của chính người này (`byok:<id>/<model>`, T-S.19b).
+
+    Raises:
+        ApiError 400 `MODEL_UNKNOWN`.
+    """
+    if model_id is None:
+        return
+    if await byok_endpoints.resolve_model(session, user_id=user_id, model_id=model_id) is None:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST,
+            ApiErrorCode.MODEL_UNKNOWN,
+            f"model khong co trong catalog hoac da tat: {model_id}",
+            details={"model_id": model_id},
+        )

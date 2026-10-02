@@ -39,6 +39,8 @@ của họ), không phải ở `/chat/completions`.
 
 from __future__ import annotations
 
+import httpx
+
 from app.config.catalog import Provider
 from app.config.settings import Settings, settings
 from app.llm.adapters.openai_compat import OpenAICompatAdapter
@@ -73,4 +75,19 @@ class ByokAdapter(OpenAICompatAdapter):
             api_key=api_key,
             timeout_s=float(config.LLM_REQUEST_TIMEOUT_S),
             default_headers=dict(provider.extra_headers) or None,
+        )
+
+    @classmethod
+    def for_endpoint(
+        cls, base_url: str, *, api_key: str, http_client: httpx.AsyncClient
+    ) -> ByokAdapter:
+        """Adapter cho endpoint người dùng tự nhập (T-S.19b). `http_client` **bắt
+        buộc** — là `pinned_client()` của T-6.3; thiếu nó là gọi thẳng, không ghim
+        IP (Cạm bẫy ②). Chỉ `Authorization: Bearer` — hợp đồng của A9.
+        """
+        return cls(
+            base_url=base_url,
+            api_key=api_key,
+            timeout_s=float(settings.LLM_REQUEST_TIMEOUT_S),
+            http_client=http_client,
         )

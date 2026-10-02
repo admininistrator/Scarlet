@@ -389,6 +389,15 @@ class Settings(BaseSettings):
     #: phải bỏ cuộc theo đơn vị giây. Gộp hai biến thì nới cái kia sẽ treo màn
     #: hình cài đặt.
     BYOK_VERIFY_TIMEOUT_S: int = Field(default=10, gt=0)
+    #: Endpoint BYOK do người dùng tự nhập (T-S.19b, NQ-134 ②). Trần số endpoint
+    #: mỗi người, số model mỗi endpoint, độ dài tên endpoint / tên model.
+    BYOK_ENDPOINTS_MAX_PER_USER: int = Field(default=5, gt=0)
+    BYOK_ENDPOINT_MODELS_MAX: int = Field(default=50, gt=0)
+    BYOK_ENDPOINT_NAME_MAX_CHARS: int = Field(default=128, gt=0)
+    #: Model tự nhập không có trong catalog nên không ai khai `context_window` /
+    #: `max_output` cho nó — hai con số này đứng thay, cho ngân sách §9.6.
+    BYOK_ENDPOINT_CONTEXT_WINDOW: int = Field(default=64000, gt=0)
+    BYOK_ENDPOINT_MAX_OUTPUT: int = Field(default=4096, gt=0)
     #: Nhịp của lượt đo provider `host-dependent` chạy nền trong `api`
     #: (`app/core/provider_health.py`, T-S.4, NQ-113) — cũng là tuổi mà FE coi
     #: `checked_at` của `GET /models` là cũ (`stale_after_s`). Hai hằng số của

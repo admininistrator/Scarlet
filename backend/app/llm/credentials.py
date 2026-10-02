@@ -88,7 +88,8 @@ from app.config import catalog
 from app.config.catalog import ModelEntry, Provider, ReasoningOption
 from app.core.crypto import DecryptionError, Sealed, unseal
 from app.db.models import KeySource
-from app.db.repositories import ProviderKeyRepository
+from app.db.repositories import ByokEndpointRepository, ProviderKeyRepository
+from app.llm import byok_endpoints
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,9 @@ class Credential:
     provider: Provider | None
     #: Khoá **bản rõ** — chỉ có ở nhánh BYOK. Không log, không đi vào exception (C20).
     api_key: str | None
+    #: Base URL của endpoint người dùng tự nhập (T-S.19b) — có thì `provider` là
+    #: `None` và worker gọi qua client ghim IP (A5).
+    base_url: str | None = None
 
     def model_name(self, model: ModelEntry, level: ReasoningOption | None = None) -> str:
         """Tên model gửi lên upstream — alias LiteLLM hay tên gốc của provider.
@@ -125,6 +129,9 @@ class Credential:
         """
         if self.key_source is KeySource.SYSTEM:
             return level.alias if level is not None and level.alias else model.id
+        if self.base_url is not None:
+            # Tên người dùng nhập, nguyên văn — kể cả dấu `/` (OpenRouter…).
+            return model.upstream_model
         return model.provider_model
 
     def reasoning_params(self, level: ReasoningOption | None) -> dict[str, Any]:
@@ -150,6 +157,10 @@ class Credential:
 #: Lượt sinh đi bằng tiền của người vận hành. Một hằng dùng chung thay vì ba
 #: lần dựng cùng một object: nó bất biến, và nó là câu trả lời mặc định của cả
 #: bốn ca lùi ở docstring module.
+class CredentialUnavailable(Exception):
+    """Lượt sinh bằng endpoint tự nhập không lấy được khoá — xem `resolve_credential`."""
+
+
 SYSTEM_CREDENTIAL = Credential(key_source=KeySource.SYSTEM, provider=None, api_key=None)
 
 
@@ -160,7 +171,12 @@ async def resolve_key_source(
 
     Trả về **chỉ** nguồn credential: bản rõ không có đường nào ra khỏi hàm
     này (xem docstring module).
+
+    Model của endpoint tự nhập luôn là BYOK: không có đường system nào cho nó,
+    và `resolve_model` đã tra endpoint theo `user_id` trước khi tới đây.
     """
+    if byok_endpoints.endpoint_id_of(model) is not None:
+        return KeySource.BYOK
     return (await _byok_key(session, user_id=user_id, model=model))[0]
 
 
@@ -171,7 +187,25 @@ async def resolve_credential(
 
     Cùng lõi với `resolve_key_source`, nên hai tiến trình không thể trả lời
     khác nhau về cùng một trạng thái DB (xem docstring module).
+
+    Raises:
+        CredentialUnavailable: model của endpoint tự nhập mà endpoint vừa bị
+            xoá, hoặc khoá không giải mã được — không có system key nào để lùi về.
     """
+    endpoint_id = byok_endpoints.endpoint_id_of(model)
+    if endpoint_id is not None:
+        row = await ByokEndpointRepository(session).get(user_id=user_id, endpoint_id=endpoint_id)
+        if row is None:
+            raise CredentialUnavailable("endpoint BYOK khong con ton tai")
+        try:
+            key = unseal(Sealed(cipher=row.key_cipher, nonce=row.key_nonce))
+        except DecryptionError:
+            raise CredentialUnavailable(
+                "khoa cua endpoint BYOK khong giai ma duoc, hay xoa roi them lai"
+            ) from None
+        return Credential(
+            key_source=KeySource.BYOK, provider=None, api_key=key, base_url=row.base_url
+        )
     key_source, provider, api_key = await _byok_key(session, user_id=user_id, model=model)
     if key_source is KeySource.SYSTEM:
         return SYSTEM_CREDENTIAL

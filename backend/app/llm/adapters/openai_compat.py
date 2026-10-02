@@ -38,6 +38,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Iterable
 from typing import TYPE_CHECKING, Any, cast
 
+import httpx
 from openai import AsyncOpenAI, omit
 from openai.types.chat import (
     ChatCompletionMessageParam,
@@ -107,6 +108,7 @@ class OpenAICompatAdapter:
         api_key: str,
         timeout_s: float,
         default_headers: dict[str, str] | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._client = AsyncOpenAI(
             base_url=base_url,
@@ -117,6 +119,11 @@ class OpenAICompatAdapter:
             # `{}`: SDK phân biệt hai cái, và một dict rỗng vẫn đi qua đường
             # merge header của nó mỗi request.
             default_headers=default_headers or None,
+            # Endpoint BYOK tự nhập: client ghim IP của T-6.3 (A5, T-S.19b).
+            # `close()` của SDK đóng luôn client này.
+            # Chữ ký của SDK 3.x ghi `httpx2.AsyncClient`, nhưng lúc chạy SDK
+            # nhận cả `httpx.AsyncClient` (đo trong container, openai 3.16.2).
+            http_client=cast("Any", http_client),
         )
 
     async def close(self) -> None:

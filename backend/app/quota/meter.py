@@ -334,12 +334,21 @@ async def record_usage(
         một lượt sinh đã xong có được phép chết vì lỗi ghi sổ hay không — cùng
         lối `read_window`/`add_to_windows`.
     """
-    rates = catalog.get_catalog().effective_pricing(model.id, at)
     spent = measure(
         model, usage=usage, sent=sent, content=content, reasoning=reasoning, tool_calls=tool_calls
     )
-    cost = cost_of(rates, spent)
-    confidence = confidence_of(model, spent)
+    if key_source is KeySource.BYOK:
+        # NQ-134 ③: BYOK chỉ đếm token — `cost_usd = 0`, không snapshot giá
+        # (endpoint tự nhập không có giá nào để chụp). `cost_confidence` lúc
+        # này nói về **token**: `low` = provider không báo `usage`, tự đếm (C40).
+        cost = quantize_cost(Decimal(0))
+        confidence = CostConfidence.EXACT if spent.measured else CostConfidence.LOW
+        snapshot: dict[str, Any] = {}
+    else:
+        rates = catalog.get_catalog().effective_pricing(model.id, at)
+        cost = cost_of(rates, spent)
+        confidence = confidence_of(model, spent)
+        snapshot = snapshot_of(model, rates, at)
 
     event = await UsageEventRepository(session).record(
         user_id=user_id,
@@ -352,7 +361,7 @@ async def record_usage(
         cached_tokens=spent.cached_tokens,
         cost_usd=cost,
         cost_confidence=confidence,
-        price_snapshot=snapshot_of(model, rates, at),
+        price_snapshot=snapshot,
         purpose=purpose,
         # B-32 — đã đo, không lấy được. Xem docstring module.
         upstream_model_reported=None,

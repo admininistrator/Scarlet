@@ -1172,7 +1172,10 @@ async def test_byok_writes_ledger_row_key_source_byok_and_ZSET_does_NOT_grow(
     so = await _read_ledger(session_factory, user_a)
     assert len(so) == 1
     assert so[0].key_source == KeySource.BYOK
-    assert so[0].cost_usd > 0, "vẫn tính tiền để người dùng xem được chi tiêu"
+    # NQ-134 ③ (T-S.19b): BYOK chỉ đếm token — không tiền, không snapshot giá.
+    assert so[0].cost_usd == 0
+    assert so[0].price_snapshot == {}
+    assert so[0].prompt_tokens > 0 and so[0].completion_tokens > 0
     assert fake_redis.zset == {}, "§10.5: BYOK không trừ quota"
 
 
@@ -1379,7 +1382,7 @@ def wire(monkeypatch: pytest.MonkeyPatch) -> _WireRecorder:
 
     def _build(**kwargs: Any) -> Any:
         transport = httpx.MockTransport(recorder)
-        return real(**kwargs, http_client=httpx.AsyncClient(transport=transport))
+        return real(**{**kwargs, "http_client": httpx.AsyncClient(transport=transport)})
 
     monkeypatch.setattr(openai_compat, "AsyncOpenAI", _build)
     return recorder
@@ -1604,3 +1607,141 @@ async def test_no_reasoning_chunks_leave_column_NULL_not_empty_string(
     reloaded = await _reload(session_factory, message.id)
     assert reloaded.content == "chỉ có câu trả lời"
     assert reloaded.reasoning is None
+
+
+# ══════════ T-S.19b — endpoint BYOK người dùng tự nhập ══════════
+#
+# Đo ở `PinnedTransport.handle_async_request` (tầng dưới SDK `openai`): lượt
+# sinh đi qua client ghim IP của T-6.3 (Cạm bẫy ②) — `ByokAdapter.for_endpoint`
+# mà quên `http_client=` thì SDK tự dựng client riêng, request đi ra mạng thật
+# tới một tên không resolve được, và ca dưới đỏ.
+
+_ENDPOINT_KEY = "sk-" + "khongphaikhoathat" * 2
+_ENDPOINT_MODEL = "deepseek/deepseek-chat"
+
+#: Stream KHÔNG có chunk `usage` — C40: token phải tự đếm, `cost_confidence=low`.
+_SSE_NO_USAGE = (
+    b'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+    b'"choices":[{"index":0,"delta":{"role":"assistant","content":"xin chao"}}]}\n\n'
+    b'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m",'
+    b'"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+    b"data: [DONE]\n\n"
+)
+
+
+async def _save_endpoint(
+    session_factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID, base_url: str
+) -> uuid.UUID:
+    from app.core.crypto import mask_secret, seal
+    from app.db.repositories import ByokEndpointRepository
+
+    async with session_factory() as s:
+        row = await ByokEndpointRepository(s).create(
+            user_id=user_id,
+            label="ep",
+            base_url=base_url,
+            sealed=seal(_ENDPOINT_KEY),
+            masked=mask_secret(_ENDPOINT_KEY),
+            models=[_ENDPOINT_MODEL],
+            verified_at=None,
+        )
+        await s.commit()
+        return row.id
+
+
+@pytest.fixture
+def pinned_net(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
+    from app.llm import byok_endpoints
+    from app.tools import ssrf
+
+    sent: list[httpx.Request] = []
+
+    async def _handle(self: ssrf.PinnedTransport, request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=_SSE_NO_USAGE
+        )
+
+    async def _resolve(host: str, port: int) -> list[str]:
+        return ["93.184.215.14"] if host == "llm.invalid" else ["127.0.0.1"]
+
+    monkeypatch.setattr(ssrf.PinnedTransport, "handle_async_request", _handle)
+    monkeypatch.setattr(
+        byok_endpoints, "validate_url", lambda url: ssrf.validate_url(url, resolver=_resolve)
+    )
+    return sent
+
+
+async def test_endpoint_turn_goes_through_pinned_client_and_counts_tokens_only(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    pinned_net: list[httpx.Request],
+) -> None:
+    """DoD 1 (vế endpoint): 1 dòng sổ, token > 0, `cost_usd = 0`, ZSET không đổi."""
+    eid = await _save_endpoint(session_factory, user_a, "https://llm.invalid/v1")
+    model_id = f"byok:{eid}/{_ENDPOINT_MODEL}"
+    message = await _minimal_tree(session, user_a, model_id=model_id)
+    system_client = FakeClient(_normal_chunks(["khong-duoc-dung"]))
+
+    await generate(_ctx(fake_redis, system_client), str(message.id))
+
+    assert fake_redis.last["type"] == "done", fake_redis.last
+    assert system_client.call is None
+    (sent,) = pinned_net
+    assert str(sent.url) == "https://llm.invalid/v1/chat/completions"
+    assert sent.headers["authorization"] == f"Bearer {_ENDPOINT_KEY}"
+    assert json.loads(sent.content)["model"] == _ENDPOINT_MODEL, "tên nguyên văn, giữ `/`"
+
+    so = await _read_ledger(session_factory, user_a)
+    assert len(so) == 1
+    assert (so[0].key_source, so[0].provider, so[0].model_id) == (
+        KeySource.BYOK,
+        f"byok:{eid}",
+        model_id,
+    )
+    assert so[0].prompt_tokens > 0 and so[0].completion_tokens > 0
+    assert so[0].cost_usd == 0
+    assert so[0].price_snapshot == {}
+    assert so[0].cost_confidence == CostConfidence.LOW, "C40: không có usage ⇒ tự đếm"
+    assert fake_redis.zset == {}
+    assert (await _reload(session_factory, message.id)).content == "xin chao"
+
+
+async def test_endpoint_now_resolving_to_private_ip_fails_before_any_request(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    pinned_net: list[httpx.Request],
+) -> None:
+    """A5 kiểm lại mỗi lượt: DNS đổi sang IP riêng sau khi lưu ⇒ lỗi, không gói nào đi."""
+    eid = await _save_endpoint(session_factory, user_a, "https://rebind.invalid/v1")
+    message = await _minimal_tree(session, user_a, model_id=f"byok:{eid}/{_ENDPOINT_MODEL}")
+
+    await generate(_ctx(fake_redis, FakeClient([])), str(message.id))
+
+    assert fake_redis.last["type"] == "error"
+    assert fake_redis.last["data"]["code"] == "UPSTREAM_ERROR"
+    assert "127.0.0.1" not in json.dumps(fake_redis.last)
+    assert pinned_net == []
+    assert await _read_ledger(session_factory, user_a) == []
+    assert (await _reload(session_factory, message.id)).status == MessageStatus.FAILED
+
+
+async def test_endpoint_of_other_user_is_model_unknown(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    user_b: uuid.UUID,
+    fake_redis: FakeRedis,
+    pinned_net: list[httpx.Request],
+) -> None:
+    eid = await _save_endpoint(session_factory, user_b, "https://llm.invalid/v1")
+    message = await _minimal_tree(session, user_a, model_id=f"byok:{eid}/{_ENDPOINT_MODEL}")
+
+    await generate(_ctx(fake_redis, FakeClient([])), str(message.id))
+
+    assert fake_redis.last["data"]["code"] == "MODEL_UNKNOWN"
+    assert pinned_net == []

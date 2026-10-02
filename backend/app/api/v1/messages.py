@@ -158,6 +158,7 @@ from app.db.repositories import (
     UserSettingsRepository,
 )
 from app.db.session import session_scope
+from app.llm import byok_endpoints
 from app.llm.credentials import resolve_key_source
 from app.quota.estimator import QuotaWarning, check_quota
 from app.streaming.cancel import set_cancel_flag
@@ -323,7 +324,7 @@ async def create_message(
                 "khong tim thay hoi thoai",
             )
 
-        model = _pick_model(body.model_id, conversation.default_model)
+        model = await _pick_model(session, user_id, body.model_id, conversation.default_model)
         # TRƯỚC `create_message` bên dưới: mức sai là `400` không để lại hàng nào.
         reasoning_effort = await _pick_reasoning(
             session, user_id=user_id, model=model, requested=body.reasoning_effort
@@ -523,7 +524,9 @@ async def _open_generation(
     return NewGeneration(assistant_message_id=amid, quota_warning=warning)
 
 
-def _pick_model(*preferred: str | None) -> catalog.ModelEntry:
+async def _pick_model(
+    session: AsyncSession, user_id: uuid.UUID, *preferred: str | None
+) -> catalog.ModelEntry:
     """Duyệt các mức ưu tiên theo đúng thứ tự truyền vào, cuối cùng là catalog.
 
     `POST .../messages` truyền hai mức (request → `conversations.default_model`);
@@ -548,7 +551,8 @@ def _pick_model(*preferred: str | None) -> catalog.ModelEntry:
     """
     for source in preferred:
         if source:
-            model = catalog.get_model(source)
+            # T-S.19b: `byok:<endpoint_id>/<model>` — endpoint tra theo `user_id`.
+            model = await byok_endpoints.resolve_model(session, user_id=user_id, model_id=source)
             if model is None:
                 raise ApiError(
                     status.HTTP_400_BAD_REQUEST,
@@ -972,7 +976,9 @@ async def retry_message(
             )
 
         conversation = await _containing_conversation(conversations, original, user_id=user_id)
-        model = _pick_model(
+        model = await _pick_model(
+            session,
+            user_id,
             body.model_id if body is not None else None,
             original.model_id,
             conversation.default_model,
@@ -1058,7 +1064,7 @@ async def edit_message(
         original = await _own_message(messages, message_id, user_id=user_id)
         _require_role(original, MessageRole.USER)
         conversation = await _containing_conversation(conversations, original, user_id=user_id)
-        model = _pick_model(conversation.default_model)
+        model = await _pick_model(session, user_id, conversation.default_model)
         reasoning_effort = await _pick_reasoning(
             session, user_id=user_id, model=model, requested=None
         )

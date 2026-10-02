@@ -279,6 +279,15 @@ class ApiErrorCode(StrEnum):
     #: cấu hình khoá. Mã riêng với `PROVIDER_UNKNOWN`: ở đó FE phải tải lại
     #: catalog, ở đây nó chỉ cần bỏ một dòng khỏi danh sách đang hiện.
     PROVIDER_KEY_NOT_FOUND = "PROVIDER_KEY_NOT_FOUND"
+    #: Base URL BYOK người dùng nhập bị từ chối (A5, §12.2, T-S.19b). `details.
+    #: reason` là mã cố định (`scheme`, `port`, `address`…), không bao giờ IP.
+    URL_UNSAFE = "URL_UNSAFE"
+    #: Endpoint BYOK không có, hoặc của người khác (§20 gộp hai ca).
+    BYOK_ENDPOINT_NOT_FOUND = "BYOK_ENDPOINT_NOT_FOUND"
+    #: Đã đủ `BYOK_ENDPOINTS_MAX_PER_USER` endpoint.
+    BYOK_ENDPOINT_LIMIT = "BYOK_ENDPOINT_LIMIT"
+    #: `label` trùng một endpoint khác của chính người này.
+    BYOK_ENDPOINT_LABEL_TAKEN = "BYOK_ENDPOINT_LABEL_TAKEN"
 
     # ── nhánh (§8.2, T-1.13) ──
     #: Thao tác nhánh gọi nhầm `role`: `retry` chỉ chạy trên message

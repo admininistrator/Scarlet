@@ -469,7 +469,11 @@ async def test_byok_still_writes_ledger_but_does_NOT_charge_quota(
     )
     row = (await session.execute(select(UsageEvent).where(UsageEvent.id == record.id))).scalar_one()
     assert row.key_source == KeySource.BYOK
-    assert row.cost_usd > 0
+    # NQ-134 ③ (T-S.19b): đủ token, `cost_usd = 0`, không snapshot giá.
+    assert (row.prompt_tokens, row.completion_tokens) == (1204, 389)
+    assert row.cost_usd == 0
+    assert row.price_snapshot == {}
+    assert row.cost_confidence == CostConfidence.EXACT
     assert quota_redis_fake.zset == {}
 
 
