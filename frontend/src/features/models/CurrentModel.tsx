@@ -30,7 +30,7 @@ export function CurrentModel({
         <TierRail tier={tier} />
         <div className="flex min-w-0 flex-1 flex-col gap-1.25">
           <div className={`flex flex-wrap items-baseline ${narrow ? "gap-1.5" : "gap-2"}`}>
-            <span className="text-body/5.5 font-semibold">{model.display_name}</span>
+            <span className="text-body/5.5 font-semibold wrap-anywhere">{model.display_name}</span>
             {model.badge ? (
               <span className="rounded-full border border-border-strong px-2 py-px text-2xs font-medium">
                 {model.badge}

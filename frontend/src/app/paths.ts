@@ -44,6 +44,11 @@ export const PATHS = {
   settingsAccount: "/cai-dat/tai-khoan",
   settingsAppearance: "/cai-dat/giao-dien",
   settingsModel: "/cai-dat/model",
+  /**
+   * T-S.19c — tab BYOK (ban T-HD10) thay tab Khoa API o vi tri thu tu. Duong
+   * cu `settingsApiKeys` chi con chuyen huong ve day (lien ket da gui di van chay).
+   */
+  settingsByok: "/cai-dat/byok",
   settingsApiKeys: "/cai-dat/khoa-api",
   /**
    * Tab Muc su dung — dich cua dong han muc tren o nhap (T-S.10, NQ-114) va

@@ -301,6 +301,17 @@
   /* Không dùng từ v3, giữ nguyên tên + giá trị (ràng buộc 3):
    *   --color-surface-assistant  --color-surface-user  --radius-bubble */
   /* ◂ v3 */
+
+  /* BYOK ▸ TAB BYOK (thay tab Khoá API, /settings/byok) --------------------------
+   * Màu: không thêm. Đã xác minh = success-text · Chưa xác minh = muted ·
+   * Không đọc được = warning-text · lỗi = danger-text, cả CHỮ lẫn VIỀN ô nhập
+   * (--color-danger ở theme tối chỉ 2.77:1 trên surface-panel, dưới 3:1 của viền).
+   * Chuyển động: không thêm. Nút đang kiểm = icon .motion-spin · “Đã lưu”, form mở,
+   * thẻ mới = .motion-enter · ô nhập = .motion-control · nút = .motion-press. */
+  --spacing-byok-list: 17.5rem;      /* 280px — trần danh sách model endpoint trả về, sau đó cuộn trong */
+  --spacing-byok-chip: 15rem;        /* 240px — chip tên model rộng tối đa, dài hơn thì cắt ellipsis */
+  --shadow-invalid: 0 0 0 1px var(--color-danger-text); /* ô lỗi: border 1px + 1px này = 2px, cùng nhịp --shadow-focus */
+  /* ◂ BYOK */
 }
 
 [data-theme="dark"] {

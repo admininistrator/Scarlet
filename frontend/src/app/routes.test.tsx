@@ -169,7 +169,7 @@ describe("bang route", () => {
       ["Tài khoản", PATHS.settingsAccount],
       ["Giao diện", PATHS.settingsAppearance],
       ["Model", PATHS.settingsModel],
-      ["Khoá API", PATHS.settingsApiKeys],
+      ["BYOK", PATHS.settingsByok],
       ["Mức sử dụng", PATHS.settingsUsage],
     ]);
   });
@@ -185,10 +185,10 @@ describe("bang route", () => {
   it("B-216 (de mo): `pending_approval` VAO duoc /cai-dat, khong bi day ve /cho-duyet", async () => {
     vi.mocked(api.me).mockResolvedValue({ ...ADMIN, role: "user", status: "pending_approval" });
 
-    renderAt(PATHS.settingsApiKeys);
+    renderAt(PATHS.settingsByok);
 
     expect(await screen.findByRole("heading", { name: "Cài đặt" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Khoá API" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "BYOK" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("heading", { name: "Đang chờ duyệt" })).toBeNull();
   });
 

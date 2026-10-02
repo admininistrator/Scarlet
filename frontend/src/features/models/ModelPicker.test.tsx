@@ -21,7 +21,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ModelOut } from "../../lib/api";
+import type { ByokEndpoint, ModelOut } from "../../lib/api";
+import { endpointModels } from "./byokModels";
 import { pickDefault } from "./defaults";
 import { ModelPicker } from "./ModelPicker";
 import { effectiveEffort } from "./reasoning";
@@ -715,5 +716,68 @@ describe("375 px — sheet ba màn", () => {
     expect(sheet).toHaveClass("h-sheet-screen", "max-h-sheet-max");
     await userEvent.click(effortRow());
     expect(screen.getByRole("dialog")).toBe(sheet);
+  });
+});
+
+// ───────────── Khoá riêng — model của endpoint tự nhập (T-S.19c, bản T-HD10 4a/4b) ─────────────
+
+describe("Khoá riêng", () => {
+  const ENDPOINT: ByokEndpoint = {
+    id: "e1d2c3b4-0000-4000-8000-000000000001",
+    label: "Groq nhóm dữ liệu",
+    base_url: "https://api.groq.com/openai/v1",
+    masked_key: "gsk_...4321",
+    models: ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"],
+    verified_at: null,
+    created_at: "2026-10-01T02:00:00Z",
+    usable: true,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+  };
+  const OWN = endpointModels([ENDPOINT, { ...ENDPOINT, id: "hong", label: "Hỏng", usable: false }]);
+  const LLAMA = `byok:${ENDPOINT.id}/llama-3.3-70b-versatile`;
+
+  it("54. nhóm 'Khoá riêng' xếp CUỐI More models: tên model + tên endpoint, không host; endpoint hỏng khoá bị bỏ", async () => {
+    const { onPick } = renderView({ models: [...FOUR, ...OWN] });
+    await openMoreModels();
+
+    const list = screen.getByRole("listbox");
+    const group = within(list).getByRole("group", { name: "Khoá riêng" });
+    const own = within(group).getAllByRole("option");
+    expect(own.map((o) => o.textContent)).toEqual([
+      "llama-3.3-70b-versatileGroq nhóm dữ liệu",
+      "openai/gpt-oss-120bGroq nhóm dữ liệu",
+    ]);
+    expect(list.textContent).not.toContain("api.groq.com");
+    expect(list.textContent).not.toContain("Hỏng");
+    expect(within(list).getAllByRole("option").indexOf(own[0])).toBe(FOUR.length);
+
+    await userEvent.click(own[0]);
+    expect(onPick).toHaveBeenCalledWith(LLAMA);
+  });
+
+  it("55. đang dùng model khoá riêng: khối Giá thành MỘT dòng; Thinking Effort mờ, tooltip nêu lý do", async () => {
+    renderView({ models: [...FOUR, ...OWN], conversation: LLAMA });
+    await openPicker();
+
+    const panel = pickerPanel() as HTMLElement;
+    expect(within(panel).getByText("Khoá riêng — không tính phí")).toBeInTheDocument();
+    expect(within(panel).queryByText("Giá")).toBeNull();
+    expect(panel.textContent).not.toContain("$");
+    expect(within(panel).getByText("Groq nhóm dữ liệu")).toBeInTheDocument();
+    expect(effortRow()).toHaveAttribute("aria-disabled", "true");
+    await userEvent.hover(effortRow());
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Scarlet không gửi mức suy luận tới endpoint tuỳ chỉnh",
+    );
+  });
+
+  it("56. 375 px: lý do in thẳng dưới nhãn Thinking Effort, khối Giá một dòng", async () => {
+    narrowScreen();
+    renderView({ models: [...FOUR, ...OWN], conversation: LLAMA });
+    await openPicker();
+
+    expect(effortRow()).toHaveTextContent("Scarlet không gửi mức suy luận tới endpoint tuỳ chỉnh");
+    expect(screen.getByText("Khoá riêng — không tính phí")).toBeInTheDocument();
   });
 });

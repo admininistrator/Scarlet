@@ -28,6 +28,7 @@ import type { ReactNode } from "react";
 import type { ModelOut, ModelPricing, PriceRates } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { formatUsd } from "../quota/quotaView";
+import { isEndpointModel } from "./byokModels";
 import { SectionLabel } from "./chips";
 
 function ActiveChip({ rates }: { rates: PriceRates }) {
@@ -95,6 +96,15 @@ function PriceLines({ pricing, narrow }: { pricing: ModelPricing; narrow: boolea
 }
 
 export function PriceBlock({ model, narrow }: { model: ModelOut; narrow: boolean }) {
+  if (isEndpointModel(model.id)) {
+    // Ban T-HD10 4a: model cua endpoint tu nhap — ca khoi thanh MOT dong, khong
+    // nhan "Gia", khong so (luot BYOK chi dem token, NQ-134 ③).
+    return (
+      <p className={`border-t border-divider text-base ${narrow ? "px-4 pt-3 pb-4" : "p-3"}`}>
+        {t("model.byokFree")}
+      </p>
+    );
+  }
   return (
     <div
       className={`flex flex-col gap-1.5 border-t border-divider ${narrow ? "px-4 pt-3 pb-4" : "p-3"}`}

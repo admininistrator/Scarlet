@@ -32,6 +32,12 @@ vi.mock("../../lib/api", async (importOriginal) => {
       listProviderKeys: vi.fn(),
       putProviderKey: vi.fn(),
       deleteProviderKey: vi.fn(),
+      listByokEndpoints: vi.fn(),
+      probeByokEndpoint: vi.fn(),
+      createByokEndpoint: vi.fn(),
+      updateByokEndpoint: vi.fn(),
+      deleteByokEndpoint: vi.fn(),
+      listByokEndpointModels: vi.fn(),
     },
   };
 });
@@ -41,6 +47,7 @@ import { routes } from "../../app/routes";
 import {
   ApiError,
   api,
+  type ByokEndpoint,
   type ModelOut,
   type ProfileOut,
   type ProviderKey,
@@ -122,6 +129,22 @@ const STORED: ProviderKey = {
   verified_at: "2026-09-26T02:00:00Z",
   created_at: "2026-09-26T02:00:00Z",
   usable: true,
+  prompt_tokens: 12345,
+  completion_tokens: 678,
+};
+
+const ENDPOINT_KEY = "gsk_banro-KHONG-DUOC-HIEN-0987654321";
+const ENDPOINT: ByokEndpoint = {
+  id: "e1d2c3b4-0000-4000-8000-000000000001",
+  label: "Groq nhóm dữ liệu",
+  base_url: "https://api.groq.com/openai/v1",
+  masked_key: "gsk_...4321",
+  models: ["llama-3.3-70b-versatile", "openai/gpt-oss-120b"],
+  verified_at: "2026-10-01T02:00:00Z",
+  created_at: "2026-10-01T02:00:00Z",
+  usable: true,
+  prompt_tokens: 210118,
+  completion_tokens: 51402,
 };
 
 function renderAt(path: string) {
@@ -160,6 +183,17 @@ beforeEach(() => {
   vi.mocked(api.listProviderKeys).mockResolvedValue({ keys: [], byok_providers: BYOK });
   vi.mocked(api.putProviderKey).mockReset();
   vi.mocked(api.deleteProviderKey).mockReset();
+  for (const fn of [
+    api.listByokEndpoints,
+    api.probeByokEndpoint,
+    api.createByokEndpoint,
+    api.updateByokEndpoint,
+    api.deleteByokEndpoint,
+    api.listByokEndpointModels,
+  ]) {
+    vi.mocked(fn).mockReset();
+  }
+  vi.mocked(api.listByokEndpoints).mockResolvedValue({ endpoints: [], max_endpoints: 5 });
 });
 
 afterEach(() => {
@@ -191,7 +225,7 @@ describe("duong dan", () => {
       PATHS.settingsAccount,
       PATHS.settingsAppearance,
       PATHS.settingsModel,
-      PATHS.settingsApiKeys,
+      PATHS.settingsByok,
       PATHS.settingsUsage,
     ]);
     // Ten trong ⇒ email (NQ-116); theme da luu.
@@ -437,7 +471,7 @@ describe("muc su dung", () => {
 
     expect(await screen.findByRole("link", { name: "Quản lý khoá API" })).toHaveAttribute(
       "href",
-      PATHS.settingsApiKeys,
+      PATHS.settingsByok,
     );
     expect(screen.queryAllByTestId("quota-fill")).toHaveLength(0);
   });
@@ -547,13 +581,13 @@ describe("giao dien", () => {
   });
 });
 
-/* ── Tab Khoa API ──────────────────────────────────────────────────────── */
+/* ── Tab BYOK — khoi provider co san (T-S.11 → T-S.19c) ──────────────── */
 
-describe("khoa API", () => {
+describe("BYOK — provider", () => {
   it("27. them khoa ⇒ hien DUNG ban che; ban ro khong con o dau ca (§20)", async () => {
     const user = userEvent.setup();
     vi.mocked(api.putProviderKey).mockResolvedValue(STORED);
-    renderAt(PATHS.settingsApiKeys);
+    renderAt(PATHS.settingsByok);
 
     // O nhap khong co `<label>` rieng: ten cua no la ten provider cua hang
     // (`aria-labelledby`, ban T-HD9 D).
@@ -576,7 +610,7 @@ describe("khoa API", () => {
   it("28. provider tu choi ⇒ noi ro, va o nhap VAN bi xoa", async () => {
     const user = userEvent.setup();
     vi.mocked(api.putProviderKey).mockRejectedValue(new ApiError(400, "PROVIDER_KEY_REJECTED", "x"));
-    renderAt(PATHS.settingsApiKeys);
+    renderAt(PATHS.settingsByok);
 
     const field = await screen.findByLabelText("DeepSeek");
     await user.type(field, PLAINTEXT);
@@ -592,7 +626,7 @@ describe("khoa API", () => {
       keys: [],
       byok_providers: [{ provider: "nha-moi", label: "Nhà mới" }],
     });
-    renderAt(PATHS.settingsApiKeys);
+    renderAt(PATHS.settingsByok);
 
     expect(await screen.findByLabelText("Nhà mới")).toBeInTheDocument();
     expect(screen.queryByText("DeepSeek")).toBeNull();
@@ -602,10 +636,10 @@ describe("khoa API", () => {
     const user = userEvent.setup();
     vi.mocked(api.listProviderKeys).mockResolvedValue({ keys: [STORED], byok_providers: BYOK });
     vi.mocked(api.deleteProviderKey).mockResolvedValue(undefined);
-    renderAt(PATHS.settingsApiKeys);
+    renderAt(PATHS.settingsByok);
 
     await user.click(await screen.findByRole("button", { name: "Xoá" }));
-    const dialog = await screen.findByRole("dialog", { name: "Xoá khoá API này?" });
+    const dialog = await screen.findByRole("dialog", { name: "Xoá khoá này?" });
     await user.click(within(dialog).getByRole("button", { name: "Huỷ" }));
     expect(api.deleteProviderKey).not.toHaveBeenCalled();
 
@@ -620,6 +654,219 @@ describe("khoa API", () => {
     expect(api.deleteProviderKey).toHaveBeenCalledWith("anthropic");
     await waitFor(() => {
       expect(screen.queryByTestId("masked-key")).toBeNull();
+    });
+  });
+
+  it("31. /cai-dat/khoa-api chuyen huong sang /cai-dat/byok; tab BYOK o vi tri thu tu", async () => {
+    const { router } = renderAt(PATHS.settingsApiKeys);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(PATHS.settingsByok);
+    });
+    const nav = await screen.findByRole("navigation", { name: "Mục cài đặt" });
+    const tabs = within(nav).getAllByRole("link");
+    expect(tabs.map((a) => a.textContent)).toEqual(["Tài khoản", "Giao diện", "Model", "BYOK", "Mức sử dụng"]);
+    expect(tabs[3]).toHaveAttribute("aria-current", "page");
+  });
+
+  it("32. hang provider: ban che + trang thai + Token vao/ra kieu Viet; khoa khong doc duoc ⇒ nhap lai tai cho", async () => {
+    vi.mocked(api.listProviderKeys).mockResolvedValue({
+      keys: [STORED, { ...STORED, provider: "deepseek", usable: false, verified_at: null }],
+      byok_providers: BYOK,
+    });
+    renderAt(PATHS.settingsByok);
+
+    const anthropic = (await screen.findByText("Anthropic")).closest("div.bg-surface-panel") as HTMLElement;
+    expect(within(anthropic).getByText("Đã xác minh")).toBeInTheDocument();
+    expect(within(anthropic).getByText("12.345")).toBeInTheDocument();
+    expect(within(anthropic).getByText("678")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Anthropic")).toBeNull();
+    // `usable: false` ⇒ o nhap lai NGAY TREN HANG (ban T-HD10 2b), khoa cu van xoa duoc.
+    expect(await screen.findByLabelText("DeepSeek")).toHaveAttribute("placeholder", "Dán khoá mới");
+    expect(screen.getByText("Không đọc được nữa — hãy nhập lại")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/\$|USD/);
+  });
+});
+
+/* ── Tab BYOK — khoi endpoint tuy chinh (T-S.19c, ban T-HD10) ─────────────── */
+
+describe("endpoint BYOK", () => {
+  async function openForm(user: ReturnType<typeof userEvent.setup>) {
+    renderAt(PATHS.settingsByok);
+    await user.click(await screen.findByRole("button", { name: "Thêm endpoint" }));
+    return screen.getByRole("form", { name: "Thêm endpoint" });
+  }
+
+  async function fillForm(user: ReturnType<typeof userEvent.setup>, form: HTMLElement, url = ENDPOINT.base_url) {
+    await user.type(within(form).getByLabelText("Tên gợi nhớ"), "Groq");
+    await user.type(within(form).getByLabelText("Base URL"), url);
+    await user.type(within(form).getByLabelText("API key"), ENDPOINT_KEY);
+  }
+
+  it("33. them: Kiem tra ⇒ chon model ⇒ Luu; Idempotency-Key GIU qua lan Luu hong (C22); khoa khong con trong DOM", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.probeByokEndpoint).mockResolvedValue({ models: ["llama-3.3-70b-versatile", "qwen3-32b"], verified: true });
+    vi.mocked(api.createByokEndpoint)
+      .mockRejectedValueOnce(new ApiError(409, "BYOK_ENDPOINT_LABEL_TAKEN", "x"))
+      .mockResolvedValueOnce(ENDPOINT);
+    const form = await openForm(user);
+    const save = within(form).getByRole("button", { name: "Lưu" });
+    const test = within(form).getByRole("button", { name: "Kiểm tra kết nối" });
+    expect(test).toBeDisabled();
+
+    await fillForm(user, form);
+    expect(save).toBeDisabled();
+    await user.click(test);
+
+    expect(api.probeByokEndpoint).toHaveBeenCalledWith(ENDPOINT.base_url, ENDPOINT_KEY);
+    expect(await within(form).findByText("Kết nối được")).toBeInTheDocument();
+    expect(within(form).getByText("2")).toBeInTheDocument();
+    expect(save).toBeDisabled();
+    await user.click(within(form).getByRole("checkbox", { name: "llama-3.3-70b-versatile" }));
+    await user.click(save);
+
+    expect(await within(form).findByText(/Bạn đã có một endpoint mang tên này/)).toBeInTheDocument();
+    await user.type(within(form).getByLabelText("Tên gợi nhớ"), " 2");
+    vi.mocked(api.listByokEndpoints).mockResolvedValue({ endpoints: [ENDPOINT], max_endpoints: 5 });
+    await user.click(save);
+
+    const calls = vi.mocked(api.createByokEndpoint).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[1][0]).toEqual({
+      label: "Groq 2",
+      base_url: ENDPOINT.base_url,
+      key: ENDPOINT_KEY,
+      models: ["llama-3.3-70b-versatile"],
+    });
+    expect(calls[0][1]).toBeTruthy();
+    expect(calls[1][1]).toBe(calls[0][1]);
+    expect(await screen.findByRole("heading", { name: ENDPOINT.label })).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Thêm endpoint" })).toBeNull();
+    expect(document.body.innerHTML).not.toContain(ENDPOINT_KEY);
+  });
+
+  it("34. loi kiem tra theo MA: URL bi chan · khoa bi tu choi · khong ket noi; doi khoa ⇒ ket qua cu mat", async () => {
+    const user = userEvent.setup();
+    const form = await openForm(user);
+    await fillForm(user, form);
+    const test = within(form).getByRole("button", { name: "Kiểm tra kết nối" });
+
+    vi.mocked(api.probeByokEndpoint).mockRejectedValueOnce(new ApiError(400, "URL_UNSAFE", "x"));
+    await user.click(test);
+    expect(await within(form).findByText(/localhost, mạng nội bộ và địa chỉ IP riêng bị chặn/)).toBeInTheDocument();
+    expect(within(form).getByLabelText("Base URL")).toHaveAttribute("aria-invalid", "true");
+
+    vi.mocked(api.probeByokEndpoint).mockRejectedValueOnce(new ApiError(400, "PROVIDER_KEY_REJECTED", "x"));
+    await user.click(test);
+    expect(await within(form).findByText(/Endpoint từ chối khoá này/)).toBeInTheDocument();
+    expect(within(form).getByLabelText("API key")).toHaveAttribute("aria-invalid", "true");
+    expect(document.body.textContent).not.toContain(ENDPOINT_KEY);
+
+    await user.type(within(form).getByLabelText("API key"), "x");
+    expect(within(form).queryByText(/Endpoint từ chối khoá này/)).toBeNull();
+
+    vi.mocked(api.probeByokEndpoint).mockRejectedValueOnce(new ApiError(503, "SERVICE_UNAVAILABLE", "x"));
+    await user.click(test);
+    expect(await within(form).findByText("Không kết nối được, hãy thử lại.")).toBeInTheDocument();
+    expect(within(form).getByRole("button", { name: "Lưu" })).toBeDisabled();
+  });
+
+  it("35. kiem hinh thuc o trinh duyet: http:// va thieu /v1 ⇒ loi, nut Kiem tra tat", async () => {
+    const user = userEvent.setup();
+    const form = await openForm(user);
+    await fillForm(user, form, "http://api.groq.com/v1");
+    await user.tab();
+    expect(within(form).getByText("Base URL phải bắt đầu bằng https://")).toBeInTheDocument();
+    expect(within(form).getByRole("button", { name: "Kiểm tra kết nối" })).toBeDisabled();
+
+    await user.clear(within(form).getByLabelText("Base URL"));
+    await user.type(within(form).getByLabelText("Base URL"), "https://api.groq.com/openai");
+    await user.tab();
+    expect(within(form).getByText("Base URL phải kết thúc bằng /v1")).toBeInTheDocument();
+    expect(api.probeByokEndpoint).not.toHaveBeenCalled();
+  });
+
+  it("36. endpoint khong tra danh sach model ⇒ go tay, them nhieu ten", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.probeByokEndpoint).mockResolvedValue({ models: [], verified: false });
+    vi.mocked(api.createByokEndpoint).mockResolvedValue(ENDPOINT);
+    const form = await openForm(user);
+    await fillForm(user, form);
+    await user.click(within(form).getByRole("button", { name: "Kiểm tra kết nối" }));
+
+    expect(await within(form).findByText(/không trả danh sách model/)).toBeInTheDocument();
+    await user.type(within(form).getByLabelText("Tên model"), "qwen3-32b{Enter}");
+    await user.type(within(form).getByLabelText("Tên model"), "llama-3.1-8b");
+    await user.click(within(form).getByRole("button", { name: "Thêm" }));
+    expect(within(form).getAllByRole("button", { name: "Bỏ model" })).toHaveLength(2);
+    await user.click(within(form).getByRole("button", { name: "Lưu" }));
+
+    expect(vi.mocked(api.createByokEndpoint).mock.calls[0][0].models).toEqual(["qwen3-32b", "llama-3.1-8b"]);
+  });
+
+  it("37. the endpoint: ten, host, khoa che, chip model, Token vao/ra; Xoa hoi lai roi DELETE", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listByokEndpoints).mockResolvedValue({ endpoints: [ENDPOINT], max_endpoints: 5 });
+    vi.mocked(api.deleteByokEndpoint).mockResolvedValue(undefined);
+    renderAt(PATHS.settingsByok);
+
+    const card = (await screen.findByRole("heading", { name: ENDPOINT.label })).closest("article") as HTMLElement;
+    expect(within(card).getByText("api.groq.com")).toBeInTheDocument();
+    expect(within(card).getByText("gsk_...4321")).toBeInTheDocument();
+    expect(within(card).getByRole("list", { name: "Model đã chọn" }).children).toHaveLength(2);
+    expect(within(card).getByText("210.118")).toBeInTheDocument();
+    expect(within(card).getByText("51.402")).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+
+    await user.click(within(card).getByRole("button", { name: "Xoá" }));
+    const dialog = await screen.findByRole("dialog", { name: "Xoá endpoint này?" });
+    expect(within(dialog).getByText("api.groq.com")).toBeInTheDocument();
+    vi.mocked(api.listByokEndpoints).mockResolvedValue({ endpoints: [], max_endpoints: 5 });
+    await act(async () => {
+      await user.click(within(dialog).getByRole("button", { name: "Xoá endpoint" }));
+    });
+
+    expect(api.deleteByokEndpoint).toHaveBeenCalledWith(ENDPOINT.id);
+    expect(await screen.findByText("Chưa có endpoint nào")).toBeInTheDocument();
+  });
+
+  it("38. du tran (tu server): nut Them aria-disabled + ly do hien san, bam khong mo form", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listByokEndpoints).mockResolvedValue({ endpoints: [ENDPOINT], max_endpoints: 1 });
+    renderAt(PATHS.settingsByok);
+
+    const add = await screen.findByRole("button", { name: "Thêm endpoint" });
+    expect(add).toHaveAttribute("aria-disabled", "true");
+    expect(add).toHaveAccessibleDescription(/Đã đủ số endpoint tối đa/);
+    await user.click(add);
+    expect(screen.queryByRole("form", { name: "Thêm endpoint" })).toBeNull();
+  });
+
+  it("39. sua: danh sach model hoi bang khoa DA LUU; chi gui ten + model", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listByokEndpoints).mockResolvedValue({ endpoints: [ENDPOINT], max_endpoints: 5 });
+    vi.mocked(api.listByokEndpointModels).mockResolvedValue({
+      models: ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "qwen3-32b"],
+      verified: true,
+    });
+    vi.mocked(api.updateByokEndpoint).mockResolvedValue(ENDPOINT);
+    renderAt(PATHS.settingsByok);
+
+    await user.click(await screen.findByRole("button", { name: "Sửa" }));
+    const form = screen.getByRole("form", { name: "Sửa endpoint" });
+    expect(api.listByokEndpointModels).toHaveBeenCalledWith(ENDPOINT.id);
+    expect(within(form).queryByLabelText("Base URL")).toBeNull();
+    expect(within(form).queryByLabelText("API key")).toBeNull();
+    await user.click(await within(form).findByRole("checkbox", { name: "openai/gpt-oss-120b" }));
+    await user.click(within(form).getByRole("checkbox", { name: "qwen3-32b" }));
+    await user.clear(within(form).getByLabelText("Tên gợi nhớ"));
+    await user.type(within(form).getByLabelText("Tên gợi nhớ"), "Groq");
+    await user.click(within(form).getByRole("button", { name: "Lưu" }));
+
+    expect(api.updateByokEndpoint).toHaveBeenCalledWith(ENDPOINT.id, {
+      label: "Groq",
+      models: ["llama-3.3-70b-versatile", "qwen3-32b"],
     });
   });
 });

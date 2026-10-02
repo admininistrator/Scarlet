@@ -159,6 +159,7 @@ from decimal import Decimal
 from ipaddress import IPv4Address, IPv6Address
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -188,6 +189,7 @@ from app.db.models import (
 )
 from app.db.repositories import (
     AuditLogRepository,
+    ByokEndpointRepository,
     MessageRepository,
     UsageBucket,
     UsageEventRepository,
@@ -195,6 +197,7 @@ from app.db.repositories import (
 from app.db.repositories.tiers import TierRepository
 from app.db.repositories.users import AdminUserRow, UserRepository
 from app.db.session import session_scope
+from app.llm import byok_endpoints
 from app.quota.tiers import OVERRIDABLE_FIELDS, EffectiveLimits
 
 logger = logging.getLogger(__name__)
@@ -378,7 +381,9 @@ class UsageRow(UsageSplit):
     """Một hàng của bảng chi phí: một khoá × hai cột (× hai việc)."""
 
     key: str
-    #: Nhãn đọc được của khoá (email, ở bảng theo user); `None` ở ba trục kia.
+    #: Nhãn đọc được của khoá: email ở bảng theo user; host của endpoint ở hàng
+    #: `byok:<id>/<model>` của bảng theo model (NQ-137 ②; endpoint đã xoá ⇒
+    #: `None`); `None` ở các chỗ còn lại.
     label: str | None = None
 
 
@@ -710,6 +715,20 @@ def _merge_buckets(buckets: list[UsageBucket]) -> list[UsageRow]:
         )
         for key, label in labels.items()
     ]
+
+
+async def _label_endpoint_rows(repo: ByokEndpointRepository, rows: list[UsageRow]) -> None:
+    """Hàng model `byok:<id>/<model>` mang host của endpoint làm `label` — dòng
+    "Endpoint tuỳ chỉnh · host" dưới tên model ở màn Chi phí (NQ-137 ②).
+
+    Host chứ không cả `base_url`: màn chỉ cần biết lượt ấy đi tới máy chủ nào.
+    """
+    parsed = {r.key: byok_endpoints.parse_model_id(r.key) for r in rows}
+    base_urls = await repo.base_urls_by_id({p[0] for p in parsed.values() if p is not None})
+    for row in rows:
+        endpoint = parsed[row.key]
+        if endpoint is not None and endpoint[0] in base_urls:
+            row.label = httpx.URL(base_urls[endpoint[0]]).host
 
 
 def _total(rows: list[UsageRow]) -> UsageSplit:
@@ -1108,6 +1127,7 @@ async def admin_usage(
             list(await events.admin_by_model(since=start, until=end, key_source=key_source))
         )
         by_source = _merge_buckets(list(await events.admin_by_key_source(since=start, until=end)))
+        await _label_endpoint_rows(ByokEndpointRepository(session), by_model)
 
     return AdminUsageOut(
         since=start,

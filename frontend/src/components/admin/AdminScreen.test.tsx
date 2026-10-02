@@ -337,9 +337,87 @@ describe("Chi phi", () => {
     // Hai cot doc phan `chat`: 0.32 (tong gom dat ten) khong hien o dau ca.
     expect(screen.queryByText("0.320000")).toBeNull();
     // Hang khoa rieng: o dat ten la "—", khong phai 0 (luot dat ten luon la tien he thong).
+    // T-S.19c: ca hai o tien kia cung "—" — luot BYOK chi dem token (NQ-134 ③).
     const bySource = screen.getByRole("region", { name: "Theo nguồn" });
     const byokRow = within(bySource).getByRole("row", { name: /Khoá riêng/ });
-    expect(within(byokRow).getByText("—")).toBeInTheDocument();
+    expect(within(byokRow).getAllByText("—")).toHaveLength(3);
+  });
+
+  it("T-S.19c: bang Theo nguon them Token vao/ra; nguon 'Khoa rieng' chi con token + dong duong di", async () => {
+    const nd = userEvent.setup();
+    const tokens = (prompt: number, completion: number) => ({
+      cost_usd: "0",
+      prompt_tokens: prompt,
+      completion_tokens: completion,
+      events: 1,
+    });
+    const row = (key: string, label: string | null, prompt: number, completion: number) => ({
+      key,
+      label,
+      metered: tokens(prompt, completion),
+      unmetered: zero,
+      by_purpose: { chat: { metered: tokens(prompt, completion), unmetered: zero }, title: { metered: zero, unmetered: zero } },
+      title_cost_usd: "0",
+    });
+    const endpointModel = "byok:e1d2c3b4-0000-4000-8000-000000000001/meta-llama/llama-4-maverick";
+    const gone = "byok:e1d2c3b4-0000-4000-8000-000000000002/qwen3-32b";
+    vi.mocked(api.adminModels).mockResolvedValue({
+      models: [
+        {
+          id: "claude-sonnet",
+          display_name: "Claude Sonnet 4.5",
+          provider: "Anthropic",
+          route: { id: "anthropic", label: "Anthropic", user_visible: true, availability: "always" },
+          health: { available: true, reason: null },
+          enabled: true,
+        },
+      ],
+      checked_at: null,
+      stale_after_s: 30,
+    });
+    vi.mocked(api.adminCosts).mockImplementation(async (source) =>
+      source === "byok"
+        ? {
+            ...report,
+            key_source: "byok",
+            totals: row("t", null, 1733647, 422097),
+            by_user: [row(UUID, "an@scarlet.test", 1733647, 422097)],
+            by_model: [
+              row("claude-sonnet", null, 1284530, 312874),
+              row(endpointModel, "openrouter.ai", 210118, 51402),
+              row(gone, null, 5, 1),
+            ],
+          }
+        : report,
+    );
+    renderAt("/admin?screen=cost");
+
+    const bySource = await screen.findByRole("region", { name: "Theo nguồn" });
+    expect(within(bySource).getByRole("columnheader", { name: "Token vào" })).toBeInTheDocument();
+    expect(within(bySource).getByRole("columnheader", { name: "Lượt gọi" })).toBeInTheDocument();
+
+    await nd.click(within(screen.getByRole("radiogroup", { name: "Nguồn tiền" })).getByRole("radio", { name: "Khoá riêng" }));
+
+    expect(await screen.findByText("Token vào trong kỳ")).toBeInTheDocument();
+    expect(screen.getAllByText("1.733.647").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("422.097").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Metered trong kỳ (USD)")).toBeNull();
+    expect(screen.getByText("Không có trong nguồn này")).toBeInTheDocument();
+
+    for (const name of ["Theo người dùng", "Theo model"]) {
+      const region = screen.getByRole("region", { name });
+      const headers = within(region).getAllByRole("columnheader").map((h) => h.textContent);
+      expect(headers.slice(1)).toEqual(["Token vào", "Token ra"]);
+    }
+    const byModel = screen.getByRole("region", { name: "Theo model" });
+    expect(within(byModel).getByRole("row", { name: /Claude Sonnet 4\.5/ })).toHaveTextContent(/Anthropic·Gọi thẳng/);
+    expect(within(byModel).getByRole("row", { name: /meta-llama\/llama-4-maverick/ })).toHaveTextContent(
+      /Endpoint tuỳ chỉnh·openrouter\.ai/,
+    );
+    // Endpoint da xoa: khong host, khong UUID tran.
+    const goneRow = within(byModel).getByRole("row", { name: /qwen3-32b/ });
+    expect(goneRow).toHaveTextContent(/Endpoint tuỳ chỉnh/);
+    expect(goneRow.textContent).not.toContain("e1d2c3b4");
   });
 
   it("chon nguon 'Khoa rieng' ⇒ the dat ten noi 'Khong co trong nguon nay', khong in so 0", async () => {

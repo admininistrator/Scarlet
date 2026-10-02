@@ -71,7 +71,7 @@ export function UsagePanel() {
         <StaticIcon icon={Info} size={18} className="mt-0.5 shrink-0 text-muted" />
         <div className="flex min-w-0 flex-col items-start">
           <p className="text-base">{t("usage.byokNote")}</p>
-          <Link to={PATHS.settingsApiKeys} className="inline-flex min-h-touch items-center text-base font-semibold">
+          <Link to={PATHS.settingsByok} className="inline-flex min-h-touch items-center text-base font-semibold">
             {t("usage.byokLink")}
           </Link>
         </div>

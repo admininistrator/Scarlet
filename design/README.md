@@ -22,6 +22,16 @@ Also read these files the selection imports:
 - `support.js`
 
 Implement: `Scarlet Khung chính v3.dc.html` | 2026-10-01 |
+| T-HD10 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+BYOK.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet BYOK.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet BYOK.dc.html` | 2026-10-02 |
 
 ## v2 — Phase S (Standardize)
 | Task | Link Claude Design | Ngày chốt | Đã đối chiếu (T-S.18) |

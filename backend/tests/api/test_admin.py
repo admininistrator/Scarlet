@@ -50,6 +50,7 @@ from app.config.version import APP_VERSION
 from app.core import provider_health
 from app.core.access_token import encode_access_token
 from app.core.blacklist import user_key
+from app.core.crypto import seal
 from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiErrorCode
 from app.core.health_checks import CheckResult
@@ -71,10 +72,11 @@ from app.db.models import (
     UserRole,
     UserStatus,
 )
-from app.db.repositories import AuditLogRepository, UsageEventRepository
+from app.db.repositories import AuditLogRepository, ByokEndpointRepository, UsageEventRepository
 from app.db.repositories.refresh_tokens import RefreshTokenRepository
 from app.db.repositories.tiers import TierRepository
 from app.db.repositories.users import UserRepository
+from app.llm import byok_endpoints
 from app.main import app
 from app.quota.tiers import OVERRIDABLE_FIELDS
 
@@ -872,6 +874,42 @@ async def test_usage_byok_filter_returns_exactly_the_non_system_part(
 
     assert body["key_source"] == "byok"
     assert Decimal(body["totals"]["metered"]["cost_usd"]) == Decimal("9.0")
+
+
+async def test_usage_endpoint_model_rows_carry_endpoint_host(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """NQ-137 ② — hàng `byok:<id>/<model>` của `by_model` mang host của endpoint
+    (dòng "Endpoint tuỳ chỉnh · host"); endpoint đã xoá ⇒ `None`; model catalog ⇒ `None`."""
+    await _admin(client, session_factory)
+    user_id = await _create_user(session_factory, UserStatus.ACTIVE)
+    async with session_factory() as session:
+        endpoint = await ByokEndpointRepository(session).create(
+            user_id=user_id,
+            label="Groq",
+            base_url="https://api.groq.com/openai/v1",
+            sealed=seal("khoa-gia"),
+            masked="x",
+            models=["llama"],
+            verified_at=None,
+        )
+        await session.commit()
+    live = byok_endpoints.model_id_for(endpoint.id, "llama")
+    gone = byok_endpoints.model_id_for(uuid.uuid4(), "llama")
+    for model_id in (live, gone, "model-catalog"):
+        await _write_ledger(
+            session_factory,
+            user_id=user_id,
+            model_id=model_id,
+            cost="0",
+            confidence=CostConfidence.EXACT,
+            key_source=KeySource.BYOK,
+        )
+
+    body = (await client.get(USAGE_PATH, params={"key_source": "byok"})).json()
+
+    labels = {h["key"]: h["label"] for h in body["by_model"]}
+    assert labels == {live: "api.groq.com", gone: None, "model-catalog": None}
 
 
 async def test_usage_unknown_key_source_is_not_free_text(

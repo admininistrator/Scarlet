@@ -54,7 +54,7 @@ export const SETTINGS_TABS = [
   { path: PATHS.settingsAccount, labelKey: "settings.tab.account", icon: User },
   { path: PATHS.settingsAppearance, labelKey: "settings.tab.appearance", icon: Contrast },
   { path: PATHS.settingsModel, labelKey: "settings.tab.model", icon: Cpu },
-  { path: PATHS.settingsApiKeys, labelKey: "settings.tab.apiKeys", icon: KeyRound },
+  { path: PATHS.settingsByok, labelKey: "settings.tab.byok", icon: KeyRound },
   { path: PATHS.settingsUsage, labelKey: "settings.tab.usage", icon: Gauge },
 ] as const satisfies readonly { path: string; labelKey: TextKey; icon: IconNode }[];
 

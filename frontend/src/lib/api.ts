@@ -502,6 +502,38 @@ export interface ProviderKey {
   verified_at: string | null;
   created_at: string;
   usable: boolean;
+  /** T-S.19b — tong token moi luot BYOK cua provider nay (NQ-134 ③). */
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
+/**
+ * Endpoint BYOK nguoi dung tu nhap — `ByokEndpointOut` (T-S.19b, NQ-134 ②).
+ * Model id de chat la `byok:<id>/<model>` — xem `features/models/byokModels.ts`.
+ */
+export interface ByokEndpoint {
+  id: string;
+  label: string;
+  base_url: string;
+  masked_key: string;
+  models: string[];
+  verified_at: string | null;
+  created_at: string;
+  usable: boolean;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
+export interface ByokEndpointList {
+  endpoints: ByokEndpoint[];
+  /** `BYOK_ENDPOINTS_MAX_PER_USER` cua server (NQ-137 ①). */
+  max_endpoints: number;
+}
+
+/** `models` rong = endpoint khong tra danh sach, FE cho go tay (C42). */
+export interface ByokProbe {
+  models: string[];
+  verified: boolean;
 }
 
 /**
@@ -1159,4 +1191,43 @@ export const api = {
 
   deleteProviderKey: (provider: string) =>
     request<void>(`/settings/keys/${encodeURIComponent(provider)}`, { method: "DELETE" }),
+
+  // ──────────── T-S.19b/c — endpoint BYOK nguoi dung tu nhap (§10.5) ────────────
+
+  listByokEndpoints: () => request<ByokEndpointList>("/settings/byok-endpoints"),
+
+  /** Nut "Kiem tra ket noi". Khong tao tai nguyen ⇒ khong `Idempotency-Key`. */
+  probeByokEndpoint: (baseUrl: string, key: string) =>
+    request<ByokProbe>("/settings/byok-endpoints/probe", {
+      method: "POST",
+      body: JSON.stringify({ base_url: baseUrl, key }),
+    }),
+
+  /**
+   * A8 — `idempotencyKey` sinh MOT lan cho mot lan soan form (C22), giu qua moi
+   * lan thu lai; server kiem lai khoa truoc khi luu (§10.5).
+   */
+  createByokEndpoint: (
+    body: { label: string; base_url: string; key: string; models: string[] },
+    idempotencyKey: string,
+  ) =>
+    request<ByokEndpoint>("/settings/byok-endpoints", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(body),
+    }),
+
+  /** Chi ten va model — doi URL hay khoa la xoa roi them (§10.5). */
+  updateByokEndpoint: (id: string, patch: { label: string; models: string[] }) =>
+    request<ByokEndpoint>(`/settings/byok-endpoints/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteByokEndpoint: (id: string) =>
+    request<void>(`/settings/byok-endpoints/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  /** Model cua endpoint DA LUU, server hoi bang khoa da luu (NQ-137 ①). */
+  listByokEndpointModels: (id: string) =>
+    request<ByokProbe>(`/settings/byok-endpoints/${encodeURIComponent(id)}/models`),
 };

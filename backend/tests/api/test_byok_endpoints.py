@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config.settings import settings
 from app.core.access_token import encode_access_token
-from app.core.crypto import mask_secret, seal
+from app.core.crypto import Sealed, mask_secret, seal
 from app.core.deps import SESSION_COOKIE_NAME
 from app.db.models import (
     CostConfidence,
@@ -328,7 +328,7 @@ async def test_other_user_gets_404_and_cannot_see_or_use(
     eid = (await _create(client, user_a)).json()["id"]
 
     listed = await client.get(LIST, headers=_auth(user_b))
-    assert listed.json() == {"endpoints": []}
+    assert listed.json()["endpoints"] == []
     patched = await client.patch(ITEM.format(eid), headers=_auth(user_b), json={"label": "B"})
     assert patched.status_code == 404
     assert patched.json()["error"]["code"] == "BYOK_ENDPOINT_NOT_FOUND"
@@ -349,6 +349,63 @@ async def test_other_user_gets_404_and_cannot_see_or_use(
     assert [e["label"] for e in still.json()["endpoints"]] == ["Cua toi"]
     assert (await client.delete(ITEM.format(eid), headers=_auth(user_a))).status_code == 204
     assert (await client.delete(ITEM.format(eid), headers=_auth(user_a))).status_code == 404
+
+
+# ─────────────── model của endpoint đã lưu + trần (NQ-137 ①) ───────────────
+
+
+async def test_saved_endpoint_models_use_stored_key_and_owner_only(
+    client: AsyncClient, user_a: uuid.UUID, user_b: uuid.UUID, net: _Net
+) -> None:
+    """Form "Sửa endpoint": hỏi `/models` bằng khoá ĐÃ LƯU, qua transport ghim IP;
+    của người khác ⇒ `404` và không gói nào đi ra."""
+    eid = (await _create(client, user_a)).json()["id"]
+    net.requests.clear()
+
+    resp = await client.get(ITEM.format(eid) + "/models", headers=_auth(user_a))
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"models": ["model-a", "model-b"], "verified": True}
+    (sent,) = net.requests
+    assert str(sent.url) == BASE + "/models"
+    assert sent.headers["authorization"] == f"Bearer {KEY}"
+    assert KEY not in resp.text
+
+    other = await client.get(ITEM.format(eid) + "/models", headers=_auth(user_b))
+    assert other.status_code == 404
+    assert other.json()["error"]["code"] == "BYOK_ENDPOINT_NOT_FOUND"
+    assert len(net.requests) == 1
+
+    listed = await client.get(LIST, headers=_auth(user_a))
+    assert listed.json()["max_endpoints"] == settings.BYOK_ENDPOINTS_MAX_PER_USER
+
+
+async def test_saved_endpoint_models_with_unreadable_key_is_400(
+    client: AsyncClient,
+    user_a: uuid.UUID,
+    net: _Net,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Khoá không giải mã được (đổi `MASTER_ENCRYPTION_KEY`) ⇒ `PROVIDER_KEY_REJECTED`,
+    không gọi endpoint."""
+    sealed = seal(KEY)
+    async with session_factory() as s:
+        row = await ByokEndpointRepository(s).create(
+            user_id=user_a,
+            label="Hong",
+            base_url=BASE,
+            sealed=Sealed(cipher=b"\x00" * len(sealed.cipher), nonce=sealed.nonce),
+            masked="x",
+            models=["m"],
+            verified_at=None,
+        )
+        await s.commit()
+
+    resp = await client.get(ITEM.format(row.id) + "/models", headers=_auth(user_a))
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "PROVIDER_KEY_REJECTED"
+    assert net.requests == []
 
 
 # ─────────────────────────── tổng token (NQ-134 ③) ───────────────────────────

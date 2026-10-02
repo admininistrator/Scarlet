@@ -7,7 +7,7 @@ không tồn tại là cùng một câu trả lời (`None` / `False`) — route
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 
 from sqlalchemy import delete, func, select, update
@@ -38,6 +38,20 @@ class ByokEndpointRepository:
             UserByokEndpoint.id == endpoint_id, UserByokEndpoint.user_id == user_id
         )
         return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def base_urls_by_id(self, endpoint_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """`base_url` theo id, của MỌI người dùng — chỉ Quản trị › Chi phí đọc (NQ-137 ②).
+
+        Ngoại lệ duy nhất của luật "lọc `user_id`" ở file này, cùng lý do
+        `UsageEventRepository._aggregate`: người gọi là admin, cửa canh là
+        `require_admin` của router. Không trả khoá, nhãn hay model.
+        """
+        if not endpoint_ids:
+            return {}
+        stmt = select(UserByokEndpoint.id, UserByokEndpoint.base_url).where(
+            UserByokEndpoint.id.in_(endpoint_ids)
+        )
+        return {r.id: r.base_url for r in (await self._session.execute(stmt)).all()}
 
     async def label_taken(
         self, *, user_id: uuid.UUID, label: str, except_id: uuid.UUID | None = None

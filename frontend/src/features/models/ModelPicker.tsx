@@ -57,9 +57,10 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, X } from "lucide";
 
 import type { ModelOut } from "../../lib/api";
-import { t } from "../../lib/i18n";
+import { t, type TextKey } from "../../lib/i18n";
 import { useReducedMotion } from "../../lib/motion";
 import { StaticIcon } from "../../components/ui/Icon";
+import { isEndpointModel } from "./byokModels";
 import { CurrentModel } from "./CurrentModel";
 import type { DefaultPick } from "./defaults";
 import { ModelList, SIDE_LAYER_OFFSET, StatusStrip } from "./ModelList";
@@ -109,6 +110,15 @@ function useIsNarrow(): boolean {
     return () => mq.removeEventListener("change", handleChange);
   }, []);
   return narrow;
+}
+
+/**
+ * Ly do hang ② mo. Ban T-HD10 4a: model cua endpoint tu nhap co cau rieng —
+ * Scarlet KHONG gui muc suy luan toi endpoint ay (backend `400
+ * REASONING_UNSUPPORTED`), chu khong phai "model khong co tuy chon".
+ */
+function effortDisabledReason(model: ModelOut): TextKey {
+  return isEndpointModel(model.id) ? "model.effortCustom" : "model.effortNone";
 }
 
 /** → tren hang ② / ③ mo lop con (ban C: "Mo bang click, Enter, hoac →"). */
@@ -185,7 +195,7 @@ function EffortMenu({
             collisionPadding={16}
             className="motion-popover z-50 max-w-tooltip rounded-md bg-surface-tooltip px-3 py-2 text-xs leading-relaxed text-tooltip-foreground shadow-popover"
           >
-            {t("model.effortNone")}
+            {t(effortDisabledReason(model))}
             <Tooltip.Arrow className="fill-surface-tooltip" />
           </Tooltip.Content>
         </Tooltip.Portal>
@@ -446,7 +456,7 @@ function SheetScreens(props: ModelPickerProps & { selected: ModelOut | undefined
                   >
                     <span className="flex flex-1 flex-col gap-0.5">
                       <span className="text-body font-medium">{t("model.effort")}</span>
-                      <span className="text-xs text-muted">{t("model.effortNone")}</span>
+                      <span className="text-xs text-muted">{t(effortDisabledReason(selected))}</span>
                     </span>
                     <StaticIcon icon={ChevronRight} size={18} className="shrink-0 text-muted" />
                   </button>

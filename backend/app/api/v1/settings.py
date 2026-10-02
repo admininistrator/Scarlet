@@ -623,6 +623,8 @@ class ByokEndpointOut(BaseModel):
 
 class ByokEndpointListOut(BaseModel):
     endpoints: list[ByokEndpointOut]
+    #: `BYOK_ENDPOINTS_MAX_PER_USER` — bộ đếm "2 / 5" của tab BYOK (NQ-137 ①, A3).
+    max_endpoints: int
 
 
 def _endpoint_out(row: UserByokEndpoint, tokens: dict[str, tuple[int, int]]) -> ByokEndpointOut:
@@ -768,7 +770,49 @@ async def list_byok_endpoints(
     async with session_scope() as session:
         rows = await ByokEndpointRepository(session).list_for_user(user_id)
         tokens = await UsageEventRepository(session).byok_tokens_by_provider(user_id)
-        return ByokEndpointListOut(endpoints=[_endpoint_out(r, tokens) for r in rows])
+        return ByokEndpointListOut(
+            endpoints=[_endpoint_out(r, tokens) for r in rows],
+            max_endpoints=settings.BYOK_ENDPOINTS_MAX_PER_USER,
+        )
+
+
+@router.get(
+    "/byok-endpoints/{endpoint_id}/models",
+    status_code=status.HTTP_200_OK,
+    response_model=ByokProbeOut,
+    responses={
+        **_ENDPOINT_ERRORS,
+        404: {"model": ErrorEnvelope, "description": "BYOK_ENDPOINT_NOT_FOUND"},
+    },
+)
+async def list_byok_endpoint_models(
+    endpoint_id: uuid.UUID,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> ByokProbeOut:
+    """Model của endpoint đã lưu, hỏi bằng **khoá đã lưu** — form "Sửa endpoint"
+    (NQ-137 ①). Cùng đường A5 với `probe`: `base_url` được kiểm lại mỗi lần.
+
+    Bản rõ chỉ sống trong lời gọi `_checked_probe`, không gán vào biến nào.
+    Phiên DB đóng trước khi gọi mạng.
+
+    Raises:
+        ApiError 404 `BYOK_ENDPOINT_NOT_FOUND`: không có, hoặc của người khác.
+        ApiError 400 `PROVIDER_KEY_REJECTED`: endpoint từ chối khoá, hoặc
+            `MASTER_ENCRYPTION_KEY` hiện tại không mở được khoá đã lưu.
+    """
+    async with session_scope() as session:
+        row = await ByokEndpointRepository(session).get(user_id=user_id, endpoint_id=endpoint_id)
+    if row is None:
+        raise _not_found()
+    try:
+        _, result = await _checked_probe(
+            row.base_url, unseal(Sealed(cipher=row.key_cipher, nonce=row.key_nonce))
+        )
+    except DecryptionError:
+        raise ApiError(
+            status.HTTP_400_BAD_REQUEST, ApiErrorCode.PROVIDER_KEY_REJECTED, _KEY_REJECTED_MSG
+        ) from None
+    return ByokProbeOut(models=result.models, verified=result.outcome is ProbeOutcome.ALIVE)
 
 
 @router.patch(

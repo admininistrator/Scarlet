@@ -15,6 +15,7 @@
 
 import { StrictMode } from "react";
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -39,6 +40,7 @@ vi.mock("../../lib/api", async (importOriginal) => {
       getConversation: vi.fn(),
       createConversation: vi.fn(),
       sendMessage: vi.fn(),
+      listByokEndpoints: vi.fn(),
     },
   };
 });
@@ -157,6 +159,7 @@ beforeEach(() => {
   vi.mocked(api.getConversation).mockReset().mockResolvedValue(CONVERSATION);
   vi.mocked(api.createConversation).mockReset();
   vi.mocked(api.sendMessage).mockReset();
+  vi.mocked(api.listByokEndpoints).mockReset().mockResolvedValue({ endpoints: [], max_endpoints: 5 });
 });
 
 afterEach(() => {
@@ -269,5 +272,84 @@ describe("loi chao go tung ky tu (T-HD5-v2 muc 1b)", () => {
     expect(typedPart?.textContent).toBe("Hôm nay bạn cần gì?");
     // Chi mot ban cho trinh doc man hinh; hai ban kia `aria-hidden`.
     expect(heading.querySelectorAll("[aria-hidden]")).toHaveLength(2);
+  });
+});
+
+describe("model cua endpoint tu nhap (T-S.19c)", () => {
+  it("6. chon o man nhap ⇒ KHONG `PUT /settings`; cau dau tao hoi thoai bang model ay; het quota van gui duoc", async () => {
+    const endpointId = "e1d2c3b4-0000-4000-8000-000000000001";
+    const own = `byok:${endpointId}/llama-3.3-70b-versatile`;
+    vi.mocked(api.listModels).mockResolvedValue([
+      {
+        id: "deepseek-flash",
+        display_name: "DeepSeek Flash",
+        provider: "DeepSeek",
+        provider_id: "deepseek",
+        capabilities: [],
+        context_window: 1,
+        max_output: 1,
+        default: true,
+        badge: null,
+        available: true,
+        unavailable_reason: null,
+        reasoning: null,
+        pricing: null,
+        pricing_mode: "unmetered",
+        checked_at: null,
+        stale_after_s: 30,
+      },
+    ]);
+    vi.mocked(api.listByokEndpoints).mockResolvedValue({
+      endpoints: [
+        {
+          id: endpointId,
+          label: "Groq",
+          base_url: "https://api.groq.com/openai/v1",
+          masked_key: "gsk_...4321",
+          models: ["llama-3.3-70b-versatile"],
+          verified_at: null,
+          created_at: "2026-10-01T00:00:00Z",
+          usable: true,
+          prompt_tokens: 0,
+          completion_tokens: 0,
+        },
+      ],
+      max_endpoints: 5,
+    });
+    const blocked = {
+      ...PROFILE,
+      quota: [
+        {
+          limit_type: "5h" as const,
+          limit_usd: "0.5000",
+          spent_usd: "0.5000",
+          remaining_usd: "0.0000",
+          remaining_pct: 0,
+          retry_after: 3600,
+        },
+      ],
+    };
+    session.current = { ...fakeSession(), user: blocked, profile: blocked };
+    vi.mocked(api.createConversation).mockResolvedValue(CONVERSATION);
+    vi.mocked(api.sendMessage).mockRejectedValue(new Error("dung o day"));
+    window.history.replaceState(null, "", "/");
+    renderScreen();
+
+    const send = await screen.findByRole("button", { name: "Gửi" });
+    await userEvent.type(screen.getByRole("textbox", { name: "Nhập tin nhắn cho Scarlet" }), "Xin chao");
+    // Model catalog + het quota 5 gio ⇒ nut Gui tat (T-3.11).
+    expect(send).toBeDisabled();
+
+    await userEvent.click(await screen.findByRole("button", { name: /^Chọn mô hình/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^More models/ }));
+    await userEvent.click(await screen.findByRole("option", { name: /llama-3\.3-70b-versatile/ }));
+
+    expect(session.current.changeDefaultModel).not.toHaveBeenCalled();
+    await waitFor(() => expect(send).toBeEnabled());
+    await userEvent.click(send);
+
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalled());
+    expect(vi.mocked(api.createConversation).mock.calls[0][0]).toEqual({ default_model: own });
+    expect(vi.mocked(api.sendMessage).mock.calls[0][1]).toMatchObject({ model_id: own });
   });
 });

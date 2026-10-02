@@ -1,9 +1,12 @@
 import { useMemo } from "react";
 
 import { useSession } from "../../app/Layout";
+import { api } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { useTypewriter } from "../../lib/motion";
+import { useResource } from "../../features/admin/useResource";
 import { useChat } from "../../features/chat/useChat";
+import { endpointModels, isEndpointModel } from "../../features/models/byokModels";
 import { ModelPicker } from "../../features/models/ModelPicker";
 import { useModels } from "../../features/models/useModels";
 import { QuotaNotice } from "../../features/quota/QuotaNotice";
@@ -83,6 +86,17 @@ export function ChatScreen() {
     `GET /models`.
   */
   const modelCatalog = useModels();
+  /*
+    T-S.19c — model cua endpoint BYOK tu nhap (nhom "Khoa rieng" cua picker,
+    ban T-HD10 4a). Nap MOT lan moi lan man chat mount: them endpoint o Cai dat
+    roi quay lai la man nay mount lai. Hong ⇒ chi catalog, khong chan gi.
+  */
+  const endpoints = useResource(api.listByokEndpoints);
+  const endpointData = endpoints.data;
+  const models = useMemo(
+    () => [...modelCatalog.models, ...endpointModels(endpointData?.endpoints ?? [])],
+    [modelCatalog.models, endpointData],
+  );
   const session = useSession();
   /*
     T-3.11 — thanh quota doc `/auth/me` cua `Layout` (khong mot luot goi nao
@@ -92,7 +106,7 @@ export function ChatScreen() {
   */
   const quota = useQuota(session);
   const chat = useChat({
-    models: modelCatalog.models,
+    models,
     accountDefaultModel: session.profile?.default_model ?? null,
     // T-S.14 — muc da nho theo model (§24.2b·S4); `useChat` tinh muc hieu luc.
     reasoningPrefs: session.profile?.reasoning_prefs,
@@ -123,10 +137,16 @@ export function ChatScreen() {
     thoai nao; neu buoc 2 hong (mat mang giua chung) thi thu da ghi duoc van
     la thu co tac dung rong hon. Hong o buoc 1 thi dung han — khong ghi mot
     nua roi bao thanh cong.
+
+    T-S.19c: model cua endpoint tu nhap BO buoc 1 — `PUT /settings` chi nhan
+    model catalog (T-S.19b), nen no chi song o tang hoi thoai (o man nhap:
+    giu tai cho toi luc `send` tao hoi thoai, xem `changeConversationModel`).
   */
   const selectModel = async (modelId: string): Promise<void> => {
     try {
-      await session.changeDefaultModel(modelId);
+      if (!isEndpointModel(modelId)) {
+        await session.changeDefaultModel(modelId);
+      }
       await chat.changeConversationModel(modelId);
     } catch (e: unknown) {
       chat.showError(e instanceof Error ? e.message : String(e));
@@ -158,7 +178,7 @@ export function ChatScreen() {
   */
   const modelPicker = (
     <ModelPicker
-      models={modelCatalog.models}
+      models={models}
       defaultPick={chat.defaultPick}
       effort={chat.effectiveEffort}
       checkedAtLabel={formatTime(modelCatalog.checkedAt)}
@@ -176,7 +196,10 @@ export function ChatScreen() {
     KHOA provider, khong phai nhan — B-257, xem `selectedProviderId`.
   */
   const selectedProvider = selectedProviderId(modelCatalog.models, chat.effectiveModel);
-  const quotaBlocked = isSendBlocked(quota.block, quota.byokProviders, selectedProvider);
+  // T-S.19c — luot cua endpoint tu nhap khong qua cua quota (§10.5, T-S.19b).
+  const endpointTurn = isEndpointModel(chat.effectiveModel);
+  const quotaBlocked =
+    !endpointTurn && isSendBlocked(quota.block, quota.byokProviders, selectedProvider);
   const draft = chat.phase === "draft";
 
   // On dinh giua cac lan render cua man chat (moi manh chu dang chay) — `AppIsland` la `memo`.
@@ -261,7 +284,7 @@ export function ChatScreen() {
                     node={node}
                     tree={tree}
                     // T-S.15 — ten hien thi cho chip "model · muc" (ban T-HD3-v2 3c).
-                    models={modelCatalog.models}
+                    models={models}
                     notes={chat.notes[node.id] ?? []}
                     running={chat.running === node.id}
                     // T-3.8 / B-232 — nut "Luu" cua tin nguoi dung tat trong luc
@@ -297,7 +320,7 @@ export function ChatScreen() {
                 readings={quota.readings}
                 warnPct={quota.warnPct}
                 block={quota.block}
-                byokCovered={byokCovers(quota.byokProviders, selectedProvider)}
+                byokCovered={endpointTurn || byokCovers(quota.byokProviders, selectedProvider)}
               />
             }
           />

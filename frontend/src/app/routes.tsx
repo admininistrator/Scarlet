@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { RouteObject } from "react-router";
+import { Navigate, type RouteObject } from "react-router";
 
 import { AdminScreen } from "../components/admin/AdminScreen";
 import { ForgotPasswordForm } from "../components/auth/ForgotPasswordForm";
@@ -10,8 +10,8 @@ import { StatusGate } from "../components/auth/StatusGate";
 import { VerifyEmailScreen } from "../components/auth/VerifyEmailScreen";
 import { ChatScreen } from "../components/chat/ChatScreen";
 import { AccountPanel } from "../components/settings/AccountPanel";
-import { ApiKeysPanel } from "../components/settings/ApiKeysPanel";
 import { AppearancePanel } from "../components/settings/AppearancePanel";
+import { ByokPanel } from "../components/settings/ByokPanel";
 import { ModelPanel } from "../components/settings/ModelPanel";
 import {
   SettingsIndex,
@@ -36,7 +36,7 @@ const SETTINGS_ROUTES: readonly (readonly [SettingsTabPath, ReactNode])[] = [
   [PATHS.settingsAccount, <AccountPanel />],
   [PATHS.settingsAppearance, <AppearancePanel />],
   [PATHS.settingsModel, <ModelPanel />],
-  [PATHS.settingsApiKeys, <ApiKeysPanel />],
+  [PATHS.settingsByok, <ByokPanel />],
   [PATHS.settingsUsage, <UsagePanel />],
 ];
 
@@ -126,6 +126,7 @@ export const routes: RouteObject[] = [
           </SignedInOnly>
         ),
       })),
+      { path: PATHS.settingsApiKeys, element: <Navigate to={PATHS.settingsByok} replace /> },
       { path: PATHS.login, element: <LoginRoute /> },
       { path: PATHS.register, element: <RegisterForm /> },
       { path: PATHS.forgotPassword, element: <ForgotPasswordForm /> },

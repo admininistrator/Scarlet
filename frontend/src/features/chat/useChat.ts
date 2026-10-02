@@ -97,6 +97,7 @@ import {
 } from "../../lib/api";
 import { PATHS } from "../../app/paths";
 import { newKey } from "../../lib/idempotency";
+import { isEndpointModel } from "../models/byokModels";
 import { pickDefault, type DefaultPick } from "../models/defaults";
 import { effectiveEffort } from "../models/reasoning";
 import { openStream, type StreamHandle, type ConnectionStatus, type UsageOut } from "../../lib/sse";
@@ -746,6 +747,13 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     async (modelId: string): Promise<void> => {
       const conversationId = treeRef.current.conversationId;
       if (conversationId === null) {
+        /*
+          T-S.19c — man nhap: model cua endpoint tu nhap khong lam mac dinh tai
+          khoan duoc (`PUT /settings` chi nhan catalog), nen no giu O DAY toi
+          luc `send` tao hoi thoai voi `default_model` cua no. Model catalog thi
+          tang tai khoan da giu — xoa cho nay de no khong de len tang ay.
+        */
+        setConversationModel(isEndpointModel(modelId) ? modelId : null);
         return;
       }
       /*

@@ -1,11 +1,12 @@
-import { useCallback, useId, useState } from "react";
+import { useCallback, useId, useState, type ReactNode } from "react";
 
 import { useResource } from "../../features/admin/useResource";
-import { api, type CostRow, type KeySource } from "../../lib/api";
+import { endpointModelName } from "../../features/models/byokModels";
+import { api, type AdminModelOut, type CostRow, type KeySource, type MeteredSplit } from "../../lib/api";
 import { t, type TextKey } from "../../lib/i18n";
 import { TableScroll } from "../ui/TableScroll";
 import { CountCell, ErrorNotice, LoadingNote, MoneyCell, ScreenTitle, TD, TH, TH_NUMBER } from "./adminUi";
-import { formatDayKey, padMoney } from "./format";
+import { formatCount, formatDayKey, padMoney } from "./format";
 
 /**
  * Man 1c "Chi phi" — §16.3, §9.5, C16, ban T-HD7 · T-2.19 → T-3.12.
@@ -45,7 +46,24 @@ import { formatDayKey, padMoney } from "./format";
  * T-S.17). Luot dat ten luon tra bang khoa he thong (§24.2b·S6), nen o nguon
  * "Khoa rieng" the ghi "Khong co trong nguon nay" va o cua hang BYOK la "—":
  * o trong co nghia, khong phai so 0.
+ *
+ * ── Nguon "Khoa rieng" chi dem token (T-S.19c, ban T-HD10 4c/4d, NQ-134 ③) ──
+ *
+ * Luot BYOK ghi `cost_usd = 0` tu T-S.19b, nen o bo loc ay hai the tien thanh
+ * Token vao / Token ra, bang Theo model va Theo nguoi dung bo moi cot tien.
+ * Duoi ten model co dong DUONG DI: model catalog ⇒ "Hang · Goi thang" (ten +
+ * hang tu `GET /admin/models`), endpoint tu nhap ⇒ "Endpoint tuy chinh · host"
+ * (`label` cua server, NQ-137 ②). Bang Theo nguon (khong loc) them Token
+ * vao / ra cho ca hai hang, o tien cua hang BYOK la "—".
  */
+
+/** Tong token cua mot hang — cong SO NGUYEN, xem khoi dau file. */
+function tokensOf(row: MeteredSplit) {
+  return {
+    tokensIn: row.metered.prompt_tokens + row.unmetered.prompt_tokens,
+    tokensOut: row.metered.completion_tokens + row.unmetered.completion_tokens,
+  };
+}
 
 const RANGES = [7, 30] as const;
 type Range = (typeof RANGES)[number];
@@ -114,6 +132,12 @@ export function CostScreen() {
     [range, source],
   );
   const report = useResource(load);
+  // Ten + hang cua model catalog cho dong duong di (chi nguon Khoa rieng). Hong ⇒ ten = id.
+  const adminModels = useResource(api.adminModels);
+  const byok = source === "byok";
+  const catalogModel = (id: string): AdminModelOut | undefined =>
+    adminModels.data?.models.find((m) => m.id === id);
+  const totals = report.data === null ? null : tokensOf(report.data.totals);
 
   return (
     <>
@@ -149,14 +173,23 @@ export function CostScreen() {
       ) : (
         <>
           <dl className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
-            <TotalCard
-              label={t("admin.cost.serverTotalMetered")}
-              value={padMoney(report.data.totals.by_purpose.chat.metered.cost_usd)}
-            />
-            <TotalCard
-              label={t("admin.cost.serverTotalUnmetered")}
-              value={padMoney(report.data.totals.by_purpose.chat.unmetered.cost_usd)}
-            />
+            {byok && totals !== null ? (
+              <>
+                <TotalCard label={t("admin.cost.tokensInTotal")} value={formatCount(totals.tokensIn)} />
+                <TotalCard label={t("admin.cost.tokensOutTotal")} value={formatCount(totals.tokensOut)} />
+              </>
+            ) : (
+              <>
+                <TotalCard
+                  label={t("admin.cost.serverTotalMetered")}
+                  value={padMoney(report.data.totals.by_purpose.chat.metered.cost_usd)}
+                />
+                <TotalCard
+                  label={t("admin.cost.serverTotalUnmetered")}
+                  value={padMoney(report.data.totals.by_purpose.chat.unmetered.cost_usd)}
+                />
+              </>
+            )}
             <TotalCard
               label={t("admin.cost.titleTotal")}
               labelWide={t("admin.cost.titleTotalWide")}
@@ -182,8 +215,9 @@ export function CostScreen() {
                   ? t("admin.cost.sourceDetail.byok")
                   : null
             }
-            titleMissing={(r) => r.key === "byok"}
-            tokens={false}
+            // T-S.19c: luot BYOK chi dem token — o tien cua hang ay la "—".
+            moneyMissing={(r) => r.key === "byok"}
+            columns="all"
           />
 
           <h3 className="text-xl font-semibold text-foreground">{t("admin.cost.byUser")}</h3>
@@ -192,7 +226,7 @@ export function CostScreen() {
             firstColumn={t("admin.col.user")}
             rows={report.data.by_user}
             rowLabel={(r) => r.label ?? r.key}
-            tokens={false}
+            columns={byok ? "tokens" : "money"}
           />
 
           <h3 className="text-xl font-semibold text-foreground">{t("admin.cost.byModel")}</h3>
@@ -200,12 +234,50 @@ export function CostScreen() {
             caption={t("admin.cost.byModel")}
             firstColumn={t("admin.col.model")}
             rows={report.data.by_model}
-            rowLabel={(r) => r.key}
-            tokens
+            rowLabel={(r) => {
+              if (!byok) {
+                return r.key;
+              }
+              const own = endpointModelName(r.key);
+              return own === null ? (catalogModel(r.key)?.display_name ?? r.key) : <span className="font-mono">{own}</span>;
+            }}
+            rowDetail={byok ? (r) => <RouteLine row={r} model={catalogModel(r.key)} /> : undefined}
+            columns={byok ? "tokens" : "money-tokens"}
           />
         </>
       )}
     </>
+  );
+}
+
+/**
+ * Dong duong di duoi ten model, CHI o man quan tri (ban T-HD10 4c, `ByokRouteLine`).
+ * Endpoint tu nhap ⇒ "Endpoint tuy chinh · host" (endpoint da xoa ⇒ khong host);
+ * model catalog dung khoa rieng ⇒ "Hang · Goi thang".
+ */
+function RouteLine({ row, model }: { row: CostRow; model: AdminModelOut | undefined }) {
+  if (endpointModelName(row.key) !== null) {
+    return (
+      <span className="flex flex-wrap gap-x-1.5">
+        <span>{t("admin.models.kind.custom")}</span>
+        {row.label !== null && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="wrap-anywhere">{row.label}</span>
+          </>
+        )}
+      </span>
+    );
+  }
+  if (model === undefined) {
+    return null;
+  }
+  return (
+    <span className="flex flex-wrap gap-x-1.5">
+      <span>{model.provider}</span>
+      <span aria-hidden>·</span>
+      <span>{t("admin.models.kind.direct")}</span>
+    </span>
   );
 }
 
@@ -248,6 +320,14 @@ function TotalCard({
 }
 
 /**
+ * Cot cua mot bang. `money` = ba cot tien + luot goi; `money-tokens` = ba cot
+ * tien + token vao/ra (bang theo model); `tokens` = chi token vao/ra (nguon
+ * Khoa rieng, ban T-HD10 4c); `all` = ba cot tien + luot goi + token (bang Theo
+ * nguon, T-S.19c).
+ */
+type Columns = "money" | "money-tokens" | "tokens" | "all";
+
+/**
  * Mot truc cua bao cao: cot dau dinh, metered va unmetered luon la HAI cot
  * rieng, cung thu tu o moi bang va cung thu tu voi chu giai bieu do. Hai cot
  * ay la phan `chat`; cot "Dat ten" dung sau chung, truoc luot goi (ban v2).
@@ -259,21 +339,25 @@ function AxisTable({
   rows,
   rowLabel,
   rowDetail,
-  titleMissing,
-  tokens,
+  moneyMissing,
+  columns,
 }: {
   caption: string;
   firstColumn: string;
   rows: CostRow[];
-  rowLabel: (row: CostRow) => string;
-  rowDetail?: (row: CostRow) => string | null;
-  /** Hang ma khoan dat ten khong ap (nguon BYOK) — "—", khong phai 0. */
-  titleMissing?: (row: CostRow) => boolean;
-  tokens: boolean;
+  rowLabel: (row: CostRow) => ReactNode;
+  rowDetail?: (row: CostRow) => ReactNode;
+  /** Hang ma tien khong ap (nguon BYOK chi dem token) — "—", khong phai 0. */
+  moneyMissing?: (row: CostRow) => boolean;
+  columns: Columns;
 }) {
   if (rows.length === 0) {
     return <p className="text-sm text-muted">{t("admin.empty")}</p>;
   }
+  const money = columns !== "tokens";
+  const requests = columns === "money" || columns === "all";
+  const tokens = columns !== "money";
+  const missing = <td className={`${TD} money text-muted`}>—</td>;
   return (
     <TableScroll label={caption}>
       <thead>
@@ -281,16 +365,25 @@ function AxisTable({
           <th scope="col" className={`${TH} sticky-col w-sticky-col`}>
             {firstColumn}
           </th>
-          <th scope="col" className={TH_NUMBER}>
-            {t("admin.col.metered")}
-          </th>
-          <th scope="col" className={TH_NUMBER}>
-            {t("admin.col.unmetered")}
-          </th>
-          <th scope="col" className={TH_NUMBER}>
-            {t("admin.col.titling")}
-          </th>
-          {tokens ? (
+          {money && (
+            <>
+              <th scope="col" className={TH_NUMBER}>
+                {t("admin.col.metered")}
+              </th>
+              <th scope="col" className={TH_NUMBER}>
+                {t("admin.col.unmetered")}
+              </th>
+              <th scope="col" className={TH_NUMBER}>
+                {t("admin.col.titling")}
+              </th>
+            </>
+          )}
+          {requests && (
+            <th scope="col" className={TH_NUMBER}>
+              {t("admin.col.requests")}
+            </th>
+          )}
+          {tokens && (
             <>
               <th scope="col" className={TH_NUMBER}>
                 {t("admin.col.tokensIn")}
@@ -299,47 +392,51 @@ function AxisTable({
                 {t("admin.col.tokensOut")}
               </th>
             </>
-          ) : (
-            <th scope="col" className={TH_NUMBER}>
-              {t("admin.col.requests")}
-            </th>
           )}
         </tr>
       </thead>
       <tbody>
         {rows.map((r) => {
           const detail = rowDetail?.(r) ?? null;
+          const noMoney = moneyMissing?.(r) ?? false;
+          const { tokensIn, tokensOut } = tokensOf(r);
           return (
-          <tr key={r.key}>
-            <th
-              scope="row"
-              className={`${TD} sticky-col w-sticky-col max-w-sticky-col text-left font-semibold ${detail === null ? "truncate" : ""}`}
-            >
-              {detail === null ? (
-                rowLabel(r)
-              ) : (
+            <tr key={r.key}>
+              <th
+                scope="row"
+                className={`${TD} sticky-col w-sticky-col max-w-sticky-col text-left font-semibold ${detail === null ? "truncate" : ""}`}
+              >
+                {detail === null ? (
+                  rowLabel(r)
+                ) : (
+                  <>
+                    <span className="block truncate">{rowLabel(r)}</span>
+                    <span className="block text-xs font-normal text-muted">{detail}</span>
+                  </>
+                )}
+              </th>
+              {money &&
+                (noMoney ? (
+                  <>
+                    {missing}
+                    {missing}
+                    {missing}
+                  </>
+                ) : (
+                  <>
+                    <MoneyCell value={r.by_purpose.chat.metered.cost_usd} />
+                    <MoneyCell value={r.by_purpose.chat.unmetered.cost_usd} />
+                    <MoneyCell value={r.title_cost_usd} />
+                  </>
+                ))}
+              {requests && <CountCell value={r.metered.events + r.unmetered.events} />}
+              {tokens && (
                 <>
-                  <span className="block truncate">{rowLabel(r)}</span>
-                  <span className="block text-xs font-normal text-muted">{detail}</span>
+                  <CountCell value={tokensIn} />
+                  <CountCell value={tokensOut} />
                 </>
               )}
-            </th>
-            <MoneyCell value={r.by_purpose.chat.metered.cost_usd} />
-            <MoneyCell value={r.by_purpose.chat.unmetered.cost_usd} />
-            {titleMissing?.(r) ? (
-              <td className={`${TD} money text-muted`}>—</td>
-            ) : (
-              <MoneyCell value={r.title_cost_usd} />
-            )}
-            {tokens ? (
-              <>
-                <CountCell value={r.metered.prompt_tokens + r.unmetered.prompt_tokens} />
-                <CountCell value={r.metered.completion_tokens + r.unmetered.completion_tokens} />
-              </>
-            ) : (
-              <CountCell value={r.metered.events + r.unmetered.events} />
-            )}
-          </tr>
+            </tr>
           );
         })}
       </tbody>
@@ -465,7 +562,7 @@ export function CostChart({ days }: { days: CostRow[] }) {
               firstColumn={t("admin.col.day")}
               rows={days}
               rowLabel={(r) => formatDayKey(r.key)}
-              tokens={false}
+              columns="money"
             />
           </details>
         </>

@@ -27,10 +27,12 @@
 
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Check, RotateCw } from "lucide";
+import { useId } from "react";
 
 import type { ModelOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { StaticIcon } from "../../components/ui/Icon";
+import { isEndpointModel } from "./byokModels";
 import type { DefaultPick, DefaultTier } from "./defaults";
 import { CapabilityChips, TierChip, TierRail, tierOf } from "./chips";
 
@@ -205,6 +207,46 @@ function LockedLabel() {
   );
 }
 
+/**
+ * Hang cua nhom "Khoa rieng" (ban T-HD10 4a, `ByokModelGroup`): ten model +
+ * ten goi nho cua endpoint, khong host, khong rail/chip tang, khong capability.
+ * Vai tro `option` nhu hang catalog ben tren — ca danh sach la MOT `listbox`
+ * (ban T-HD10 viet `menuitemradio`, xem bao cao T-S.19c).
+ */
+function EndpointRow({
+  model,
+  selected,
+  onPick,
+}: {
+  model: ModelOut;
+  selected: boolean;
+  onPick: (modelId: string) => void;
+}) {
+  return (
+    <div
+      role="option"
+      aria-selected={selected}
+      tabIndex={0}
+      onClick={() => onPick(model.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onPick(model.id);
+        }
+      }}
+      className="motion-control flex min-h-row-model shrink-0 cursor-pointer items-center gap-2.5 rounded-md p-2 text-left focus-visible:-outline-offset-2 hover:bg-surface-hover aria-selected:bg-accent-subtle"
+    >
+      <span className="flex w-4 shrink-0 justify-center">
+        {selected ? <StaticIcon icon={Check} size={16} strokeWidth={2.25} className="text-accent-text" /> : null}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="text-base font-semibold wrap-anywhere">{model.display_name}</span>
+        <span className="text-xs text-muted wrap-anywhere">{model.provider}</span>
+      </span>
+    </div>
+  );
+}
+
 export function ModelList({
   models,
   defaultPick,
@@ -218,9 +260,14 @@ export function ModelList({
   onPick: (modelId: string) => void;
   className?: string;
 }) {
+  const groupLabelId = useId();
+  // Ban T-HD10: model cua endpoint tu nhap xep CUOI, thanh nhom rieng; model
+  // catalog (ke ca hang dung khoa rieng) giu cho cu.
+  const catalogModels = models.filter((m) => !isEndpointModel(m.id));
+  const ownModels = models.filter((m) => isEndpointModel(m.id));
   return (
     <ul role="listbox" aria-label={t("model.listLabel")} className={`flex flex-col gap-0.5 ${className}`}>
-      {models.map((m) => (
+      {catalogModels.map((m) => (
         <ModelRow
           key={m.id}
           model={m}
@@ -230,6 +277,21 @@ export function ModelList({
           onPick={onPick}
         />
       ))}
+      {ownModels.length > 0 ? (
+        <li role="none" className="mt-1 border-t border-divider pt-1.5">
+          <div role="group" aria-labelledby={groupLabelId} className="flex flex-col gap-0.5">
+            <span
+              id={groupLabelId}
+              className="px-2 pt-2 pb-1 text-2xs font-semibold tracking-wider text-muted uppercase"
+            >
+              {t("model.group.byok")}
+            </span>
+            {ownModels.map((m) => (
+              <EndpointRow key={m.id} model={m} selected={m.id === defaultPick.modelId} onPick={onPick} />
+            ))}
+          </div>
+        </li>
+      ) : null}
     </ul>
   );
 }
