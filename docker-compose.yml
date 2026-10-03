@@ -145,9 +145,14 @@ services:
   migrate:                       # §22.2 — chạy một lần rồi thoát, KHÔNG chạy trong entrypoint của api
     <<: *common
     build: ./backend
-    command: alembic upgrade head
+    # T-4.1 — tao bucket MinIO o day, cung ly do voi migration: viec chuan bi
+    # MOT lan, xong TRUOC khi api/worker nhan viec (ca hai cho
+    # service_completed_successfully). Idempotent — xem app/cli.py.
+    command: ["sh", "-c", "alembic upgrade head && python -m app.cli ensure-bucket"]
     restart: "no"
-    depends_on: { postgres: { condition: service_healthy } }
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio:    { condition: service_healthy }
     profiles: [core]
 
   litellm:

@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: SecretStr
     MINIO_SECRET_KEY: SecretStr
     MINIO_BUCKET: str = Field(min_length=1)
+    # T-4.1 — region ghim cho `app/core/storage.py`. Phải khớp `MINIO_REGION`
+    # của server MinIO (mặc định của nó là `us-east-1`). Không có biến này thì
+    # SDK hỏi region qua mạng trước MỖI lần ký URL (Cạm bẫy ② của T-4.1).
+    MINIO_REGION: str = Field(default="us-east-1", min_length=1)
 
     # ═══ Provider keys — CỐ Ý KHÔNG CÓ Ở ĐÂY (NQ-15, B-26, T-0.12) ═══
     # `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `NINEROUTER_*`, `OLLAMA_*`… sống

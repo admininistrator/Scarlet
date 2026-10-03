@@ -2,10 +2,17 @@
 
 KH tham chiếu: §10.3, RR-7 · CLAUDE.md A4 · tasks.md T-2.13.
 
-Hôm nay **hai** lệnh:
+Hôm nay **ba** lệnh:
 
     docker compose exec api python -m app.cli rebuild-quota --all
     docker compose exec api python -m app.cli reset-rate-limit ip register --all
+    docker compose run --rm migrate python -m app.cli ensure-bucket
+
+`ensure-bucket` (T-4.1) chạy trong service `migrate`, sau `alembic upgrade
+head`: cùng lý lẽ §22.2 — việc chuẩn bị một lần, xong **trước** khi `api`/
+`worker` nhận việc (cả hai `depends_on: migrate: service_completed_successfully`),
+không trong `lifespan` của từng replica và không lười ở request đầu tiên.
+Idempotent: bucket đã có ⇒ in "da co", mã thoát 0.
 
 Chạy **trong container** chứ không từ WSL host: `DATABASE_URL` và `REDIS_URL`
 trong `.env` trỏ tới `postgres:5432`/`redis:6379`, tức tên service trên network
@@ -78,6 +85,7 @@ from collections.abc import Coroutine
 from typing import Any
 
 from app.config.settings import settings
+from app.core import storage
 from app.core.log_redact import install_log_redaction
 from app.core.ratelimit import (
     GROUP_CHAT,
@@ -95,6 +103,7 @@ logger = logging.getLogger(__name__)
 
 REBUILD_QUOTA = "rebuild-quota"
 RESET_RATE_LIMIT = "reset-rate-limit"
+ENSURE_BUCKET = "ensure-bucket"
 
 #: Hai trục của `reset-rate-limit`, khớp hai lớp đầu của §10.6. Xem docstring
 #: module cho lý do trục `streams` vắng mặt.
@@ -240,6 +249,10 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="xoa MOI dinh danh cua nhom nay — dung khi khong biet IP cua chinh minh",
     )
+    commands.add_parser(
+        ENSURE_BUCKET,
+        help="tao bucket MINIO_BUCKET neu chua co, khong policy an danh (T-4.1, §15.2)",
+    )
     return parser
 
 
@@ -282,6 +295,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.lenh == RESET_RATE_LIMIT:
         identity = _check_reset(parser, args)
         return asyncio.run(_run(_reset_rate_limit(args.truc, args.nhom, identity)))
+    if args.lenh == ENSURE_BUCKET:
+        created = storage.ensure_bucket()
+        print(f"{ENSURE_BUCKET}: {settings.MINIO_BUCKET} {'da tao' if created else 'da co'}")
+        return 0
     raise AssertionError(f"lenh khong co nguoi xu ly: {args.lenh}")
 
 
