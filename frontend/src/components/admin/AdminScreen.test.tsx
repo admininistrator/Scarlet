@@ -31,6 +31,7 @@ vi.mock("../../lib/api", async (importOriginal) => {
       adminSystem: vi.fn(),
       adminAuditLogs: vi.fn(),
       adminModels: vi.fn(),
+      adminUpdateModel: vi.fn(),
       healthDeep: vi.fn(),
     },
   };
@@ -370,6 +371,8 @@ describe("Chi phi", () => {
           route: { id: "anthropic", label: "Anthropic", user_visible: true, availability: "always" },
           health: { available: true, reason: null },
           enabled: true,
+          vision: true,
+          vision_override: null,
         },
       ],
       checked_at: null,
@@ -443,6 +446,8 @@ describe("Model", () => {
         route: { id: "deepseek", label: "DeepSeek AI", user_visible: true, availability: "always" },
         health: { available: true, reason: null },
         enabled: true,
+        vision: true,
+        vision_override: null,
       },
       {
         id: "nr-gemini-flash",
@@ -451,6 +456,8 @@ describe("Model", () => {
         route: { id: "ninerouter", label: "9Router (local)", user_visible: false, availability: "host-dependent" },
         health: { available: false, reason: "9Router (local) đang không phản hồi." },
         enabled: true,
+        vision: true,
+        vision_override: null,
       },
     ],
     checked_at: "2026-09-30T07:32:10Z",
@@ -472,5 +479,25 @@ describe("Model", () => {
     // The duong di: ly do cua server nguyen van, loai "Trung gian" cho duong an.
     expect(screen.getByText("9Router (local) đang không phản hồi.")).toBeInTheDocument();
     expect(screen.getByText("Trung gian")).toBeInTheDocument();
+  });
+
+  it("T-4.5: o 'Doc anh' — Luon tat ⇒ PATCH vision=false, Theo catalog ⇒ null, roi nap lai", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.adminModels).mockResolvedValue(MODELS);
+    vi.mocked(api.adminUpdateModel).mockResolvedValue(undefined);
+    renderAt("/admin?screen=models");
+
+    const table = await screen.findByRole("region", { name: "Model" });
+    const select = within(table).getByRole("combobox", { name: "Đọc ảnh — DeepSeek Flash" });
+    expect(select).toHaveValue("catalog");
+
+    await user.selectOptions(select, "off");
+    await user.selectOptions(select, "catalog");
+
+    expect(vi.mocked(api.adminUpdateModel).mock.calls).toEqual([
+      ["deepseek-flash", { vision: false }],
+      ["deepseek-flash", { vision: null }],
+    ]);
+    await waitFor(() => expect(api.adminModels).toHaveBeenCalledTimes(3));
   });
 });

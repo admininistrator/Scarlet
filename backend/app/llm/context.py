@@ -51,7 +51,7 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, Template
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config.catalog import ModelEntry
+from app.config.catalog import VISION_CAPABILITY, ModelEntry
 from app.config.settings import settings
 from app.db.models import Attachment, AttachmentKind, Message, MessageRole, MessageStatus
 from app.db.repositories import MessageRepository
@@ -83,9 +83,6 @@ SYSTEM_PROMPT_TTL_S = 60
 #: `cancelled` thì CÓ vào: §7.5 lưu phần đã sinh, người dùng đã đọc nó trên màn
 #: hình, nên bỏ đi sẽ làm model và người dùng nhìn hai lịch sử khác nhau.
 USABLE_STATUSES = frozenset({MessageStatus.COMPLETED, MessageStatus.CANCELLED})
-
-#: Cờ capability của catalog (§9.2, §9.4) cho phép gửi ảnh.
-VISION_CAPABILITY = "vision"
 
 #: Dòng chữ thay cho ảnh ở các lượt cũ (C33, T-4.4b).
 IMAGE_PLACEHOLDER = "[ảnh: {name}]"

@@ -1019,5 +1019,23 @@ def get_default_model() -> ModelEntry | None:
     return next((m for m in _catalog.models if m.default and m.enabled), None)
 
 
+#: Cờ capability của catalog (§9.2, §9.4) cho phép gửi ảnh.
+VISION_CAPABILITY = "vision"
+
+
+def with_vision(model: ModelEntry, vision: bool | None) -> ModelEntry:
+    """Bản sao của `model` với cờ `vision` bị ghi đè; `None` ⇒ giữ giá trị file.
+
+    Ghi đè đến từ `model_overrides` (T-4.5, NQ-139) — hàm này thuần, không đọc
+    DB; người gộp là `app/db/repositories/model_overrides.py::with_override`.
+    Bản sao, không sửa tại chỗ: `model` là phần tử của catalog dùng chung cả
+    tiến trình.
+    """
+    if vision is None or (VISION_CAPABILITY in model.capabilities) == vision:
+        return model
+    rest = [c for c in model.capabilities if c != VISION_CAPABILITY]
+    return model.model_copy(update={"capabilities": [*rest, VISION_CAPABILITY] if vision else rest})
+
+
 #: Nạp ngay lúc import — fail-fast (L2). Catalog sai schema → app không boot.
 _catalog = _read_and_validate(CATALOG_PATH)

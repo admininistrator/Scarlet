@@ -10,6 +10,7 @@
  */
 
 import type { ModelOut } from "../../lib/api";
+import { VISION } from "./chips";
 import { t } from "../../lib/i18n";
 import type { DefaultTier } from "./defaults";
 import { CapabilityChips, SectionLabel, TierChip, TierRail } from "./chips";
@@ -18,11 +19,15 @@ export function CurrentModel({
   model,
   tier,
   narrow,
+  conversationHasImages = false,
 }: {
   model: ModelOut;
   tier: DefaultTier | null;
   narrow: boolean;
+  /** T-4.5 — hoi thoai dang mo da co anh (duong di, `attachments[].kind`). */
+  conversationHasImages?: boolean;
 }) {
+  const warnNoVision = conversationHasImages && !model.capabilities.includes(VISION);
   return (
     <div className={`flex flex-col gap-2.5 ${narrow ? "px-4 pt-2.5 pb-3" : "p-3"}`}>
       <SectionLabel>{t("model.inUse")}</SectionLabel>
@@ -50,13 +55,13 @@ export function CurrentModel({
       </div>
       <p className="text-2xs text-muted">{t("model.tierOrder")}</p>
       {/*
-        Cho chua cho canh bao "model nay khong co vision ma hoi thoai da co
-        anh" — T-4.5 (`tasks.md` §7b.2), KHONG lam o T-S.14. `empty:hidden`
-        nen hom nay no khong chiem mot pixel nao; task ay chi phai bom noi
-        dung vao, khong phai doi bo cuc. (Khung net dut cua ban ve la chu
-        thich, khong phai phan tu giao dien.)
+        T-4.5 — canh bao "model nay khong co vision ma hoi thoai da co anh".
+        `empty:hidden`: khong canh bao thi khong chiem mot pixel nao. Anh o
+        luot cu khong chan gui (backend thay no bang chu, T-4.4b) — chi bao.
       */}
-      <div data-slot="capability-warning" data-planned="T-4.5" aria-live="polite" className="empty:hidden" />
+      <div data-slot="capability-warning" aria-live="polite" className="empty:hidden text-xs text-danger-text">
+        {warnNoVision ? t("model.noVisionWithImages") : null}
+      </div>
     </div>
   );
 }

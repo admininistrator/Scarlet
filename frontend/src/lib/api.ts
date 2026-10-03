@@ -179,6 +179,24 @@ export interface MessageOut {
    * khong tu picker: nhanh cu phai giu muc cu (UC-04 dong 4).
    */
   reasoning_effort: string | null;
+  /**
+   * T-4.4a — tep gan vao message (duong di, `siblings`). Tuy chon vi message
+   * FE tu dung (dang gui) chua co; T-4.5 chi doc `kind` (canh bao vision).
+   */
+  attachments?: MessageAttachment[];
+}
+
+/** Mot tep cua message — `attachment_out` cua backend (T-4.4a). */
+export interface MessageAttachment {
+  id: string;
+  kind: "image" | "file";
+  name: string;
+  bytes: number;
+  mime_type: string;
+  width: number | null;
+  height: number | null;
+  extract_status: string;
+  url: string;
 }
 
 export interface ConversationOut {
@@ -671,7 +689,8 @@ export type AuditActionName =
   | "user.suspend"
   | "user.update"
   | "tier.update"
-  | "catalog.reload";
+  | "catalog.reload"
+  | "model.update";
 
 /** Mot dong so — "ai, luc nao, lam gi, voi ai" (§16.3, B-191). */
 export interface AuditEntry {
@@ -800,6 +819,10 @@ export interface AdminModelOut {
   health: { available: boolean; reason: string | null };
   /** Chi doc (B-258). `false` = co trong catalog nhung tat. */
   enabled: boolean;
+  /** Doc duoc anh — gia tri DANG AP DUNG (file catalog, hoac ghi de). */
+  vision: boolean;
+  /** Ghi de cua admin (NQ-139); `null` = theo file catalog. */
+  vision_override: boolean | null;
 }
 
 export interface AdminModelListOut {
@@ -1110,6 +1133,13 @@ export const api = {
     }),
 
   adminListTiers: () => request<TierList>("/admin/tiers"),
+
+  /** T-4.5 (NQ-139) — ghi de co `vision`; `null` = ve gia tri file catalog. */
+  adminUpdateModel: (modelId: string, patch: { vision: boolean | null }) =>
+    request<void>(`/admin/models/${encodeURIComponent(modelId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
 
   adminUpdateTier: (name: string, patch: TierPatch) =>
     request<TierRow>(`/admin/tiers/${encodeURIComponent(name)}`, {

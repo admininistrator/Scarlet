@@ -18,6 +18,9 @@ import type { DefaultPick, DefaultTier } from "./defaults";
  * chua co ban dich) phai hien duoc chu khong duoc lam vo hang: `capabilityLabel`
  * roi ve chinh chuoi tho.
  */
+/** Capability cho phep gui anh (§9.4) — nut dinh kem va canh bao cua T-4.5 doc no. */
+export const VISION = "vision";
+
 const CAPABILITY_LABELS: Record<string, TextKey> = {
   tools: "model.cap.tools",
   vision: "model.cap.vision",

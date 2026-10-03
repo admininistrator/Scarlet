@@ -9,6 +9,7 @@ import { DISPLAY_LOCALE, t } from "../../lib/i18n";
 import { newKey } from "../../lib/idempotency";
 import { useDock } from "../../lib/motion";
 import { ComingSoon } from "../ui/ComingSoon";
+import { AttachButtonNoVision } from "./Attachments";
 import { Icon, StaticIcon } from "../ui/Icon";
 
 /**
@@ -109,6 +110,7 @@ export function Composer({
   modelPicker,
   quotaNotice,
   quotaBlocked = false,
+  noVision = false,
 }: {
   running: boolean;
   enabled: boolean;
@@ -128,6 +130,11 @@ export function Composer({
    * san), va nut Dung cua mot luot dang chay khong bao gio bi khoa vi quota.
    */
   quotaBlocked?: boolean;
+  /**
+   * T-4.5 (S9) — model dang chon KHONG `vision` ⇒ nut dinh kem la
+   * `AttachButtonNoVision` (tooltip noi ly do). Co `vision` ⇒ nut cho cua T-4.7.
+   */
+  noVision?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const [keyLocked, setKeyLocked] = useState(false);
@@ -252,11 +259,15 @@ export function Composer({
 
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
             {/* §7b.2 — bon nut cho cua o nhap; khong mot handler nao (S12). */}
-            <ComingSoon
-              planned="T-4.7"
-              label={t("composer.attach")}
-              icon={<StaticIcon icon={Paperclip} size={20} />}
-            />
+            {noVision ? (
+              <AttachButtonNoVision />
+            ) : (
+              <ComingSoon
+                planned="T-4.7"
+                label={t("composer.attach")}
+                icon={<StaticIcon icon={Paperclip} size={20} />}
+              />
+            )}
             <ComingSoon
               planned="T-6.7"
               label={t("composer.webSearch")}

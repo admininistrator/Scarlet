@@ -9,6 +9,7 @@
                                                  · và theo purpose (T-S.8)
     POST   /api/v1/admin/catalog/reload          nạp lại model_catalog.json
     GET    /api/v1/admin/models                  model + đường đi thật (T-S.8)
+    PATCH  /api/v1/admin/models/{id}             ghi đè cờ vision      (T-4.5)
     GET    /api/v1/admin/tiers                   bảng hạn mức          (T-2.20)
     PATCH  /api/v1/admin/tiers/{name}            đổi hạn mức CẢ tier   (T-2.20)
     GET    /api/v1/admin/system                  hàng đợi · stream · health
@@ -164,7 +165,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from app.config import catalog
-from app.config.catalog import Availability
+from app.config.catalog import Availability, with_vision
 from app.config.settings import settings
 from app.config.version import APP_VERSION
 from app.core.blacklist import revoke_all_sessions, set_user_cutoff
@@ -177,6 +178,7 @@ from app.core.ratelimit import client_ip
 from app.core.redis import get_redis
 from app.db.models import (
     TARGET_CATALOG,
+    TARGET_MODEL,
     TARGET_TIER,
     TARGET_USER,
     AuditAction,
@@ -194,6 +196,7 @@ from app.db.repositories import (
     UsageBucket,
     UsageEventRepository,
 )
+from app.db.repositories.model_overrides import ModelOverrideRepository
 from app.db.repositories.tiers import TierRepository
 from app.db.repositories.users import AdminUserRow, UserRepository
 from app.db.session import session_scope
@@ -454,6 +457,22 @@ class AdminModelOut(BaseModel):
     #: `false` = có trong catalog nhưng tắt, nên vắng mặt ở `GET /models`.
     #: Chỉ đọc: đổi nó là sửa `model_catalog.json` rồi tải lại (B-258).
     enabled: bool
+    #: Model đọc được ảnh — giá trị **đang áp dụng** (file, hoặc ghi đè).
+    vision: bool
+    #: Ghi đè của admin (`PATCH /admin/models/{id}`, NQ-139); `None` = theo file.
+    vision_override: bool | None
+
+
+class UpdateModelRequest(BaseModel):
+    """Body của `PATCH /admin/models/{id}` — T-4.5, NQ-139.
+
+    `vision` **bắt buộc có mặt**: `true`/`false` = ghi đè file, `null` = xoá ghi
+    đè, về lại `capabilities` của `model_catalog.json`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    vision: bool | None
 
 
 class AdminModelListOut(BaseModel):
@@ -1190,10 +1209,13 @@ async def admin_models() -> AdminModelListOut:
     **Không ghi sổ**, cùng luật mọi endpoint `GET` của file này.
     """
     cat = catalog.get_catalog()
+    async with session_scope() as session:
+        overrides = await ModelOverrideRepository(session).vision_map()
     snapshot = provider_statuses()
     ordered = sorted(cat.models, key=lambda m: m.order)
     models: list[AdminModelOut] = []
     for m in ordered:
+        override = overrides.get(m.id)
         route = cat.providers[m.provider]
         available = snapshot.statuses.get(m.provider, _NOT_PROBED).available
         models.append(
@@ -1212,6 +1234,8 @@ async def admin_models() -> AdminModelListOut:
                     reason=None if available else no_response_reason(route, name_route=True),
                 ),
                 enabled=m.enabled,
+                vision=catalog.VISION_CAPABILITY in with_vision(m, override).capabilities,
+                vision_override=override,
             )
         )
     return AdminModelListOut(
@@ -1219,6 +1243,55 @@ async def admin_models() -> AdminModelListOut:
         checked_at=snapshot.checked_at,
         stale_after_s=settings.PROVIDER_HEALTH_TTL_S,
     )
+
+
+@router.patch(
+    "/models/{model_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        404: {"model": ErrorEnvelope, "description": "catalog khong co model nay (MODEL_UNKNOWN)"},
+    },
+)
+async def update_model(
+    request: Request,
+    body: UpdateModelRequest,
+    actor_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    model_id: Annotated[str, Path()],
+) -> None:
+    """Ghi đè cờ `vision` của một model catalog — T-4.5, NQ-139 (một phần B-258).
+
+    Hiệu lực ngay ở lượt sinh kế tiếp: guard S9, worker và `GET /models` đều
+    đọc bảng `model_overrides` lúc gọi, không cache. Model đang tắt cũng ghi
+    đè được — nó vẫn có mặt ở `GET /admin/models`. Không đổi gì ⇒ không ghi sổ.
+
+    Raises:
+        ApiError 404 `MODEL_UNKNOWN`: `model_id` không có trong catalog.
+    """
+    if not any(m.id == model_id for m in catalog.get_catalog().models):
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            ApiErrorCode.MODEL_UNKNOWN,
+            "catalog khong co model nay",
+            details={"model_id": model_id},
+        )
+    async with session_scope() as session:
+        repo = ModelOverrideRepository(session)
+        before = await repo.get_vision(model_id)
+        if before == body.vision:
+            return
+        if body.vision is None:
+            await repo.clear(model_id)
+        else:
+            await repo.put_vision(model_id, body.vision, actor_id=actor_id)
+        await AuditLogRepository(session).record(
+            actor_id=actor_id,
+            action=AuditAction.MODEL_UPDATE,
+            target_type=TARGET_MODEL,
+            target_id=model_id,
+            details={"changed": {"vision_override": {"from": before, "to": body.vision}}},
+            ip=client_ip(request),
+        )
+        await session.commit()
 
 
 # ═════════════════════ T-2.20 — bốn endpoint còn lại của §18.5 ══════════════

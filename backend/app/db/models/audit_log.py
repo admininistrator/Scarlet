@@ -59,6 +59,7 @@ class AuditAction(StrEnum):
     USER_UPDATE = "user.update"
     TIER_UPDATE = "tier.update"
     CATALOG_RELOAD = "catalog.reload"
+    MODEL_UPDATE = "model.update"
 
 
 #: Giá trị của `target_type` cho một hành động tác động lên một hàng `users`.
@@ -77,6 +78,10 @@ TARGET_TIER = "tiers"
 #: `target_type` cho hành động không nhắm vào hàng nào — `catalog.reload` tác
 #: động lên tiến trình, không lên dữ liệu. `target_id` khi đó để `NULL`.
 TARGET_CATALOG = "catalog"
+
+#: `target_type` cho `model.update` (T-4.5) — `target_id` là `models[].id` của
+#: catalog, cũng là khoá chính của `model_overrides`.
+TARGET_MODEL = "model_overrides"
 
 
 class AuditLog(Base):

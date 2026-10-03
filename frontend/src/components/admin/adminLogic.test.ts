@@ -274,6 +274,8 @@ describe("routeCards — health thuoc ve DUONG DI (`GET /admin/models`, T-S.17)"
       route: { id: "khoa", label: "Nhan", user_visible: true, availability: "always" },
       health: { available: true, reason: null },
       enabled: true,
+      vision: true,
+      vision_override: null,
       ...p,
     };
   }

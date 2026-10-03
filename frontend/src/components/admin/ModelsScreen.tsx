@@ -25,6 +25,8 @@ import { formatClock } from "./format";
  * — nen the duong di chi ghi loai "Trung gian" cho duong an (T-S.17, nguoi
  * dung chot).
  *
+ * T-4.5 (NQ-139): cot "Doc anh" — ghi de co `vision` qua `PATCH /admin/models/{id}`.
+ *
  * B-262 ④ theo ban v2: the khong co do tre, bang khong co cot "Bat" — khong
  * endpoint nao cho hai thu ay (B-258). "Kiem luc" la `checked_at` cua server.
  * Model `enabled: false` van co mat (server tra ca model tat): hang ghi "Dang
@@ -99,11 +101,66 @@ function RouteHealth({ model }: { model: AdminModelOut }) {
 
 const isFailed = (m: AdminModelOut) => m.enabled && !m.health.available;
 
+const VISION_CHOICES = [
+  { value: "catalog", label: "admin.models.vision.catalog" },
+  { value: "on", label: "admin.models.vision.on" },
+  { value: "off", label: "admin.models.vision.off" },
+] as const;
+
+/**
+ * T-4.5 (NQ-139) — o chon "Doc anh": theo file catalog, hoac ghi de bat/tat.
+ * `<select>` that chu khong cong tac: co BA trang thai, va "theo catalog" phai
+ * chon lai duoc. Chu "Co"/"Khong" ben canh la gia tri DANG AP DUNG.
+ */
+function VisionSelect({
+  model,
+  busy,
+  onChange,
+}: {
+  model: AdminModelOut;
+  busy: boolean;
+  onChange: (vision: boolean | null) => void;
+}) {
+  const value = model.vision_override === null ? "catalog" : model.vision_override ? "on" : "off";
+  return (
+    <span className="flex items-center gap-2">
+      <select
+        aria-label={`${t("admin.col.vision")} — ${model.display_name}`}
+        value={value}
+        disabled={busy}
+        onChange={(e) => onChange(e.target.value === "catalog" ? null : e.target.value === "on")}
+        className="motion-control min-h-touch rounded-md border border-border-strong bg-background px-3 text-sm text-foreground"
+      >
+        {VISION_CHOICES.map((c) => (
+          <option key={c.value} value={c.value}>
+            {t(c.label)}
+          </option>
+        ))}
+      </select>
+      <span className="text-sm text-muted">{t(model.vision ? "admin.yes" : "admin.no")}</span>
+    </span>
+  );
+}
+
 export function ModelsScreen() {
   const models = useResource(api.adminModels);
   const [reloading, setReloading] = useState(false);
   const [lastReload, setLastReload] = useState<{ at: number; result: ReloadCatalogOut } | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
+  const [savingVision, setSavingVision] = useState(false);
+
+  const setVision = async (modelId: string, vision: boolean | null) => {
+    setSavingVision(true);
+    setActionError(null);
+    try {
+      await api.adminUpdateModel(modelId, { vision });
+      await models.reload();
+    } catch (e) {
+      setActionError(toApiError(e));
+    } finally {
+      setSavingVision(false);
+    }
+  };
 
   const reload = async () => {
     setReloading(true);
@@ -234,6 +291,9 @@ export function ModelsScreen() {
                     <th scope="col" className={TH}>
                       {t("admin.col.routeHealth")}
                     </th>
+                    <th scope="col" className={TH}>
+                      {t("admin.col.vision")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -247,6 +307,9 @@ export function ModelsScreen() {
                       </td>
                       <td className={`${TD} py-3`}>
                         <RouteHealth model={m} />
+                      </td>
+                      <td className={`${TD} py-2`}>
+                        <VisionSelect model={m} busy={savingVision} onChange={(v) => void setVision(m.id, v)} />
                       </td>
                     </tr>
                   ))}
@@ -275,9 +338,11 @@ export function ModelsScreen() {
                       {t("admin.models.failedOnRoute")} <strong>{m.route.label}</strong>
                     </span>
                   )}
+                  <VisionSelect model={m} busy={savingVision} onChange={(v) => void setVision(m.id, v)} />
                 </li>
               ))}
             </ul>
+            <p className="text-xs text-muted">{t("admin.models.vision.note")}</p>
           </section>
         </div>
       )}

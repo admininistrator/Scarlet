@@ -93,6 +93,8 @@ export interface ModelPickerProps {
   onPickEffort: (level: string) => void;
   /** Goi moi lan picker MO — `useModels.refreshIfStale` (T-S.4). */
   onOpen?: () => void;
+  /** T-4.5 — hoi thoai dang mo da co anh ⇒ `CurrentModel` canh bao khi model khong vision. */
+  conversationHasImages?: boolean;
 }
 
 /** Be rong nho hay khong. Theo doi song, khong doc mot lan roi thoi. */
@@ -444,7 +446,12 @@ function SheetScreens(props: ModelPickerProps & { selected: ModelOut | undefined
           ) : (
             <>
               <div className="border-t border-divider">
-                <CurrentModel model={selected} tier={defaultPick.tier} narrow />
+                <CurrentModel
+                  model={selected}
+                  tier={defaultPick.tier}
+                  narrow
+                  conversationHasImages={props.conversationHasImages}
+                />
               </div>
               <div className="border-t border-divider px-2 py-1">
                 {selected.reasoning === null ? (
@@ -656,7 +663,12 @@ export function ModelPicker(props: ModelPickerProps) {
               <EmptyBody loading={props.loading} narrow={false} />
             ) : (
               <>
-                <CurrentModel model={selected} tier={props.defaultPick.tier} narrow={false} />
+                <CurrentModel
+                  model={selected}
+                  tier={props.defaultPick.tier}
+                  narrow={false}
+                  conversationHasImages={props.conversationHasImages}
+                />
                 <div className="border-t border-divider p-1.5">
                   <EffortMenu model={selected} effort={props.effort} onPickEffort={props.onPickEffort} />
                 </div>

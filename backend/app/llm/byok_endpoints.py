@@ -33,6 +33,7 @@ from app.config import catalog
 from app.config.catalog import _VERSION_SEGMENT, ModelEntry
 from app.config.settings import settings
 from app.db.repositories import ByokEndpointRepository
+from app.db.repositories.model_overrides import with_override
 from app.tools.ssrf import CheckedUrl, UnsafeUrlError, pinned_client, validate_url
 
 #: Tiền tố của model id và của `usage_events.provider` cho endpoint tự nhập.
@@ -215,9 +216,14 @@ async def resolve_model(
 
     Endpoint tra theo `user_id` trong SQL; của người khác, đã xoá, hay model
     không còn trong `models` của nó ⇒ `None` (⇒ `MODEL_UNKNOWN`).
+
+    Model catalog đi kèm ghi đè `vision` của admin (T-4.5, NQ-139) — đây là
+    chỗ chung của `POST …/messages`, `retry`, `PATCH` và worker, nên guard và
+    ngữ cảnh đọc cùng một cờ. Model endpoint không có ghi đè: `capabilities: []`.
     """
     if not model_id.startswith(BYOK_PREFIX):
-        return catalog.get_model(model_id)
+        model = catalog.get_model(model_id)
+        return None if model is None else await with_override(session, model)
     parsed = parse_model_id(model_id)
     if parsed is None:
         return None

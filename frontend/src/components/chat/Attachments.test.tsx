@@ -67,7 +67,7 @@ describe("AttachmentPreviews (T-4.7, dung san)", () => {
   });
 });
 
-describe("AttachButtonNoVision (T-4.5, ve san — P4 bat)", () => {
+describe("AttachButtonNoVision (T-4.5, da gan)", () => {
   it("6. mo nhu nut cho, tooltip noi LY DO thay cho 'Sap co', toi duoc bang Tab", async () => {
     const user = userEvent.setup();
     render(<AttachButtonNoVision />);
@@ -77,7 +77,7 @@ describe("AttachButtonNoVision (T-4.5, ve san — P4 bat)", () => {
     expect(button).toHaveFocus();
     expect(button).toHaveAttribute("aria-disabled", "true");
     expect(button).not.toBeDisabled();
-    expect(button).toHaveAttribute("data-planned", "T-4.5");
+    expect(button).not.toHaveAttribute("data-planned");
 
     const tooltip = await screen.findByRole("tooltip");
     expect(tooltip).toHaveTextContent(/^Model này không đọc được ảnh$/);

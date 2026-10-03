@@ -7,6 +7,7 @@ import { useTypewriter } from "../../lib/motion";
 import { useResource } from "../../features/admin/useResource";
 import { useChat } from "../../features/chat/useChat";
 import { endpointModels, isEndpointModel } from "../../features/models/byokModels";
+import { VISION } from "../../features/models/chips";
 import { ModelPicker } from "../../features/models/ModelPicker";
 import { useModels } from "../../features/models/useModels";
 import { QuotaNotice } from "../../features/quota/QuotaNotice";
@@ -176,6 +177,13 @@ export function ChatScreen() {
     model chu tron, duoi-phai; popover `side="top"` mo LEN tu day, duoi 640 px
     la sheet).
   */
+  /*
+    T-4.5 (S9) — model SE GUI co doc duoc anh khong, va hoi thoai dang mo da
+    co anh chua. Model chua biet (danh sach dang tai) ⇒ khong khoa gi.
+  */
+  const sendingModel = models.find((m) => m.id === chat.effectiveModel);
+  const noVision = sendingModel !== undefined && !sendingModel.capabilities.includes(VISION);
+  const conversationHasImages = tree.path.some((m) => m.attachments?.some((a) => a.kind === "image"));
   const modelPicker = (
     <ModelPicker
       models={models}
@@ -188,6 +196,7 @@ export function ChatScreen() {
       onPick={(id) => void selectModel(id)}
       onPickEffort={(level) => void selectEffort(level)}
       onOpen={modelCatalog.refreshIfStale}
+      conversationHasImages={conversationHasImages}
     />
   );
   /*
@@ -315,6 +324,7 @@ export function ChatScreen() {
             onStop={() => void chat.stop()}
             modelPicker={modelPicker}
             quotaBlocked={quotaBlocked}
+            noVision={noVision}
             quotaNotice={
               <QuotaNotice
                 readings={quota.readings}

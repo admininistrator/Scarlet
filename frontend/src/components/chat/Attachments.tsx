@@ -10,7 +10,7 @@ import { StaticIcon } from "../ui/Icon";
  * KH tham chieu: §24.2b·S12, S15 (P4) · ban T-HD2-v2 muc G6, G7.
  *
  * Chua co du lieu nao de chung hien: duong ong anh/tep la T-4.1–T-4.3, nut
- * dinh kem that la T-4.7, trang thai "model khong doc duoc anh" bat o T-4.5.
+ * dinh kem that la T-4.7. `AttachButtonNoVision` da gan o T-4.5 (`Composer`).
  * Chung co mat o day de P4 chi con viec GAN (mount trong hop nhap cua
  * `Composer`, tren textarea) chu khong ve lai o nhap — va co test render voi
  * fixture de hinh dang khong muc di trong luc cho.
@@ -130,7 +130,6 @@ export function AttachButtonNoVision() {
             type="button"
             aria-disabled="true"
             aria-label={t("composer.attach")}
-            data-planned="T-4.5"
             className="control-disabled inline-flex size-touch shrink-0 items-center justify-center rounded-md text-muted"
           >
             <StaticIcon icon={Paperclip} size={20} />

@@ -27,6 +27,7 @@ import { LIMIT_KEYS, STATUS_LABEL, type LimitKey } from "./usersView";
 const TARGET_USERS = "users";
 const TARGET_TIERS = "tiers";
 const TARGET_CATALOG = "catalog";
+const TARGET_MODELS = "model_overrides";
 
 export const ACTION_LABEL: Record<AuditActionName, TextKey> = {
   "user.approve": "admin.auditAction.user.approve",
@@ -35,6 +36,7 @@ export const ACTION_LABEL: Record<AuditActionName, TextKey> = {
   "user.update": "admin.auditAction.user.update",
   "tier.update": "admin.auditAction.tier.update",
   "catalog.reload": "admin.auditAction.catalog.reload",
+  "model.update": "admin.auditAction.model.update",
 };
 
 const FIELD_LABEL: Record<string, TextKey> = {
@@ -51,6 +53,7 @@ const FIELD_LABEL: Record<string, TextKey> = {
   allowed_model_tags: "admin.field.allowed_model_tags",
   models: "admin.field.models",
   version: "admin.field.version",
+  vision_override: "admin.field.vision_override",
 };
 
 export type AuditActor = { kind: "person"; name: string; email: string | null } | { kind: "unknown" };
@@ -59,6 +62,7 @@ export type AuditTarget =
   | { kind: "user"; name: string; email: string | null }
   | { kind: "deletedUser"; shortId: string }
   | { kind: "tier"; name: string }
+  | { kind: "model"; name: string }
   | { kind: "catalog" }
   | { kind: "none" };
 
@@ -102,6 +106,8 @@ export function describeTarget(entry: AuditEntry): AuditTarget {
       return { kind: "tier", name: entry.target_id ?? "" };
     case TARGET_CATALOG:
       return { kind: "catalog" };
+    case TARGET_MODELS:
+      return { kind: "model", name: entry.target_id ?? "" };
     default:
       return { kind: "none" };
   }
@@ -193,7 +199,8 @@ export function describeChanges(entry: AuditEntry): AuditChange[] {
       ];
     }
     case "user.update":
-    case "tier.update": {
+    case "tier.update":
+    case "model.update": {
       const changed = (details.changed ?? {}) as Record<string, { from?: unknown; to?: unknown }>;
       return Object.entries(changed).map(([field, change]) => ({
         label: fieldLabel(field),

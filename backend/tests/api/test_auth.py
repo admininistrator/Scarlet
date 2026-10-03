@@ -1285,6 +1285,7 @@ async def test_mismatched_origin_blocked_403(client: AsyncClient) -> None:
     assert resp.json()["error"]["code"] == ApiErrorCode.FORBIDDEN
 
 
+@pytest.mark.usefixtures("_db_for_tests")
 async def test_missing_origin_passes(client: AsyncClient) -> None:
     """Không có `Origin` (mọi client hiện có: `curl`, `httpx`, script) → không
     bị chặn — xem docstring `app/core/origin.py` cho lý do."""

@@ -116,6 +116,18 @@ def _restore_real_catalog() -> None:
     provider_health.forget_all()
 
 
+async def _no_overrides() -> dict[str, bool]:
+    return {}
+
+
+@pytest.fixture(autouse=True)
+def _no_vision_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-4.5 — `GET /models` đọc bảng `model_overrides`; `TestClient` chạy app
+    trên vòng lặp riêng nên không trỏ được vào session của test. Ca đo ghi đè
+    thật ở `tests/api/test_vision_guard.py` (client async, Postgres thật)."""
+    monkeypatch.setattr(models_api, "_vision_overrides", _no_overrides)
+
+
 @pytest.fixture(autouse=True)
 def _no_real_network_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """T-3.6 — `GET /models` nay hỏi `provider_health`, thứ gọi ra ngoài.

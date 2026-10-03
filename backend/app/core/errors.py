@@ -326,6 +326,10 @@ class ApiErrorCode(StrEnum):
     #: `400` — `attachment_ids` nhiều hơn `max_attachments` của tier (đọc lúc
     #: gọi). `details` mang `{max_attachments}`.
     ATTACHMENT_LIMIT_EXCEEDED = "ATTACHMENT_LIMIT_EXCEEDED"
+    #: `422` — câu hỏi của lượt sắp sinh có ảnh mà model (đã gộp ghi đè của
+    #: admin; model endpoint BYOK luôn không) thiếu `vision` (§9.4, S9, T-4.5).
+    #: Cả ba đường sinh chữ; `details` mang `{model_id}`. Không message nào được tạo.
+    MODEL_NO_VISION = "MODEL_NO_VISION"
 
 
 #: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ

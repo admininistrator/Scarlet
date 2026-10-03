@@ -158,6 +158,7 @@ from app.db.repositories import (
     MessageRepository,
     UserSettingsRepository,
 )
+from app.db.repositories.model_overrides import with_override
 from app.db.session import session_scope
 from app.llm import byok_endpoints
 from app.llm.credentials import resolve_key_source
@@ -469,6 +470,7 @@ async def _open_generation(
         ApiError 403 `PENDING_APPROVAL`: trạng thái chỉ chat được bằng khoá
             riêng (§11.1), mà lượt này lại đi bằng system key vì chưa có khoá
             dùng được cho provider của model đã chọn (B-140).
+        ApiError 422 `MODEL_NO_VISION`: xem `ensure_vision`.
         ApiError 404 `PARENT_NOT_FOUND`: `parent_id` không nằm trong hội thoại
             này (hoặc vừa bị xoá mềm). Với `POST .../messages` ca này không thể
             xảy ra — cha là message vừa ghi ở dòng trên — nhưng `retry` thì có:
@@ -480,6 +482,10 @@ async def _open_generation(
             trên nhánh system key.
         ApiError 503 `ENQUEUE_FAILED`: xem `_day_job`.
     """
+    # S9 (T-4.5) — trước mọi việc khác: ném ở đây là rollback cả message user
+    # caller vừa ghi, không job nào vào hàng đợi.
+    await ensure_vision(session, user_id=user_id, question_id=parent_id, model=model)
+
     # §10.5 — ai trả tiền cho lượt này. Hỏi TRƯỚC `create_message`: cả hai
     # phép kiểm ngay dưới đều có thể ném, và ném trước khi ghi nghĩa là không
     # có hàng nào phải rollback (cùng tinh thần với thứ tự quota/ghế bên dưới).
@@ -567,6 +573,36 @@ async def _open_generation(
     return NewGeneration(assistant_message_id=amid, quota_warning=warning)
 
 
+async def ensure_vision(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    question_id: uuid.UUID | None,
+    model: catalog.ModelEntry,
+) -> None:
+    """Guard vision của S9 (§9.4, T-4.5) — chung cho cả ba đường sinh chữ.
+
+    Chỉ xét câu hỏi **của lượt sắp sinh** (`question_id` = cha của message
+    assistant sắp tạo): ảnh ở lượt cũ đã thành một dòng chữ trong ngữ cảnh
+    (T-4.4b), nên đổi sang model không `vision` giữa hội thoại vẫn được. `model`
+    là model ĐÃ resolve (`_pick_model`): đã gộp ghi đè của admin, và model
+    endpoint BYOK dựng tại chỗ với `capabilities: []` — tra catalog riêng ở
+    đây thì model endpoint lọt (Cạm bẫy ②).
+
+    Raise:
+        ApiError 422 `MODEL_NO_VISION`.
+    """
+    if question_id is None or catalog.VISION_CAPABILITY in model.capabilities:
+        return
+    if await AttachmentRepository(session).has_image(user_id=user_id, message_id=question_id):
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ApiErrorCode.MODEL_NO_VISION,
+            f"model khong doc duoc anh: {model.id}",
+            details={"model_id": model.id},
+        )
+
+
 async def _pick_model(
     session: AsyncSession, user_id: uuid.UUID, *preferred: str | None
 ) -> catalog.ModelEntry:
@@ -612,7 +648,7 @@ async def _pick_model(
             ApiErrorCode.NO_MODEL_AVAILABLE,
             "khong co model nao dang bat trong catalog",
         )
-    return default
+    return await with_override(session, default)
 
 
 async def _pick_reasoning(

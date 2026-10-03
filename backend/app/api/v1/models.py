@@ -37,6 +37,10 @@ provider là lượt đo nền gần nhất (`provider_statuses()` là hàm đ�
 ở T-S.4: FE cần nó để biết khi nào hỏi lại lúc mở picker mà không phải chép
 một con số của `.env` vào `.tsx` (A3). Cả hai giống nhau ở mọi phần tử: response
 vẫn là một mảng để không đổi hình dạng §18.3 cho ba màn đang đọc nó.
+
+T-4.5 (NQ-139): `capabilities` đã gộp ghi đè `vision` của admin — **một** câu
+Postgres trên bảng `model_overrides`. NQ-113 nói về việc không chờ provider;
+câu này không chạm provider nào.
 """
 
 from __future__ import annotations
@@ -47,9 +51,18 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.config import catalog
-from app.config.catalog import Catalog, ModelEntry, PriceWindow, PricingMode, WindowedRates
+from app.config.catalog import (
+    Catalog,
+    ModelEntry,
+    PriceWindow,
+    PricingMode,
+    WindowedRates,
+    with_vision,
+)
 from app.config.settings import settings
 from app.core.provider_health import ProviderStatus, provider_statuses
+from app.db.repositories.model_overrides import ModelOverrideRepository
+from app.db.session import session_scope
 
 router = APIRouter(tags=["models"])
 
@@ -161,10 +174,17 @@ def _public_reasoning(m: ModelEntry) -> PublicReasoning | None:
     )
 
 
+async def _vision_overrides() -> dict[str, bool]:
+    """Ghi đè `vision` của admin (NQ-139) — `model_id → vision`."""
+    async with session_scope() as session:
+        return await ModelOverrideRepository(session).vision_map()
+
+
 @router.get("/models", response_model=list[PublicModel])
 async def list_models() -> list[PublicModel]:
     cat = catalog.get_catalog()
-    # Chỉ đọc bộ nhớ — không có `await` nào trong handler này (NQ-113).
+    vision = await _vision_overrides()
+    # Trạng thái provider chỉ đọc bộ nhớ — không chờ lượt đo nào (NQ-113).
     snapshot = provider_statuses()
     statuses = snapshot.statuses
     at = _now()
@@ -175,7 +195,7 @@ async def list_models() -> list[PublicModel]:
             display_name=m.display_name,
             provider=cat.display_provider(m),
             provider_id=m.provider if cat.providers[m.provider].user_visible else None,
-            capabilities=m.capabilities,
+            capabilities=with_vision(m, vision.get(m.id)).capabilities,
             context_window=m.context_window,
             max_output=m.max_output,
             default=m.default,

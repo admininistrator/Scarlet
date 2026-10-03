@@ -211,7 +211,9 @@ function TargetCell({ entry }: { entry: AuditEntry }) {
   const kindLabel =
     target.kind === "tier"
       ? t("admin.target.tier")
-      : target.kind === "catalog"
+      : target.kind === "model"
+        ? t("admin.target.model")
+        : target.kind === "catalog"
         ? t("admin.target.catalog")
         : target.kind === "deletedUser"
           ? t("admin.target.deletedUser")
@@ -225,7 +227,7 @@ function TargetCell({ entry }: { entry: AuditEntry }) {
           {target.email !== null && <span className="break-all text-xs text-muted">{target.email}</span>}
         </>
       )}
-      {target.kind === "tier" && (
+      {(target.kind === "tier" || target.kind === "model") && (
         <span className="rounded-sm border border-border-strong px-1.5 font-mono text-sm text-foreground">
           {target.name}
         </span>

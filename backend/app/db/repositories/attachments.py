@@ -9,11 +9,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import insert, literal, select, update
+from sqlalchemy import exists, insert, literal, select, update
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Attachment
+from app.db.models import Attachment, AttachmentKind
 
 #: Cột chép sang hàng mới khi sửa câu hỏi (T-4.4a) — mọi cột trừ `id` và
 #: `message_id`. `created_at` có mặt có chủ ý: B-57 / NQ-18.
@@ -69,6 +69,17 @@ class AttachmentRepository:
             .returning(Attachment.id)
         )
         return len((await self._session.execute(stmt)).all())
+
+    async def has_image(self, *, user_id: uuid.UUID, message_id: uuid.UUID) -> bool:
+        """Message có ảnh nào không — câu hỏi của guard vision (T-4.5, S9)."""
+        stmt = select(
+            exists().where(
+                Attachment.message_id == message_id,
+                Attachment.user_id == user_id,
+                Attachment.kind == AttachmentKind.IMAGE,
+            )
+        )
+        return bool((await self._session.execute(stmt)).scalar())
 
     async def list_for_messages(
         self, *, user_id: uuid.UUID, message_ids: Sequence[uuid.UUID]
