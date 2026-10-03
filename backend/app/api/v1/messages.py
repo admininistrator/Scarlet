@@ -127,7 +127,7 @@ from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.conversations import PathMessage
+from app.api.v1.conversations import PathMessage, with_attachments
 from app.config import catalog
 from app.config.settings import FEEDBACK_REASON_MAX_CHARS, settings
 from app.core.deps import (
@@ -152,6 +152,7 @@ from app.db.models import (
     UserStatus,
 )
 from app.db.repositories import (
+    AttachmentRepository,
     ConversationRepository,
     MessageNotInConversationError,
     MessageRepository,
@@ -161,6 +162,7 @@ from app.db.session import session_scope
 from app.llm import byok_endpoints
 from app.llm.credentials import resolve_key_source
 from app.quota.estimator import QuotaWarning, check_quota
+from app.quota.tiers import get_effective_limits
 from app.streaming.cancel import set_cancel_flag
 
 logger = logging.getLogger(__name__)
@@ -227,7 +229,8 @@ class NewGeneration:
 class CreateMessageRequest(BaseModel):
     """Body của §18.2. Ba trường, hai trong đó là tuỳ chọn có ý nghĩa riêng."""
 
-    #: Nội dung người dùng gõ. `min_length=1` vì một lượt rỗng không cho model
+    #: Nội dung người dùng gõ. Rỗng chỉ khi có `attachment_ids` (T-4.4a,
+    #: `_content_or_files`) — không tệp thì một lượt rỗng không cho model
     #: thêm thông tin nào mà vẫn tốn một lượt sinh — và `llm/context.py::_to_wire`
     #: sẽ lặng lẽ loại nó khỏi ngữ cảnh, để lại một hoá đơn không có câu hỏi.
     #:
@@ -238,7 +241,11 @@ class CreateMessageRequest(BaseModel):
     #: `messages`, tiêu một lượt `Idempotency-Key`, rồi mới nổ `CONTEXT_TOO_LARGE`
     #: ở `llm/context.py` giữa lượt sinh. Nay nó là `422` ở biên vào, chưa chạm
     #: Postgres.
-    content: str = Field(min_length=1, max_length=settings.MESSAGE_MAX_CHARS)
+    content: str = Field(max_length=settings.MESSAGE_MAX_CHARS)
+    #: Tệp đã tải lên (`POST /attachments`), chưa gắn message nào (T-4.4a).
+    #: Trần `max_attachments` của tier đọc trong handler, không `max_length`
+    #: ở đây (Cạm bẫy ⑤) — tier đổi được lúc chạy.
+    attachment_ids: list[uuid.UUID] = []
     #: C14 — lá client **đang thấy**. Vắng ⇒ dùng `active_leaf_id`; có (kể cả
     #: `null`) ⇒ dùng đúng giá trị đó. Xem docstring module.
     parent_id: uuid.UUID | None = None
@@ -251,6 +258,12 @@ class CreateMessageRequest(BaseModel):
     #: ở đây: câu hỏi đúng là "model NÀY có mức ấy không", không phải "chữ này
     #: có trong bộ từ vựng không".
     reasoning_effort: str | None = None
+
+    @model_validator(mode="after")
+    def _content_or_files(self) -> CreateMessageRequest:
+        if not self.content and not self.attachment_ids:
+            raise ValueError("content rong chi duoc khi co attachment_ids")
+        return self
 
 
 class CreateMessageResponse(BaseModel):
@@ -282,7 +295,8 @@ class CreateMessageResponse(BaseModel):
     responses={
         400: {
             "model": ErrorEnvelope,
-            "description": "model_id khong co trong catalog, hoac thieu Idempotency-Key",
+            "description": "model_id khong co trong catalog, thieu Idempotency-Key, "
+            "hoac qua max_attachments (ATTACHMENT_LIMIT_EXCEEDED)",
         },
         409: {"model": ErrorEnvelope, "description": "Mot request cung khoa dang chay (§11.4)"},
         429: {
@@ -291,7 +305,10 @@ class CreateMessageResponse(BaseModel):
             "MAX_CONCURRENT_STREAMS luot sinh chua khep (TOO_MANY_STREAMS) — §10.6, "
             "hoac het han muc chi tieu (QUOTA_EXCEEDED) — §10.2",
         },
-        404: {"model": ErrorEnvelope, "description": "Hoi thoai hoac parent_id khong thay"},
+        404: {
+            "model": ErrorEnvelope,
+            "description": "Hoi thoai, parent_id hoac tep (ATTACHMENT_NOT_FOUND) khong thay",
+        },
         503: {"model": ErrorEnvelope, "description": "Khong day duoc job vao hang doi"},
     },
 )
@@ -311,6 +328,19 @@ async def create_message(
     tồn tại — một luật gắn theo router chỉ giữ được tính chất "không ai quên"
     khi không endpoint nào phải nhắc tới nó.
     """
+    # Trùng id gửi hai lần là một tệp, không phải lỗi.
+    attachment_ids = list(dict.fromkeys(body.attachment_ids))
+    if attachment_ids:
+        # Trần đọc lúc gọi (T-4.4a Cạm bẫy ⑤), TRƯỚC mọi `INSERT`.
+        limit = (await get_effective_limits(user_id)).max_attachments
+        if len(attachment_ids) > limit:
+            raise ApiError(
+                status.HTTP_400_BAD_REQUEST,
+                ApiErrorCode.ATTACHMENT_LIMIT_EXCEEDED,
+                "qua so tep cho phep moi tin nhan",
+                details={"max_attachments": limit},
+            )
+
     async with session_scope() as session:
         conversations = ConversationRepository(session)
         messages = MessageRepository(session)
@@ -357,6 +387,19 @@ async def create_message(
         # detached, và đọc thuộc tính của nó ngoài session là chỗ sinh
         # `DetachedInstanceError` nếu có ai lỡ bật `expire_on_commit`.
         uid = user_message.id
+        # TRƯỚC `_open_generation` (job đẩy trong đó): một id hỏng ⇒ rollback,
+        # không message, không job. Của người khác / không có / đã gắn ⇒ cùng
+        # một câu (§20) — `attach` lọc `user_id` và `message_id IS NULL` trong SQL.
+        if attachment_ids:
+            attached = await AttachmentRepository(session).attach(
+                user_id=user_id, message_id=uid, attachment_ids=attachment_ids
+            )
+            if attached != len(attachment_ids):
+                raise ApiError(
+                    status.HTTP_404_NOT_FOUND,
+                    ApiErrorCode.ATTACHMENT_NOT_FOUND,
+                    "khong tim thay tep",
+                )
         generation = await _open_generation(
             session=session,
             messages=messages,
@@ -1089,6 +1132,10 @@ async def edit_message(
             ) from exc
 
         uid = user_message.id
+        # NQ-138 ③ — bản sửa mang theo tệp của bản gốc; bản gốc giữ nguyên.
+        await AttachmentRepository(session).copy_to_message(
+            user_id=user_id, source_id=original.id, target_id=uid
+        )
         generation = await _open_generation(
             session=session,
             messages=messages,
@@ -1139,10 +1186,14 @@ async def list_siblings(
         siblings = await messages.get_siblings(
             original.conversation_id, original.parent_id, user_id=user_id
         )
-        items = [
-            PathMessage.from_message(m, sibling_index=index, sibling_count=len(siblings))
-            for index, m in enumerate(siblings)
-        ]
+        items = await with_attachments(
+            session,
+            [
+                PathMessage.from_message(m, sibling_index=index, sibling_count=len(siblings))
+                for index, m in enumerate(siblings)
+            ],
+            user_id=user_id,
+        )
         mine = next(i for i in items if i.id == message_id)
         return SiblingsResponse(
             message_id=message_id,

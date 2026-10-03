@@ -319,7 +319,13 @@ class ApiErrorCode(StrEnum):
     #: giải nén. Không bao giờ để nó thành `500`.
     ATTACHMENT_IMAGE_INVALID = "ATTACHMENT_IMAGE_INVALID"
     #: `404` — không có, hoặc của người khác (§20: hai ca một câu trả lời).
+    #: `attachment_ids` của `POST …/messages` (T-4.4a) dùng lại mã này cho mọi
+    #: id "không dùng được" — thêm ca "đã gắn message khác" — để id của B và id
+    #: bịa ra trả lời trùng từng byte.
     ATTACHMENT_NOT_FOUND = "ATTACHMENT_NOT_FOUND"
+    #: `400` — `attachment_ids` nhiều hơn `max_attachments` của tier (đọc lúc
+    #: gọi). `details` mang `{max_attachments}`.
+    ATTACHMENT_LIMIT_EXCEEDED = "ATTACHMENT_LIMIT_EXCEEDED"
 
 
 #: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ

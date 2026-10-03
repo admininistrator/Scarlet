@@ -61,11 +61,13 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.attachments import AttachmentOut, attachment_out
 from app.config.settings import CONVERSATION_TITLE_MAX_CHARS, settings
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.db.models import Conversation, Message, MessageFeedback, MessageRole, MessageStatus
 from app.db.repositories import (
+    AttachmentRepository,
     ConversationRepository,
     MessageNotInConversationError,
     MessageRepository,
@@ -175,6 +177,9 @@ class PathMessage(BaseModel):
     #: một hội thoại. Hai nút sáng/tối chỉ cần một enum; ai vừa gõ lý do thì đã
     #: nhận lại nguyên văn trong response của chính `POST .../feedback`.
     feedback: MessageFeedback | None
+    #: Tệp gửi kèm (T-4.4a), thứ tự tải lên. Điền bởi `with_attachments` —
+    #: một câu cho cả danh sách, không một câu mỗi message.
+    attachments: list[AttachmentOut] = []
 
     @classmethod
     def from_path_node(cls, node: PathNode) -> PathMessage:
@@ -562,7 +567,26 @@ async def _path(
     if conversation.active_leaf_id is None:
         return []
     nodes = await MessageRepository(session).get_path(conversation.active_leaf_id, user_id=user_id)
-    return [PathMessage.from_path_node(node) for node in nodes]
+    return await with_attachments(
+        session, [PathMessage.from_path_node(node) for node in nodes], user_id=user_id
+    )
+
+
+async def with_attachments(
+    session: AsyncSession, items: list[PathMessage], *, user_id: uuid.UUID
+) -> list[PathMessage]:
+    """Điền `attachments` cho cả danh sách bằng MỘT truy vấn (T-4.4a Cạm bẫy ④)."""
+    if not items:
+        return items
+    rows = await AttachmentRepository(session).list_for_messages(
+        user_id=user_id, message_ids=[item.id for item in items]
+    )
+    by_message: dict[uuid.UUID | None, list[AttachmentOut]] = {}
+    for row in rows:
+        by_message.setdefault(row.message_id, []).append(attachment_out(row))
+    for item in items:
+        item.attachments = by_message.get(item.id, [])
+    return items
 
 
 async def _check_model(session: AsyncSession, user_id: uuid.UUID, model_id: str | None) -> None:

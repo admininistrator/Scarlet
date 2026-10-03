@@ -72,7 +72,7 @@ class AttachmentOut(BaseModel):
     url: str | None
 
 
-def _out(row: Attachment) -> AttachmentOut:
+def attachment_out(row: Attachment) -> AttachmentOut:
     return AttachmentOut(
         id=row.id,
         kind=row.kind,
@@ -197,7 +197,7 @@ async def upload_attachment(
             width=width,
             height=height,
         )
-        out = _out(row)
+        out = attachment_out(row)
         await session.commit()
     return out
 
@@ -221,4 +221,4 @@ async def get_attachment(
             ApiErrorCode.ATTACHMENT_NOT_FOUND,
             "khong tim thay tep",
         )
-    return _out(row)
+    return attachment_out(row)

@@ -485,6 +485,18 @@ MATRIX: tuple[CaIDOR, ...] = (
         body=lambda target: {"content": "noi vao cay cua B", "parent_id": str(target)},
         error_code=ApiErrorCode.PARENT_NOT_FOUND,
     ),
+    # T-4.4a (B-181): tệp chưa gắn của B trong thân request. Thủng ⇒ `202` và
+    # tệp của B thành của message A — ảnh của B vào ngữ cảnh A trả tiền đọc.
+    CaIDOR(
+        name="POST /conversations/{cua-A}/messages voi attachment_ids cua B",
+        resource="attachment",
+        route=f"{API}/conversations/{{conversation_id}}/messages",
+        method="POST",
+        target="attachment",
+        path=lambda _target, of_a: f"{API}/conversations/{of_a}/messages",
+        body=lambda target: {"content": "gan tep cua B", "attachment_ids": [str(target)]},
+        error_code=ApiErrorCode.ATTACHMENT_NOT_FOUND,
+    ),
     # ── message: id của B nằm thẳng trong đường dẫn ──
     CaIDOR(
         name="GET /messages/{cua-B}/stream",
@@ -547,7 +559,7 @@ MATRIX: tuple[CaIDOR, ...] = (
         error_code=ApiErrorCode.MESSAGE_NOT_FOUND,
     ),
     # ── attachment (T-4.2, B-181). Ô `attachment_ids` trong thân
-    # `POST …/messages` thuộc T-4.4a. `404` ở đây không đóng URL MinIO —
+    # `POST …/messages` ở nhóm id-trong-BODY phía trên (T-4.4a). `404` ở đây không đóng URL MinIO —
     # quyền ở tầng chữ ký là TTL + phạm vi khoá (T-4.1). ──
     CaIDOR(
         name="GET /attachments/{cua-B}",
@@ -679,6 +691,11 @@ async def test_after_whole_matrix_Bs_data_is_intact(
     assert so_message == 2, "A da chen them message vao cay cua B"
     assert content == ["cau hoi cua B", "cau tra loi cho B"]
     assert fake_arq.pushed == [], "mot job da vao hang doi cho mot request tra 404"
+    async with session_factory() as session:
+        attachment = await AttachmentRepository(session).get(
+            user_id=b.user_id, attachment_id=b.attachment
+        )
+    assert attachment is not None and attachment.message_id is None, "A da gan tep cua B"
 
 
 # ═══════════ 3. Không rò qua DANH SÁCH — chỗ không có id để mà 404 ══════════
