@@ -65,6 +65,7 @@ from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiErrorCode
 from app.core.security import hash_password
 from app.db.models import (
+    AttachmentKind,
     Conversation,
     Message,
     MessageRole,
@@ -74,7 +75,11 @@ from app.db.models import (
     UserRole,
     UserStatus,
 )
-from app.db.repositories import ConversationRepository, MessageRepository
+from app.db.repositories import (
+    AttachmentRepository,
+    ConversationRepository,
+    MessageRepository,
+)
 from app.db.repositories.provider_keys import ProviderKeyRepository
 from app.db.repositories.users import UserRepository
 from app.llm import byok_verify as verify_mod
@@ -254,6 +259,8 @@ class Dataset:
     #: `role='assistant'`, `status='completed'` — đích của `retry`/`cancel`.
     message_assistant: uuid.UUID
     provider: str
+    #: Một hàng `attachments` (T-4.2, B-181) — object MinIO không cần có thật.
+    attachment: uuid.UUID
 
 
 def provider_byok() -> str:
@@ -314,6 +321,14 @@ async def _build_data(
             masked=mask_secret(key),
             verified_at=None,
         )
+        attachment = await AttachmentRepository(session).create(
+            user_id=user_id,
+            kind=AttachmentKind.FILE,
+            mime_type="application/pdf",
+            original_name=f"tep cua {label}.pdf",
+            size_bytes=1,
+            storage_key=f"{user_id}/idor.pdf",
+        )
         await session.commit()
         return Dataset(
             user_id=user_id,
@@ -321,6 +336,7 @@ async def _build_data(
             message_user=question.id,
             message_assistant=answer.id,
             provider=provider,
+            attachment=attachment.id,
         )
 
 
@@ -383,6 +399,7 @@ _TARGETS: dict[str, Callable[[Dataset], uuid.UUID]] = {
     "conversation": lambda d: d.conversation_id,
     "message_user": lambda d: d.message_user,
     "message_assistant": lambda d: d.message_assistant,
+    "attachment": lambda d: d.attachment,
 }
 
 
@@ -528,6 +545,19 @@ MATRIX: tuple[CaIDOR, ...] = (
         path=lambda target, _of_a: f"{API}/messages/{target}/siblings",
         body=None,
         error_code=ApiErrorCode.MESSAGE_NOT_FOUND,
+    ),
+    # ── attachment (T-4.2, B-181). Ô `attachment_ids` trong thân
+    # `POST …/messages` thuộc T-4.4a. `404` ở đây không đóng URL MinIO —
+    # quyền ở tầng chữ ký là TTL + phạm vi khoá (T-4.1). ──
+    CaIDOR(
+        name="GET /attachments/{cua-B}",
+        resource="attachment",
+        route=f"{API}/attachments/{{attachment_id}}",
+        method="GET",
+        target="attachment",
+        path=lambda target, _of_a: f"{API}/attachments/{target}",
+        body=None,
+        error_code=ApiErrorCode.ATTACHMENT_NOT_FOUND,
     ),
 )
 
@@ -754,6 +784,11 @@ async def test_A_writing_new_key_does_not_overwrite_Bs_row(
 # ═════════ 5. Ma trận phải phủ HẾT — "quên một endpoint là đủ" (§20) ════════
 
 
+#: Tham số đường dẫn mang id của một tài nguyên có chủ. `{attachment_id}` từ
+#: T-4.2 (B-181) — thiếu nó thì route mới lọt qua phép đếm dưới đây mà vẫn xanh.
+_ID_PARAMS = ("{conversation_id}", "{message_id}", "{attachment_id}")
+
+
 async def test_matrix_covers_every_route_with_id_in_path() -> None:
     """Đọc surface OpenAPI THẬT và bắt `MATRIX` phủ hết.
 
@@ -775,7 +810,7 @@ async def test_matrix_covers_every_route_with_id_in_path() -> None:
     """
     in_app: set[tuple[str, str]] = set()
     for path, methods in app.openapi()["paths"].items():
-        if "{conversation_id}" not in path and "{message_id}" not in path:
+        if not any(param in path for param in _ID_PARAMS):
             continue
         for method in methods:
             in_app.add((method.upper(), path))

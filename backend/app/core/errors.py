@@ -308,6 +308,19 @@ class ApiErrorCode(StrEnum):
     #: không nói message ấy có thật ở đâu khác hay không.
     LEAF_NOT_FOUND = "LEAF_NOT_FOUND"
 
+    # ── tệp đính kèm (§15.2, T-4.2) ──
+    #: `413` — tệp vượt `max_upload_mb` của tier (đọc lúc gọi, B-153). Trần của
+    #: Nginx (`client_max_body_size`) trả trang HTML của nó, không mã này.
+    ATTACHMENT_TOO_LARGE = "ATTACHMENT_TOO_LARGE"
+    #: `415` — MIME nhận dạng từ byte nằm ngoài `ALLOWED_UPLOAD_MIME` (SVG,
+    #: HTML, EXE đổi tên…), hoặc zip không phải DOCX.
+    ATTACHMENT_TYPE_UNSUPPORTED = "ATTACHMENT_TYPE_UNSUPPORTED"
+    #: `422` — đúng loại ảnh nhưng Pillow không đọc được: hỏng, cắt cụt, bom
+    #: giải nén. Không bao giờ để nó thành `500`.
+    ATTACHMENT_IMAGE_INVALID = "ATTACHMENT_IMAGE_INVALID"
+    #: `404` — không có, hoặc của người khác (§20: hai ca một câu trả lời).
+    ATTACHMENT_NOT_FOUND = "ATTACHMENT_NOT_FOUND"
+
 
 #: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ
 #: là lưới đỡ: mọi chỗ raise trong `app/` nên dùng `ApiError` với một mã nói

@@ -230,6 +230,7 @@ from app.db.repositories.user_settings import UserSettingsRepository
 from app.db.repositories.users import UserRepository
 from app.db.session import session_scope
 from app.quota.snapshot import WindowSnapshot, read_snapshot
+from app.quota.tiers import get_effective_limits
 
 logger = logging.getLogger(__name__)
 
@@ -528,9 +529,10 @@ class UserOut(BaseModel):
 class ProfileOut(UserOut):
     """`GET /auth/me` — *"User + tier + quota còn lại + trạng thái"* (§18.1).
 
-    Rộng hơn `UserOut` đúng tám trường (hai của T-3.0, `quota_warn_remaining_pct`
+    Rộng hơn `UserOut` đúng mười một trường (hai của T-3.0, `quota_warn_remaining_pct`
     của T-3.11, ba của T-S.5, `limits_cache_ttl_s` của T-S.11, `stream_ttl_s`
-    của T-S.13), và đứng riêng vì chúng thuộc về thanh quota, ô nhập, sidebar
+    của T-S.13, ba trần upload của T-4.2), và đứng riêng vì chúng thuộc về
+    thanh quota, ô nhập, sidebar
     và trang Cài đặt — còn `avatar_color`/`reasoning_prefs` là một lượt
     đọc `user_settings`, và `quota` thì **không** miễn phí: `quota` là hai
     lượt đọc Redis (và có thể một lượt dựng lại từ Postgres, RR-7).
@@ -575,6 +577,12 @@ class ProfileOut(UserOut):
     #: catalog **hiện tại**: cặp hết hợp lệ vì catalog vừa sửa bị bỏ qua, không
     #: lỗi — xem `app/core/user_prefs.py`.
     reasoning_prefs: dict[str, str]
+    #: Ba trần upload (T-4.2) — FE T-4.7 chặn **trước** khi tải lên (UC-06
+    #: dòng 3). Hai trần đầu là hạn mức tier đã gộp ghi đè (§10.4), cùng con
+    #: số `POST /attachments` đọc; cái cuối là `ALLOWED_UPLOAD_MIME` (§15.2).
+    max_upload_mb: int
+    max_attachments: int
+    allowed_upload_mime: list[str]
 
 
 def _set_session_cookie(response: Response, user: UserOut) -> None:
@@ -1111,6 +1119,7 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> ProfileO
         profile = UserOut.model_validate(user)
         prefs = read_prefs(await UserSettingsRepository(session).get_prefs(user_id))
         quota = await read_snapshot(session, user_id=user_id)
+    limits = await get_effective_limits(user_id)
 
     return ProfileOut(
         **profile.model_dump(),
@@ -1122,4 +1131,7 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> ProfileO
         display_name_max_chars=settings.DISPLAY_NAME_MAX_CHARS,
         avatar_color=prefs.avatar_color,
         reasoning_prefs=prefs.reasoning,
+        max_upload_mb=limits.max_upload_mb,
+        max_attachments=limits.max_attachments,
+        allowed_upload_mime=list(settings.allowed_upload_mime),
     )

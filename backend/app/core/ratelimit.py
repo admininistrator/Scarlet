@@ -317,10 +317,9 @@ def auth_limit(group: str) -> Callable[[Request], Awaitable[None]]:
 RL_USER_PREFIX = "rl:user:"
 
 #: Nhóm route của §10.6. `auth` không có mặt ở đây — nó chạy trên trục IP
-#: (`gioi_han_auth`, NQ-43); `upload` chưa có endpoint nào tới Phase 4 (B-148).
-#: Khai một nhóm rỗng chỉ để cho đủ bảng là dựng một nút vặn không ai xoay
-#: được, và là đúng thứ A10 gọi tên.
+#: (`gioi_han_auth`, NQ-43); `upload` có từ T-4.2 (B-148).
 GROUP_CHAT = "chat"
+GROUP_UPLOAD = "upload"
 
 #: Ba header của §10.6 ("header `X-RateLimit-*` + `Retry-After`").
 #: `X-RateLimit-Reset` tính bằng **số giây còn lại tới khi xô đầy lại**, không
@@ -538,6 +537,11 @@ def per_user_limit(group: str, *, read_limit: Callable[[], int]) -> Callable[...
 def chat_limit() -> Callable[..., Awaitable[None]]:
     """20/phút theo user cho ba route SINH CHỮ (§10.6, nhóm `chat`)."""
     return per_user_limit(GROUP_CHAT, read_limit=lambda: settings.RATE_LIMIT_CHAT_PER_MIN)
+
+
+def upload_limit() -> Callable[..., Awaitable[None]]:
+    """10/phút theo user cho `POST /attachments` (§10.6, nhóm `upload`, B-148)."""
+    return per_user_limit(GROUP_UPLOAD, read_limit=lambda: settings.RATE_LIMIT_UPLOAD_PER_MIN)
 
 
 # ╔══════════════════════════════════════════════════════════════════════════╗

@@ -187,9 +187,11 @@ class Settings(BaseSettings):
     #: một *giới hạn* nên nó ở đây (A3, §19.2 L4).
     #:
     #: Nhóm `auth` của cùng hàng đó đã có mặt ở `RATE_LIMIT_AUTH_IP_PER_MIN`
-    #: (trục IP, NQ-43 — route `/auth/*` không có user để đếm theo); nhóm
-    #: `upload` chưa có endpoint nào tới Phase 4, nên chưa có biến (B-148).
+    #: (trục IP, NQ-43 — route `/auth/*` không có user để đếm theo).
     RATE_LIMIT_CHAT_PER_MIN: int = Field(default=20, gt=0)
+    #: Nhóm `upload` của cùng hàng §10.6 (10/phút) — `POST /attachments`
+    #: (T-4.2, B-148). Cùng token bucket với `chat`.
+    RATE_LIMIT_UPLOAD_PER_MIN: int = Field(default=10, gt=0)
     #: Ngưỡng điểm zxcvbn (0–4, xem `app/core/security.py`) để coi một mật
     #: khẩu là "quá phổ biến" (§11.6 cho phép `zxcvbn` hoặc danh sách 10k
     #: top; chọn zxcvbn vì nó mang sẵn tập tần suất mật khẩu rò rỉ thật và
@@ -473,7 +475,8 @@ class Settings(BaseSettings):
     # ═══ Upload (§15.2) ═══
     ALLOWED_UPLOAD_MIME: str = (
         "image/png,image/jpeg,image/webp,image/gif,application/pdf,"
-        "text/plain,text/markdown,"
+        # Không `text/markdown`: libmagic trả `text/plain` cho `.md` (NQ-138 ②).
+        "text/plain,"
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
     PRESIGN_TTL_S: int = Field(default=300, gt=0)
