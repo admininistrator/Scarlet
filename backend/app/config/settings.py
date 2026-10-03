@@ -457,6 +457,11 @@ class Settings(BaseSettings):
     VISION_MAX_BYTES: int = Field(default=3_500_000, gt=0)
     MAX_PDF_PAGES_VISION: int = Field(default=10, gt=0)
     RESEND_IMAGES_IN_HISTORY: bool = False
+    #: Token ước lượng cho MỘT ảnh được gửi (NQ-138 ④, T-4.4b) — cộng vào ngân
+    #: sách §9.6 và dự toán §10.2. Một con số chứ không công thức: §15.3 không
+    #: có công thức, mỗi provider tính một kiểu. Mặc định = số đo `claude-haiku`
+    #: (ảnh cạnh dài 1568 sau T-4.3) làm tròn lên trăm. Ngoài Phụ lục B (B-348).
+    VISION_TOKENS_PER_IMAGE: int = Field(default=1600, gt=0)
 
     # ═══ Web tools (§12) ═══
     TAVILY_API_KEY: SecretStr = SecretStr("")

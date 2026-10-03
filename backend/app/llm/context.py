@@ -43,7 +43,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -53,9 +53,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.catalog import ModelEntry
 from app.config.settings import settings
-from app.db.models import Message, MessageRole, MessageStatus
+from app.db.models import Attachment, AttachmentKind, Message, MessageRole, MessageStatus
 from app.db.repositories import MessageRepository
-from app.llm.tokens import count_message, count_messages
+from app.db.repositories.attachments import AttachmentRepository
+from app.llm.tokens import IMAGE_PART_TYPE, count_message, count_messages
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,12 @@ SYSTEM_PROMPT_TTL_S = 60
 #: `cancelled` thì CÓ vào: §7.5 lưu phần đã sinh, người dùng đã đọc nó trên màn
 #: hình, nên bỏ đi sẽ làm model và người dùng nhìn hai lịch sử khác nhau.
 USABLE_STATUSES = frozenset({MessageStatus.COMPLETED, MessageStatus.CANCELLED})
+
+#: Cờ capability của catalog (§9.2, §9.4) cho phép gửi ảnh.
+VISION_CAPABILITY = "vision"
+
+#: Dòng chữ thay cho ảnh ở các lượt cũ (C33, T-4.4b).
+IMAGE_PLACEHOLDER = "[ảnh: {name}]"
 
 
 class ContextError(RuntimeError):
@@ -228,12 +235,15 @@ async def build(
         BudgetTooSmallError: ngân sách không chứa nổi system prompt + khối
             message mới nhất.
     """
-    path = await MessageRepository(session).get_path(leaf_id, user_id=user_id)
+    path = [
+        node.message for node in await MessageRepository(session).get_path(leaf_id, user_id=user_id)
+    ]
 
     system_message = _system_message(model_meta)
     # Ưu tiên thứ hai của §9.6 — skill descriptions — chèn vào đây ở Phase 7.
 
-    blocks = _atomic_blocks(node.message for node in path)
+    images = await _images(session, path, user_id=user_id)
+    blocks = _atomic_blocks(path, images=images, send_images=_image_turns(path, model_meta))
     if not blocks:
         raise EmptyPathError(leaf_id)
 
@@ -311,7 +321,60 @@ def _fit(
     return kept
 
 
-def _atomic_blocks(messages: Iterable[Message]) -> list[list[dict[str, Any]]]:
+async def _images(
+    session: AsyncSession, path: list[Message], *, user_id: uuid.UUID
+) -> dict[uuid.UUID, list[Attachment]]:
+    """Ảnh của mọi message user trên đường đi — MỘT câu, chỉ Postgres (T-4.4b).
+
+    Byte KHÔNG nạp ở đây (Cạm bẫy ① T-4.4b): `build()` chạy cả trong
+    `POST …/messages` qua `check_quota`, nên MinIO + Pillow là việc của worker.
+    """
+    ids = [m.id for m in path if m.role is MessageRole.USER]
+    if not ids:
+        return {}
+    rows = await AttachmentRepository(session).list_for_messages(user_id=user_id, message_ids=ids)
+    images: dict[uuid.UUID, list[Attachment]] = {}
+    for row in rows:
+        if row.kind == AttachmentKind.IMAGE and row.message_id is not None:
+            images.setdefault(row.message_id, []).append(row)
+    return images
+
+
+def _image_turns(path: list[Message], model_meta: ModelEntry) -> Callable[[Message], bool]:
+    """Message nào được gửi ẢNH thật — phần còn lại thay ảnh bằng một dòng chữ (C33).
+
+    Chỉ message user **cuối** đường đi, tức câu hỏi của lượt đang sinh (cha của
+    lá `queued`, kể cả khi thử lại). `RESEND_IMAGES_IN_HISTORY` đọc LÚC GỌI.
+    Model không `vision` ⇒ không message nào (lưới thứ hai; chặn cứng là T-4.5).
+    """
+    if VISION_CAPABILITY not in model_meta.capabilities:
+        return lambda _message: False
+    if settings.RESEND_IMAGES_IN_HISTORY:
+        return lambda _message: True
+    current = next((m.id for m in reversed(path) if m.role is MessageRole.USER), None)
+    return lambda message: message.id == current
+
+
+def image_ref(attachment: Attachment) -> dict[str, Any]:
+    """Phần `image_url` dạng THAM CHIẾU — worker thay bằng `data:` URL trước khi gửi.
+
+    Không có khoá `image_url`: tham chiếu lọt tới provider là `400`, không phải
+    một ảnh rỗng im lặng.
+    """
+    return {
+        "type": IMAGE_PART_TYPE,
+        "attachment_id": str(attachment.id),
+        "storage_key": attachment.storage_key,
+        "mime_type": attachment.mime_type,
+    }
+
+
+def _atomic_blocks(
+    messages: Iterable[Message],
+    *,
+    images: Mapping[uuid.UUID, list[Attachment]] | None = None,
+    send_images: Callable[[Message], bool] = lambda _message: False,
+) -> list[list[dict[str, Any]]]:
     """Gom đường đi thành các KHỐI không được cắt lẻ (C15).
 
     Một khối là một trong hai thứ:
@@ -337,7 +400,11 @@ def _atomic_blocks(messages: Iterable[Message]) -> list[list[dict[str, Any]]]:
     pending: set[str] = set()
 
     for message in messages:
-        wire = _to_wire(message)
+        wire = _to_wire(
+            message,
+            images=(images or {}).get(message.id, ()),
+            send_images=send_images(message),
+        )
         if wire is None:
             # Message chưa xong / đã xoá / rỗng. Nó KHÔNG đóng khối đang mở:
             # một message hỏng chen giữa `tool_call` và `tool_result` của nó
@@ -402,7 +469,9 @@ def _close_block(block: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
     return [stripped] if stripped["content"] else None
 
 
-def _to_wire(message: Message) -> dict[str, Any] | None:
+def _to_wire(
+    message: Message, *, images: Sequence[Attachment] = (), send_images: bool = False
+) -> dict[str, Any] | None:
     """Đổi một `Message` của DB thành một message trên dây, hoặc `None` nếu bỏ.
 
     `None` khi: trạng thái chưa có nội dung chốt (`USABLE_STATUSES`), hoặc
@@ -422,11 +491,23 @@ def _to_wire(message: Message) -> dict[str, Any] | None:
     (T-1.6) và nó ghi bằng `ToolCall.to_wire()` của `app/llm/client.py`, tức
     hình dạng này chỉ được viết ra ở đúng một chỗ trong cả backend. `arguments`
     giữ nguyên chuỗi provider đã gửi (điểm 3+4 ở docstring của `client.py`).
+
+    **Ảnh (T-4.4b, C33).** `send_images` ⇒ `content` nhiều phần: chữ (nếu có)
+    rồi mỗi ảnh một `image_ref`. Không ⇒ mỗi ảnh một dòng `[ảnh: <tên>]` nối vào
+    chữ. Message chỉ có ảnh vì thế không bao giờ rỗng (T-4.4a Cạm bẫy ③).
     """
     if message.status not in USABLE_STATUSES:
         return None
 
-    wire: dict[str, Any] = {"role": message.role.value, "content": message.content}
+    content: str | list[dict[str, Any]] = message.content
+    if images and send_images:
+        text = [{"type": "text", "text": message.content}] if message.content else []
+        content = [*text, *map(image_ref, images)]
+    elif images:
+        lines = [IMAGE_PLACEHOLDER.format(name=image.original_name) for image in images]
+        content = "\n".join([message.content, *lines] if message.content else lines)
+
+    wire: dict[str, Any] = {"role": message.role.value, "content": content}
 
     if message.role is MessageRole.ASSISTANT and message.tool_calls:
         wire["tool_calls"] = message.tool_calls

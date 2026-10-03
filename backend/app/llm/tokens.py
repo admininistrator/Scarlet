@@ -4,8 +4,9 @@ KH tham chiếu: §9.6, C15, C40 · CLAUDE.md A3, §19.2 L4 · NQ-20.
 
 Module này chỉ làm **một** việc: đổi một danh sách message đúng hình dạng dây
 OpenAI thành một con số. Nó không biết ngân sách là bao nhiêu (`context.py`
-biết), không biết tiền (§10.2 biết), và không đọc `Settings` — nhờ vậy nó
-import được ở bất cứ đâu, kể cả trong bước build của Docker image.
+biết), không biết tiền (§10.2 biết), và không đọc `Settings` lúc import — nhờ
+vậy nó import được ở bất cứ đâu, kể cả trong bước build của Docker image. Ngoại
+lệ duy nhất là token ảnh (T-4.4b), đọc muộn ngay khi gặp phần `image_url`.
 
 **Hai chỗ dùng, đã chốt ở NQ-20:**
 
@@ -63,6 +64,9 @@ TOKENS_PER_NAME = 1
 #: Mọi request đều được mồi sẵn `<|start|>assistant<|message|>` trước khi model
 #: viết chữ đầu tiên. Cộng đúng một lần cho cả danh sách, không phải mỗi message.
 TOKENS_REPLY_PRIMING = 3
+
+#: `type` của phần ảnh trong `content` nhiều phần (OpenAI Chat Completions).
+IMAGE_PART_TYPE = "image_url"
 
 #: Các khoá của một message trên dây mà giá trị là chuỗi và phải đếm.
 _STRING_FIELDS = ("role", "name", "tool_call_id")
@@ -161,10 +165,10 @@ def _count_content(content: Any, *, model_id: str) -> int:
     """Đếm `content`, chịu được cả hai hình dạng mà OpenAI cho phép.
 
     Chuỗi là dạng của Phase 1. Dạng danh sách các phần (`[{"type":"text",…},
-    {"type":"image_url",…}]`) tới ở Phase 4 cùng vision; đếm sẵn phần văn bản
-    của nó ở đây để ngày đó không có một số 0 im lặng. Token của **ảnh** tính
-    theo công thức riêng của §15.3 và **không** thuộc module này — T-4.x sẽ cộng
-    thêm, chỗ này chỉ chịu trách nhiệm không nói dối về phần chữ.
+    {"type":"image_url",…}]`) là message có ảnh (T-4.4b): phần chữ đếm bằng
+    `tiktoken`, mỗi phần `image_url` cộng đúng `VISION_TOKENS_PER_IMAGE` (NQ-138
+    ④ — §15.3 không có công thức, mỗi provider tính một kiểu). Ảnh đã thay bằng
+    dòng chữ ở lượt cũ (C33) là chữ, không phải phần ảnh, nên không cộng.
     """
     if isinstance(content, str):
         return count_text(content, model_id=model_id)
@@ -175,5 +179,11 @@ def _count_content(content: Any, *, model_id: str) -> int:
                 text = part.get("text")
                 if isinstance(text, str):
                     total += count_text(text, model_id=model_id)
+                if part.get("type") == IMAGE_PART_TYPE:
+                    # Import muộn: module này phải import được ở bước build
+                    # image, nơi `Settings` thiếu biến và nổ (A4).
+                    from app.config.settings import settings
+
+                    total += settings.VISION_TOKENS_PER_IMAGE
         return total
     return 0

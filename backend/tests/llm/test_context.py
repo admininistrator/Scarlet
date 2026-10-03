@@ -29,12 +29,15 @@ from typing import Any
 
 import pytest
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import catalog
 from app.config.catalog import ModelEntry
 from app.config.settings import settings
+from app.core import storage
 from app.db.models import Conversation, Message, MessageRole, MessageStatus
 from app.db.repositories import ConversationRepository, MessageRepository
+from app.db.repositories.attachments import AttachmentRepository
 from app.llm import context
 from app.llm.context import (
     BudgetTooSmallError,
@@ -44,6 +47,7 @@ from app.llm.context import (
     token_budget,
 )
 from app.llm.tokens import count_message, count_messages
+from app.quota.estimator import check_quota
 
 #: Model giả lập. Không phải model OpenAI ⇒ đi đúng nhánh "xấp xỉ" của §9.6.
 MODEL_ID = "model-thu-nghiem"
@@ -68,9 +72,13 @@ LONG_TEXT = (
 
 
 def _model(
-    *, context_window: int = 128_000, max_output: int = 4096, model_id: str = MODEL_ID
+    *,
+    context_window: int = 128_000,
+    max_output: int = 4096,
+    model_id: str = MODEL_ID,
+    capabilities: list[str] | None = None,
 ) -> ModelEntry:
-    """`model_meta` tối thiểu — chỉ ba trường mà §9.6 thực sự đọc."""
+    """`model_meta` tối thiểu — ba trường của §9.6, cộng `capabilities` (T-4.4b)."""
     return ModelEntry(
         id=model_id,
         display_name=DISPLAY_NAME,
@@ -79,6 +87,7 @@ def _model(
         context_window=context_window,
         max_output=max_output,
         pricing_mode="unmetered",
+        capabilities=capabilities or [],
     )
 
 
@@ -638,3 +647,224 @@ async def test_tool_call_without_result_drops_tool_calls_keeps_text(
     _assert_no_orphans(result)
     assert _contents(result[1:]) == ["hỏi", "Để tôi tra cứu đã.", "hỏi tiếp"]
     assert not [m for m in result if m.get("tool_calls")]
+
+
+# ───────────────────────── ảnh vào ngữ cảnh (T-4.4b, C33) ─────────────────────────
+
+VISION = ["vision"]
+IMAGE_NAME = "ma-so.png"
+QUESTION = "Ảnh này ghi mã gì?"
+
+
+def _vision_model() -> ModelEntry:
+    return _model(capabilities=VISION)
+
+
+async def _attach(session: AsyncSession, user_id: uuid.UUID, message: Message) -> None:
+    await AttachmentRepository(session).create(
+        user_id=user_id,
+        message_id=message.id,
+        kind="image",
+        mime_type="image/png",
+        original_name=IMAGE_NAME,
+        size_bytes=1234,
+        storage_key=f"{user_id}/2026/10/{uuid.uuid4()}.png",
+        width=64,
+        height=48,
+    )
+
+
+async def _image_turns(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    turns: int,
+    with_image: bool = True,
+    first_content: str = QUESTION,
+) -> Message:
+    """`turns` lượt; lượt 1 có ảnh. Trả lá `queued` của lượt cuối — đúng §7.2 ①."""
+    conversation = await _conversation(session, user_id)
+    parent: Message | None = None
+    for turn in range(1, turns + 1):
+        question = await _add(
+            session,
+            conversation,
+            user_id,
+            role=MessageRole.USER,
+            parent=parent,
+            content=first_content if turn == 1 else f"câu hỏi lượt {turn}",
+            status=MessageStatus.COMPLETED,
+        )
+        if turn == 1 and with_image:
+            await _attach(session, user_id, question)
+        last = turn == turns
+        parent = await _add(
+            session,
+            conversation,
+            user_id,
+            role=MessageRole.ASSISTANT,
+            parent=question,
+            content="" if last else f"trả lời lượt {turn}",
+            status=MessageStatus.QUEUED if last else MessageStatus.COMPLETED,
+        )
+    assert parent is not None
+    return parent
+
+
+def _image_parts(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        part
+        for m in messages
+        if isinstance(m["content"], list)
+        for part in m["content"]
+        if part["type"] == "image_url"
+    ]
+
+
+async def test_turn1_image_is_one_part_on_last_user_message(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """**DoD**: lượt 1 có ảnh ⇒ đúng 1 phần `image_url`, ở message user cuối, dạng tham chiếu."""
+    leaf = await _image_turns(session, user_a, turns=1)
+
+    result = await build(session, leaf.id, _vision_model(), user_id=user_a)
+
+    assert len(_image_parts(result)) == 1
+    last = result[-1]
+    assert last["role"] == "user"
+    assert last["content"][0] == {"type": "text", "text": QUESTION}
+    ref = last["content"][1]
+    assert ref["type"] == "image_url" and "image_url" not in ref, "build() không được có byte"
+    assert ref["mime_type"] == "image/png" and ref["attachment_id"]
+
+
+@pytest.mark.parametrize("turns", [2, 3])
+async def test_later_turns_send_no_image_only_a_text_line(
+    session: AsyncSession, user_a: uuid.UUID, turns: int
+) -> None:
+    """**DoD** — C33: lượt 2 và 3 ⇒ 0 phần `image_url`, ảnh lượt 1 thành dòng chữ."""
+    leaf = await _image_turns(session, user_a, turns=turns)
+
+    result = await build(session, leaf.id, _vision_model(), user_id=user_a)
+
+    assert _image_parts(result) == []
+    assert result[1]["content"] == f"{QUESTION}\n[ảnh: {IMAGE_NAME}]"
+
+
+async def test_resend_true_keeps_turn1_image_at_turn3(
+    session: AsyncSession, user_a: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**DoD**: `RESEND_IMAGES_IN_HISTORY=true` ⇒ lượt 3 vẫn có ảnh lượt 1 — đọc LÚC GỌI."""
+    leaf = await _image_turns(session, user_a, turns=3)
+    monkeypatch.setattr(settings, "RESEND_IMAGES_IN_HISTORY", True)
+
+    result = await build(session, leaf.id, _vision_model(), user_id=user_a)
+
+    assert len(_image_parts(result)) == 1
+    assert _image_parts(result[1:2]) == _image_parts(result)
+
+
+async def test_retry_turn1_still_one_image(session: AsyncSession, user_a: uuid.UUID) -> None:
+    """**DoD**: thử lại lượt 1 — assistant mới là anh em dưới CÙNG câu hỏi ⇒ vẫn 1 ảnh."""
+    first = await _image_turns(session, user_a, turns=1)
+    first.status = MessageStatus.COMPLETED
+    first.content = "mã là 123456"
+    await session.flush()
+    conversation = await session.get(Conversation, first.conversation_id)
+    question = await session.get(Message, first.parent_id)
+    assert conversation is not None and question is not None
+    retry = await _add(
+        session,
+        conversation,
+        user_a,
+        role=MessageRole.ASSISTANT,
+        parent=question,
+        status=MessageStatus.QUEUED,
+    )
+
+    result = await build(session, retry.id, _vision_model(), user_id=user_a)
+
+    assert len(_image_parts(result)) == 1
+    assert result[-1]["role"] == "user"
+
+
+async def test_empty_content_with_image_is_still_in_context(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """**DoD** — T-4.4a Cạm bẫy ③: `content: ""` + ảnh ⇒ message có mặt, không phần chữ rỗng."""
+    leaf = await _image_turns(session, user_a, turns=1, first_content="")
+
+    result = await build(session, leaf.id, _vision_model(), user_id=user_a)
+
+    assert [m["role"] for m in result] == ["system", "user"]
+    assert [part["type"] for part in result[-1]["content"]] == ["image_url"]
+
+
+async def test_model_without_vision_gets_no_image_part(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """**DoD**: model không `vision` ⇒ 0 phần ảnh (lưới thứ hai; chặn cứng ở T-4.5)."""
+    leaf = await _image_turns(session, user_a, turns=1)
+
+    result = await build(session, leaf.id, _model(), user_id=user_a)
+
+    assert _image_parts(result) == []
+    assert result[-1]["content"] == f"{QUESTION}\n[ảnh: {IMAGE_NAME}]"
+
+
+async def _image_token_delta(session: AsyncSession, user_id: uuid.UUID, *, turns: int) -> int:
+    """`count_messages` của cây có ảnh − cùng cây không ảnh (hai hội thoại riêng)."""
+    model = _vision_model()
+    totals = []
+    for with_image in (True, False):
+        leaf = await _image_turns(session, user_id, turns=turns, with_image=with_image)
+        built = await build(session, leaf.id, model, user_id=user_id)
+        totals.append(count_messages(built, model_id=model.id))
+    return totals[0] - totals[1]
+
+
+async def test_image_tokens_enter_budget_only_when_sent(
+    session: AsyncSession, user_a: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**DoD**: lượt 1 hiệu == biến; lượt 2 không cộng; monkeypatch biến ⇒ hiệu đổi theo."""
+    turn2 = await _image_token_delta(session, user_a, turns=2)
+    assert await _image_token_delta(session, user_a, turns=1) == settings.VISION_TOKENS_PER_IMAGE
+    assert turn2 < settings.VISION_TOKENS_PER_IMAGE
+
+    monkeypatch.setattr(settings, "VISION_TOKENS_PER_IMAGE", 7777)
+
+    assert await _image_token_delta(session, user_a, turns=1) == 7777
+    assert await _image_token_delta(session, user_a, turns=2) == turn2, "dòng chữ thay ảnh"
+
+
+class _StorageTouchedError(AssertionError):
+    pass
+
+
+async def test_check_quota_never_touches_storage(
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+    quota_redis_fake: Any,
+) -> None:
+    """**DoD** — Cạm bẫy ①: đường của `POST …/messages` dựng ngữ cảnh có ảnh mà
+    KHÔNG chạm MinIO. Module lưu trữ giả ném khi bị gọi."""
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise _StorageTouchedError("build()/check_quota chạm MinIO")
+
+    for name in ("get", "put", "_read", "_client"):
+        monkeypatch.setattr(storage, name, _boom)
+    monkeypatch.setattr("app.quota.estimator.get_redis", lambda: quota_redis_fake)
+    monkeypatch.setattr("app.quota.tiers.get_redis", lambda: quota_redis_fake)
+    monkeypatch.setattr("app.db.session.get_sessionmaker", lambda: session_factory)
+    model = catalog.get_model("claude-haiku")
+    assert model is not None and "vision" in model.capabilities
+
+    async with session_factory() as session:
+        leaf = await _image_turns(session, user_a, turns=1)
+        leaf.model_id = model.id
+        await session.commit()
+    async with session_factory() as session:
+        assert len(_image_parts(await build(session, leaf.id, model, user_id=user_a))) == 1
+        await check_quota(session, user_id=user_a, leaf_id=leaf.id, model=model)

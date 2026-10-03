@@ -22,6 +22,8 @@ client dựng từ stream.
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -32,6 +34,7 @@ from typing import Any
 
 import httpx
 import pytest
+from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -39,6 +42,7 @@ import app.db.session as db_session
 from app.config import catalog
 from app.config.catalog import get_model
 from app.config.settings import settings
+from app.core import storage
 from app.db.models import (
     Conversation,
     CostConfidence,
@@ -49,6 +53,7 @@ from app.db.models import (
     UsageEvent,
 )
 from app.db.repositories import ConversationRepository, MessageRepository
+from app.db.repositories.attachments import AttachmentRepository
 from app.llm import context as llm_context
 from app.llm.adapters import openai_compat
 from app.llm.adapters.system import SystemAdapter
@@ -1745,3 +1750,85 @@ async def test_endpoint_of_other_user_is_model_unknown(
 
     assert fake_redis.last["data"]["code"] == "MODEL_UNKNOWN"
     assert pinned_net == []
+
+
+# ───────────────────────── ảnh tới model (T-4.4b) ─────────────────────────
+
+
+def _png() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 48), "red").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+async def _tree_with_image(session: AsyncSession, user_id: uuid.UUID) -> tuple[Message, str]:
+    """`_minimal_tree` + một ảnh gắn vào câu hỏi. Trả lá và `storage_key`."""
+    answer = await _minimal_tree(session, user_id)
+    key = f"{user_id}/2026/10/{uuid.uuid4()}.png"
+    await AttachmentRepository(session).create(
+        user_id=user_id,
+        message_id=answer.parent_id,
+        kind="image",
+        mime_type="image/png",
+        original_name="do.png",
+        size_bytes=1,
+        storage_key=key,
+    )
+    await session.commit()
+    return answer, key
+
+
+async def test_image_reference_becomes_data_url_before_stream(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Worker thay tham chiếu của `build()` bằng `data:image/png;base64,…` — byte từ MinIO."""
+    message, key = await _tree_with_image(session, user_a)
+    png = _png()
+    asked: list[str] = []
+
+    async def _get(storage_key: str) -> bytes:
+        asked.append(storage_key)
+        return png
+
+    monkeypatch.setattr(storage, "get", _get)
+    client = FakeClient(_normal_chunks(["Màu đỏ."]))
+
+    await generate(_ctx(fake_redis, client), str(message.id))
+
+    assert fake_redis.last["type"] == "done"
+    assert asked == [key]
+    assert client.call is not None
+    parts = client.call["messages"][-1]["content"]
+    assert parts[1] == {
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode()},
+    }
+
+
+async def test_missing_image_object_ends_with_coded_error(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Object mất ⇒ `error ATTACHMENT_UNAVAILABLE` (C19), không gọi model, không treo."""
+    message, _key = await _tree_with_image(session, user_a)
+
+    async def _missing(_storage_key: str) -> bytes:
+        raise FileNotFoundError("NoSuchKey")
+
+    monkeypatch.setattr(storage, "get", _missing)
+    client = FakeClient(_normal_chunks(["không được tới đây"]))
+
+    await generate(_ctx(fake_redis, client), str(message.id))
+
+    assert fake_redis.kind == ["start", "error"]
+    assert fake_redis.last["data"]["code"] == "ATTACHMENT_UNAVAILABLE"
+    assert client.call is None
+    reloaded = await _reload(session_factory, message.id)
+    assert reloaded.status is MessageStatus.FAILED
+    assert reloaded.error_code == "ATTACHMENT_UNAVAILABLE"

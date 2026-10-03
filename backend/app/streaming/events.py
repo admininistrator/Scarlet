@@ -70,6 +70,8 @@ class ErrorCode(StrEnum):
     CONTEXT_EMPTY = "CONTEXT_EMPTY"
     #: Ngân sách không chứa nổi system prompt + khối mới nhất (`BudgetTooSmallError`).
     CONTEXT_TOO_LARGE = "CONTEXT_TOO_LARGE"
+    #: Ảnh của lượt này không đọc được từ MinIO (object mất, MinIO tắt) — T-4.4b.
+    ATTACHMENT_UNAVAILABLE = "ATTACHMENT_UNAVAILABLE"
     #: Provider/LiteLLM lỗi hoặc đứt giữa chừng — ca của C19.
     UPSTREAM_ERROR = "UPSTREAM_ERROR"
     #: Job bị arq cắt vì quá `GENERATE_TIMEOUT_S`, hoặc container dừng giữa job.

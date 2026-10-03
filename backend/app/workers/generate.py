@@ -99,6 +99,7 @@ from typing import Any
 
 from app.config.catalog import ModelEntry, ReasoningOption, reasoning_to_send
 from app.config.settings import settings
+from app.core import storage
 from app.db.models import KeySource, MessageStatus
 from app.db.repositories import MessageRepository
 from app.db.session import session_scope
@@ -106,6 +107,8 @@ from app.llm import byok_endpoints, context
 from app.llm.adapters.byok import ByokAdapter
 from app.llm.client import Chunk, LLMClient, ToolCall, Usage
 from app.llm.credentials import Credential, CredentialUnavailable, resolve_credential
+from app.llm.tokens import IMAGE_PART_TYPE
+from app.llm.vision import prepare_image
 from app.quota import meter
 from app.streaming.cancel import FINISH_REASON_CANCELLED, is_cancel_requested
 from app.streaming.events import (
@@ -353,6 +356,8 @@ async def _run(
             )
         )
 
+        await _inline_images(wire_messages)
+
         # Mốc giá của A7: bảng giá dùng để ghi sổ là bảng giá của **lúc gọi**,
         # không phải lúc lượt sinh kết thúc. Đặt ngay trước `await` chứ không
         # ở đầu `_chay`: quãng `_prepare` có thể mất vài chục mili-giây vì
@@ -409,6 +414,34 @@ async def _run(
             # Đứt giữa chừng: đây là ca chính của C19. Phần chữ đã gom trong
             # `result` vẫn được ghi xuống Postgres ở `_close_ledger`.
             raise GenerationError(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
+
+
+async def _inline_images(messages: list[dict[str, Any]]) -> None:
+    """Thay mỗi `context.image_ref` bằng `data:<mime>;base64,…` — tại chỗ (T-4.4b).
+
+    Ở worker chứ không trong `build()` (Cạm bẫy ① T-4.4b). Pillow trong
+    `to_thread`: chạy thẳng trên event loop là đứng delta + nhịp tim của mọi
+    lượt sinh khác cùng worker (Cạm bẫy ⑤). Object mất ⇒ `error` có mã (C19).
+    """
+    for message in messages:
+        parts = message["content"]
+        if not isinstance(parts, list):
+            continue
+        for index, part in enumerate(parts):
+            if part.get("type") != IMAGE_PART_TYPE or "storage_key" not in part:
+                continue
+            try:
+                data = await storage.get(part["storage_key"])
+            except Exception as exc:
+                raise GenerationError(
+                    ErrorCode.ATTACHMENT_UNAVAILABLE,
+                    f"anh {part['attachment_id']}: {type(exc).__name__}",
+                ) from exc
+            mime, b64 = await asyncio.to_thread(prepare_image, data, part["mime_type"])
+            parts[index] = {
+                "type": IMAGE_PART_TYPE,
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            }
 
 
 @asynccontextmanager

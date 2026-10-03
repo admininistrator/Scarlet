@@ -15,6 +15,7 @@ vốn dĩ là xấp xỉ (xem docstring của module). Cái được kiểm là 
 
 from __future__ import annotations
 
+from app.config.settings import settings
 from app.llm.tokens import (
     DEFAULT_ENCODING,
     TOKENS_PER_MESSAGE,
@@ -84,7 +85,7 @@ def test_tool_calls_are_counted() -> None:
 
 
 def test_list_content_still_counts_text_parts() -> None:
-    """Hình dạng của Phase 4 (vision). Token của ẢNH là việc của §15.3, không phải ở đây."""
+    """Hình dạng của Phase 4 (vision): chữ đếm như chuỗi, ảnh cộng đúng biến (NQ-138 ④)."""
     as_string = count_message({"role": "user", "content": "mô tả ảnh này"}, model_id=MODEL_ID)
     as_list = count_message(
         {
@@ -96,7 +97,7 @@ def test_list_content_still_counts_text_parts() -> None:
         },
         model_id=MODEL_ID,
     )
-    assert as_list == as_string
+    assert as_list == as_string + settings.VISION_TOKENS_PER_IMAGE
 
 
 def test_whole_list_adds_reply_priming_exactly_once() -> None:
