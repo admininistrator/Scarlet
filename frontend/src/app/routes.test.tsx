@@ -58,6 +58,9 @@ const ADMIN: ProfileOut = {
   display_name_max_chars: 64,
   avatar_color: null,
   reasoning_prefs: {},
+  max_upload_mb: 10,
+  max_attachments: 5,
+  allowed_upload_mime: ["image/png", "image/jpeg", "application/pdf", "text/plain"],
 };
 
 const ZERO_AMOUNT = { cost_usd: "0", prompt_tokens: 0, completion_tokens: 0, events: 0 };

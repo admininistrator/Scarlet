@@ -257,7 +257,7 @@ export interface ChatState {
   /** T-3.3 — hoi thoai dang mo vua bi xoa: roi khoi no, ve man nhap. */
   closeConversation: () => void;
   /** Hai khoa do NGUOI GOI cam (C22) — xem `SendResult`, `SendKeys`. */
-  send: (content: string, keys: SendKeys) => Promise<SendResult>;
+  send: (content: string, keys: SendKeys, attachmentIds?: readonly string[]) => Promise<SendResult>;
   stop: () => Promise<void>;
   /**
    * §8.2 — sinh lai cau tra loi `messageId` thanh mot anh em cua no, bang
@@ -781,7 +781,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
    * module.
    */
   const send = useCallback(
-    async (newContent: string, keys: SendKeys): Promise<SendResult> => {
+    async (newContent: string, keys: SendKeys, attachmentIds: readonly string[] = []): Promise<SendResult> => {
       const fromDraft = treeRef.current.conversationId === null;
       setBusy(true);
       try {
@@ -806,6 +806,8 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
             // T-S.14 — dung muc dang hien tren picker (§24.2b·S4: body thang).
             // Model khong co muc ⇒ vang mat: mot `id` bat ky se la `400`.
             ...(effort === null ? {} : { reasoning_effort: effort }),
+            // T-4.7 — vang mat khi khong co tep: body cu giu nguyen tung byte.
+            ...(attachmentIds.length === 0 ? {} : { attachment_ids: [...attachmentIds] }),
           },
           keys.message,
         );

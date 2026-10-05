@@ -42,11 +42,12 @@ describe("nut dinh kem theo `vision` cua model dang chon", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent(/^Model này không đọc được ảnh$/);
   });
 
-  it("2. co vision ⇒ nut cua T-4.7 (chua gan hanh vi), khong phai nut 'khong doc duoc anh'", () => {
+  it("2. co vision ⇒ nut dinh kem THAT (T-4.7): khong aria-disabled, khong data-planned", () => {
     renderComposer(false);
 
     const button = screen.getByRole("button", { name: "Đính kèm ảnh hoặc tệp" });
-    expect(button).toHaveAttribute("data-planned", "T-4.7");
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(button).not.toHaveAttribute("data-planned");
   });
 });
 

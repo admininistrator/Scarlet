@@ -373,13 +373,12 @@ describe("Composer", () => {
    ══════════════════════════════════════════════════════════════════════════ */
 
 describe("Composer — nut cho va bo cuc (T-S.10)", () => {
-  it("14. bon nut cho cua o nhap theo §7b.2: aria-disabled, dung data-planned, bam khong gui", async () => {
+  it("14. ba nut cho cua o nhap theo §7b.2 (dinh kem da gan o T-4.7): aria-disabled, dung data-planned, bam khong gui", async () => {
     const sendMock = vi.fn(async (_content: string, _keys: SendKeys) => "da-gui" as SendResult);
     renderComposer(sendMock);
     await userEvent.type(textbox(), "cau hoi");
 
     const pending = [
-      ["Đính kèm ảnh hoặc tệp", "T-4.7"],
       ["Tìm web", "T-6.7"],
       ["Chọn skill", "T-7.9"],
       ["Nhập bằng giọng nói", "T-8.4"],

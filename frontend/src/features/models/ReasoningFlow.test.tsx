@@ -127,6 +127,9 @@ const PROFILE: ProfileOut = {
   display_name_max_chars: 64,
   avatar_color: "avatar-3",
   reasoning_prefs: { "deepseek-flash": "low", "claude-haiku": "low" },
+  max_upload_mb: 10,
+  max_attachments: 5,
+  allowed_upload_mime: ["image/png", "image/jpeg", "application/pdf", "text/plain"],
 };
 
 function Harness() {

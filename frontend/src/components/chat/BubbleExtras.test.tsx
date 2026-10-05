@@ -201,7 +201,7 @@ describe("anh / tep trong bong bong nguoi dung (T-4.7)", () => {
     );
     const list = screen.getByRole("list", { name: "Tệp đính kèm" });
 
-    expect(list).toHaveAttribute("data-planned", "T-4.7");
+    expect(list).not.toHaveAttribute("data-planned");
     expect(within(list).getByRole("img", { name: "dashboard.png" }).closest("li")).toHaveClass("size-thumb");
     expect(within(list).getByText("bao-cao-chi-phi-quy-3-2026.pdf")).toBeInTheDocument();
     expect(within(list).getByText("2,4 MB")).toBeInTheDocument();

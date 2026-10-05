@@ -17,12 +17,12 @@ const ITEMS: PendingAttachment[] = [
   { id: "pdf-1", kind: "file", name: "bao-cao-chi-phi-quy-3-2026.pdf", bytes: 2_516_582 },
 ];
 
-describe("AttachmentPreviews (T-4.7, dung san)", () => {
-  it("1. mot anh + mot tep: data-planned, ten, dung luong theo locale", () => {
+describe("AttachmentPreviews (T-4.7)", () => {
+  it("1. mot anh + mot tep: khong con data-planned, ten, dung luong theo locale", () => {
     render(<AttachmentPreviews items={ITEMS} onRemove={vi.fn()} />);
 
     const previews = screen.getByRole("list", { name: "Tệp đính kèm" });
-    expect(previews).toHaveAttribute("data-planned", "T-4.7");
+    expect(previews).not.toHaveAttribute("data-planned");
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     expect(screen.getByText("bao-cao-chi-phi-quy-3-2026.pdf")).toHaveClass("truncate");
     expect(screen.getByText("2,4 MB")).toBeInTheDocument();

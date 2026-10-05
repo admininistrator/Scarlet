@@ -10,6 +10,7 @@ import { BranchNav, Divider } from "./BranchNav";
 import { Hint } from "./Hint";
 import { Markdown } from "./Markdown";
 import { AnswerActions } from "./AnswerActions";
+import { UserAttachments } from "./BubbleExtras";
 
 /**
  * Mot bong bong tren duong di hien tai — ban T-HD3, §8.2, §7.4, C13.
@@ -384,9 +385,27 @@ function UserBubble({
       // nen, khong vien, khong nhan.
       className="mr-0 ml-auto flex w-fit max-w-bubble-user flex-col gap-1"
     >
+      {/*
+        T-4.7 — tep TREN chu (ban T-HD3-v2 3e), tu `attachments` cua duong di:
+        F5 van hien (UC-06 dong 5). `url` ky moi o moi lan doc duong di (B-343).
+      */}
+      {node.attachments !== undefined && node.attachments.length > 0 && (
+        <div className="flex justify-end">
+          <UserAttachments
+            items={node.attachments.map((a) => ({
+              id: a.id,
+              kind: a.kind,
+              name: a.name,
+              bytes: a.bytes,
+              thumbnailUrl: a.url ?? undefined,
+            }))}
+          />
+        </div>
+      )}
       {/* Tin nhan cua nguoi dung la chu tho: no khong di qua mot model nao,
-          va render markdown o day nghia la nguoi go ``` bi mat dau ```. */}
-      <p className="m-0 text-body whitespace-pre-wrap text-foreground">{text}</p>
+          va render markdown o day nghia la nguoi go ``` bi mat dau ```.
+          Tin chi co tep (T-4.4a: `content` rong) ⇒ khong ve doan rong. */}
+      {text !== "" && <p className="m-0 text-body whitespace-pre-wrap text-foreground">{text}</p>}
       {/*
         Cung mot ngu phap voi hang duoi bong bong assistant: dieu huong nhanh,
         vach ngan, roi hanh dong. Neo phai vi ca bong bong neo phai (T-HD3 2b).

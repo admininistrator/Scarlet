@@ -98,10 +98,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // viet ro de mot lan doi `VITE_API_BASE_URL` sang host khac khong lam
     // danh tinh bien mat trong im lang.
     credentials: "same-origin",
+    // Chi than CHUOI la JSON. `FormData` (T-4.7, `uploadAttachment`) de trinh
+    // duyet tu dat `multipart/form-data; boundary=…` — dat tay la mat boundary.
     headers:
-      init?.body === undefined
-        ? init?.headers
-        : { "Content-Type": "application/json", ...init?.headers },
+      typeof init?.body === "string"
+        ? { "Content-Type": "application/json", ...init?.headers }
+        : init?.headers,
   });
 
   if (!res.ok) {
@@ -196,7 +198,8 @@ export interface MessageAttachment {
   width: number | null;
   height: number | null;
   extract_status: string;
-  url: string;
+  /** Presigned URL ky moi o MOI response (T-4.1). Chi anh co; tep la `null`. */
+  url: string | null;
 }
 
 export interface ConversationOut {
@@ -505,6 +508,14 @@ export interface ProfileOut extends UserOut {
   avatar_color: string | null;
   /** T-S.5 — da loc theo catalog HIEN TAI (cap het hop le bi bo qua). */
   reasoning_prefs: Record<string, string>;
+  /**
+   * T-4.2 → T-4.7 — ba tran tai len, de khay chan TRUOC khi `POST /attachments`
+   * (UC-06 dong 3). Hai tran dau theo tier (`get_effective_limits`); cua that
+   * van la server — tier sua nong trong ≤ `limits_cache_ttl_s`.
+   */
+  max_upload_mb: number;
+  max_attachments: number;
+  allowed_upload_mime: string[];
 }
 
 /**
@@ -954,6 +965,8 @@ export const api = {
       parent_id?: string | null;
       model_id?: string | null;
       reasoning_effort?: string | null;
+      /** T-4.4a — id tu `POST /attachments`; co tep thi `content` duoc rong. */
+      attachment_ids?: string[];
     },
     idempotencyKey: string,
   ) =>
@@ -962,6 +975,24 @@ export const api = {
       body: JSON.stringify(body),
       headers: { "Idempotency-Key": idempotencyKey },
     }),
+
+  /**
+   * §15.1 — MOT tep moi lan goi (multipart, truong `file`), `201` + hang vua tao.
+   * Khoa theo TEP chu khong theo lan soan (Cam bay ④ cua T-4.7): server khong
+   * bam than request, hai tep chung khoa thi tep thu hai nhan lai tep dau.
+   */
+  uploadAttachment: (file: File, idempotencyKey: string) => {
+    const body = new FormData();
+    body.append("file", file);
+    return request<MessageAttachment>("/attachments", {
+      method: "POST",
+      body,
+      headers: { "Idempotency-Key": idempotencyKey },
+    });
+  },
+
+  /** Doc lai mot tep — khay hoi `extract_status` toi khi roi `pending`. */
+  getAttachment: (id: string) => request<MessageAttachment>(`/attachments/${id}`),
 
   cancel: (messageId: string) => request<CancelOut>(`/messages/${messageId}/cancel`, { method: "POST" }),
 

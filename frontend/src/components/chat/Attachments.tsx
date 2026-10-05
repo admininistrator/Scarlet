@@ -1,23 +1,19 @@
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { FileText, Image, Paperclip, X } from "lucide";
+import { FileText, Image, LoaderCircle, Paperclip, X } from "lucide";
 
 import { DISPLAY_LOCALE, t } from "../../lib/i18n";
 import { StaticIcon } from "../ui/Icon";
 
 /**
- * Hai thanh phan cua o nhap DUNG SAN, CHUA MOUNT — T-S.10, §7b.2, NQ-121.
+ * Hai thanh phan cua o nhap — dung o T-S.10 (§7b.2, NQ-121), gan o T-4.5
+ * (`AttachButtonNoVision`) va T-4.7 (`AttachmentPreviews`, trong hop nhap cua
+ * `Composer`, tren textarea).
  *
  * KH tham chieu: §24.2b·S12, S15 (P4) · ban T-HD2-v2 muc G6, G7.
  *
- * Chua co du lieu nao de chung hien: duong ong anh/tep la T-4.1–T-4.3, nut
- * dinh kem that la T-4.7. `AttachButtonNoVision` da gan o T-4.5 (`Composer`).
- * Chung co mat o day de P4 chi con viec GAN (mount trong hop nhap cua
- * `Composer`, tren textarea) chu khong ve lai o nhap — va co test render voi
- * fixture de hinh dang khong muc di trong luc cho.
- *
  * Ten tep di vao JSX nhu CHU (React tu thoat), khong bao gio qua
- * `dangerouslySetInnerHTML`: ten do nguoi dung dat, va ngay no la du lieu that
- * thi no la du lieu khong tin cay.
+ * `dangerouslySetInnerHTML`: ten do nguoi dung dat, nen no la du lieu khong
+ * tin cay.
  */
 
 export type PendingAttachment = {
@@ -25,9 +21,37 @@ export type PendingAttachment = {
   kind: "image" | "file";
   name: string;
   bytes: number;
-  /** URL xem truoc do trinh duyet tao (`blob:`) — P4 cap; vang mat ⇒ icon. */
+  /** URL xem truoc do trinh duyet tao (`blob:`); vang mat ⇒ icon. */
   previewUrl?: string;
+  /**
+   * T-4.7 — vang mat = san sang gui. `uploading`: `POST /attachments` dang
+   * bay; `processing`: `extract_status = pending`; `error`: kem `error`.
+   * Ban ve G6 chi ve trang thai san sang — hai trang thai cho dung vong quay
+   * cua chip cong cu (3e), loi dung vien `danger`.
+   */
+  state?: "uploading" | "processing" | "error";
+  /** Ly do loi, hien thay dung luong. */
+  error?: string;
 };
+
+/** Vong quay cua trang thai cho — cung hinh chip "Dang tim web…" (3e). */
+function Spinner() {
+  return (
+    <span aria-hidden="true" className="motion-spin grid size-4 place-items-center text-accent-text">
+      <StaticIcon icon={LoaderCircle} size={16} />
+    </span>
+  );
+}
+
+function stateLabel(item: PendingAttachment): string | undefined {
+  if (item.state === "uploading") {
+    return t("composer.uploading");
+  }
+  if (item.state === "processing") {
+    return t("composer.processing");
+  }
+  return item.error;
+}
 
 const KILO = 1024;
 
@@ -64,17 +88,26 @@ export function AttachmentPreviews({
     return null;
   }
   return (
-    <ul aria-label={t("composer.attachments")} data-planned="T-4.7" className="flex flex-wrap gap-2 px-2.5 pt-2.5">
+    <ul aria-label={t("composer.attachments")} className="flex flex-wrap gap-2 px-2.5 pt-2.5">
       {items.map((item) =>
         item.kind === "image" ? (
           <li
             key={item.id}
-            className="relative grid size-attachment shrink-0 place-items-center rounded-md border border-border bg-surface-code text-muted"
+            title={stateLabel(item)}
+            className={`relative grid size-attachment shrink-0 place-items-center rounded-md border bg-surface-code text-muted ${
+              item.state === "error" ? "border-danger ring-1 ring-danger" : "border-border"
+            }`}
           >
             {item.previewUrl === undefined ? (
               <StaticIcon icon={Image} size={20} />
             ) : (
               <img src={item.previewUrl} alt={item.name} className="size-full rounded-md object-cover" />
+            )}
+            {item.state !== undefined && <span className="sr-only">{stateLabel(item)}</span>}
+            {(item.state === "uploading" || item.state === "processing") && (
+              <span className="absolute inset-0 grid place-items-center rounded-md bg-surface-panel/70">
+                <Spinner />
+              </span>
             )}
             <button
               type="button"
@@ -90,14 +123,25 @@ export function AttachmentPreviews({
         ) : (
           <li
             key={item.id}
-            className="flex h-attachment max-w-60 min-w-0 flex-[0_1_auto] items-center gap-2.5 rounded-md border border-border bg-background pl-2.5"
+            className={`flex h-attachment max-w-60 min-w-0 flex-[0_1_auto] items-center gap-2.5 rounded-md border bg-background pl-2.5 ${
+              item.state === "error" ? "border-danger" : "border-border"
+            }`}
           >
             <span className="grid size-8 shrink-0 place-items-center rounded-sm bg-danger-subtle text-danger-text">
-              <StaticIcon icon={FileText} size={18} />
+              {item.state === "uploading" || item.state === "processing" ? (
+                <Spinner />
+              ) : (
+                <StaticIcon icon={FileText} size={18} />
+              )}
             </span>
             <span className="flex min-w-0 flex-col">
               <span className="truncate text-sm font-medium">{item.name}</span>
-              <span className="tabular text-xs text-muted">{formatBytes(item.bytes)}</span>
+              <span
+                title={stateLabel(item)}
+                className={`truncate text-xs ${item.state === "error" ? "text-danger-text" : "tabular text-muted"}`}
+              >
+                {stateLabel(item) ?? formatBytes(item.bytes)}
+              </span>
             </span>
             <button
               type="button"

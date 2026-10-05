@@ -8,7 +8,7 @@ import { formatBytes } from "./Attachments";
 import { safeUrl } from "./markdownPolicy";
 
 /**
- * Bon thanh phan cua bong bong DUNG SAN, CHUA MOUNT — T-S.15, §7b.2, NQ-121.
+ * Bon thanh phan cua bong bong — dung o T-S.15 (§7b.2, NQ-121).
  *
  * KH tham chieu: §24.2b·S12, S15 (P4–P7) · ban T-HD3-v2 muc 3e, 3h ·
  * tasks.md T-S.15 (Cam bay ②).
@@ -18,13 +18,12 @@ import { safeUrl } from "./markdownPolicy";
  * | `T-6.7`        | Chip "Dang tim web…" + chip nguon/favicon | P6        |
  * | `T-7.9`        | Chip "Dang chay code…"                   | P7        |
  * | `T-5.3`        | The artifact (nut "Mo" la nut cho)       | P5        |
- * | `T-4.7`        | Anh / tep trong bong bong nguoi dung     | P4        |
+ * | —              | Anh / tep trong bong bong nguoi dung     | GAN o T-4.7 |
  *
- * Chua co du lieu nao de chung hien — tool, artifact, tep dinh kem deu chua ton
- * tai. Chung co mat o day de phase sau chi con viec GAN vao `MessageItem`
- * (ban ve dat chip cong cu va nguon TREN chu tra loi, the artifact duoi chu,
- * tep dinh kem tren chu cua nguoi dung) — va co test render voi fixture de
- * hinh dang khong muc trong luc cho. KHONG file nao ngoai test import file nay.
+ * Ba thanh phan dau chua co du lieu — tool, artifact chua ton tai; chung cho
+ * phase sau GAN vao `MessageItem` (ban ve dat chip cong cu va nguon TREN chu
+ * tra loi, the artifact duoi chu). `UserAttachments` da gan o T-4.7 (tep TREN
+ * chu cua nguoi dung).
  *
  * ╔════════════════════════════════════════════════════════════════════════╗
  * ║  DU LIEU THAT KHONG TIN DUOC — LOC NGAY TU BAY GIO (Cam bay ②)         ║
@@ -271,7 +270,7 @@ export function ArtifactCard({ artifact }: { artifact: ArtifactSummary }) {
   );
 }
 
-// ──────────────────── tep dinh kem trong bong bong nguoi dung (T-4.7) ────────────────────
+// ──────────────────── tep dinh kem trong bong bong nguoi dung (gan o T-4.7) ────────────────────
 
 export type SentAttachment = {
   id: string;
@@ -293,7 +292,7 @@ export function UserAttachments({ items }: { items: readonly SentAttachment[] })
     return null;
   }
   return (
-    <ul aria-label={t("chat.attachments")} data-planned="T-4.7" className="flex flex-wrap gap-2">
+    <ul aria-label={t("chat.attachments")} className="flex flex-wrap justify-end gap-2">
       {items.map((item) => {
         const name = plainText(item.name);
         if (item.kind === "image") {

@@ -2,6 +2,7 @@ import { ArrowUp, Globe, Mic, Paperclip, Square, Zap } from "lucide";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import type { SendKeys, SendResult } from "../../features/chat/useChat";
+import { usePendingAttachments, type UploadLimits } from "../../features/chat/usePendingAttachments";
 import { DISPLAY_LOCALE, t } from "../../lib/i18n";
 // `newKey` roi khoi file nay o T-3.7 (B-231): nut Thu lai nay cung phai sinh
 // khoa, va mot ban chep thu hai cua duong lui "khong co secure context" la
@@ -9,7 +10,7 @@ import { DISPLAY_LOCALE, t } from "../../lib/i18n";
 import { newKey } from "../../lib/idempotency";
 import { useDock } from "../../lib/motion";
 import { ComingSoon } from "../ui/ComingSoon";
-import { AttachButtonNoVision } from "./Attachments";
+import { AttachButtonNoVision, AttachmentPreviews } from "./Attachments";
 import { Icon, StaticIcon } from "../ui/Icon";
 
 /**
@@ -111,12 +112,14 @@ export function Composer({
   quotaNotice,
   quotaBlocked = false,
   noVision = false,
+  uploadLimits = null,
 }: {
   running: boolean;
   enabled: boolean;
   /** `message_max_chars` cua `GET /auth/me`; `null` = chua biet. */
   maxChars: number | null;
-  onSend: (content: string, keys: SendKeys) => Promise<SendResult>;
+  /** `attachmentIds` — id server cua khay (T-4.7); rong khi khong dinh kem. */
+  onSend: (content: string, keys: SendKeys, attachmentIds: string[]) => Promise<SendResult>;
   onStop: () => void;
   /** `false` = man nhap (o nhap giua man); `true` = trong hoi thoai (o day). */
   docked: boolean;
@@ -132,9 +135,12 @@ export function Composer({
   quotaBlocked?: boolean;
   /**
    * T-4.5 (S9) — model dang chon KHONG `vision` ⇒ nut dinh kem la
-   * `AttachButtonNoVision` (tooltip noi ly do). Co `vision` ⇒ nut cho cua T-4.7.
+   * `AttachButtonNoVision` (tooltip noi ly do), va keo-tha/dan ANH bi tu choi
+   * kem ly do (T-4.7). Tep khac van nhan.
    */
   noVision?: boolean;
+  /** T-4.7 — ba tran tai len cua `GET /auth/me`; `null` = chua biet, khong chan. */
+  uploadLimits?: UploadLimits | null;
 }) {
   const [draft, setDraft] = useState("");
   const [keyLocked, setKeyLocked] = useState(false);
@@ -143,11 +149,19 @@ export function Composer({
   //: render sau — dung cai bay S5 dang do.
   const keysRef = useRef<SendKeys | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const dock = useDock<HTMLFormElement>(docked);
+  const attachments = usePendingAttachments(uploadLimits, noVision);
+  //: B-355 ② — anh/PDF quet trong khay ma model dang chon khong doc anh:
+  //: server se tra `422 MODEL_NO_VISION`, nen chan o day kem ly do.
+  const visionBlocked = noVision && attachments.needsVision;
 
   const charCount = [...draft].length;
   const overLimit = maxChars !== null && charCount > maxChars;
-  const canSend = enabled && draft.trim() !== "" && !overLimit && !quotaBlocked;
+  const hasContent = draft.trim() !== "" || attachments.items.length > 0;
+  //: T-4.7 — tep dang tai/dang doc/loi khoa Gui: gui luc ay la mat tep im lang.
+  const canSend =
+    enabled && hasContent && attachments.ready && !visionBlocked && !overLimit && !quotaBlocked;
 
   /*
     Hop nhap gian theo chu toi `--spacing-composer-max` roi cuon ben trong
@@ -174,9 +188,30 @@ export function Composer({
       keysRef.current = freshKeys();
     }
     // Xoa sach o nhap la bo han lan soan thao ay: cau sau la mot cau khac.
-    if (next === "") {
-      keysRef.current = null;
-      setKeyLocked(false);
+    // T-4.7: "sach" = khong chu VA khong tep.
+    if (next === "" && attachments.items.length === 0) {
+      dropKeys();
+    }
+  }
+
+  function dropKeys(): void {
+    keysRef.current = null;
+    setKeyLocked(false);
+  }
+
+  /** T-4.7 — nut, keo-tha, dan: mot cua. Them tep cung bat dau lan soan (luat 1). */
+  function addFiles(files: readonly File[]): void {
+    if (files.length === 0) {
+      return;
+    }
+    keysRef.current ??= freshKeys();
+    attachments.add(files);
+  }
+
+  function removeFile(id: string): void {
+    attachments.remove(id);
+    if (draft === "" && attachments.items.length === 1) {
+      dropKeys();
     }
   }
 
@@ -188,16 +223,17 @@ export function Composer({
     // ghi de o day chinh la cai bay C22 ta. Dong nay chi do ca dan chu vao o
     // nhap bang mot duong khong sinh ra `change` nao.
     keysRef.current ??= freshKeys();
-    const result = await onSend(draft, keysRef.current);
+    const result = await onSend(draft, keysRef.current, attachments.ids);
     if (result === "da-gui") {
       // Luat 3 — va chi o day.
       keysRef.current = null;
       setKeyLocked(false);
       setDraft("");
+      attachments.clear();
       return;
     }
-    // Luat 2: chu va cap khoa deu o nguyen. Nguoi dung bam Gui lan nua la
-    // dung cap ay.
+    // Luat 2: chu, khay tep va cap khoa deu o nguyen. Nguoi dung bam Gui lan
+    // nua la dung cap ay.
     setKeyLocked(result === "ket-khoa");
   }
 
@@ -231,13 +267,36 @@ export function Composer({
               ? "border-danger ring-1 ring-danger"
               : "border-border-strong focus-within:border-ring focus-within:shadow-focus"
           }`}
+          // T-4.7 — keo-tha len hop nhap. `dragover` phai `preventDefault` thi
+          // `drop` moi ban; chi khi keo TEP, de keo chu van roi vao textarea.
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes("Files")) {
+              e.preventDefault();
+            }
+          }}
+          onDrop={(e) => {
+            if (e.dataTransfer.files.length > 0) {
+              e.preventDefault();
+              addFiles([...e.dataTransfer.files]);
+            }
+          }}
         >
+          <AttachmentPreviews items={attachments.items} onRemove={removeFile} />
           <label className="min-w-0">
             <span className="sr-only">{t("chat.oNhap")}</span>
             <textarea
               ref={textareaRef}
               value={draft}
               onChange={(e) => changeDraft(e.target.value)}
+              // T-4.7 — dan anh. Clipboard co CA chu (copy tu Word/Excel kem
+              // anh render cua vung chon) ⇒ la dan chu, khong dinh kem.
+              onPaste={(e) => {
+                const { files, types } = e.clipboardData;
+                if (files.length > 0 && !types.includes("text/plain")) {
+                  e.preventDefault();
+                  addFiles([...files]);
+                }
+              }}
               onKeyDown={(e) => {
                 // Bo go tieng Viet dung Enter de chot tu — xem docstring.
                 if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) {
@@ -258,15 +317,34 @@ export function Composer({
           </label>
 
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
-            {/* §7b.2 — bon nut cho cua o nhap; khong mot handler nao (S12). */}
+            {/* §7b.2 — ba nut cho con lai cua o nhap; khong mot handler nao (S12). */}
             {noVision ? (
               <AttachButtonNoVision />
             ) : (
-              <ComingSoon
-                planned="T-4.7"
-                label={t("composer.attach")}
-                icon={<StaticIcon icon={Paperclip} size={20} />}
-              />
+              <>
+                <button
+                  type="button"
+                  aria-label={t("composer.attach")}
+                  title={t("composer.attach")}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="motion-press inline-flex size-touch shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface-hover hover:text-foreground"
+                >
+                  <StaticIcon icon={Paperclip} size={20} />
+                </button>
+                {/* `accept` chi loc hop chon tep; cua that la server (§15.2). */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  hidden
+                  accept={uploadLimits?.allowed_upload_mime.join(",")}
+                  onChange={(e) => {
+                    addFiles([...(e.target.files ?? [])]);
+                    // Chon lai dung tep vua go van phai ban `change`.
+                    e.target.value = "";
+                  }}
+                />
+              </>
             )}
             <ComingSoon
               planned="T-6.7"
@@ -302,6 +380,17 @@ export function Composer({
             </button>
           </div>
         </div>
+
+        {(attachments.rejected.length > 0 || visionBlocked) && (
+          <div role="alert" className="mt-2 flex flex-col gap-0.5 pl-1 text-sm text-danger-text">
+            {attachments.rejected.map((reason, index) => (
+              <p key={index} className="m-0 break-words">
+                {reason}
+              </p>
+            ))}
+            {visionBlocked && <p className="m-0">{t("composer.noVisionPending")}</p>}
+          </div>
+        )}
 
         {keyLocked && (
           <div

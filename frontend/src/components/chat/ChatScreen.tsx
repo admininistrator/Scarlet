@@ -183,7 +183,23 @@ export function ChatScreen() {
   */
   const sendingModel = models.find((m) => m.id === chat.effectiveModel);
   const noVision = sendingModel !== undefined && !sendingModel.capabilities.includes(VISION);
-  const conversationHasImages = tree.path.some((m) => m.attachments?.some((a) => a.kind === "image"));
+  // B-355 ① — PDF quet (`needs_vision`) cung di luat anh (T-4.6b).
+  const conversationHasImages = tree.path.some((m) =>
+    m.attachments?.some((a) => a.kind === "image" || a.extract_status === "needs_vision"),
+  );
+  // T-4.7 — ba tran tai len cua `/auth/me`; profile chua ve ⇒ khong chan o FE.
+  const profile = session.profile;
+  const uploadLimits = useMemo(
+    () =>
+      profile === null || profile === undefined
+        ? null
+        : {
+            max_upload_mb: profile.max_upload_mb,
+            max_attachments: profile.max_attachments,
+            allowed_upload_mime: profile.allowed_upload_mime,
+          },
+    [profile],
+  );
   const modelPicker = (
     <ModelPicker
       models={models}
@@ -325,6 +341,7 @@ export function ChatScreen() {
             modelPicker={modelPicker}
             quotaBlocked={quotaBlocked}
             noVision={noVision}
+            uploadLimits={uploadLimits}
             quotaNotice={
               <QuotaNotice
                 readings={quota.readings}
