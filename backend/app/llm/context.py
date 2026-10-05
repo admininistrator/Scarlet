@@ -40,6 +40,7 @@ trong `build()`.
 
 from __future__ import annotations
 
+import html
 import logging
 import time
 import uuid
@@ -53,7 +54,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.catalog import VISION_CAPABILITY, ModelEntry
 from app.config.settings import settings
-from app.db.models import Attachment, AttachmentKind, Message, MessageRole, MessageStatus
+from app.db.models import (
+    Attachment,
+    AttachmentKind,
+    ExtractStatus,
+    Message,
+    MessageRole,
+    MessageStatus,
+)
 from app.db.repositories import MessageRepository
 from app.db.repositories.attachments import AttachmentRepository
 from app.llm.tokens import IMAGE_PART_TYPE, count_message, count_messages
@@ -86,6 +94,11 @@ USABLE_STATUSES = frozenset({MessageStatus.COMPLETED, MessageStatus.CANCELLED})
 
 #: Dòng chữ thay cho ảnh ở các lượt cũ (C33, T-4.4b).
 IMAGE_PLACEHOLDER = "[ảnh: {name}]"
+#: Dòng chữ thay cho tệp ở các lượt cũ, hoặc tệp không có chữ (T-4.6a, NQ-138 ⑥).
+FILE_PLACEHOLDER = "[tệp: {name}]"
+#: Khối bọc chữ tệp (§20) — system prompt dặn model coi nó là dữ liệu.
+UNTRUSTED_OPEN = '<untrusted_content name="{name}">'
+UNTRUSTED_CLOSE = "</untrusted_content>"
 
 
 class ContextError(RuntimeError):
@@ -239,8 +252,13 @@ async def build(
     system_message = _system_message(model_meta)
     # Ưu tiên thứ hai của §9.6 — skill descriptions — chèn vào đây ở Phase 7.
 
-    images = await _images(session, path, user_id=user_id)
-    blocks = _atomic_blocks(path, images=images, send_images=_image_turns(path, model_meta))
+    attachments = await _attachments(session, path, user_id=user_id)
+    blocks = _atomic_blocks(
+        path,
+        attachments=attachments,
+        send_images=_image_turns(path, model_meta),
+        send_files=_current_turn(path),
+    )
     if not blocks:
         raise EmptyPathError(leaf_id)
 
@@ -318,10 +336,10 @@ def _fit(
     return kept
 
 
-async def _images(
+async def _attachments(
     session: AsyncSession, path: list[Message], *, user_id: uuid.UUID
 ) -> dict[uuid.UUID, list[Attachment]]:
-    """Ảnh của mọi message user trên đường đi — MỘT câu, chỉ Postgres (T-4.4b).
+    """Tệp của mọi message user trên đường đi — MỘT câu, chỉ Postgres (T-4.4b).
 
     Byte KHÔNG nạp ở đây (Cạm bẫy ① T-4.4b): `build()` chạy cả trong
     `POST …/messages` qua `check_quota`, nên MinIO + Pillow là việc của worker.
@@ -330,11 +348,21 @@ async def _images(
     if not ids:
         return {}
     rows = await AttachmentRepository(session).list_for_messages(user_id=user_id, message_ids=ids)
-    images: dict[uuid.UUID, list[Attachment]] = {}
+    by_message: dict[uuid.UUID, list[Attachment]] = {}
     for row in rows:
-        if row.kind == AttachmentKind.IMAGE and row.message_id is not None:
-            images.setdefault(row.message_id, []).append(row)
-    return images
+        if row.message_id is not None:
+            by_message.setdefault(row.message_id, []).append(row)
+    return by_message
+
+
+def _current_turn(path: list[Message]) -> Callable[[Message], bool]:
+    """Message user **cuối** đường đi — câu hỏi của lượt đang sinh (T-4.4b).
+
+    Chữ tệp chỉ đi ở đây (NQ-138 ⑥): luật ảnh, nhưng KHÔNG đọc
+    `RESEND_IMAGES_IN_HISTORY` và không hỏi `vision` — chữ là chữ.
+    """
+    current = next((m.id for m in reversed(path) if m.role is MessageRole.USER), None)
+    return lambda message: message.id == current
 
 
 def _image_turns(path: list[Message], model_meta: ModelEntry) -> Callable[[Message], bool]:
@@ -348,8 +376,7 @@ def _image_turns(path: list[Message], model_meta: ModelEntry) -> Callable[[Messa
         return lambda _message: False
     if settings.RESEND_IMAGES_IN_HISTORY:
         return lambda _message: True
-    current = next((m.id for m in reversed(path) if m.role is MessageRole.USER), None)
-    return lambda message: message.id == current
+    return _current_turn(path)
 
 
 def image_ref(attachment: Attachment) -> dict[str, Any]:
@@ -366,11 +393,24 @@ def image_ref(attachment: Attachment) -> dict[str, Any]:
     }
 
 
+def file_block(attachment: Attachment) -> str:
+    """Chữ tệp trong khối `<untrusted_content>` có tên tệp (§20, T-4.6a).
+
+    Tên escape thành thuộc tính; thẻ đóng lọt trong chữ tệp bị bẻ, để chữ người
+    dùng không tự "đóng khối" rồi viết tiếp như chỉ dẫn.
+    """
+    body = (attachment.extracted_text or "").replace(UNTRUSTED_CLOSE, "</untrusted_content_>")
+    return "\n".join(
+        [UNTRUSTED_OPEN.format(name=html.escape(attachment.original_name)), body, UNTRUSTED_CLOSE]
+    )
+
+
 def _atomic_blocks(
     messages: Iterable[Message],
     *,
-    images: Mapping[uuid.UUID, list[Attachment]] | None = None,
+    attachments: Mapping[uuid.UUID, list[Attachment]] | None = None,
     send_images: Callable[[Message], bool] = lambda _message: False,
+    send_files: Callable[[Message], bool] = lambda _message: False,
 ) -> list[list[dict[str, Any]]]:
     """Gom đường đi thành các KHỐI không được cắt lẻ (C15).
 
@@ -399,8 +439,9 @@ def _atomic_blocks(
     for message in messages:
         wire = _to_wire(
             message,
-            images=(images or {}).get(message.id, ()),
+            attachments=(attachments or {}).get(message.id, ()),
             send_images=send_images(message),
+            send_files=send_files(message),
         )
         if wire is None:
             # Message chưa xong / đã xoá / rỗng. Nó KHÔNG đóng khối đang mở:
@@ -467,7 +508,11 @@ def _close_block(block: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
 
 
 def _to_wire(
-    message: Message, *, images: Sequence[Attachment] = (), send_images: bool = False
+    message: Message,
+    *,
+    attachments: Sequence[Attachment] = (),
+    send_images: bool = False,
+    send_files: bool = False,
 ) -> dict[str, Any] | None:
     """Đổi một `Message` của DB thành một message trên dây, hoặc `None` nếu bỏ.
 
@@ -492,17 +537,32 @@ def _to_wire(
     **Ảnh (T-4.4b, C33).** `send_images` ⇒ `content` nhiều phần: chữ (nếu có)
     rồi mỗi ảnh một `image_ref`. Không ⇒ mỗi ảnh một dòng `[ảnh: <tên>]` nối vào
     chữ. Message chỉ có ảnh vì thế không bao giờ rỗng (T-4.4a Cạm bẫy ③).
+
+    **Tệp (T-4.6a, NQ-138 ⑥).** `send_files` và tệp `done` có chữ ⇒ một khối
+    `file_block` đứng TRƯỚC câu hỏi (tài liệu dài đặt trước câu hỏi). Còn lại —
+    lượt cũ, hay tệp không có chữ — một dòng `[tệp: <tên>]`. Không có ảnh gửi
+    đi thì `content` vẫn là một chuỗi: provider nhận mảng `text` chưa đo hết.
     """
     if message.status not in USABLE_STATUSES:
         return None
 
-    content: str | list[dict[str, Any]] = message.content
+    images = [a for a in attachments if a.kind == AttachmentKind.IMAGE]
+    files = [a for a in attachments if a.kind != AttachmentKind.IMAGE]
+    blocks: list[str] = []
+    lines: list[str] = []
+    for f in files:
+        if send_files and f.extract_status == ExtractStatus.DONE and f.extracted_text:
+            blocks.append(file_block(f))
+        else:
+            lines.append(FILE_PLACEHOLDER.format(name=f.original_name))
+    if not send_images:
+        lines += [IMAGE_PLACEHOLDER.format(name=image.original_name) for image in images]
+    tail = "\n".join(part for part in [message.content, *lines] if part)
+    text = "\n\n".join(part for part in [*blocks, tail] if part)
+
+    content: str | list[dict[str, Any]] = text
     if images and send_images:
-        text = [{"type": "text", "text": message.content}] if message.content else []
-        content = [*text, *map(image_ref, images)]
-    elif images:
-        lines = [IMAGE_PLACEHOLDER.format(name=image.original_name) for image in images]
-        content = "\n".join([message.content, *lines] if message.content else lines)
+        content = [*([{"type": "text", "text": text}] if text else []), *map(image_ref, images)]
 
     wire: dict[str, Any] = {"role": message.role.value, "content": content}
 

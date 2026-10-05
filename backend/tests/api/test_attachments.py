@@ -7,6 +7,7 @@ không tệp nhị phân nào trong repo.
 
 from __future__ import annotations
 
+import codecs
 import io
 import struct
 import subprocess
@@ -21,14 +22,15 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from PIL import Image
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.v1.attachments import DOCX_MIME
+from app.api.v1.attachments import DOCX_MIME, decode_text
 from app.config.settings import settings
 from app.core import storage
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
+from app.core.errors import ApiError
 from app.core.idempotency import HEADER_IDEMPOTENCY
 from app.db.models import Attachment, User, UserRole, UserStatus
 from app.main import app
@@ -54,6 +56,31 @@ def bucket(monkeypatch: pytest.MonkeyPatch) -> dict[str, tuple[bytes, str]]:
 
     monkeypatch.setattr(storage, "put", _put)
     return objects
+
+
+class _FakeArq:
+    """Hàng đợi giả cho job `extract` (T-4.6a): ghi `(tên, args, _job_id)`."""
+
+    def __init__(self) -> None:
+        self.pushed: list[tuple[str, tuple[Any, ...], str | None]] = []
+        self.broken = False
+
+    async def enqueue_job(self, name: str, *args: Any, _job_id: str | None = None) -> object:
+        if self.broken:
+            raise ConnectionError("redis:6379")
+        self.pushed.append((name, args, _job_id))
+        return object()
+
+
+@pytest.fixture(autouse=True)
+def arq(monkeypatch: pytest.MonkeyPatch) -> _FakeArq:
+    fake = _FakeArq()
+
+    async def _pool() -> _FakeArq:
+        return fake
+
+    monkeypatch.setattr("app.api.v1.attachments.get_arq_pool", _pool)
+    return fake
 
 
 @pytest_asyncio.fixture
@@ -161,13 +188,18 @@ async def test_valid_image_201(
     assert bucket[row.storage_key] == (data, mime)
 
 
-async def test_pdf_201_is_file_without_url(client: AsyncClient, user_a: uuid.UUID) -> None:
+async def test_pdf_201_is_file_without_url(
+    client: AsyncClient, user_a: uuid.UUID, arq: _FakeArq
+) -> None:
     resp = await _upload(client, user_a, _PDF, name="x.png", content_type="image/png")
 
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert (body["kind"], body["mime_type"], body["url"]) == ("file", "application/pdf", None)
     assert (body["width"], body["height"]) == (None, None)
+    # T-4.6a: PDF chờ job `extract`, tên ghim, một tệp một `_job_id`.
+    assert body["extract_status"] == "pending"
+    assert arq.pushed == [("extract", (body["id"],), f"extract:{body['id']}")]
 
 
 async def test_markdown_is_text_plain(client: AsyncClient, user_a: uuid.UUID) -> None:
@@ -190,6 +222,75 @@ async def test_docx_by_zip_listing(client: AsyncClient, user_a: uuid.UUID, first
 
     assert resp.status_code == 201, resp.text
     assert resp.json()["mime_type"] == DOCX_MIME
+    assert resp.json()["extract_status"] == "pending"
+
+
+# ─────────────────────── TXT giải mã ngay ở `api` (T-4.6a) ───────────────────────
+
+_VI = "Tiếng Việt có dấu: Đường phố Hà Nội, nữ hoàng, chuyện ấy."
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        _VI.encode("utf-8"),
+        codecs.BOM_UTF8 + _VI.encode("utf-8"),
+        codecs.BOM_UTF16_LE + _VI.encode("utf-16-le"),
+    ],
+    ids=["utf8", "utf8-bom", "utf16le-bom"],
+)
+async def test_txt_is_done_at_upload_same_text(
+    client: AsyncClient, user_a: uuid.UUID, session: AsyncSession, arq: _FakeArq, data: bytes
+) -> None:
+    """**DoD** NQ-138 ⑦: ba cách mã hoá hợp lệ ⇒ `done` ngay, cùng chuỗi, 0 `�`, không job."""
+    resp = await _upload(client, user_a, data, "ghi-chu.txt", "text/plain")
+
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["extract_status"] == "done"
+    row = await session.execute(select(Attachment).where(Attachment.id == resp.json()["id"]))
+    text = row.scalar_one().extracted_text
+    assert text == _VI and "\ufffd" not in text
+    assert arq.pushed == []
+
+
+@pytest.mark.parametrize(
+    "data",
+    ["Xin chào".encode("cp1258"), _VI.encode("utf-16-le"), "abc".encode("utf-16-le")],
+    ids=["cp1258", "utf16le-khong-bom", "utf16le-khong-bom-ascii"],
+)
+async def test_txt_bad_encoding_415(
+    client: AsyncClient, user_a: uuid.UUID, session: AsyncSession, data: bytes
+) -> None:
+    """**DoD** NQ-138 ⑦ Cạm bẫy ④: không đoán bảng mã ⇒ `415`, không hàng nào."""
+    resp = await _upload(client, user_a, data, "ghi-chu.txt", "text/plain")
+
+    assert resp.status_code == 415, resp.text
+    assert resp.json()["error"]["code"] in {
+        "ATTACHMENT_TEXT_ENCODING",
+        "ATTACHMENT_TYPE_UNSUPPORTED",  # libmagic không gọi nó là `text/plain`
+    }
+    count = select(func.count()).select_from(Attachment).where(Attachment.user_id == user_a)
+    assert (await session.execute(count)).scalar_one() == 0
+
+
+def test_decode_text_rejects_cp1258_by_its_own_code() -> None:
+    """Ca `cp1258` phải đỏ ở CHÍNH luật giải mã, không nhờ libmagic từ chối hộ."""
+    with pytest.raises(ApiError) as caught:
+        decode_text("Xin chào".encode("cp1258"))
+    assert caught.value.code == "ATTACHMENT_TEXT_ENCODING"
+
+
+async def test_enqueue_failure_marks_failed_and_503(
+    client: AsyncClient, user_a: uuid.UUID, session: AsyncSession, arq: _FakeArq
+) -> None:
+    """Redis chết sau `commit` ⇒ hàng `failed` (không `pending` mãi) + `503`."""
+    arq.broken = True
+    resp = await _upload(client, user_a, _PDF)
+
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["error"]["code"] == "ENQUEUE_FAILED"
+    row = await session.execute(select(Attachment).where(Attachment.user_id == user_a))
+    assert row.scalar_one().extract_status == "failed"
 
 
 # ─────────────────────── sai loại ⇒ 415 ───────────────────────

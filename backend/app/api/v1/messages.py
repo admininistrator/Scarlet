@@ -299,7 +299,11 @@ class CreateMessageResponse(BaseModel):
             "description": "model_id khong co trong catalog, thieu Idempotency-Key, "
             "hoac qua max_attachments (ATTACHMENT_LIMIT_EXCEEDED)",
         },
-        409: {"model": ErrorEnvelope, "description": "Mot request cung khoa dang chay (§11.4)"},
+        409: {
+            "model": ErrorEnvelope,
+            "description": "Mot request cung khoa dang chay (§11.4), "
+            "hoac tep con dang trich chu (ATTACHMENT_NOT_READY)",
+        },
         429: {
             "model": ErrorEnvelope,
             "description": "Qua 20 luot/phut (RATE_LIMITED), da co "
@@ -400,6 +404,25 @@ async def create_message(
                     status.HTTP_404_NOT_FOUND,
                     ApiErrorCode.ATTACHMENT_NOT_FOUND,
                     "khong tim thay tep",
+                )
+            # T-4.6a — chữ tệp đi vòng qua `MESSAGE_MAX_CHARS` (Cạm bẫy ②): chặn ở
+            # biên vào, không để `202` rồi `CONTEXT_TOO_LARGE` giữa lượt sinh.
+            # Ném trong `session_scope` ⇒ rollback cả message lẫn `attach`.
+            pending, chars = await AttachmentRepository(session).text_gate(
+                user_id=user_id, message_id=uid
+            )
+            if pending:
+                raise ApiError(
+                    status.HTTP_409_CONFLICT,
+                    ApiErrorCode.ATTACHMENT_NOT_READY,
+                    "tep dang duoc trich chu, gui lai sau",
+                )
+            if chars > settings.ATTACHMENT_TEXT_MAX_CHARS:
+                raise ApiError(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    ApiErrorCode.ATTACHMENT_TEXT_TOO_LONG,
+                    "chu trong tep vuot tran cho phep",
+                    details={"max_chars": settings.ATTACHMENT_TEXT_MAX_CHARS},
                 )
         generation = await _open_generation(
             session=session,

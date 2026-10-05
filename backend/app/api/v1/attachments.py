@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import io
+import logging
 import uuid
 import zipfile
 from typing import Annotated
@@ -42,18 +43,20 @@ from app.config.settings import settings
 from app.core import storage
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
+from app.core.queue import EXTRACT_JOB_ID_PREFIX, EXTRACT_JOB_NAME, get_arq_pool
 from app.core.ratelimit import upload_limit
-from app.db.models import Attachment, AttachmentKind
+from app.db.models import Attachment, AttachmentKind, ExtractStatus
+from app.db.models.attachment import DOCX_MIME, DOCX_PART, PDF_MIME
 from app.db.repositories import AttachmentRepository
 from app.db.session import session_scope
 from app.quota.tiers import get_effective_limits
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
-DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 #: Ba câu trả lời libmagic có thể cho một DOCX (Cạm bẫy ①).
 _ZIP_ANSWERS = frozenset({"application/zip", "application/octet-stream", DOCX_MIME})
-_DOCX_PART = "word/document.xml"
 _TEXT = "text/plain"
 _BYTES_PER_MB = 1024 * 1024
 
@@ -96,10 +99,10 @@ def _unsupported(mime: str) -> ApiError:
 
 
 def _is_docx(data: bytes) -> bool:
-    """Chỉ đọc danh mục — giải nén là việc của T-4.6a, có trần."""
+    """Chỉ đọc danh mục — giải nén là việc của job `extract` (T-4.6a), có trần."""
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            return _DOCX_PART in archive.namelist()
+            return DOCX_PART in archive.namelist()
     except Exception:  # byte của người dùng: không phải zip đọc được là "không"
         return False
 
@@ -147,6 +150,58 @@ def image_size(data: bytes, mime: str) -> tuple[int, int]:
     return width, height
 
 
+def decode_text(data: bytes) -> str:
+    """`.txt` → chuỗi, đúng NQ-138 ⑦. Raise `415 ATTACHMENT_TEXT_ENCODING`.
+
+    BOM UTF-16 (LE/BE) ⇒ UTF-16; còn lại UTF-8 **strict**, bỏ BOM nếu có
+    (`utf-8-sig`). Không đoán bảng mã, không `errors="replace"` — `�` trong ngữ
+    cảnh là C9. `\\x00` trong kết quả = UTF-16 không BOM lọt qua UTF-8 strict
+    (`"abc".encode("utf-16-le")`, Cạm bẫy ④) ⇒ cũng từ chối.
+    """
+    utf16 = data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE))
+    try:
+        text: str | None = data.decode("utf-16" if utf16 else "utf-8-sig")
+    except UnicodeDecodeError:
+        text = None
+    if text is None or "\x00" in text:
+        raise ApiError(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            ApiErrorCode.ATTACHMENT_TEXT_ENCODING,
+            "tep chu phai la UTF-8 hoac UTF-16 co BOM",
+        )
+    return text
+
+
+async def _enqueue_extract(attachment_id: uuid.UUID) -> None:
+    """Đẩy job `extract` SAU `commit` — trước thì worker có thể đọc hụt hàng.
+
+    Hỏng ⇒ hàng thành `failed` (không để `pending` mãi, `POST …/messages` sẽ
+    `409` vĩnh viễn) rồi `503 ENQUEUE_FAILED` như `_day_job` của `messages.py`.
+    """
+    try:
+        pool = await get_arq_pool()
+        job = await pool.enqueue_job(
+            EXTRACT_JOB_NAME,
+            str(attachment_id),
+            _job_id=f"{EXTRACT_JOB_ID_PREFIX}{attachment_id}",
+        )
+    except Exception:
+        logger.exception("khong day duoc job extract cho tep %s", attachment_id)
+        job = None
+    if job is not None:
+        return
+    async with session_scope() as session:
+        await AttachmentRepository(session).set_extracted(
+            attachment_id, status=ExtractStatus.FAILED, text=None
+        )
+        await session.commit()
+    raise ApiError(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        ApiErrorCode.ENQUEUE_FAILED,
+        "khong day duoc job trich chu",
+    )
+
+
 def _inspect(data: bytes) -> tuple[str, int | None, int | None]:
     mime = sniff_mime(data)
     if mime.startswith("image/"):
@@ -161,8 +216,12 @@ def _inspect(data: bytes) -> tuple[str, int | None, int | None]:
     dependencies=[Depends(upload_limit())],
     responses={
         413: {"model": ErrorEnvelope, "description": "vuot max_upload_mb (ATTACHMENT_TOO_LARGE)"},
-        415: {"model": ErrorEnvelope, "description": "ATTACHMENT_TYPE_UNSUPPORTED"},
+        415: {
+            "model": ErrorEnvelope,
+            "description": "ATTACHMENT_TYPE_UNSUPPORTED, ATTACHMENT_TEXT_ENCODING",
+        },
         422: {"model": ErrorEnvelope, "description": "ATTACHMENT_IMAGE_INVALID"},
+        503: {"model": ErrorEnvelope, "description": "Khong day duoc job extract"},
     },
 )
 async def upload_attachment(
@@ -183,6 +242,14 @@ async def upload_attachment(
 
     # libmagic + Pillow là việc CPU trên tới vài MB — không giữ event loop.
     mime, width, height = await asyncio.to_thread(_inspect, data)
+    # TXT giải mã ngay, không job (NQ-138 ⑦); PDF/DOCX chờ job `extract`.
+    text = decode_text(data) if mime == _TEXT else None
+    if text is not None:
+        extract_status = ExtractStatus.DONE
+    elif mime in (PDF_MIME, DOCX_MIME):
+        extract_status = ExtractStatus.PENDING
+    else:
+        extract_status = ExtractStatus.NONE
     key = storage.object_key(user_id, mime)
     await storage.put(key, data, mime)
 
@@ -196,9 +263,13 @@ async def upload_attachment(
             storage_key=key,
             width=width,
             height=height,
+            extracted_text=text,
+            extract_status=extract_status,
         )
         out = attachment_out(row)
         await session.commit()
+    if extract_status is ExtractStatus.PENDING:
+        await _enqueue_extract(out.id)
     return out
 
 

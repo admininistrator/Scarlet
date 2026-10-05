@@ -330,6 +330,15 @@ class ApiErrorCode(StrEnum):
     #: admin; model endpoint BYOK luôn không) thiếu `vision` (§9.4, S9, T-4.5).
     #: Cả ba đường sinh chữ; `details` mang `{model_id}`. Không message nào được tạo.
     MODEL_NO_VISION = "MODEL_NO_VISION"
+    #: `415` — `.txt` không phải UTF-8 (có/không BOM) hay UTF-16 có BOM, hoặc
+    #: giải mã ra `\x00` (NQ-138 ⑦, T-4.6a). Không đoán bảng mã, không `replace`.
+    ATTACHMENT_TEXT_ENCODING = "ATTACHMENT_TEXT_ENCODING"
+    #: `409` — tệp gửi kèm còn `extract_status = pending` (T-4.6a). Gửi lại sau
+    #: khi job `extract` khép thì hợp lệ.
+    ATTACHMENT_NOT_READY = "ATTACHMENT_NOT_READY"
+    #: `422` — tổng chữ tệp của message vượt `ATTACHMENT_TEXT_MAX_CHARS` (T-4.6a
+    #: Cạm bẫy ②). `details` mang `{max_chars}`. Không message nào được tạo.
+    ATTACHMENT_TEXT_TOO_LONG = "ATTACHMENT_TEXT_TOO_LONG"
 
 
 #: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ

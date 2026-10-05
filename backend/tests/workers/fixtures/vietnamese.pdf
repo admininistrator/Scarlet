@@ -1,0 +1,119 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [7 0 R 9 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /DejaVuSans /Encoding /Identity-H /DescendantFonts [4 0 R] /ToUnicode 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /CIDFontType2 /BaseFont /DejaVuSans /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 5 0 R /DW 600 >>
+endobj
+5 0 obj
+<< /Type /FontDescriptor /FontName /DejaVuSans /Flags 32 /FontBBox [0 -200 1000 900] /ItalicAngle 0 /Ascent 900 /Descent -200 /CapHeight 700 /StemV 80 >>
+endobj
+6 0 obj
+<< /Length 964 >>
+stream
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+46 beginbfchar
+<0020> <0020>
+<002C> <002C>
+<002E> <002E>
+<003A> <003A>
+<0048> <0048>
+<004E> <004E>
+<0050> <0050>
+<0054> <0054>
+<0056> <0056>
+<0061> <0061>
+<0062> <0062>
+<0063> <0063>
+<0064> <0064>
+<0067> <0067>
+<0068> <0068>
+<0069> <0069>
+<006D> <006D>
+<006E> <006E>
+<006F> <006F>
+<0070> <0070>
+<0072> <0072>
+<0073> <0073>
+<0074> <0074>
+<0075> <0075>
+<0079> <0079>
+<00E0> <00E0>
+<00E1> <00E1>
+<00EA> <00EA>
+<00EC> <00EC>
+<00ED> <00ED>
+<00F2> <00F2>
+<00F3> <00F3>
+<0110> <0110>
+<0111> <0111>
+<01B0> <01B0>
+<1EA1> <1EA1>
+<1EA5> <1EA5>
+<1EBF> <1EBF>
+<1EC7> <1EC7>
+<1ED1> <1ED1>
+<1ED3> <1ED3>
+<1ED9> <1ED9>
+<1EDD> <1EDD>
+<1EDF> <1EDF>
+<1EEF> <1EEF>
+<2014> <2014>
+endbfchar
+endcmap
+CMapName currentdict /defineresource pop
+end
+end
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 331 >>
+stream
+BT /F1 12 Tf 50 750 Td <005400720061006E00670020006D1ED90074003A0020005400691EBF006E00670020005600691EC700740020006300F3002000641EA50075002020140020011001B01EDD006E00670020007000681ED10020004800E00020004E1ED90069002C00201ED300201EA10074002C0020006E1EEF00200068006F00E0006E0067002C002000630068007500791EC7006E00201EA50079002E> Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 10 0 R >>
+endobj
+10 0 obj
+<< /Length 235 >>
+stream
+BT /F1 12 Tf 50 750 Td <005400720061006E00670020006800610069003A0020005000681EDF0020006200F20020007400E1006900200063006800ED006E002C0020006200E1006E00680020006D00EC002C0020006300E000200070006800EA002000731EEF00610020011100E1002E> Tj ET
+endstream
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000262 00000 n 
+0000000444 00000 n 
+0000000613 00000 n 
+0000001627 00000 n 
+0000001753 00000 n 
+0000002135 00000 n 
+0000002262 00000 n 
+trailer
+<< /Size 11 /Root 1 0 R >>
+startxref
+2549
+%%EOF

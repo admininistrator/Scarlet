@@ -8,7 +8,7 @@ chết. `users` ra đời ở T-2.1 (§11.1, §11.6), `tiers` ở T-2.10 (§10.4
 `model_overrides` ở T-4.5 (NQ-139).
 """
 
-from app.db.models.attachment import Attachment, AttachmentKind
+from app.db.models.attachment import Attachment, AttachmentKind, ExtractStatus
 from app.db.models.audit_log import (
     TARGET_CATALOG,
     TARGET_MODEL,
@@ -33,6 +33,7 @@ from app.db.models.user_settings import UserSettings
 __all__ = [
     "Attachment",
     "AttachmentKind",
+    "ExtractStatus",
     "TARGET_CATALOG",
     "TARGET_MODEL",
     "TARGET_TIER",

@@ -51,9 +51,10 @@ from arq.worker import Function
 
 from app.config.settings import settings
 from app.core.log_redact import install_log_redaction
-from app.core.queue import GENERATE_JOB_NAME, TITLE_JOB_NAME, redis_settings
+from app.core.queue import EXTRACT_JOB_NAME, GENERATE_JOB_NAME, TITLE_JOB_NAME, redis_settings
 from app.db.session import dispose_engine
 from app.llm.adapters.system import SystemAdapter
+from app.workers.extract import extract
 from app.workers.generate import CTX_LLM_CLIENT, generate
 from app.workers.reaper import REAPER_JOB_NAME, REAPER_SECONDS_IN_MINUTE, reaper
 from app.workers.spend_alert import (
@@ -89,6 +90,10 @@ FUNCTIONS: list[Function] = [
         timeout=settings.GENERATE_TIMEOUT_S,
         max_tries=TITLE_MAX_TRIES,
     ),
+    # T-4.6a — trích chữ PDF/DOCX. KHÔNG `max_tries=1` (Cạm bẫy ⑤): luật "không
+    # thử lại" của hai job trên sinh ra vì tiền, job này không gọi model. Job
+    # tự nuốt lỗi của byte người dùng, nên arq chỉ thử lại khi worker chết giữa chừng.
+    func(extract, name=EXTRACT_JOB_NAME),
 ]
 
 #: §7.6 — lưới cuối cho ca "worker chết giữa lúc sinh" (tiêu chí S4).
@@ -146,7 +151,12 @@ async def on_startup(ctx: dict[str, Any]) -> None:
         conn.host,
         conn.port,
         conn.database,
-        ", ".join(f"{f.name}(timeout={f.timeout_s}s, max_tries={f.max_tries})" for f in FUNCTIONS),
+        # `None` = mặc định của arq (job `extract`, T-4.6a) — in chữ, không "Nones".
+        ", ".join(
+            f"{f.name}(timeout={f'{f.timeout_s}s' if f.timeout_s else 'mac-dinh-arq'}, "
+            f"max_tries={f.max_tries or 'mac-dinh-arq'})"
+            for f in FUNCTIONS
+        ),
         # In cả `minute` lẫn `second`: từ T-2.17 có hai cron với hai độ phân
         # giải khác nhau (`reaper` ghim giây, `spend_alert` ghim phút), nên một
         # dòng chỉ in `second=` sẽ nói `spend_alert(second={0})` — đọc ra là

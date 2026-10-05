@@ -66,6 +66,11 @@ TITLE_JOB_NAME = "title"
 #: enqueue lại được (NQ-110 — "không bao giờ đặt tên hai lần").
 TITLE_JOB_ID_PREFIX = "title:"
 
+#: Job trích chữ PDF/DOCX (§15.1, T-4.6a). Cùng lý lẽ ghim tên với `generate`.
+#: `_job_id` = `extract:{attachment_id}` — một tệp, một job.
+EXTRACT_JOB_NAME = "extract"
+EXTRACT_JOB_ID_PREFIX = "extract:"
+
 _pool: ArqRedis | None = None
 _lock = asyncio.Lock()
 

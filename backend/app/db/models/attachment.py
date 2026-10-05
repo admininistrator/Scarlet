@@ -22,6 +22,30 @@ class AttachmentKind(StrEnum):
     FILE = "file"
 
 
+#: MIME của hai loại tệp đi qua job `extract` (T-4.6a). Sống ở đây — `api` và
+#: `worker` cùng import — chứ không ở `api/v1/attachments.py`.
+PDF_MIME = "application/pdf"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+#: Mục của zip làm nên một DOCX (NQ-138 ②) — cũng là mục duy nhất job đọc.
+DOCX_PART = "word/document.xml"
+
+
+class ExtractStatus(StrEnum):
+    """`attachments.extract_status` — tập cố định (T-4.6a, lối `ErrorCode` của T-1.6).
+
+    `none` = ảnh, không có gì để trích. TXT giải mã ngay ở `api` ⇒ `done` luôn;
+    PDF/DOCX ra đời `pending`, job `extract` khép thành một trong bốn trạng thái
+    còn lại. `needs_vision` / `too_many_pages`: PDF không lớp chữ (T-4.6b).
+    """
+
+    NONE = "none"
+    PENDING = "pending"
+    DONE = "done"
+    NEEDS_VISION = "needs_vision"
+    TOO_MANY_PAGES = "too_many_pages"
+    FAILED = "failed"
+
+
 class Attachment(Base):
     __tablename__ = "attachments"
 
@@ -44,7 +68,8 @@ class Attachment(Base):
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    #: `none` tới T-4.6a (trích chữ).
+    #: Cache của lần trích DUY NHẤT (§17.2) — không trích lại mỗi lượt.
+    #: Một trong `ExtractStatus`.
     extract_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'none'"))
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()

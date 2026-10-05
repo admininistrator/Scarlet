@@ -462,6 +462,17 @@ class Settings(BaseSettings):
     #: có công thức, mỗi provider tính một kiểu. Mặc định = số đo `claude-haiku`
     #: (ảnh cạnh dài 1568 sau T-4.3) làm tròn lên trăm. Ngoài Phụ lục B (B-348).
     VISION_TOKENS_PER_IMAGE: int = Field(default=1600, gt=0)
+    #: Trần TỔNG chữ trích từ tệp của MỘT message (T-4.6a Cạm bẫy ②) — vượt ⇒
+    #: `422` ở `POST …/messages`, trước khi có lượt sinh. Chữ tệp đi vòng qua
+    #: `MESSAGE_MAX_CHARS`, nên tổng xấu nhất là hai trần cộng lại: 48000 ký tự
+    #: ≈ 15k token (đo `o200k`, tiếng Việt ~3.2 ký tự/token) < 27672 của
+    #: `ol-qwen-small`. Không còn an toàn ở tỷ lệ bi quan 1 token/ký tự như
+    #: `MESSAGE_MAX_CHARS` — đã chọn có chủ ý (NQ-140). Ngoài Phụ lục B.
+    ATTACHMENT_TEXT_MAX_CHARS: int = Field(default=24000, gt=0)
+    #: Trần byte GIẢI NÉN của `word/document.xml` (T-4.6a, Cạm bẫy ⑥) — worker
+    #: đọc tối đa trần + 1 byte rồi mới parse; vượt ⇒ `failed`. XML của DOCX
+    #: nặng gấp nhiều lần chữ của nó, nên trần rộng hơn hẳn trần chữ.
+    DOCX_XML_MAX_BYTES: int = Field(default=20 * 1024 * 1024, gt=0)
 
     # ═══ Web tools (§12) ═══
     TAVILY_API_KEY: SecretStr = SecretStr("")

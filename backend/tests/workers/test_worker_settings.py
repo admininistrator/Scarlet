@@ -25,6 +25,7 @@ from arq.worker import Worker, create_worker
 
 import app.workers.main as worker_main
 from app.config.settings import Settings, settings
+from app.core.queue import EXTRACT_JOB_NAME
 from app.workers.main import (
     CRON_JOBS,
     FUNCTIONS,
@@ -38,15 +39,17 @@ from app.workers.main import (
 from app.workers.reaper import REAPER_JOB_NAME
 
 
-def test_exactly_two_jobs_generate_and_title() -> None:
+def test_exactly_three_jobs_generate_title_extract() -> None:
     """§7.2 bước ① viết `enqueue('generate', ...)` — tên đó là giao kèo.
 
     T-S.7 thêm job thứ hai, `title` (§24.2b·S6), với cùng loại giao kèo: bên
-    đẩy là `api/v1/messages.py::_enqueue_title`.
+    đẩy là `api/v1/messages.py::_enqueue_title`. T-4.6a thêm `extract` — bên
+    đẩy là `api/v1/attachments.py::_enqueue_extract`.
     """
-    assert [f.name for f in FUNCTIONS] == ["generate", "title"]
+    assert [f.name for f in FUNCTIONS] == ["generate", "title", "extract"]
     assert GENERATE_JOB_NAME == "generate"
     assert TITLE_JOB_NAME == "title"
+    assert EXTRACT_JOB_NAME == "extract"
 
 
 def test_generate_never_retries() -> None:
@@ -76,6 +79,9 @@ def test_real_worker_gets_all_three_params() -> None:
     title = worker.functions["title"]
     assert title.max_tries == 1, "mất max_tries=1 -> arq quay về mặc định 5"
     assert title.timeout_s == settings.GENERATE_TIMEOUT_S
+
+    # T-4.6a Cạm bẫy ⑤: job không tiêu tiền thì KHÔNG thừa hưởng max_tries=1.
+    assert worker.functions["extract"].max_tries != 1
 
     # `health_check_interval` và `redis_settings` chỉ có tác dụng nếu arq thật
     # sự nhận được chúng — xem lý do ở docstring module.

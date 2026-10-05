@@ -18,11 +18,13 @@ from sqlalchemy import event, func, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app.api.v1 import conversations as conversations_api
+from app.config.settings import settings
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
 from app.db.models import (
     Attachment,
     AttachmentKind,
+    ExtractStatus,
     Message,
     MessageRole,
     MessageStatus,
@@ -412,3 +414,96 @@ async def test_path_of_20_with_files_costs_one_query_more(
     assert n_files == n_without_loader + 1
     # Câu đọc tệp chạy cả khi không có tệp — biết "không có" cũng cần chính câu ấy.
     assert n_files == n_plain
+
+
+# ═══════════════════════ chữ tệp ở biên vào (T-4.6a) ═══════════════════════
+
+
+async def _file_row(
+    factory: async_sessionmaker[AsyncSession],
+    user_id: uuid.UUID,
+    *,
+    status: ExtractStatus,
+    text: str | None = None,
+) -> uuid.UUID:
+    async with factory() as session:
+        row = await AttachmentRepository(session).create(
+            user_id=user_id,
+            kind=AttachmentKind.FILE,
+            mime_type="application/pdf",
+            original_name="tai-lieu.pdf",
+            size_bytes=1000,
+            storage_key=f"{user_id}/2026/10/{uuid.uuid4()}.pdf",
+            extracted_text=text,
+            extract_status=status,
+        )
+        await session.commit()
+        return row.id
+
+
+async def test_send_with_pending_file_is_409_and_writes_nothing(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_arq: _FakeArq,
+) -> None:
+    """**DoD**: gửi khi tệp còn `pending` ⇒ `409`, không message, không job, tệp chưa gắn."""
+    conv = await _conversation(session_factory, user_a)
+    att = await _file_row(session_factory, user_a, status=ExtractStatus.PENDING)
+
+    resp = await _send(client, user_a, conv, [att])
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["error"]["code"] == "ATTACHMENT_NOT_READY"
+    assert await _count_messages(session_factory, conv) == 0
+    assert await _message_id_of(session_factory, att) is None
+    assert fake_arq.pushed == []
+
+
+async def test_file_text_over_cap_is_422_and_writes_nothing(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**DoD** Cạm bẫy ②: TỔNG chữ hai tệp vượt trần ⇒ `422`, `count(*) messages` không đổi.
+
+    Mỗi tệp một mình vừa trần — chỉ tổng mới vượt. Trần đọc lúc gọi.
+    """
+    monkeypatch.setattr(settings, "ATTACHMENT_TEXT_MAX_CHARS", 100)
+    conv = await _conversation(session_factory, user_a)
+    ids = [
+        await _file_row(session_factory, user_a, status=ExtractStatus.DONE, text="a" * 60)
+        for _ in range(2)
+    ]
+    before = await _count_messages(session_factory, conv)
+
+    resp = await _send(client, user_a, conv, ids)
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"] == {
+        "code": "ATTACHMENT_TEXT_TOO_LONG",
+        "message": "chu trong tep vuot tran cho phep",
+        "details": {"max_chars": 100},
+    }
+    assert await _count_messages(session_factory, conv) == before
+    assert [await _message_id_of(session_factory, i) for i in ids] == [None, None]
+
+
+async def test_file_text_at_cap_is_202(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Đúng bằng trần vẫn qua — ca đối chứng của ca trên."""
+    monkeypatch.setattr(settings, "ATTACHMENT_TEXT_MAX_CHARS", 120)
+    conv = await _conversation(session_factory, user_a)
+    ids = [
+        await _file_row(session_factory, user_a, status=ExtractStatus.DONE, text="a" * 60)
+        for _ in range(2)
+    ]
+
+    resp = await _send(client, user_a, conv, ids)
+
+    assert resp.status_code == 202, resp.text

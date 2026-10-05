@@ -9,11 +9,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import exists, insert, literal, select, update
+from sqlalchemy import exists, func, insert, literal, select, update
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Attachment, AttachmentKind
+from app.db.models import Attachment, AttachmentKind, ExtractStatus
 
 #: Cột chép sang hàng mới khi sửa câu hỏi (T-4.4a) — mọi cột trừ `id` và
 #: `message_id`. `created_at` có mặt có chủ ý: B-57 / NQ-18.
@@ -80,6 +80,28 @@ class AttachmentRepository:
             )
         )
         return bool((await self._session.execute(stmt)).scalar())
+
+    async def set_extracted(
+        self, attachment_id: uuid.UUID, *, status: ExtractStatus, text: str | None
+    ) -> None:
+        """Khép một hàng `pending` (T-4.6a). Hàng đã khép thì không đổi — một lần trích."""
+        await self._session.execute(
+            update(Attachment)
+            .where(
+                Attachment.id == attachment_id,
+                Attachment.extract_status == ExtractStatus.PENDING,
+            )
+            .values(extract_status=status, extracted_text=text)
+        )
+
+    async def text_gate(self, *, user_id: uuid.UUID, message_id: uuid.UUID) -> tuple[bool, int]:
+        """`(còn tệp pending, tổng ký tự chữ tệp)` của một message — MỘT câu (T-4.6a)."""
+        stmt = select(
+            func.count().filter(Attachment.extract_status == ExtractStatus.PENDING) > 0,
+            func.coalesce(func.sum(func.length(Attachment.extracted_text)), 0),
+        ).where(Attachment.message_id == message_id, Attachment.user_id == user_id)
+        pending, chars = (await self._session.execute(stmt)).one()
+        return bool(pending), int(chars)
 
     async def list_for_messages(
         self, *, user_id: uuid.UUID, message_ids: Sequence[uuid.UUID]
