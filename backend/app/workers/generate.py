@@ -124,6 +124,7 @@ from app.streaming.events import (
 )
 from app.streaming.producer import StreamProducer
 from app.tools.ssrf import UnsafeUrlError, pinned_client
+from app.workers.extract import PAGE_MIME, render_pdf_page
 
 logger = logging.getLogger(__name__)
 
@@ -422,7 +423,12 @@ async def _inline_images(messages: list[dict[str, Any]]) -> None:
     Ở worker chứ không trong `build()` (Cạm bẫy ① T-4.4b). Pillow trong
     `to_thread`: chạy thẳng trên event loop là đứng delta + nhịp tim của mọi
     lượt sinh khác cùng worker (Cạm bẫy ⑤). Object mất ⇒ `error` có mã (C19).
+
+    Tham chiếu có `page` = trang PDF quét (T-4.6b): render trang ấy thành PNG
+    rồi đi cùng T-4.3 — một trang một lần (Cạm bẫy ②). Byte PDF đọc một lần
+    cho mọi trang của nó.
     """
+    objects: dict[str, bytes] = {}
     for message in messages:
         parts = message["content"]
         if not isinstance(parts, list):
@@ -430,18 +436,27 @@ async def _inline_images(messages: list[dict[str, Any]]) -> None:
         for index, part in enumerate(parts):
             if part.get("type") != IMAGE_PART_TYPE or "storage_key" not in part:
                 continue
+            key = part["storage_key"]
             try:
-                data = await storage.get(part["storage_key"])
+                if key not in objects:
+                    objects[key] = await storage.get(key)
             except Exception as exc:
                 raise GenerationError(
                     ErrorCode.ATTACHMENT_UNAVAILABLE,
                     f"anh {part['attachment_id']}: {type(exc).__name__}",
                 ) from exc
-            mime, b64 = await asyncio.to_thread(prepare_image, data, part["mime_type"])
+            mime, b64 = await asyncio.to_thread(_prepare_part, objects[key], part)
             parts[index] = {
                 "type": IMAGE_PART_TYPE,
                 "image_url": {"url": f"data:{mime};base64,{b64}"},
             }
+
+
+def _prepare_part(data: bytes, part: dict[str, Any]) -> tuple[str, str]:
+    """T-4.3 cho một tham chiếu — trang PDF quét render thành PNG trước (T-4.6b)."""
+    if "page" in part:
+        return prepare_image(render_pdf_page(data, part["page"]), PAGE_MIME)
+    return prepare_image(data, part["mime_type"])
 
 
 @asynccontextmanager

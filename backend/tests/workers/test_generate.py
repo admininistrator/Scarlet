@@ -1808,6 +1808,58 @@ async def test_image_reference_becomes_data_url_before_stream(
     }
 
 
+async def test_scanned_pdf_pages_become_png_data_urls_one_read(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-4.6b: tham chiếu trang PDF quét ⇒ trang render thành PNG cạnh dài
+    `VISION_MAX_EDGE_PX`, đúng thứ tự trang; object PDF đọc MỘT lần cho mọi trang."""
+    answer = await _minimal_tree(session, user_a)
+    key = f"{user_a}/2026/10/{uuid.uuid4()}.pdf"
+    await AttachmentRepository(session).create(
+        user_id=user_a,
+        message_id=answer.parent_id,
+        kind="file",
+        mime_type="application/pdf",
+        original_name="ban-chup.pdf",
+        size_bytes=1,
+        storage_key=key,
+        extract_status="needs_vision",
+        page_count=2,
+    )
+    await session.commit()
+    pages = [Image.new("RGB", (200, 100), color) for color in ("red", "blue")]
+    buf = io.BytesIO()
+    pages[0].save(buf, "PDF", save_all=True, append_images=pages[1:])
+    asked: list[str] = []
+
+    async def _get(storage_key: str) -> bytes:
+        asked.append(storage_key)
+        return buf.getvalue()
+
+    monkeypatch.setattr(storage, "get", _get)
+    client = FakeClient(_normal_chunks(["Hai trang."]))
+
+    await generate(_ctx(fake_redis, client), str(answer.id))
+
+    assert fake_redis.last["type"] == "done"
+    assert asked == [key]
+    assert client.call is not None
+    images = [p for p in client.call["messages"][-1]["content"] if p["type"] == "image_url"]
+    prefix = "data:image/png;base64,"
+    colors = []
+    for part in images:
+        url = part["image_url"]["url"]
+        assert url.startswith(prefix)
+        with Image.open(io.BytesIO(base64.b64decode(url[len(prefix) :]))) as page:
+            assert max(page.size) == settings.VISION_MAX_EDGE_PX
+            colors.append(page.convert("RGB").getpixel((page.width // 2, page.height // 2)))
+    # Pillow nén trang PDF bằng JPEG (255 thành 254) — so kênh trội, đúng thứ tự trang.
+    assert [rgb.index(max(rgb)) for rgb in colors] == [0, 2]
+
+
 async def test_missing_image_object_ends_with_coded_error(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],

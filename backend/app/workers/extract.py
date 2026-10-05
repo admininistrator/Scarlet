@@ -11,7 +11,9 @@ trên byte người dùng trong tiến trình giữ mọi lượt sinh (Rủi ro
   mọi việc khác; đọc chữ từng trang, dừng khi đã quá `ATTACHMENT_TEXT_MAX_CHARS`
   — phần thừa vẫn lưu để `POST …/messages` trả `422` có mã, không âm thầm cắt.
   Không lớp chữ ⇒ `needs_vision`, hoặc `too_many_pages` khi quá
-  `MAX_PDF_PAGES_VISION` (T-4.6b dùng hai trạng thái này).
+  `MAX_PDF_PAGES_VISION`. Số trang vào `page_count` (NQ-141).
+* **PDF quét → ảnh** (T-4.6b): `render_pdf_page` — worker `generate` gọi cho
+  từng tham chiếu trang, một trang một lần (Cạm bẫy ② T-4.6b).
 * **DOCX bằng stdlib** `zipfile` + `xml.etree`: đọc tối đa `DOCX_XML_MAX_BYTES`
   + 1 byte giải nén **trước** khi parse (Cạm bẫy ⑥); vượt ⇒ `failed`. Thực thể
   XML lồng nhau (billion laughs) do expat ≥ 2.4 của 3.12 tự chặn.
@@ -51,7 +53,11 @@ _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 # ponytail: khoá toàn cục, PDF trích tuần tự; tách tiến trình nếu hàng đợi dài.
 _PDFIUM_LOCK = threading.Lock()
 
-Result = tuple[ExtractStatus, str | None]
+#: Định dạng của trang PDF đã render (`render_pdf_page`).
+PAGE_MIME = "image/png"
+
+#: `(trạng thái, chữ, số trang PDF)`.
+Result = tuple[ExtractStatus, str | None, int | None]
 
 
 def extract_pdf(data: bytes) -> Result:
@@ -76,10 +82,31 @@ def extract_pdf(data: bytes) -> Result:
             pdf.close()
     text = "\n".join(texts).strip()
     if text:
-        return ExtractStatus.DONE, text
+        return ExtractStatus.DONE, text, pages
     if pages > settings.MAX_PDF_PAGES_VISION:
-        return ExtractStatus.TOO_MANY_PAGES, None
-    return ExtractStatus.NEEDS_VISION, None
+        return ExtractStatus.TOO_MANY_PAGES, None, pages
+    return ExtractStatus.NEEDS_VISION, None, pages
+
+
+def render_pdf_page(data: bytes, index: int) -> bytes:
+    """Trang `index` thành `PAGE_MIME`, cạnh dài đúng `VISION_MAX_EDGE_PX` (T-4.6b).
+
+    Render thẳng ở cỡ T-4.3 sẽ giữ — không render 300 dpi rồi mới thu (Cạm bẫy
+    ②: A4 300 dpi ≈ 26 MB RGB). Trần đọc lúc gọi. Việc CPU — người gọi bọc
+    `asyncio.to_thread`.
+    """
+    with _PDFIUM_LOCK:
+        pdf = pdfium.PdfDocument(data)
+        try:
+            page = pdf[index]
+            scale = settings.VISION_MAX_EDGE_PX / max(page.get_size())
+            image = page.render(scale=scale).to_pil()
+            page.close()
+        finally:
+            pdf.close()
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def extract_docx(data: bytes) -> Result:
@@ -88,10 +115,10 @@ def extract_docx(data: bytes) -> Result:
     with zipfile.ZipFile(io.BytesIO(data)) as archive, archive.open(DOCX_PART) as part:
         xml = part.read(cap + 1)
     if len(xml) > cap:
-        return ExtractStatus.FAILED, None
+        return ExtractStatus.FAILED, None, None
     root = ElementTree.fromstring(xml)
     paragraphs = ["".join(t.text or "" for t in p.iter(f"{_W}t")) for p in root.iter(f"{_W}p")]
-    return ExtractStatus.DONE, "\n".join(paragraphs).strip()
+    return ExtractStatus.DONE, "\n".join(paragraphs).strip(), None
 
 
 EXTRACTORS: dict[str, Callable[[bytes], Result]] = {
@@ -122,14 +149,17 @@ async def extract(ctx: dict[str, Any], attachment_id: str) -> None:
 
     status: ExtractStatus
     text: str | None
+    pages: int | None
     try:
         data = await storage.get(row.storage_key)
-        status, text = await asyncio.to_thread(EXTRACTORS[row.mime_type], data)
+        status, text, pages = await asyncio.to_thread(EXTRACTORS[row.mime_type], data)
     except Exception as exc:  # byte người dùng: mọi đường hỏng là `failed`, không traceback
         logger.warning("extract: %s that bai (%s)", aid, type(exc).__name__)
-        status, text = ExtractStatus.FAILED, None
+        status, text, pages = ExtractStatus.FAILED, None, None
 
     async with session_scope() as session:
-        await AttachmentRepository(session).set_extracted(aid, status=status, text=text)
+        await AttachmentRepository(session).set_extracted(
+            aid, status=status, text=text, pages=pages
+        )
         await session.commit()
     logger.info("extract: %s -> %s (%d ky tu)", aid, status, len(text or ""))

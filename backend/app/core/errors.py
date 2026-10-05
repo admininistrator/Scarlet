@@ -339,6 +339,10 @@ class ApiErrorCode(StrEnum):
     #: `422` — tổng chữ tệp của message vượt `ATTACHMENT_TEXT_MAX_CHARS` (T-4.6a
     #: Cạm bẫy ②). `details` mang `{max_chars}`. Không message nào được tạo.
     ATTACHMENT_TEXT_TOO_LONG = "ATTACHMENT_TEXT_TOO_LONG"
+    #: `422` — câu hỏi của lượt sắp sinh kèm PDF quét quá `MAX_PDF_PAGES_VISION`
+    #: trang (UC-06 "quá thì báo user", T-4.6b) — cả ba đường sinh chữ, mọi
+    #: model. `details` mang `{max_pages}`. Không âm thầm cắt trang.
+    PDF_TOO_MANY_PAGES = "PDF_TOO_MANY_PAGES"
 
 
 #: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ

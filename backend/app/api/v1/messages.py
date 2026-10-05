@@ -493,7 +493,7 @@ async def _open_generation(
         ApiError 403 `PENDING_APPROVAL`: trạng thái chỉ chat được bằng khoá
             riêng (§11.1), mà lượt này lại đi bằng system key vì chưa có khoá
             dùng được cho provider của model đã chọn (B-140).
-        ApiError 422 `MODEL_NO_VISION`: xem `ensure_vision`.
+        ApiError 422 `MODEL_NO_VISION` / `PDF_TOO_MANY_PAGES`: xem `ensure_vision`.
         ApiError 404 `PARENT_NOT_FOUND`: `parent_id` không nằm trong hội thoại
             này (hoặc vừa bị xoá mềm). Với `POST .../messages` ca này không thể
             xảy ra — cha là message vừa ghi ở dòng trên — nhưng `retry` thì có:
@@ -612,12 +612,27 @@ async def ensure_vision(
     endpoint BYOK dựng tại chỗ với `capabilities: []` — tra catalog riêng ở
     đây thì model endpoint lọt (Cạm bẫy ②).
 
+    PDF quét (T-4.6b) cần vision như ảnh — `extract_status` là nguồn, không mở
+    PDF (Cạm bẫy ③). Quá `MAX_PDF_PAGES_VISION` (đọc lúc gọi) ⇒ chặn ở **mọi**
+    model, cả model có vision: không âm thầm cắt trang (UC-06).
+
     Raise:
-        ApiError 422 `MODEL_NO_VISION`.
+        ApiError 422 `PDF_TOO_MANY_PAGES`, rồi 422 `MODEL_NO_VISION`.
     """
-    if question_id is None or catalog.VISION_CAPABILITY in model.capabilities:
+    if question_id is None:
         return
-    if await AttachmentRepository(session).has_image(user_id=user_id, message_id=question_id):
+    max_pages = settings.MAX_PDF_PAGES_VISION
+    needs_vision, too_many = await AttachmentRepository(session).vision_gate(
+        user_id=user_id, message_id=question_id, max_pages=max_pages
+    )
+    if too_many:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ApiErrorCode.PDF_TOO_MANY_PAGES,
+            f"PDF qua {max_pages} trang",
+            details={"max_pages": max_pages},
+        )
+    if needs_vision and catalog.VISION_CAPABILITY not in model.capabilities:
         raise ApiError(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             ApiErrorCode.MODEL_NO_VISION,

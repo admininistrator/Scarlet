@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import exists, func, insert, literal, select, update
+from sqlalchemy import and_, func, insert, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,7 @@ _COPIED = (
     "height",
     "extracted_text",
     "extract_status",
+    "page_count",
     "created_at",
 )
 
@@ -70,19 +71,40 @@ class AttachmentRepository:
         )
         return len((await self._session.execute(stmt)).all())
 
-    async def has_image(self, *, user_id: uuid.UUID, message_id: uuid.UUID) -> bool:
-        """Message có ảnh nào không — câu hỏi của guard vision (T-4.5, S9)."""
-        stmt = select(
-            exists().where(
-                Attachment.message_id == message_id,
-                Attachment.user_id == user_id,
-                Attachment.kind == AttachmentKind.IMAGE,
-            )
+    async def vision_gate(
+        self, *, user_id: uuid.UUID, message_id: uuid.UUID, max_pages: int
+    ) -> tuple[bool, bool]:
+        """`(cần vision, có PDF quá trần trang)` của một message — MỘT câu (T-4.5, T-4.6b).
+
+        Cần vision = ảnh, hoặc PDF không lớp chữ (`extract_status` là nguồn duy
+        nhất — Cạm bẫy ③ T-4.6b, không mở PDF lần hai). Quá trần = đã khép
+        `too_many_pages`, hoặc `needs_vision` mà `page_count` vượt `max_pages`
+        (trần đọc lúc gọi, không chỉ lúc trích).
+        """
+        scanned = Attachment.extract_status.in_(
+            [ExtractStatus.NEEDS_VISION, ExtractStatus.TOO_MANY_PAGES]
         )
-        return bool((await self._session.execute(stmt)).scalar())
+        over = or_(
+            Attachment.extract_status == ExtractStatus.TOO_MANY_PAGES,
+            and_(
+                Attachment.extract_status == ExtractStatus.NEEDS_VISION,
+                Attachment.page_count > max_pages,
+            ),
+        )
+        stmt = select(
+            func.count().filter(or_(Attachment.kind == AttachmentKind.IMAGE, scanned)) > 0,
+            func.count().filter(over) > 0,
+        ).where(Attachment.message_id == message_id, Attachment.user_id == user_id)
+        needs_vision, too_many = (await self._session.execute(stmt)).one()
+        return bool(needs_vision), bool(too_many)
 
     async def set_extracted(
-        self, attachment_id: uuid.UUID, *, status: ExtractStatus, text: str | None
+        self,
+        attachment_id: uuid.UUID,
+        *,
+        status: ExtractStatus,
+        text: str | None,
+        pages: int | None = None,
     ) -> None:
         """Khép một hàng `pending` (T-4.6a). Hàng đã khép thì không đổi — một lần trích."""
         await self._session.execute(
@@ -91,7 +113,7 @@ class AttachmentRepository:
                 Attachment.id == attachment_id,
                 Attachment.extract_status == ExtractStatus.PENDING,
             )
-            .values(extract_status=status, extracted_text=text)
+            .values(extract_status=status, extracted_text=text, page_count=pages)
         )
 
     async def text_gate(self, *, user_id: uuid.UUID, message_id: uuid.UUID) -> tuple[bool, int]:

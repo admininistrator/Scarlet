@@ -25,7 +25,7 @@ from app.core import storage
 from app.db.models import Attachment, AttachmentKind, ExtractStatus
 from app.db.models.attachment import DOCX_MIME, DOCX_PART, PDF_MIME
 from app.db.repositories import AttachmentRepository
-from app.workers.extract import extract, extract_docx, extract_pdf
+from app.workers.extract import extract, extract_docx, extract_pdf, render_pdf_page
 
 FIXTURE_PDF = (Path(__file__).parent / "fixtures" / "vietnamese.pdf").read_bytes()
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -110,17 +110,18 @@ async def _row(session: AsyncSession, attachment_id: uuid.UUID) -> Attachment:
 
 def test_pdf_with_vietnamese_text_is_done_intact() -> None:
     """**DoD**: PDF có chữ tiếng Việt ⇒ `done`, dấu nguyên vẹn, 0 `�`, đủ hai trang."""
-    status, text = extract_pdf(FIXTURE_PDF)
+    status, text, pages = extract_pdf(FIXTURE_PDF)
 
     assert status is ExtractStatus.DONE
     assert text is not None and "�" not in text
     assert "Tiếng Việt có dấu — Đường phố Hà Nội, ồ ạt, nữ hoàng, chuyện ấy." in text
     assert "Trang hai: Phở bò tái chín, bánh mì, cà phê sữa đá." in text
+    assert pages == 2
 
 
 def test_image_only_pdf_needs_vision() -> None:
     """**DoD**: PDF chỉ ảnh (Pillow) ⇒ `needs_vision` (T-4.6b), không chữ."""
-    assert extract_pdf(_image_pdf(2)) == (ExtractStatus.NEEDS_VISION, None)
+    assert extract_pdf(_image_pdf(2)) == (ExtractStatus.NEEDS_VISION, None, 2)
 
 
 def test_image_only_pdf_over_vision_pages_is_too_many_pages(
@@ -128,7 +129,17 @@ def test_image_only_pdf_over_vision_pages_is_too_many_pages(
 ) -> None:
     """`MAX_PDF_PAGES_VISION` đọc lúc gọi."""
     monkeypatch.setattr(settings, "MAX_PDF_PAGES_VISION", 1)
-    assert extract_pdf(_image_pdf(2)) == (ExtractStatus.TOO_MANY_PAGES, None)
+    assert extract_pdf(_image_pdf(2)) == (ExtractStatus.TOO_MANY_PAGES, None, 2)
+
+
+def test_render_page_long_edge_is_vision_max(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-4.6b Cạm bẫy ②: render thẳng ở cạnh dài `VISION_MAX_EDGE_PX` (đọc lúc gọi)."""
+    monkeypatch.setattr(settings, "VISION_MAX_EDGE_PX", 800)
+    png = render_pdf_page(_image_pdf(2), 1)
+
+    with Image.open(io.BytesIO(png)) as page:
+        assert page.format == "PNG"
+        assert page.size == (800, 400)  # trang 200×100 pt, giữ tỉ lệ
 
 
 # ─────────────────────────── DOCX ───────────────────────────
@@ -136,10 +147,11 @@ def test_image_only_pdf_over_vision_pages_is_too_many_pages(
 
 def test_docx_two_paragraphs() -> None:
     """**DoD**: DOCX hai đoạn ⇒ đúng hai đoạn."""
-    status, text = extract_docx(_docx("Đoạn một có dấu.", "Đoạn hai."))
+    status, text, pages = extract_docx(_docx("Đoạn một có dấu.", "Đoạn hai."))
 
     assert status is ExtractStatus.DONE
     assert text is not None and text.split("\n") == ["Đoạn một có dấu.", "Đoạn hai."]
+    assert pages is None
 
 
 def test_docx_bomb_200mb_fails_reading_at_most_cap_plus_one(
@@ -170,7 +182,7 @@ def test_docx_bomb_200mb_fails_reading_at_most_cap_plus_one(
 
     monkeypatch.setattr(zipfile.ZipFile, "open", _open)
 
-    assert extract_docx(data) == (ExtractStatus.FAILED, None)
+    assert extract_docx(data) == (ExtractStatus.FAILED, None, None)
     assert 0 < sum(read) <= settings.DOCX_XML_MAX_BYTES + 1
     assert settings.DOCX_XML_MAX_BYTES < 200 * _MB
 
@@ -189,6 +201,18 @@ async def test_job_closes_pending_pdf_as_done(
     row = await _row(session, aid)
     assert row.extract_status == ExtractStatus.DONE
     assert row.extracted_text is not None and "Hà Nội" in row.extracted_text
+
+
+async def test_job_records_page_count_of_scanned_pdf(
+    session: AsyncSession, user_a: uuid.UUID, bucket: dict[str, bytes]
+) -> None:
+    """NQ-141: số trang ghi cùng lúc khép hàng — `build()` không mở lại PDF."""
+    aid = await _pending_row(session, user_a, bucket, _image_pdf(3), PDF_MIME)
+
+    await extract({}, str(aid))
+
+    row = await _row(session, aid)
+    assert (row.extract_status, row.page_count) == (ExtractStatus.NEEDS_VISION, 3)
 
 
 @pytest.mark.parametrize(

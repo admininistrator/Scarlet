@@ -35,7 +35,8 @@ class ExtractStatus(StrEnum):
 
     `none` = ảnh, không có gì để trích. TXT giải mã ngay ở `api` ⇒ `done` luôn;
     PDF/DOCX ra đời `pending`, job `extract` khép thành một trong bốn trạng thái
-    còn lại. `needs_vision` / `too_many_pages`: PDF không lớp chữ (T-4.6b).
+    còn lại. `needs_vision` / `too_many_pages`: PDF không lớp chữ — trang render
+    thành ảnh, đi luật ảnh (T-4.6b).
     """
 
     NONE = "none"
@@ -68,6 +69,9 @@ class Attachment(Base):
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Số trang PDF, job `extract` ghi cùng lúc khép hàng (T-4.6b, NQ-141) —
+    #: `build()` phát mỗi trang PDF quét một phần ảnh mà không mở lại PDF.
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     #: Cache của lần trích DUY NHẤT (§17.2) — không trích lại mỗi lượt.
     #: Một trong `ExtractStatus`.
     extract_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'none'"))

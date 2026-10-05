@@ -952,3 +952,46 @@ async def test_closing_tag_inside_file_text_cannot_close_the_block(
     built = await build(session, leaf.id, _model(), user_id=user_a)
 
     assert built[-1]["content"].count("</untrusted_content>") == 1
+
+
+# ─────────────────────── PDF quét → ảnh (T-4.6b) ───────────────────────
+
+SCAN_NAME = "ban-chup.pdf"
+
+
+async def _attach_scan(
+    session: AsyncSession, user_id: uuid.UUID, message: Message, pages: int
+) -> None:
+    """PDF không lớp chữ đã trích (T-4.6a) — `needs_vision`, `page_count` (NQ-141)."""
+    await AttachmentRepository(session).create(
+        user_id=user_id,
+        message_id=message.id,
+        kind="file",
+        mime_type="application/pdf",
+        original_name=SCAN_NAME,
+        size_bytes=4321,
+        storage_key=f"{user_id}/2026/10/{uuid.uuid4()}.pdf",
+        extract_status="needs_vision",
+        page_count=pages,
+    )
+
+
+@pytest.mark.parametrize(("turns", "parts"), [(1, 3), (2, 0), (3, 0)])
+async def test_scanned_pdf_three_pages_is_three_images_only_on_its_turn(
+    session: AsyncSession, user_a: uuid.UUID, turns: int, parts: int
+) -> None:
+    """**DoD**: PDF quét 3 trang ⇒ 3 phần `image_url` ở lượt chứa nó, 0 ở lượt sau (C33)."""
+    leaf = await _image_turns(session, user_a, turns=turns, with_image=False)
+    question = (await MessageRepository(session).get_path(leaf.id, user_id=user_a))[0].message
+    await _attach_scan(session, user_a, question, pages=3)
+
+    built = await build(session, leaf.id, _vision_model(), user_id=user_a)
+
+    images = _image_parts(built)
+    assert len(images) == parts
+    assert [ref.get("page") for ref in images] == list(range(parts))
+    assert all("image_url" not in ref for ref in images), "build() không được có byte"
+    if parts:
+        assert count_messages(built, model_id=MODEL_ID) >= 3 * settings.VISION_TOKENS_PER_IMAGE
+    else:
+        assert built[1]["content"] == f"{QUESTION}\n[tệp: {SCAN_NAME}]"

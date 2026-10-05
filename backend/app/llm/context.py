@@ -379,18 +379,28 @@ def _image_turns(path: list[Message], model_meta: ModelEntry) -> Callable[[Messa
     return _current_turn(path)
 
 
-def image_ref(attachment: Attachment) -> dict[str, Any]:
+def image_ref(attachment: Attachment, page: int | None = None) -> dict[str, Any]:
     """Phần `image_url` dạng THAM CHIẾU — worker thay bằng `data:` URL trước khi gửi.
 
     Không có khoá `image_url`: tham chiếu lọt tới provider là `400`, không phải
-    một ảnh rỗng im lặng.
+    một ảnh rỗng im lặng. `page` = trang (từ 0) của PDF quét — worker render
+    trang ấy (T-4.6b).
     """
-    return {
+    ref: dict[str, Any] = {
         "type": IMAGE_PART_TYPE,
         "attachment_id": str(attachment.id),
         "storage_key": attachment.storage_key,
         "mime_type": attachment.mime_type,
     }
+    if page is not None:
+        ref["page"] = page
+    return ref
+
+
+def _scanned(attachment: Attachment) -> bool:
+    """PDF không lớp chữ — mỗi trang một ảnh (T-4.6b). `page_count` NULL = hàng
+    trích trước NQ-141, không biết số trang ⇒ đi như tệp không chữ."""
+    return attachment.extract_status == ExtractStatus.NEEDS_VISION and bool(attachment.page_count)
 
 
 def file_block(attachment: Attachment) -> str:
@@ -542,16 +552,22 @@ def _to_wire(
     `file_block` đứng TRƯỚC câu hỏi (tài liệu dài đặt trước câu hỏi). Còn lại —
     lượt cũ, hay tệp không có chữ — một dòng `[tệp: <tên>]`. Không có ảnh gửi
     đi thì `content` vẫn là một chuỗi: provider nhận mảng `text` chưa đo hết.
+
+    **PDF quét (T-4.6b).** Là ảnh nhiều trang: đi đúng luật ảnh (`send_images`),
+    mỗi trang một `image_ref(…, page)` sau các ảnh; không gửi ⇒ dòng `[tệp: <tên>]`.
     """
     if message.status not in USABLE_STATUSES:
         return None
 
     images = [a for a in attachments if a.kind == AttachmentKind.IMAGE]
     files = [a for a in attachments if a.kind != AttachmentKind.IMAGE]
+    refs = [image_ref(image) for image in images]
     blocks: list[str] = []
     lines: list[str] = []
     for f in files:
-        if send_files and f.extract_status == ExtractStatus.DONE and f.extracted_text:
+        if send_images and _scanned(f):
+            refs += [image_ref(f, page) for page in range(f.page_count or 0)]
+        elif send_files and f.extract_status == ExtractStatus.DONE and f.extracted_text:
             blocks.append(file_block(f))
         else:
             lines.append(FILE_PLACEHOLDER.format(name=f.original_name))
@@ -561,8 +577,8 @@ def _to_wire(
     text = "\n\n".join(part for part in [*blocks, tail] if part)
 
     content: str | list[dict[str, Any]] = text
-    if images and send_images:
-        content = [*([{"type": "text", "text": text}] if text else []), *map(image_ref, images)]
+    if refs and send_images:
+        content = [*([{"type": "text", "text": text}] if text else []), *refs]
 
     wire: dict[str, Any] = {"role": message.role.value, "content": content}
 

@@ -22,6 +22,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import catalog
+from app.config.settings import settings
 from app.core.access_token import encode_access_token
 from app.core.crypto import seal
 from app.core.deps import SESSION_COOKIE_NAME
@@ -29,6 +30,7 @@ from app.db.models import (
     AttachmentKind,
     AuditAction,
     AuditLog,
+    ExtractStatus,
     Message,
     MessageRole,
     MessageStatus,
@@ -36,6 +38,7 @@ from app.db.models import (
     UserRole,
     UserStatus,
 )
+from app.db.models.attachment import PDF_MIME
 from app.db.repositories import (
     AttachmentRepository,
     ByokEndpointRepository,
@@ -404,3 +407,99 @@ async def test_user_cannot_override_vision(client: AsyncClient, user_a: uuid.UUI
     resp = await _set_vision(client, _auth(user_a), _model(vision=False), True)
 
     assert resp.status_code == 403
+
+
+# ═══════════════════════ PDF quét cần vision (T-4.6b) ═══════════════════════
+
+
+async def _upload_pdf(
+    factory: async_sessionmaker[AsyncSession],
+    user_id: uuid.UUID,
+    *,
+    status: ExtractStatus,
+    pages: int,
+    text: str | None = None,
+) -> uuid.UUID:
+    """PDF đã qua job `extract` (T-4.6a) — chưa gắn message nào."""
+    async with factory() as session:
+        row = await AttachmentRepository(session).create(
+            user_id=user_id,
+            kind=AttachmentKind.FILE,
+            mime_type=PDF_MIME,
+            original_name="tai-lieu.pdf",
+            size_bytes=100,
+            storage_key=f"{user_id}/2026/10/{uuid.uuid4()}.pdf",
+            extract_status=status,
+            extracted_text=text,
+            page_count=pages,
+        )
+        await session.commit()
+        return row.id
+
+
+async def _new_conversation(
+    factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID
+) -> uuid.UUID:
+    async with factory() as session:
+        conv = (await ConversationRepository(session).create_conversation(user_id=user_id)).id
+        await session.commit()
+        return conv
+
+
+@pytest.mark.parametrize(
+    "status", [ExtractStatus.NEEDS_VISION, ExtractStatus.TOO_MANY_PAGES], ids=str
+)
+async def test_scanned_pdf_over_page_cap_is_422_and_writes_nothing(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_arq: _FakeArq,
+    monkeypatch: pytest.MonkeyPatch,
+    status: ExtractStatus,
+) -> None:
+    """**DoD**: trần = 2 (đọc lúc gọi) + PDF quét 3 trang ⇒ `422` nêu trần, cả model có vision."""
+    monkeypatch.setattr(settings, "MAX_PDF_PAGES_VISION", 2)
+    conv = await _new_conversation(session_factory, user_a)
+    att = await _upload_pdf(session_factory, user_a, status=status, pages=3)
+    before = await _count(session_factory)
+
+    resp = await _post(client, user_a, conv, [att], _model(vision=True))
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "PDF_TOO_MANY_PAGES"
+    assert resp.json()["error"]["details"] == {"max_pages": 2}
+    assert await _count(session_factory) == before
+    assert fake_arq.pushed == []
+
+
+async def test_scanned_pdf_to_model_without_vision_is_422(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_arq: _FakeArq,
+) -> None:
+    """**DoD**: PDF quét + model không vision ⇒ `422 MODEL_NO_VISION` (T-4.5 coi nó như ảnh)."""
+    conv = await _new_conversation(session_factory, user_a)
+    att = await _upload_pdf(session_factory, user_a, status=ExtractStatus.NEEDS_VISION, pages=2)
+    before = await _count(session_factory)
+    model = _model(vision=False)
+
+    resp = await _post(client, user_a, conv, [att], model)
+
+    _assert_no_vision(resp, model)
+    assert await _count(session_factory) == before
+    assert fake_arq.pushed == []
+
+
+async def test_text_pdf_to_model_without_vision_is_202(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], user_a: uuid.UUID
+) -> None:
+    """**DoD**: PDF có chữ + model không vision ⇒ `202` — chữ là chữ (T-4.6a)."""
+    conv = await _new_conversation(session_factory, user_a)
+    att = await _upload_pdf(
+        session_factory, user_a, status=ExtractStatus.DONE, pages=12, text="Bao cao quy 3."
+    )
+
+    resp = await _post(client, user_a, conv, [att], _model(vision=False))
+
+    assert resp.status_code == 202, resp.text
