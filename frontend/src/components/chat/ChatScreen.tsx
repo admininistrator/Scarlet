@@ -13,7 +13,7 @@ import { useModels } from "../../features/models/useModels";
 import { QuotaNotice } from "../../features/quota/QuotaNotice";
 import { byokCovers, isSendBlocked, selectedProviderId } from "../../features/quota/quotaView";
 import { useQuota } from "../../features/quota/useQuota";
-import { ArtifactPanel } from "../artifacts/ArtifactPanel";
+import { ArtifactPanel, type PanelArtifact } from "../artifacts/ArtifactPanel";
 import { AppIsland } from "../island/AppIsland";
 import { ChatStream } from "./ChatStream";
 import { Composer } from "./Composer";
@@ -107,6 +107,25 @@ export function ChatScreen() {
     gian lam tuoi nao (B-209).
   */
   const quota = useQuota(session);
+
+  /*
+    T-5.4 — panel artifact. Nut o dao (`PanelToggle`); dong tu TRONG panel thi
+    dao tra tieu diem ve nut ay (`focusRequest` tang moi lan). T-5.3 do artifact
+    vao: event `artifact` moi (UC-10 dong 1) hoac nut "Mo" tren the.
+  */
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelFocusRequest, setPanelFocusRequest] = useState(0);
+  const [panelArtifact, setPanelArtifact] = useState<PanelArtifact | null>(null);
+  const togglePanel = useCallback(() => setPanelOpen((was) => !was), []);
+  const closePanel = useCallback(() => {
+    setPanelOpen(false);
+    setPanelFocusRequest((n) => n + 1);
+  }, []);
+  const openArtifact = useCallback((artifact: PanelArtifact) => {
+    setPanelArtifact(artifact);
+    setPanelOpen(true);
+  }, []);
+
   const chat = useChat({
     models,
     accountDefaultModel: session.profile?.default_model ?? null,
@@ -114,6 +133,7 @@ export function ChatScreen() {
     reasoningPrefs: session.profile?.reasoning_prefs,
     onQuotaWarning: quota.noteWarning,
     onQuotaStale: () => void session.refreshProfile(),
+    onArtifact: openArtifact,
   });
   const { tree } = chat;
   /*
@@ -228,18 +248,6 @@ export function ChatScreen() {
     !endpointTurn && isSendBlocked(quota.block, quota.byokProviders, selectedProvider);
   const draft = chat.phase === "draft";
 
-  /*
-    T-5.4 — panel artifact. Nut o dao (`PanelToggle`); dong tu TRONG panel thi
-    dao tra tieu diem ve nut ay (`focusRequest` tang moi lan).
-  */
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [panelFocusRequest, setPanelFocusRequest] = useState(0);
-  const togglePanel = useCallback(() => setPanelOpen((was) => !was), []);
-  const closePanel = useCallback(() => {
-    setPanelOpen(false);
-    setPanelFocusRequest((n) => n + 1);
-  }, []);
-
   // On dinh giua cac lan render cua man chat (moi manh chu dang chay) — `AppIsland` la `memo`.
   const { openConversation, newConversation, closeConversation, createdConversationId, connection } = chat;
   const islandChat = useMemo(
@@ -335,6 +343,9 @@ export function ChatScreen() {
                     // T-S.15 — ten hien thi cho chip "model · muc" (ban T-HD3-v2 3c).
                     models={models}
                     notes={chat.notes[node.id] ?? []}
+                    // T-5.3 — CHI artifact cua message nay (Q-P5-7: khop trong chinh no).
+                    artifacts={chat.artifactsOf(node)}
+                    onOpenArtifact={openArtifact}
                     running={chat.running === node.id}
                     // T-3.8 / B-232 — nut "Luu" cua tin nguoi dung tat trong luc
                     // mot thao tac doi cay con bay. `PATCH /messages/{id}` khong
@@ -378,8 +389,7 @@ export function ChatScreen() {
         </div>
       </div>
 
-      {/* T-5.3 do artifact vao day; hom nay luon trang thai trong. */}
-      <ArtifactPanel open={panelOpen} onClose={closePanel} artifact={null} />
+      <ArtifactPanel open={panelOpen} onClose={closePanel} artifact={panelArtifact} />
     </div>
   );
 }

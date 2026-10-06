@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, Pencil, RotateCcw } from "lucide";
 import { useState } from "react";
 
 import { effortLabel } from "../../features/models/reasoning";
-import type { Feedback, MessageOut, ModelOut } from "../../lib/api";
+import type { Feedback, MessageOut, ModelOut, PathArtifact } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { hasSiblings, content, reasoningOf, type TreeState } from "../../lib/tree";
 import { Icon, StaticIcon } from "../ui/Icon";
@@ -81,6 +81,8 @@ export function MessageItem({
   tree,
   models,
   notes,
+  artifacts,
+  onOpenArtifact,
   running,
   busy,
   onRetry,
@@ -96,6 +98,12 @@ export function MessageItem({
    */
   models: readonly ModelOut[];
   notes: string[];
+  /**
+   * T-5.3 — artifact cua CHINH message nay (`useChat.artifactsOf`): khoi trung
+   * tung byte thanh the tai cho, con lai the duoi chu. On dinh giua cac lan render.
+   */
+  artifacts?: readonly PathArtifact[];
+  onOpenArtifact?: (artifact: PathArtifact) => void;
   running: boolean;
   /**
    * Co mot thao tac doi cay dang bay. Nut "Luu" tat trong luc do — B-232:
@@ -158,14 +166,14 @@ export function MessageItem({
         // `motion-none`: phan tu nay doi noi dung 300+ lan mot luot sinh (T-1.14).
         <div className="motion-none min-h-6 text-body text-foreground">
           <span className="sr-only">{t("chat.streaming")}</span>
-          <Markdown text={text} streaming />
+          <Markdown text={text} streaming artifacts={artifacts} onOpenArtifact={onOpenArtifact} />
         </div>
       )}
 
       {/* Ban T-HD3: bong bong loi GIU lai phan chu da chay duoc, khong xoa. */}
       {isError && text !== "" && (
         <div className="mb-3 text-body text-foreground">
-          <Markdown text={text} streaming={false} />
+          <Markdown text={text} streaming={false} artifacts={artifacts} onOpenArtifact={onOpenArtifact} />
         </div>
       )}
 
@@ -191,7 +199,7 @@ export function MessageItem({
 
       {done && (
         <div className="motion-none mt-1 min-h-6 text-body text-foreground">
-          <Markdown text={text} streaming={false} />
+          <Markdown text={text} streaming={false} artifacts={artifacts} onOpenArtifact={onOpenArtifact} />
         </div>
       )}
 

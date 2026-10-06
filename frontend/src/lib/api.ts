@@ -186,6 +186,30 @@ export interface MessageOut {
    * FE tu dung (dang gui) chua co; T-4.5 chi doc `kind` (canh bao vision).
    */
   attachments?: MessageAttachment[];
+  /** T-5.2a — artifact cua message (duong di), thu tu khoi. Tuy chon: cung ly do `attachments`. */
+  artifacts?: PathArtifact[];
+}
+
+/**
+ * Mot artifact tren duong di — `PathArtifact` cua backend (T-5.2a). `kind` la
+ * bay gia tri cua DDL; `title` rong = khoi khong tieu de. `content` co mat de
+ * FE khop khoi trong bong bong THEO TUNG BYTE (Q-P5-7).
+ */
+export interface PathArtifact {
+  id: string;
+  kind: string;
+  language: string | null;
+  title: string;
+  version: number;
+  content: string | null;
+}
+
+/** `GET /artifacts/{id}` (T-5.2a). */
+export interface ArtifactOut extends PathArtifact {
+  lineage_id: string;
+  message_id: string;
+  conversation_id: string;
+  created_at: string;
 }
 
 /** Mot tep cua message — `attachment_out` cua backend (T-4.4a). */
@@ -993,6 +1017,9 @@ export const api = {
 
   /** Doc lai mot tep — khay hoi `extract_status` toi khi roi `pending`. */
   getAttachment: (id: string) => request<MessageAttachment>(`/attachments/${id}`),
+
+  /** T-5.3 — noi dung cua artifact vua toi qua event `artifact` (event khong mang `content`). */
+  getArtifact: (id: string) => request<ArtifactOut>(`/artifacts/${id}`),
 
   cancel: (messageId: string) => request<CancelOut>(`/messages/${messageId}/cancel`, { method: "POST" }),
 

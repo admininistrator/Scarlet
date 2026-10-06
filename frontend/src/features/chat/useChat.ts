@@ -93,6 +93,7 @@ import {
   type Feedback,
   type MessageOut,
   type ModelOut,
+  type PathArtifact,
   type QuotaWarning,
 } from "../../lib/api";
 import { PATHS } from "../../app/paths";
@@ -239,8 +240,14 @@ export interface ChatState {
   running: string | null;
   busy: boolean;
   usage: UsageOut | null;
-  /** Chip cua `tool_call`/`tool_result`/`artifact`, theo `message_id`. */
+  /** Chip cua `tool_call`/`tool_result`, theo `message_id`. */
   notes: Record<string, string[]>;
+  /**
+   * T-5.3 — artifact cua mot message: `artifacts[]` cua duong di (song qua F5,
+   * qua `STREAM_TTL_S` — B-87) cong the vua toi qua event ma duong di chua co.
+   * Tra lai CHINH mang cua duong di khi khong co gi them (on dinh cho `memo`).
+   */
+  artifactsOf: (node: MessageOut) => readonly PathArtifact[];
   error: string | null;
 
   /**
@@ -313,6 +320,13 @@ export interface ChatOptions {
    * DUY NHAT cua thanh quota — khong co bo dem thoi gian nao (B-209).
    */
   onQuotaStale?: () => void;
+  /**
+   * T-5.3 — mot artifact MOI vua toi qua stream (UC-10 dong 1: mo panel phai).
+   * Goi dung mot lan moi `artifact_id` trong doi hook, sau `GET /artifacts/{id}`
+   * (hong ⇒ voi phan event biet). Artifact da co tren duong di — mo lai hoi
+   * thoai, F5, `XRANGE` phat lai (§7.3) — KHONG goi.
+   */
+  onArtifact?: (artifact: PathArtifact) => void;
 }
 
 /**
@@ -324,6 +338,8 @@ export interface ChatOptions {
 const NO_OPTIONS: ChatOptions = { models: [], accountDefaultModel: null };
 /** Cung ly do `NO_OPTIONS`: mot `{}` literal la mot object moi moi lan render. */
 const NO_PREFS: Readonly<Record<string, string>> = {};
+/** Cung ly do: `artifactsOf` tra MOT mang rong cho moi message khong co artifact. */
+const NO_ARTIFACTS: readonly PathArtifact[] = [];
 
 export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
   const { models, accountDefaultModel, reasoningPrefs = NO_PREFS } = options;
@@ -336,11 +352,14 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     onQuotaWarning: options.onQuotaWarning,
     onQuotaStale: options.onQuotaStale,
   });
+  // T-5.3 — cung ly do: closure moi moi lan render.
+  const artifactHookRef = useRef(options.onArtifact);
   useEffect(() => {
     quotaHooksRef.current = {
       onQuotaWarning: options.onQuotaWarning,
       onQuotaStale: options.onQuotaStale,
     };
+    artifactHookRef.current = options.onArtifact;
   });
   /** `202` vua ve — chuyen `quota_warning` (neu co) cho nguoi nghe. */
   const reportQuotaWarning = useCallback((warning: QuotaWarning | null | undefined) => {
@@ -431,6 +450,53 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
   const addNote = useCallback((messageId: string, text: string) => {
     setNotes((prev) => ({ ...prev, [messageId]: [...(prev[messageId] ?? []), text] }));
   }, []);
+
+  /*
+    T-5.3 — artifact vua toi qua stream, theo `message_id`, cho toi khi duong di
+    co no. `seenArtifactsRef` chong lap theo `artifact_id`: noi lai TAY (C6) di
+    tu cursor nhung `XRANGE` cua mot tab moi phat lai MOI event (§7.3) — moi
+    lan phat lai la mot `GET` va mot lan mo panel nua neu khong chan o day.
+  */
+  const [streamArtifacts, setStreamArtifacts] = useState<Record<string, PathArtifact[]>>({});
+  const seenArtifactsRef = useRef(new Set<string>());
+
+  const receiveArtifact = useCallback(
+    (messageId: string, data: { artifact_id: string; kind: string; title: string; version: number }) => {
+      const id = data.artifact_id;
+      const onPath = treeRef.current.path.some((m) => m.artifacts?.some((a) => a.id === id) === true);
+      if (seenArtifactsRef.current.has(id) || onPath) {
+        return;
+      }
+      seenArtifactsRef.current.add(id);
+      // The hien NGAY tu phan event biet; `content` chua co ⇒ the nam duoi chu
+      // cho toi khi `GET` ve (khong khop khoi nao — B-363).
+      const card: PathArtifact = { id, kind: data.kind, title: data.title, version: data.version, language: null, content: null };
+      const put = (artifact: PathArtifact) =>
+        setStreamArtifacts((prev) => ({
+          ...prev,
+          [messageId]: [...(prev[messageId] ?? []).filter((a) => a.id !== id), artifact],
+        }));
+      put(card);
+      void api.getArtifact(id).then(
+        (full) => {
+          const loaded: PathArtifact = { ...card, language: full.language, content: full.content };
+          put(loaded);
+          artifactHookRef.current?.(loaded);
+        },
+        () => artifactHookRef.current?.(card),
+      );
+    },
+    [],
+  );
+
+  const artifactsOf = useCallback(
+    (node: MessageOut): readonly PathArtifact[] => {
+      const onPath = node.artifacts ?? NO_ARTIFACTS;
+      const extra = (streamArtifacts[node.id] ?? []).filter((a) => !onPath.some((p) => p.id === a.id));
+      return extra.length === 0 ? onPath : [...onPath, ...extra];
+    },
+    [streamArtifacts],
+  );
 
   // ╔══════════════════════════════════════════════════════════════════════╗
   // ║  GOM DELTA THEO KHUNG HINH — B-234, quy tac 4 cua ban T-HD3          ║
@@ -588,7 +654,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
               );
               break;
             case "artifact":
-              addNote(messageId, `artifact ${event.data.artifact_id} v${event.data.version}`);
+              receiveArtifact(messageId, event.data);
               break;
             case "usage":
               setUsage(event.data);
@@ -617,7 +683,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
         },
       });
     },
-    [updateTree, closeStream, flushDeltas, reload, queueDelta, addNote],
+    [updateTree, closeStream, flushDeltas, reload, queueDelta, addNote, receiveArtifact],
   );
 
   /**
@@ -1015,6 +1081,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     busy,
     usage,
     notes,
+    artifactsOf,
     error,
     changeConversationModel,
     newConversation: leaveConversation,

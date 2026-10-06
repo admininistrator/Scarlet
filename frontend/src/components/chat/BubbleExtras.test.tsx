@@ -10,10 +10,12 @@
  */
 
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ArtifactCard,
+  CARD_KIND,
+  artifactLabel,
   SourceList,
   ToolChips,
   UserAttachments,
@@ -164,28 +166,79 @@ describe("chip nguon (T-6.7)", () => {
 });
 
 describe("the artifact (T-5.3)", () => {
-  it("12 — tieu de, nhan phien ban `v3` tu SO cua may chu, nhan loai; the mang `T-5.3`", () => {
+  it("12 — tieu de, nhan phien ban `v3` tu SO cua may chu, nhan loai; khong con `data-planned`", () => {
     const { container } = render(
-      <ArtifactCard artifact={{ kind: "code", title: "readQuota.ts — đọc hạn mức từ Redis", version: 3 }} />,
+      <ArtifactCard
+        artifact={{ kind: "code", title: "readQuota.ts — đọc hạn mức từ Redis", version: 3 }}
+        onOpen={() => {}}
+      />,
     );
     const card = container.firstElementChild as HTMLElement;
 
-    expect(card).toHaveAttribute("data-planned", "T-5.3");
+    expect(container.querySelector("[data-planned]")).toBeNull();
     expect(card).toHaveClass("max-w-artifact");
     expect(card).toHaveTextContent("readQuota.ts — đọc hạn mức từ Redis");
     expect(card).toHaveTextContent("v3");
     expect(card).toHaveTextContent("Code");
   });
 
-  it("13 — chi nut 'Mo' bam duoc ve hinh, va no la nut CHO: `aria-disabled`, khong `disabled`", () => {
-    render(<ArtifactCard artifact={{ kind: "html", title: "Bang gia", version: 1 }} />);
-    const open = screen.getByRole("button", { name: "Mở" });
+  it("13 — nut 'Mo' la nut THAT (khong `aria-disabled`), ten truy cap mang tieu de, bam ⇒ `onOpen`", () => {
+    const onOpen = vi.fn();
+    render(<ArtifactCard artifact={{ kind: "html", title: "Bang gia", version: 1 }} onOpen={onOpen} />);
+    const open = screen.getByRole("button", { name: "Mở Bang gia" });
 
-    expect(open).toHaveAttribute("aria-disabled", "true");
-    expect(open).not.toBeDisabled();
-    expect(open).toHaveAttribute("data-planned", "T-5.3");
+    expect(open).toHaveTextContent(/^Mở$/);
+    expect(open).not.toHaveAttribute("aria-disabled");
     expect(screen.getAllByRole("button")).toHaveLength(1);
-    expect(screen.getByText("Trang HTML")).toBeInTheDocument();
+    fireEvent.click(open);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("16 — bang `kind`: bay gia tri cua DDL ⇒ bon loai cua the, MOT bang; chu la ⇒ Code", () => {
+    const rows: [string, string][] = [
+      ["html", "Trang HTML"],
+      ["react", "Trang HTML"],
+      ["svg", "Biểu đồ"],
+      ["mermaid", "Biểu đồ"],
+      ["markdown", "Tài liệu"],
+      ["file", "Tài liệu"],
+      ["code", "Code"],
+      ["constructor", "Code"],
+      ["la-hoan-toan", "Code"],
+    ];
+    for (const [kind, type] of rows) {
+      const { container, unmount } = render(
+        <ArtifactCard artifact={{ kind, title: "T", version: 1 }} onOpen={() => {}} />,
+      );
+      expect(container.querySelector(".text-xs.text-muted")).toHaveTextContent(type);
+      unmount();
+    }
+    expect(Object.keys(CARD_KIND).sort()).toEqual(["code", "file", "html", "markdown", "mermaid", "react", "svg"]);
+  });
+
+  it("17 — tieu de do model dat co `U+202E` ⇒ ky tu bi bo (the va ten nut)", () => {
+    render(<ArtifactCard artifact={{ kind: "code", title: `hoa-don${RLO}fdp.exe`, version: 1 }} onOpen={() => {}} />);
+
+    expect(screen.getByText("hoa-donfdp.exe")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mở hoa-donfdp.exe" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(RLO);
+  });
+
+  it("18 — tieu de rong ⇒ nhan suy ra 'ngon ngu · N dong'; chua co `content` ⇒ chi ngon ngu / loai", () => {
+    expect(artifactLabel({ kind: "code", title: "", version: 1, language: "python", content: "a\nb\nc" })).toBe(
+      "python · 3 dòng",
+    );
+    expect(artifactLabel({ kind: "html", title: "  ", version: 1, language: null, content: "<p>" })).toBe(
+      "Trang HTML · 1 dòng",
+    );
+    expect(artifactLabel({ kind: "react", title: "", version: 2 })).toBe("Trang HTML");
+    render(
+      <ArtifactCard
+        artifact={{ kind: "code", title: "", version: 1, language: "ts", content: "x\ny" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Mở ts · 2 dòng" })).toBeInTheDocument();
   });
 });
 

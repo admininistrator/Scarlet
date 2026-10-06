@@ -1,8 +1,10 @@
-import { memo, useMemo } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import { createContext, memo, useContext, useMemo } from "react";
+import ReactMarkdown, { type Components, type ExtraProps, type Options } from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
+import type { PathArtifact } from "../../lib/api";
+import { ArtifactCard } from "./BubbleExtras";
 import { CodeBlock } from "./CodeBlock";
 import { SANITIZE_SCHEMA, safeUrl } from "./markdownPolicy";
 import { splitStreamingTail } from "./streamingTail";
@@ -49,17 +51,12 @@ const COMPONENTS: Components = {
     cu bat lam.
   */
   pre(props) {
-    const node = props.node;
-    const child = node?.children?.[0];
-    if (child !== undefined && child.type === "element" && child.tagName === "code") {
+    const child = props.node === undefined ? null : preCode(props.node);
+    if (child !== null) {
       const className = child.properties?.className;
       const names = Array.isArray(className) ? className.map(String) : [];
       const language = names.map((n) => /^language-([\w+#-]+)$/.exec(n)?.[1]).find((n) => n !== undefined) ?? "";
-      const code = child.children
-        .map((n) => (n.type === "text" ? n.value : ""))
-        .join("")
-        .replace(/\n$/, "");
-      return <CodeBlock language={language} code={code} open={false} />;
+      return <CodeBlock language={language} code={codeText(child)} open={false} />;
     }
     return <pre className="my-3 overflow-x-auto rounded-md bg-surface-code p-3 text-sm">{props.children}</pre>;
   },
@@ -115,7 +112,100 @@ const COMPONENTS: Components = {
     </th>
   ),
   td: (props) => <td className="border-t border-divider px-3 py-2 align-top">{props.children}</td>,
+
+  // Cho dat the artifact (`rehypeArtifacts`). Markdown khong tu sinh `div` (khong `rehype-raw`).
+  div: (props) => {
+    const id = props.node?.properties?.[SLOT];
+    return typeof id === "string" ? <ArtifactSlot id={id} /> : <div>{props.children}</div>;
+  },
 };
+
+// ───────────────────── khoi da thanh artifact ⇒ the (T-5.3, Q-P5-7) ─────────────────────
+
+/** Kieu hast qua `react-markdown` — goi `hast` khong phai phu thuoc truc tiep. */
+type Element = NonNullable<ExtraProps["node"]>;
+type Root = { children: Element["children"] };
+type Plugins = NonNullable<Options["rehypePlugins"]>;
+
+/** `code` con cua mot `pre`, hoac `null`. */
+function preCode(pre: Element): Element | null {
+  const child = pre.children[0];
+  return child !== undefined && child.type === "element" && child.tagName === "code" ? child : null;
+}
+
+/** Than khoi = `code.value` cua mdast: to-hast them DUNG mot `\n` cuoi, bo no di. */
+function codeText(code: Element): string {
+  return code.children
+    .map((n) => (n.type === "text" ? n.value : ""))
+    .join("")
+    .replace(/\n$/, "");
+}
+
+/** Thuoc tinh hast cua cho dat the: `div[data-artifact=<id>]`. */
+const SLOT = "dataArtifact";
+
+const slot = (id: string): Element => ({ type: "element", tagName: "div", properties: { [SLOT]: id }, children: [] });
+
+/**
+ * Plugin rehype, chay SAU `rehypeSanitize` tren CUNG cay hast ma `pre` ben tren
+ * ve — mot phan tich, nen "khoi nao da thanh the" va "the nao con thua" khong
+ * the lech nhau.
+ *
+ * - `pre > code` co than trung TUNG BYTE voi `content` cua mot artifact cua
+ *   chinh message nay ⇒ cho dat the. Backend la nguon duy nhat quyet khoi nao
+ *   la artifact (luat ③ cua phase): FE khong dem dong, khong doc ngon ngu.
+ * - Moi artifact dat mot lan, theo thu tu: hai khoi giong het ⇒ hai the.
+ * - Artifact khong khop khoi nao ⇒ the o CUOI, duoi chu (B-363: markdown long
+ *   sai ma ham tach Python va mdast hieu khac; ban nguoi dung sua o T-5.2b;
+ *   the vua toi qua event, `content` chua ve). Mat the la mat artifact.
+ */
+function rehypeArtifacts(artifacts: readonly PathArtifact[]) {
+  return (tree: Root) => {
+    const placed = new Set<string>();
+    const walk = (parent: Root | Element): void => {
+      parent.children.forEach((node, index) => {
+        if (node.type !== "element") {
+          return;
+        }
+        const code = node.tagName === "pre" ? preCode(node) : null;
+        if (code === null) {
+          walk(node);
+          return;
+        }
+        const value = codeText(code);
+        const match = artifacts.find((a) => !placed.has(a.id) && a.content === value);
+        if (match !== undefined) {
+          placed.add(match.id);
+          parent.children[index] = slot(match.id);
+        }
+      });
+    };
+    walk(tree);
+    for (const artifact of artifacts) {
+      if (!placed.has(artifact.id)) {
+        tree.children.push(slot(artifact.id));
+      }
+    }
+  };
+}
+
+const ArtifactSlots = createContext<{
+  artifacts: readonly PathArtifact[];
+  onOpen: (artifact: PathArtifact) => void;
+} | null>(null);
+
+function ArtifactSlot({ id }: { id: string }) {
+  const slots = useContext(ArtifactSlots);
+  const artifact = slots?.artifacts.find((a) => a.id === id);
+  if (slots === null || artifact === undefined) {
+    return null;
+  }
+  return <ArtifactCard artifact={artifact} onOpen={() => slots.onOpen(artifact)} />;
+}
+
+const REHYPE_PLUGINS: Plugins = [[rehypeSanitize, SANITIZE_SCHEMA]];
+const NO_ARTIFACTS: readonly PathArtifact[] = [];
+const NO_OPEN = () => {};
 
 /** Khoi chu tho cho phan markdown chua dong — ban T-HD3 hinh 2d. */
 function PartialBlock({ text }: { text: string }) {
@@ -130,24 +220,39 @@ function PartialBlock({ text }: { text: string }) {
 export const Markdown = memo(function Markdown({
   text,
   streaming,
+  artifacts = NO_ARTIFACTS,
+  onOpenArtifact = NO_OPEN,
 }: {
   text: string;
   /** Chu con dang chay — bat phan tach "dang do" va con tro nhap nhay. */
   streaming: boolean;
+  /**
+   * T-5.3 — artifact cua CHINH message nay (duong di + event). Phai on dinh giua
+   * cac lan render: mang moi la phan tich lai ca message (`memo`).
+   */
+  artifacts?: readonly PathArtifact[];
+  onOpenArtifact?: (artifact: PathArtifact) => void;
 }) {
   const { body, tail } = useMemo(() => splitStreamingTail(text, streaming), [text, streaming]);
+  const rehypePlugins = useMemo(
+    (): Plugins => (artifacts.length === 0 ? REHYPE_PLUGINS : [...REHYPE_PLUGINS, [rehypeArtifacts, artifacts]]),
+    [artifacts],
+  );
+  const slots = useMemo(() => ({ artifacts, onOpen: onOpenArtifact }), [artifacts, onOpenArtifact]);
 
   return (
     <div className={streaming && tail === null ? "caret-tail" : undefined}>
       {body !== "" && (
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          rehypePlugins={[[rehypeSanitize, SANITIZE_SCHEMA]]}
-          urlTransform={safeUrl}
-          components={COMPONENTS}
-        >
-          {body}
-        </ReactMarkdown>
+        <ArtifactSlots value={slots}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={rehypePlugins}
+            urlTransform={safeUrl}
+            components={COMPONENTS}
+          >
+            {body}
+          </ReactMarkdown>
+        </ArtifactSlots>
       )}
       {tail?.kind === "code" && <CodeBlock language={tail.language} code={tail.code} open />}
       {tail?.kind === "raw" && <PartialBlock text={tail.text} />}

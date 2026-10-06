@@ -2,7 +2,6 @@ import { AppWindow, ChartColumn, Check, FileCode, FileText, Image, LoaderCircle,
 import { useState } from "react";
 
 import { t, type TextKey } from "../../lib/i18n";
-import { ComingSoon } from "../ui/ComingSoon";
 import { StaticIcon } from "../ui/Icon";
 import { formatBytes } from "./Attachments";
 import { safeUrl } from "./markdownPolicy";
@@ -17,13 +16,14 @@ import { safeUrl } from "./markdownPolicy";
  * |----------------|------------------------------------------|-----------|
  * | `T-6.7`        | Chip "Dang tim web…" + chip nguon/favicon | P6        |
  * | `T-7.9`        | Chip "Dang chay code…"                   | P7        |
- * | `T-5.3`        | The artifact (nut "Mo" la nut cho)       | P5        |
+ * | —              | The artifact                             | GAN o T-5.3 |
  * | —              | Anh / tep trong bong bong nguoi dung     | GAN o T-4.7 |
  *
- * Ba thanh phan dau chua co du lieu — tool, artifact chua ton tai; chung cho
- * phase sau GAN vao `MessageItem` (ban ve dat chip cong cu va nguon TREN chu
- * tra loi, the artifact duoi chu). `UserAttachments` da gan o T-4.7 (tep TREN
- * chu cua nguoi dung).
+ * Hai chip dau chua co du lieu — tool chua ton tai; phase sau GAN vao
+ * `MessageItem` (ban ve dat chip cong cu va nguon TREN chu tra loi).
+ * `ArtifactCard` gan o T-5.3 (`Markdown`: thay khoi da thanh artifact, hoac
+ * duoi chu khi khong khop khoi nao — B-363). `UserAttachments` da gan o
+ * T-4.7 (tep TREN chu cua nguoi dung).
  *
  * ╔════════════════════════════════════════════════════════════════════════╗
  * ║  DU LIEU THAT KHONG TIN DUOC — LOC NGAY TU BAY GIO (Cam bay ②)         ║
@@ -219,8 +219,51 @@ function Favicon({ src, title, href }: { src: string | undefined; title: string;
 // ─────────────────────────── the artifact (T-5.3) ───────────────────────────
 
 export type ArtifactKind = "code" | "document" | "html" | "chart";
-/** `version` la SO phien ban tu may chu (§14.2) — "v3" khong phai chuoi dich. */
-export type ArtifactSummary = { kind: ArtifactKind; title: string; version: number };
+/**
+ * Phan cua artifact ma the can — tap con cua `PathArtifact` (T-5.2a). `kind` la
+ * chu cua DDL (bay gia tri), `version` la SO tu may chu (§14.2) — "v3" khong
+ * phai chuoi dich. `language` / `content` vang mat khi the moi chi biet event.
+ */
+export type ArtifactSummary = {
+  kind: string;
+  title: string;
+  version: number;
+  language?: string | null;
+  content?: string | null;
+};
+
+/**
+ * Bay `kind` cua DDL (Phu luc A) ⇒ bon loai cua the — MOT bang (T-5.3 Cam bay ①).
+ * `file` (con tro MinIO cua skill, P7) la tai lieu. Chu la ⇒ `code`.
+ */
+export const CARD_KIND: Readonly<Record<string, ArtifactKind>> = {
+  html: "html",
+  react: "html",
+  svg: "chart",
+  mermaid: "chart",
+  markdown: "document",
+  file: "document",
+  code: "code",
+};
+
+/** `Object.hasOwn`: `kind` la du lieu cua model — "constructor" khong duoc thanh mot ham. */
+export function cardKind(kind: string): ArtifactKind {
+  return Object.hasOwn(CARD_KIND, kind) ? CARD_KIND[kind] : "code";
+}
+
+/** Tieu de da loc; rong ⇒ nhan suy ra "ngon ngu · N dong" (T-5.3). */
+export function artifactLabel(artifact: ArtifactSummary): string {
+  const title = plainText(artifact.title);
+  if (title !== "") {
+    return title;
+  }
+  const language = plainText(artifact.language ?? "");
+  const parts = [language === "" ? t(ARTIFACT_TYPE[cardKind(artifact.kind)]) : language];
+  if (artifact.content !== null && artifact.content !== undefined) {
+    parts.push(`${artifact.content.split("\n").length} ${t("artifact.lines")}`);
+  }
+  return parts.join(" · ");
+}
 
 const ARTIFACT_ICON: Record<ArtifactKind, IconNode> = {
   code: FileCode,
@@ -239,33 +282,37 @@ const ARTIFACT_TYPE: Record<ArtifactKind, TextKey> = {
 /**
  * The artifact trong bong bong — ban ve 3e. Rong toi da 480 (`max-w-artifact`),
  * co theo bong bong o 375 px: tieu de cat "…", nut "Mo" KHONG co. Ca the
- * khong bam duoc — chi nut "Mo", va nut ay la nut cho (`ComingSoon`, S12) cho
- * toi khi T-5.3 mo panel.
+ * khong bam duoc — chi nut "Mo" (T-5.3: mo panel phai voi artifact nay).
  */
-export function ArtifactCard({ artifact }: { artifact: ArtifactSummary }) {
+export function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactSummary; onOpen: () => void }) {
+  const kind = cardKind(artifact.kind);
+  const label = artifactLabel(artifact);
   return (
-    <div
-      data-planned="T-5.3"
-      className="mt-3 flex max-w-artifact items-center gap-3 rounded-lg border border-border bg-background py-2 pr-2 pl-2.5"
-    >
+    <div className="mt-3 flex max-w-artifact items-center gap-3 rounded-lg border border-border bg-background py-2 pr-2 pl-2.5">
       <span
         aria-hidden="true"
         className="grid size-artifact-icon shrink-0 place-items-center rounded-md bg-accent-subtle text-accent-text"
       >
-        <StaticIcon icon={ARTIFACT_ICON[artifact.kind]} size={20} />
+        <StaticIcon icon={ARTIFACT_ICON[kind]} size={20} />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-base font-semibold">{plainText(artifact.title)}</span>
+          <span className="truncate text-base font-semibold">{label}</span>
           <span className="shrink-0 rounded-sm border border-border-strong px-1.5 font-mono text-2xs text-muted">
             v{artifact.version}
           </span>
         </span>
-        <span className="text-xs text-muted">{t(ARTIFACT_TYPE[artifact.kind])}</span>
+        <span className="text-xs text-muted">{t(ARTIFACT_TYPE[kind])}</span>
       </span>
-      <span className="flex shrink-0">
-        <ComingSoon planned="T-5.3" label={t("artifact.open")} />
-      </span>
+      <button
+        type="button"
+        // Nhieu the tren mot man hinh: ten truy cap mang tieu de, chu hien van la "Mo".
+        aria-label={`${t("artifact.open")} ${label}`}
+        onClick={onOpen}
+        className="motion-press min-h-touch shrink-0 rounded-md border border-border-strong bg-surface-panel px-4 text-base font-medium text-foreground hover:bg-surface-hover"
+      >
+        {t("artifact.open")}
+      </button>
     </div>
   );
 }
