@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, Text, func, text
+from sqlalchemy import ForeignKey, Index, Integer, Text, func, text
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,4 +39,15 @@ class Artifact(Base):
     #: `clock_timestamp()` từ migration 0011 (B-57).
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
+
+    __table_args__ = (
+        # Migration 0012 (T-5.2a) — khai lại để metadata không nói dối (§17.4).
+        # Tên phải TRÙNG DDL. Dòng = `COALESCE(parent_artifact_id, id)`.
+        Index(
+            "uq_art_lineage_version",
+            func.coalesce(parent_artifact_id, id),
+            version,
+            unique=True,
+        ),
     )

@@ -754,7 +754,7 @@ async def _close_ledger(
 
 
 async def _publish_artifacts(mid: uuid.UUID, producer: StreamProducer, result: _Result) -> None:
-    """Bước ⑥.2 — khối code đủ điều kiện ⇒ hàng `artifacts` v1 + `XADD artifact` (T-5.1).
+    """Bước ⑥.2 — khối code đủ điều kiện ⇒ hàng `artifacts` + `XADD artifact` (T-5.1, T-5.2a).
 
     Mọi ngả khép (xong, huỷ, `length`, lỗi giữa chừng) đi qua cùng luật: chỉ khối
     rào **đã đóng** — khối dở ở cuối không bao giờ thành artifact (Cạm bẫy ③).
@@ -765,10 +765,13 @@ async def _publish_artifacts(mid: uuid.UUID, producer: StreamProducer, result: _
     """
     try:
         blocks = artifact_blocks(result.content)
-        if not blocks:
+        if not blocks or result.user_id is None:
             return
         async with session_scope() as session:
-            rows = await ArtifactRepository(session).create_initial(message_id=mid, blocks=blocks)
+            # T-5.2a: có tiêu đề ⇒ có thể là phiên bản kế của một dòng trên đường đi.
+            rows = await ArtifactRepository(session).create_for_message(
+                message_id=mid, user_id=result.user_id, blocks=blocks
+            )
             await session.commit()
         for row in rows:
             await producer.emit(

@@ -127,7 +127,7 @@ from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.conversations import PathMessage, with_attachments
+from app.api.v1.conversations import PathMessage, with_artifacts, with_attachments
 from app.config import catalog
 from app.config.settings import FEEDBACK_REASON_MAX_CHARS, settings
 from app.core.deps import (
@@ -1268,6 +1268,7 @@ async def list_siblings(
             ],
             user_id=user_id,
         )
+        await with_artifacts(session, items, user_id=user_id)
         mine = next(i for i in items if i.id == message_id)
         return SiblingsResponse(
             message_id=message_id,

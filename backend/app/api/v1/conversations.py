@@ -61,12 +61,14 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.artifacts import PathArtifact, path_artifact
 from app.api.v1.attachments import AttachmentOut, attachment_out
 from app.config.settings import CONVERSATION_TITLE_MAX_CHARS, settings
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.db.models import Conversation, Message, MessageFeedback, MessageRole, MessageStatus
 from app.db.repositories import (
+    ArtifactRepository,
     AttachmentRepository,
     ConversationRepository,
     MessageNotInConversationError,
@@ -180,6 +182,9 @@ class PathMessage(BaseModel):
     #: Tệp gửi kèm (T-4.4a), thứ tự tải lên. Điền bởi `with_attachments` —
     #: một câu cho cả danh sách, không một câu mỗi message.
     attachments: list[AttachmentOut] = []
+    #: Artifact của message (T-5.2a), thứ tự khối. Điền bởi `with_artifacts` —
+    #: cũng một câu cho cả danh sách.
+    artifacts: list[PathArtifact] = []
 
     @classmethod
     def from_path_node(cls, node: PathNode) -> PathMessage:
@@ -567,9 +572,9 @@ async def _path(
     if conversation.active_leaf_id is None:
         return []
     nodes = await MessageRepository(session).get_path(conversation.active_leaf_id, user_id=user_id)
-    return await with_attachments(
-        session, [PathMessage.from_path_node(node) for node in nodes], user_id=user_id
-    )
+    items = [PathMessage.from_path_node(node) for node in nodes]
+    await with_attachments(session, items, user_id=user_id)
+    return await with_artifacts(session, items, user_id=user_id)
 
 
 async def with_attachments(
@@ -586,6 +591,23 @@ async def with_attachments(
         by_message.setdefault(row.message_id, []).append(attachment_out(row))
     for item in items:
         item.attachments = by_message.get(item.id, [])
+    return items
+
+
+async def with_artifacts(
+    session: AsyncSession, items: list[PathMessage], *, user_id: uuid.UUID
+) -> list[PathMessage]:
+    """Điền `artifacts` cho cả danh sách bằng MỘT truy vấn (T-5.2a Cạm bẫy ④)."""
+    if not items:
+        return items
+    rows = await ArtifactRepository(session).list_for_messages(
+        user_id=user_id, message_ids=[item.id for item in items]
+    )
+    by_message: dict[uuid.UUID, list[PathArtifact]] = {}
+    for row in rows:
+        by_message.setdefault(row.message_id, []).append(path_artifact(row))
+    for item in items:
+        item.artifacts = by_message.get(item.id, [])
     return items
 
 

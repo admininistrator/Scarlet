@@ -46,6 +46,7 @@ chúng, và đó là lý do T-2.18 chuyển chúng lên conftest gốc.
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -76,13 +77,16 @@ from app.db.models import (
     UserStatus,
 )
 from app.db.repositories import (
+    ArtifactRepository,
     AttachmentRepository,
+    ByokEndpointRepository,
     ConversationRepository,
     MessageRepository,
 )
 from app.db.repositories.provider_keys import ProviderKeyRepository
 from app.db.repositories.users import UserRepository
 from app.llm import byok_verify as verify_mod
+from app.llm.artifact_blocks import ArtifactBlock
 from app.main import app
 
 API = "/api/v1"
@@ -261,6 +265,10 @@ class Dataset:
     provider: str
     #: Một hàng `attachments` (T-4.2, B-181) — object MinIO không cần có thật.
     attachment: uuid.UUID
+    #: Artifact trên câu trả lời (T-5.2a, B-182) — không có `user_id` trên bảng.
+    artifact: uuid.UUID
+    #: Endpoint BYOK (T-S.19b) — vào ma trận ở T-5.2a (B-342).
+    byok_endpoint: uuid.UUID
 
 
 def provider_byok() -> str:
@@ -329,6 +337,20 @@ async def _build_data(
             size_bytes=1,
             storage_key=f"{user_id}/idor.pdf",
         )
+        [artifact] = await ArtifactRepository(session).create_for_message(
+            message_id=answer.id,
+            user_id=user_id,
+            blocks=[ArtifactBlock(kind="html", language="html", title="Trang", content="<p/>")],
+        )
+        endpoint = await ByokEndpointRepository(session).create(
+            user_id=user_id,
+            label=f"endpoint cua {label}",
+            base_url="https://byok.example/v1",
+            sealed=seal(key),
+            masked=mask_secret(key),
+            models=["m"],
+            verified_at=None,
+        )
         await session.commit()
         return Dataset(
             user_id=user_id,
@@ -337,6 +359,8 @@ async def _build_data(
             message_assistant=answer.id,
             provider=provider,
             attachment=attachment.id,
+            artifact=artifact.id,
+            byok_endpoint=endpoint.id,
         )
 
 
@@ -400,6 +424,8 @@ _TARGETS: dict[str, Callable[[Dataset], uuid.UUID]] = {
     "message_user": lambda d: d.message_user,
     "message_assistant": lambda d: d.message_assistant,
     "attachment": lambda d: d.attachment,
+    "artifact": lambda d: d.artifact,
+    "byok_endpoint": lambda d: d.byok_endpoint,
 }
 
 
@@ -571,6 +597,59 @@ MATRIX: tuple[CaIDOR, ...] = (
         body=None,
         error_code=ApiErrorCode.ATTACHMENT_NOT_FOUND,
     ),
+    # ── artifact (T-5.2a, B-182): bảng không có `user_id`, sở hữu qua JOIN
+    # `messages → conversations`. Origin phụ không có id nào (T-5.6). ──
+    CaIDOR(
+        name="GET /artifacts/{cua-B}",
+        resource="artifact",
+        route=f"{API}/artifacts/{{artifact_id}}",
+        method="GET",
+        target="artifact",
+        path=lambda target, _of_a: f"{API}/artifacts/{target}",
+        body=None,
+        error_code=ApiErrorCode.ARTIFACT_NOT_FOUND,
+    ),
+    CaIDOR(
+        name="GET /artifacts/{cua-B}/versions",
+        resource="artifact",
+        route=f"{API}/artifacts/{{artifact_id}}/versions",
+        method="GET",
+        target="artifact",
+        path=lambda target, _of_a: f"{API}/artifacts/{target}/versions",
+        body=None,
+        error_code=ApiErrorCode.ARTIFACT_NOT_FOUND,
+    ),
+    # ── byok endpoint (T-S.19b) — lộ ra khi bộ lọc thành "mọi `{…_id}`" (B-342) ──
+    CaIDOR(
+        name="GET /settings/byok-endpoints/{cua-B}/models",
+        resource="byok_endpoint",
+        route=f"{API}/settings/byok-endpoints/{{endpoint_id}}/models",
+        method="GET",
+        target="byok_endpoint",
+        path=lambda target, _of_a: f"{API}/settings/byok-endpoints/{target}/models",
+        body=None,
+        error_code=ApiErrorCode.BYOK_ENDPOINT_NOT_FOUND,
+    ),
+    CaIDOR(
+        name="PATCH /settings/byok-endpoints/{cua-B}",
+        resource="byok_endpoint",
+        route=f"{API}/settings/byok-endpoints/{{endpoint_id}}",
+        method="PATCH",
+        target="byok_endpoint",
+        path=lambda target, _of_a: f"{API}/settings/byok-endpoints/{target}",
+        body=lambda _target: {"label": "A doi nhan endpoint cua B"},
+        error_code=ApiErrorCode.BYOK_ENDPOINT_NOT_FOUND,
+    ),
+    CaIDOR(
+        name="DELETE /settings/byok-endpoints/{cua-B}",
+        resource="byok_endpoint",
+        route=f"{API}/settings/byok-endpoints/{{endpoint_id}}",
+        method="DELETE",
+        target="byok_endpoint",
+        path=lambda target, _of_a: f"{API}/settings/byok-endpoints/{target}",
+        body=None,
+        error_code=ApiErrorCode.BYOK_ENDPOINT_NOT_FOUND,
+    ),
 )
 
 #: `pytest -v` in ra câu chữ của ma trận, không phải `MA_TRAN0..MA_TRAN10`.
@@ -696,6 +775,40 @@ async def test_after_whole_matrix_Bs_data_is_intact(
             user_id=b.user_id, attachment_id=b.attachment
         )
     assert attachment is not None and attachment.message_id is None, "A da gan tep cua B"
+    async with session_factory() as session:
+        endpoint = await ByokEndpointRepository(session).get(
+            user_id=b.user_id, endpoint_id=b.byok_endpoint
+        )
+    assert endpoint is not None, "DELETE cua A da xoa endpoint BYOK cua B"
+    assert endpoint.label == "endpoint cua B", "PATCH cua A da doi nhan endpoint cua B"
+
+
+@pytest.mark.parametrize("deleted", ["message", "conversation"])
+async def test_artifact_of_As_soft_deleted_message_is_404(
+    client: AsyncClient,
+    a: Dataset,
+    session_factory: async_sessionmaker[AsyncSession],
+    deleted: str,
+) -> None:
+    """C12 (Cạm bẫy ③ T-5.2a): artifact của message / hội thoại đã xoá mềm phải
+    `404` — không chỉ vắng khỏi đường đi. `200` trước khi xoá là phép đối chứng."""
+    paths = [f"{API}/artifacts/{a.artifact}", f"{API}/artifacts/{a.artifact}/versions"]
+    assert [(await client.get(p)).status_code for p in paths] == [200, 200]
+
+    async with session_factory() as session:
+        if deleted == "message":
+            await MessageRepository(session).soft_delete_message(
+                a.message_assistant, user_id=a.user_id
+            )
+        else:
+            await ConversationRepository(session).soft_delete_conversation(
+                a.conversation_id, user_id=a.user_id
+            )
+        await session.commit()
+
+    for p in paths:
+        resp = await client.get(p)
+        assert (resp.status_code, resp.json()["error"]["code"]) == (404, "ARTIFACT_NOT_FOUND")
 
 
 # ═══════════ 3. Không rò qua DANH SÁCH — chỗ không có id để mà 404 ══════════
@@ -801,9 +914,17 @@ async def test_A_writing_new_key_does_not_overwrite_Bs_row(
 # ═════════ 5. Ma trận phải phủ HẾT — "quên một endpoint là đủ" (§20) ════════
 
 
-#: Tham số đường dẫn mang id của một tài nguyên có chủ. `{attachment_id}` từ
-#: T-4.2 (B-181) — thiếu nó thì route mới lọt qua phép đếm dưới đây mà vẫn xanh.
-_ID_PARAMS = ("{conversation_id}", "{message_id}", "{attachment_id}")
+#: B-342 (T-5.2a): MỌI tham số đường dẫn `{…_id}` là id của một tài nguyên có
+#: chủ, trừ danh sách miễn dưới đây — mỗi dòng một lý do. Danh sách tay các tên
+#: CẦN đếm (`_ID_PARAMS` cũ) làm route mới lọt qua mà vẫn xanh (đo ở T-4.2).
+_ID_PARAM = re.compile(r"\{(\w+_id)\}")
+_EXEMPT_ID_PARAMS = {
+    # `/admin/users/{user_id}…` — chặn ở `require_admin` (§16.3), phủ bởi
+    # `tests/api/test_admin_authz.py`; admin đọc dữ liệu người khác là chức năng.
+    "user_id": "admin",
+    # `/admin/models/{model_id}` — tên model trong catalog, không phải tài nguyên có chủ.
+    "model_id": "catalog",
+}
 
 
 async def test_matrix_covers_every_route_with_id_in_path() -> None:
@@ -816,18 +937,14 @@ async def test_matrix_covers_every_route_with_id_in_path() -> None:
     trận — cùng cách T-2.16 đóng cạm bẫy `require_admin` bằng vị trí, chỉ khác
     là ở đây phép đếm làm việc đó.
 
-    Hai họ đường dẫn có `{...}` mà cố ý **không** tính:
-
-    * `/settings/keys/{provider}` — `{provider}` là một tên trong catalog, ai
-      cũng được phép gõ; tài nguyên nằm ở `(user_id, provider)` và nhóm 4 ở
-      trên đo đúng nó.
-    * `/admin/users/{user_id}` — `/admin/*` chặn ở `require_admin` (§16.3), và
-      `tests/api/test_admin_authz.py` đã phủ cả bảy endpoint từ T-2.16. Một
-      admin đọc dữ liệu của người khác là **chức năng**, không phải IDOR.
+    Đếm **mọi** `{…_id}` trừ `_EXEMPT_ID_PARAMS` (B-342). Tham số không đuôi
+    `_id` không phải id tài nguyên: `/settings/keys/{provider}` — tên trong
+    catalog, tài nguyên nằm ở `(user_id, provider)` và nhóm 4 ở trên đo đúng
+    nó; `/admin/tiers/{name}` — chặn ở `require_admin` (§16.3).
     """
     in_app: set[tuple[str, str]] = set()
     for path, methods in app.openapi()["paths"].items():
-        if not any(param in path for param in _ID_PARAMS):
+        if not set(_ID_PARAM.findall(path)) - _EXEMPT_ID_PARAMS.keys():
             continue
         for method in methods:
             in_app.add((method.upper(), path))

@@ -1951,7 +1951,7 @@ async def test_artifact_insert_failure_still_done_content_intact_one_log_line(
     async def _boom(*_a: Any, **_k: Any) -> list[Artifact]:
         raise RuntimeError("deadlock detected")
 
-    monkeypatch.setattr(ArtifactRepository, "create_initial", _boom)
+    monkeypatch.setattr(ArtifactRepository, "create_for_message", _boom)
 
     with caplog.at_level("ERROR", logger="app.workers.generate"):
         await generate(_ctx(fake_redis, FakeClient(_normal_chunks(TWO_BLOCKS))), str(message.id))

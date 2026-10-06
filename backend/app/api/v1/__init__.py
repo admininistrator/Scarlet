@@ -48,7 +48,17 @@ không được biết tên route của `api/` (luật lớp §5.3).
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1 import admin, attachments, auth, conversations, health, messages, models, stream
+from app.api.v1 import (
+    admin,
+    artifacts,
+    attachments,
+    auth,
+    conversations,
+    health,
+    messages,
+    models,
+    stream,
+)
 from app.api.v1 import settings as settings_router
 from app.config.settings import settings
 from app.core.deps import require_admin, require_app_access
@@ -97,6 +107,7 @@ router.include_router(conversations.router, dependencies=_AUTHENTICATED)
 router.include_router(messages.router, dependencies=_AUTHENTICATED)
 router.include_router(settings_router.router, dependencies=_AUTHENTICATED)
 router.include_router(attachments.router, dependencies=_AUTHENTICATED)
+router.include_router(artifacts.router, dependencies=_AUTHENTICATED)
 router.include_router(auth.router)
 
 # §18.6 — `/_debug/*` CHỈ tồn tại khi DEBUG=true. Gắn router có điều kiện thay

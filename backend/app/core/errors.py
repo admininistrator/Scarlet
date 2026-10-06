@@ -323,6 +323,9 @@ class ApiErrorCode(StrEnum):
     #: id "không dùng được" — thêm ca "đã gắn message khác" — để id của B và id
     #: bịa ra trả lời trùng từng byte.
     ATTACHMENT_NOT_FOUND = "ATTACHMENT_NOT_FOUND"
+    #: `404` — `GET /artifacts/{id}`, `/versions` (T-5.2a): không có, của người
+    #: khác, hoặc message / hội thoại chứa nó đã xoá mềm — một câu trả lời (§20).
+    ARTIFACT_NOT_FOUND = "ARTIFACT_NOT_FOUND"
     #: `400` — `attachment_ids` nhiều hơn `max_attachments` của tier (đọc lúc
     #: gọi). `details` mang `{max_attachments}`.
     ATTACHMENT_LIMIT_EXCEEDED = "ATTACHMENT_LIMIT_EXCEEDED"
