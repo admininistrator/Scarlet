@@ -34,11 +34,16 @@
  * Doi chung o trang cha: `fetch('/api/v1/conversations')` ⇒ 200 + danh sach
  * khong rong — khong co no thi "tam dong chan" co the chi vi phien hong.
  *
+ * T-5.7, sau doi chung: `render` HTML chua ma 6 chu so qua `postMessage` (bat
+ * tay `ready` → `render` → `rendered`) ⇒ body khung chua ma; (i) mot trang
+ * KHAC cung origin chinh `window.open` khung roi gui `render` ⇒ khung khong
+ * doi (chi kiem `event.source` cua khung chan duoc).
+ *
  * Chuoi `sandbox` doc tu `ArtifactFrame.tsx` — CUNG chuoi voi khung that. Ma
  * thoat = so dong truot (LOT + doi chung hong).
  */
 
-import { createHash, X509Certificate } from "node:crypto";
+import { createHash, randomInt, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import puppeteer from "puppeteer-core";
@@ -178,6 +183,63 @@ try {
   const controlOk = control[0] === 200 && control[1] > 0;
   console.log(`đối chứng ${controlOk ? "đạt" : "HỎNG"}  trang cha GET /api/v1/conversations ⇒ ${control[0]} (${control[1]} hội thoại)`);
   if (!controlOk) failures += 1;
+
+  // T-5.7 — nap noi dung bang `postMessage`, dung bat tay cua `ArtifactFrame.tsx`:
+  // listener gan TRUOC khi chen iframe, `render` chi gui sau `ready` tu dung
+  // `contentWindow`. Ma sinh luc chay ⇒ `docker compose logs | grep -c <ma>`.
+  const code = String(randomInt(100_000, 1_000_000));
+  console.log(`mã      ${code}`);
+  const reply = await page.evaluate(
+    (src, sandbox, content, timeoutMs) =>
+      new Promise((resolve) => {
+        const frame = document.createElement("iframe");
+        frame.id = "render";
+        frame.setAttribute("sandbox", sandbox);
+        addEventListener("message", (event) => {
+          if (event.source !== frame.contentWindow) return;
+          if (event.data?.type === "ready") {
+            frame.contentWindow.postMessage({ type: "render", kind: "html", content }, "*");
+          } else {
+            resolve(JSON.stringify(event.data));
+          }
+        });
+        frame.src = src;
+        document.body.append(frame);
+        setTimeout(() => resolve("hết giờ"), timeoutMs);
+      }),
+    FRAME_URL,
+    SANDBOX,
+    `<p>mã ${code}</p>`,
+    LOAD_TIMEOUT_MS,
+  );
+  const rendered = await (await page.$("#render")).contentFrame();
+  const text = await rendered.evaluate(() => document.body.innerText);
+  const renderOk = reply === '{"type":"rendered"}' && text.includes(code);
+  console.log(`render  ${renderOk ? "đạt" : "HỎNG"}  khung trả ${reply}; body ${JSON.stringify(text)}`);
+  if (!renderOk) failures += 1;
+
+  // (i) Mot trang KHAC cung origin chinh (khong phai cha cua khung) mo khung
+  // bang `window.open` roi gui `render` — origin dung, `source` sai. Chi kiem
+  // `event.source === window.parent` cua khung chan duoc ca nay.
+  const intruderCode = String(randomInt(100_000, 1_000_000));
+  const other = await browser.newPage();
+  await other.goto(`${PUBLIC_BASE_URL}/api/v1/models`, { waitUntil: "domcontentloaded" });
+  const [popup] = await Promise.all([
+    new Promise((resolve) => other.once("popup", resolve)),
+    other.evaluate((url) => {
+      globalThis.opened = window.open(url);
+    }, FRAME_URL),
+  ]);
+  await popup.waitForFunction(() => document.readyState === "complete", { timeout: LOAD_TIMEOUT_MS });
+  await other.evaluate((content) => {
+    globalThis.opened.postMessage({ type: "render", kind: "html", content }, "*");
+  }, `<p>mã ${intruderCode}</p>`);
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  const popupText = await popup.evaluate(() => document.body.innerText);
+  const intruded = popupText.includes(intruderCode);
+  console.log(`(i) ${intruded ? "LỌT" : "chặn"}  trang khác gửi render vào khung mở bằng window.open ⇒ body ${JSON.stringify(popupText)}`);
+  if (intruded) failures += 1;
+  await other.close();
 } catch (e) {
   console.error(e.message);
   failures += 1;
