@@ -32,7 +32,13 @@ from app.db.models import (
     UserRole,
     UserStatus,
 )
-from app.db.repositories import AttachmentRepository, ConversationRepository, MessageRepository
+from app.db.repositories import (
+    ArtifactRepository,
+    AttachmentRepository,
+    ConversationRepository,
+    MessageRepository,
+)
+from app.llm.artifact_blocks import ArtifactBlock
 from app.main import app
 
 API = "/api/v1"
@@ -507,3 +513,100 @@ async def test_file_text_at_cap_is_202(
     resp = await _send(client, user_a, conv, ids)
 
     assert resp.status_code == 202, resp.text
+
+
+# ─────────── trần chung: chữ tệp + bản sửa artifact (T-5.2b, B-208 / B-353) ───────────
+
+
+async def _edited_turn(
+    factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID, conv: uuid.UUID, edit_chars: int
+) -> uuid.UUID:
+    """Lượt 1 có artifact v1, rồi người dùng sửa nó (`edit_chars` ký tự, 0 = không sửa).
+    Trả câu trả lời lượt 1 — đã là `active_leaf_id`, nên câu hỏi gửi tiếp nhận bản sửa."""
+    async with factory() as session:
+        messages = MessageRepository(session)
+        q1 = await messages.create_message(
+            conversation_id=conv,
+            user_id=user_id,
+            role=MessageRole.USER,
+            parent_id=None,
+            content="q1",
+        )
+        a1 = await messages.create_message(
+            conversation_id=conv,
+            user_id=user_id,
+            role=MessageRole.ASSISTANT,
+            parent_id=q1.id,
+            content="a1",
+            status=MessageStatus.COMPLETED,
+        )
+        artifacts = ArtifactRepository(session)
+        [v1] = await artifacts.create_for_message(
+            message_id=a1.id,
+            user_id=user_id,
+            blocks=[ArtifactBlock(kind="html", language="html", title="Trang A", content="<p/>")],
+        )
+        if edit_chars:
+            await artifacts.create_user_version(
+                user_id=user_id, artifact_id=v1.id, content="e" * edit_chars
+            )
+        await ConversationRepository(session).set_active_leaf(
+            conv, user_id=user_id, message_id=a1.id
+        )
+        await session.commit()
+        return a1.id
+
+
+async def test_file_text_plus_artifact_edit_share_one_cap(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**DoD** T-5.2b: chữ tệp 20 000 + bản sửa 5 000, trần 24 000 ⇒ `422
+    ATTACHMENT_TEXT_TOO_LONG`, `count(*) messages` không đổi. Mỗi phần một mình vừa trần."""
+    monkeypatch.setattr(settings, "ATTACHMENT_TEXT_MAX_CHARS", 24_000)
+    conv = await _conversation(session_factory, user_a)
+    await _edited_turn(session_factory, user_a, conv, 5_000)
+    att = await _file_row(session_factory, user_a, status=ExtractStatus.DONE, text="a" * 20_000)
+    before = await _count_messages(session_factory, conv)
+
+    resp = await _send(client, user_a, conv, [att])
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "ATTACHMENT_TEXT_TOO_LONG"
+    assert await _count_messages(session_factory, conv) == before
+    assert await _message_id_of(session_factory, att) is None
+
+
+async def test_edited_question_gets_unsent_edit_inside_same_cap(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`PATCH /messages/{id}` tạo câu hỏi mới — bản sửa chưa ai gửi vào nó, cộng
+    chữ tệp chép từ bản gốc ⇒ cùng trần, cùng `422`."""
+    monkeypatch.setattr(settings, "ATTACHMENT_TEXT_MAX_CHARS", 24_000)
+    conv = await _conversation(session_factory, user_a)
+    a1 = await _edited_turn(session_factory, user_a, conv, 0)
+    att = await _file_row(session_factory, user_a, status=ExtractStatus.DONE, text="a" * 20_000)
+    sent = await _send(client, user_a, conv, [att], parent_id=str(a1))
+    assert sent.status_code == 202, sent.text
+    async with session_factory() as session:
+        [v1] = await ArtifactRepository(session).list_for_messages(user_id=user_a, message_ids=[a1])
+        await ArtifactRepository(session).create_user_version(
+            user_id=user_a, artifact_id=v1.id, content="e" * 5_000
+        )
+        await session.commit()
+    before = await _count_messages(session_factory, conv)
+
+    resp = await client.patch(
+        f"{API}/messages/{sent.json()['user_message_id']}",
+        headers=_auth(user_a),
+        json={"content": "hoi lai"},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "ATTACHMENT_TEXT_TOO_LONG"
+    assert await _count_messages(session_factory, conv) == before

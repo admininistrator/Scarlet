@@ -2,6 +2,7 @@
 
     GET /api/v1/artifacts/{id}            một phiên bản, đủ `content`
     GET /api/v1/artifacts/{id}/versions   mọi phiên bản của dòng, KHÔNG `content`
+    POST /api/v1/artifacts/{id}/versions  người dùng sửa ⇒ phiên bản mới (T-5.2b)
 
 KH tham chiếu: §14.2, §18.3, §20 · NQ-142 (Q-P5-2).
 
@@ -17,10 +18,12 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from app.config.settings import settings
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
+from app.core.ratelimit import upload_limit
 from app.db.models import Artifact
 from app.db.repositories import ArtifactRepository
 from app.db.session import session_scope
@@ -64,8 +67,15 @@ class ArtifactVersionOut(BaseModel):
     kind: str
     language: str | None
     title: str
+    #: `model` | `user` — tab "bạn sửa" (T-5.9).
+    origin: str
     message_id: uuid.UUID
     created_at: datetime
+
+
+class ArtifactEditIn(BaseModel):
+    #: Trần đọc lúc gọi ở handler (mã riêng), không ở `Field`.
+    content: str = Field(min_length=1)
 
 
 class ArtifactVersionList(BaseModel):
@@ -143,3 +153,40 @@ async def list_artifact_versions(
     return ArtifactVersionList(
         items=[ArtifactVersionOut.model_validate(dict(r._mapping)) for r in rows]
     )
+
+
+@router.post(
+    "/{artifact_id}/versions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ArtifactVersionOut,
+    dependencies=[Depends(upload_limit())],
+    responses={
+        **_NOT_FOUND_RESPONSES,
+        422: {"model": ErrorEnvelope, "description": "content rong, ARTIFACT_TOO_LONG"},
+    },
+)
+async def create_artifact_version(
+    artifact_id: uuid.UUID,
+    body: ArtifactEditIn,
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+) -> ArtifactVersionOut:
+    """Người dùng sửa ⇒ hàng mới `origin = user` (Q-P5-3); `artifact_id` là phiên
+    bản bất kỳ của dòng. `201` KHÔNG mang `content` — bản ghi `idem:` của
+    `Idempotency-Key` (tuỳ chọn, gắn ở router) lưu nguyên response 24 h (B-145).
+    """
+    if len(body.content) > settings.ATTACHMENT_TEXT_MAX_CHARS:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ApiErrorCode.ARTIFACT_TOO_LONG,
+            "ban sua vuot tran cho phep",
+            details={"max_chars": settings.ATTACHMENT_TEXT_MAX_CHARS},
+        )
+    async with session_scope() as session:
+        row = await ArtifactRepository(session).create_user_version(
+            user_id=user_id, artifact_id=artifact_id, content=body.content
+        )
+        if row is None:
+            raise _not_found()
+        out = ArtifactVersionOut.model_validate(row, from_attributes=True)
+        await session.commit()
+    return out

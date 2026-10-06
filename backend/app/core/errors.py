@@ -326,6 +326,10 @@ class ApiErrorCode(StrEnum):
     #: `404` — `GET /artifacts/{id}`, `/versions` (T-5.2a): không có, của người
     #: khác, hoặc message / hội thoại chứa nó đã xoá mềm — một câu trả lời (§20).
     ARTIFACT_NOT_FOUND = "ARTIFACT_NOT_FOUND"
+    #: `422` — `POST /artifacts/{id}/versions` (T-5.2b): bản sửa vượt
+    #: `ATTACHMENT_TEXT_MAX_CHARS` — cùng trần với chữ tệp của một lượt (B-208).
+    #: `details` mang `{max_chars}`. Không hàng nào được tạo.
+    ARTIFACT_TOO_LONG = "ARTIFACT_TOO_LONG"
     #: `400` — `attachment_ids` nhiều hơn `max_attachments` của tier (đọc lúc
     #: gọi). `details` mang `{max_attachments}`.
     ATTACHMENT_LIMIT_EXCEEDED = "ATTACHMENT_LIMIT_EXCEEDED"

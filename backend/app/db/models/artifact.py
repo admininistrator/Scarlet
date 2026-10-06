@@ -8,12 +8,20 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import ForeignKey, Index, Integer, Text, func, text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, Text, func, text
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.models.base import Base
+
+
+class ArtifactOrigin(StrEnum):
+    """`artifacts.origin` — tập cố định (T-5.2b, migration 0013)."""
+
+    MODEL = "model"
+    USER = "user"
 
 
 class Artifact(Base):
@@ -36,6 +44,8 @@ class Artifact(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     storage_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Một trong `ArtifactOrigin` — `user` = bản người dùng sửa trong panel (T-5.2b).
+    origin: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'model'"))
     #: `clock_timestamp()` từ migration 0011 (B-57).
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.clock_timestamp()
@@ -50,4 +60,6 @@ class Artifact(Base):
             version,
             unique=True,
         ),
+        # Migration 0013 (T-5.2b).
+        CheckConstraint("origin IN ('model', 'user')", name="ck_art_origin"),
     )

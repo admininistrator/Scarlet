@@ -1,5 +1,6 @@
 """T-5.2a — dòng phiên bản do model (Q-P5-2), `GET /artifacts/{id}`, `/versions`,
-artifact trên đường đi. IDOR ở `tests/security/test_idor.py` (B-182).
+artifact trên đường đi. T-5.2b — người dùng sửa ⇒ phiên bản mới (Q-P5-3), bản sửa
+vào ngữ cảnh lượt kế tiếp (Q-P5-5). IDOR ở `tests/security/test_idor.py` (B-182).
 
 Hàng `artifacts` ghi qua đúng `ArtifactRepository.create_for_message` mà worker
 gọi — không qua LLM. Cây dựng bằng `MessageRepository` như `test_tree.py`.
@@ -14,17 +15,22 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, insert
+from sqlalchemy import event, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app.api.v1 import conversations as conversations_api
+from app.config.catalog import ModelEntry
+from app.config.settings import settings
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
+from app.core.idempotency import HEADER_IDEMPOTENCY, HEADER_REPLAY
 from app.db.models import Artifact, Message, MessageRole, MessageStatus, UserRole, UserStatus
 from app.db.repositories import ArtifactRepository, ConversationRepository, MessageRepository
 from app.db.repositories import artifacts as artifacts_repo
 from app.llm.artifact_blocks import ArtifactBlock
+from app.llm.context import build
+from app.llm.tokens import count_messages, count_text
 from app.main import app
 
 API = "/api/v1"
@@ -363,3 +369,311 @@ async def test_path_of_20_with_artifacts_costs_same_queries(
         )
     assert n_art == n_plain
     assert n_art == n_no_loader + 1
+
+
+# ═══════════════ T-5.2b — người dùng sửa ⇒ phiên bản mới (Q-P5-3) ═══════════════
+
+
+async def _edit(
+    session: AsyncSession, user_id: uuid.UUID, artifact_id: uuid.UUID, content: str = "<p>sua</p>"
+) -> Artifact:
+    row = await ArtifactRepository(session).create_user_version(
+        user_id=user_id, artifact_id=artifact_id, content=content
+    )
+    assert row is not None
+    return row
+
+
+async def _lineage_size(session: AsyncSession, root: uuid.UUID) -> int:
+    stmt = select(func.count()).where(
+        func.coalesce(Artifact.parent_artifact_id, Artifact.id) == root
+    )
+    return int((await session.execute(stmt)).scalar_one())
+
+
+async def test_edit_v2_makes_v3_user_parent_root_201_without_content(
+    client: AsyncClient, session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    t = await _tree(session, user_a)
+    _, a1, [v1] = await t.turn(None, "Trang A")
+    _, a2, [v2] = await t.turn(a1.id, "Trang A")
+    await session.commit()
+
+    resp = await client.post(
+        f"{API}/artifacts/{v2.id}/versions", headers=_auth(user_a), json={"content": "<p>sua</p>"}
+    )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert "content" not in body, "201 chi sieu du lieu — ban ghi idem: nho (B-145)"
+    assert (body["version"], body["origin"], body["message_id"]) == (3, "user", str(a2.id))
+    row = await session.get(Artifact, uuid.UUID(body["id"]))
+    assert row is not None
+    assert (row.parent_artifact_id, row.kind, row.language, row.title, row.content) == (
+        v1.id,
+        "html",
+        "html",
+        "Trang A",
+        "<p>sua</p>",
+    )
+
+
+async def test_same_idempotency_key_replays_and_keeps_one_row(
+    client: AsyncClient, session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    t = await _tree(session, user_a)
+    _, _, [v1] = await t.turn(None, "Trang A")
+    await session.commit()
+    headers = _auth(user_a) | {HEADER_IDEMPOTENCY: "dod-t-5-2b-sua-1"}
+    url = f"{API}/artifacts/{v1.id}/versions"
+
+    first = await client.post(url, headers=headers, json={"content": "ban 1"})
+    second = await client.post(url, headers=headers, json={"content": "ban 2 khac"})
+
+    assert (first.status_code, second.status_code) == (201, 201)
+    assert second.headers[HEADER_REPLAY] == "true"
+    assert second.json() == first.json()
+    assert await _lineage_size(session, v1.id) == 2
+
+
+async def test_empty_content_is_422(
+    client: AsyncClient, session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    t = await _tree(session, user_a)
+    _, _, [v1] = await t.turn(None, "Trang A")
+    await session.commit()
+
+    resp = await client.post(
+        f"{API}/artifacts/{v1.id}/versions", headers=_auth(user_a), json={"content": ""}
+    )
+
+    assert resp.status_code == 422
+    assert await _lineage_size(session, v1.id) == 1
+
+
+async def test_edit_over_cap_is_422_own_code_and_writes_nothing(
+    client: AsyncClient, session: AsyncSession, user_a: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cùng trần `ATTACHMENT_TEXT_MAX_CHARS` (đọc lúc gọi); đúng bằng trần vẫn qua."""
+    monkeypatch.setattr(settings, "ATTACHMENT_TEXT_MAX_CHARS", 10)
+    t = await _tree(session, user_a)
+    _, _, [v1] = await t.turn(None, "Trang A")
+    await session.commit()
+    url = f"{API}/artifacts/{v1.id}/versions"
+
+    over = await client.post(url, headers=_auth(user_a), json={"content": "x" * 11})
+    assert over.status_code == 422
+    assert over.json()["error"] == {
+        "code": "ARTIFACT_TOO_LONG",
+        "message": "ban sua vuot tran cho phep",
+        "details": {"max_chars": 10},
+    }
+    assert await _lineage_size(session, v1.id) == 1
+
+    at_cap = await client.post(url, headers=_auth(user_a), json={"content": "x" * 10})
+    assert at_cap.status_code == 201
+
+
+# ─────────────── bản sửa vào ngữ cảnh lượt kế tiếp (Q-P5-5) ───────────────
+
+_EDIT_BLOCK = '<untrusted_content name="artifact:'
+_EDIT_LINE = "[artifact:"
+
+
+def _meta() -> ModelEntry:
+    return ModelEntry(
+        id="model-thu-nghiem",
+        display_name="Model Thử Nghiệm",
+        provider="thu-nghiem",
+        upstream_model="thu-nghiem/model-v1",
+        context_window=128_000,
+        max_output=4096,
+        pricing_mode="unmetered",
+        capabilities=[],
+    )
+
+
+async def _ask(t: _Tree, parent: uuid.UUID, content: str = "hoi tiep") -> Message:
+    return await MessageRepository(t.session).create_message(
+        conversation_id=t.conversation_id,
+        user_id=t.user_id,
+        role=MessageRole.USER,
+        parent_id=parent,
+        content=content,
+    )
+
+
+async def _queued(t: _Tree, question: uuid.UUID) -> Message:
+    """Lá `queued` — câu trả lời đang chờ sinh (§7.2 ①); cũng là một lần Thử lại."""
+    return await MessageRepository(t.session).create_message(
+        conversation_id=t.conversation_id,
+        user_id=t.user_id,
+        role=MessageRole.ASSISTANT,
+        parent_id=question,
+        content="",
+        status=MessageStatus.QUEUED,
+    )
+
+
+async def _built(t: _Tree, leaf: Message) -> list[dict[str, Any]]:
+    return await build(t.session, leaf.id, _meta(), user_id=t.user_id)
+
+
+def _blocks(built: list[dict[str, Any]]) -> list[tuple[int, str]]:
+    """`(vị trí message, khối)` của mọi khối bản sửa."""
+    return [
+        (i, block)
+        for i, m in enumerate(built)
+        for block in str(m["content"]).split("\n\n")
+        if block.startswith(_EDIT_BLOCK)
+    ]
+
+
+async def test_edit_then_send_question_one_block_on_last_user_message(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    t = await _tree(session, user_a)
+    _, a1, [v1] = await t.turn(None, "Trang A")
+    await _edit(session, user_a, v1.id, "<p>MA 482913</p>")
+    leaf = await _queued(t, (await _ask(t, a1.id)).id)
+
+    built = await _built(t, leaf)
+
+    [(at, block)] = _blocks(built)
+    assert at == len(built) - 1, "khoi o message user CUOI"
+    assert block.startswith('<untrusted_content name="artifact: Trang A v2 (người dùng sửa)">')
+    assert "<p>MA 482913</p>" in block and block.endswith("</untrusted_content>")
+    assert built[-1]["content"].endswith("hoi tiep"), "khoi dung TRUOC cau hoi"
+
+
+async def test_next_turn_has_no_block_only_a_line(session: AsyncSession, user_a: uuid.UUID) -> None:
+    t = await _tree(session, user_a)
+    _, a1, [v1] = await t.turn(None, "Trang A")
+    await _edit(session, user_a, v1.id)
+    q2 = await _ask(t, a1.id)
+    a2, _ = await t.answer(q2.id)
+    leaf = await _queued(t, (await _ask(t, a2.id, "hoi lan ba")).id)
+
+    built = await _built(t, leaf)
+
+    assert _blocks(built) == []
+    assert built[3]["content"] == "hoi tiep\n[artifact: Trang A v2 — người dùng đã sửa]"
+    assert sum(_EDIT_LINE in str(m["content"]) for m in built) == 1
+
+
+async def test_edit_after_sending_then_retry_no_block_next_question_one(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    t = await _tree(session, user_a)
+    _, a1, [v1] = await t.turn(None, "Trang A")
+    q2 = await _ask(t, a1.id)
+    await t.answer(q2.id)
+    await _edit(session, user_a, v1.id)  # SAU khi câu hỏi q2 đã gửi
+
+    retry = await _queued(t, q2.id)
+    assert _blocks(await _built(t, retry)) == []
+    assert all(_EDIT_LINE not in str(m["content"]) for m in await _built(t, retry))
+
+    a2_retried, _ = await t.answer(q2.id)
+    leaf = await _queued(t, (await _ask(t, a2_retried.id, "hoi lan ba")).id)
+    built = await _built(t, leaf)
+    assert [at for at, _ in _blocks(built)] == [len(built) - 1]
+
+
+async def test_edit_while_model_answers_goes_to_next_question(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    t = await _tree(session, user_a)
+    _, a1, [v1] = await t.turn(None, "Trang A")
+    q2 = await _ask(t, a1.id)
+    a2 = await _queued(t, q2.id)
+    await _edit(session, user_a, v1.id)  # a2 còn đang sinh
+    a2.status, a2.content = MessageStatus.COMPLETED, "xong"
+    await session.flush()
+    leaf = await _queued(t, (await _ask(t, a2.id, "hoi lan ba")).id)
+
+    built = await _built(t, leaf)
+
+    assert [at for at, _ in _blocks(built)] == [len(built) - 1]
+    assert _EDIT_LINE not in built[3]["content"], "q2 gui TRUOC ban sua"
+
+
+async def test_retry_of_turn_with_block_still_one_block(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """Lần đầu sinh ra v-model mới — ở nhánh anh em, ngoài đường đi của lần thử lại."""
+    t = await _tree(session, user_a)
+    _, a1, [v1] = await t.turn(None, "Trang A")
+    await _edit(session, user_a, v1.id)
+    q2 = await _ask(t, a1.id)
+    _, [rewrite] = await t.answer(q2.id, "Trang A")
+    assert (rewrite.version, rewrite.origin) == (3, "model")
+
+    built = await _built(t, await _queued(t, q2.id))
+
+    [(_, block)] = _blocks(built)
+    assert 'name="artifact: Trang A v2 (người dùng sửa)"' in block
+
+
+async def test_two_edits_between_turns_one_block_newest(
+    session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    t = await _tree(session, user_a)
+    _, a1, [v1] = await t.turn(None, "Trang A")
+    await _edit(session, user_a, v1.id, "ban cu")
+    await _edit(session, user_a, v1.id, "ban moi")
+    leaf = await _queued(t, (await _ask(t, a1.id)).id)
+
+    [(_, block)] = _blocks(await _built(t, leaf))
+
+    assert 'name="artifact: Trang A v3 (người dùng sửa)"' in block
+    assert "ban moi" in block and "ban cu" not in block
+
+
+async def test_model_rewrite_after_edit_no_block(session: AsyncSession, user_a: uuid.UUID) -> None:
+    """Sửa lúc model còn trả lời, rồi chính câu trả lời ấy viết lại (v3 `model`) ⇒ bản sửa đã cũ."""
+    t = await _tree(session, user_a)
+    _, a1, [v1] = await t.turn(None, "Trang A")
+    q2 = await _ask(t, a1.id)
+    a2 = await _queued(t, q2.id)
+    await _edit(session, user_a, v1.id)
+    await ArtifactRepository(session).create_for_message(
+        message_id=a2.id, user_id=user_a, blocks=[_block("Trang A")]
+    )
+    a2.status, a2.content = MessageStatus.COMPLETED, "xong"
+    await session.flush()
+    leaf = await _queued(t, (await _ask(t, a2.id, "hoi lan ba")).id)
+
+    built = await _built(t, leaf)
+
+    assert _blocks(built) == []
+    assert all(_EDIT_LINE not in str(m["content"]) for m in built)
+
+
+async def test_lineage_outside_path_no_block(session: AsyncSession, user_a: uuid.UUID) -> None:
+    """Sửa artifact của nhánh khác ⇒ không vào ngữ cảnh nhánh này (C11)."""
+    t = await _tree(session, user_a)
+    _, _, [other_branch] = await t.turn(None, "Trang A")
+    _, a1, _ = await t.turn(None, "Trang B")
+    await _edit(session, user_a, other_branch.id)
+    leaf = await _queued(t, (await _ask(t, a1.id)).id)
+
+    built = await _built(t, leaf)
+
+    assert _blocks(built) == []
+    assert all(_EDIT_LINE not in str(m["content"]) for m in built)
+
+
+async def test_count_messages_counts_edit_block(session: AsyncSession, user_a: uuid.UUID) -> None:
+    body = "<p>" + "noi dung ban sua " * 40 + "</p>"
+    trees = []
+    for edited in (True, False):
+        t = await _tree(session, user_a)
+        _, a1, [v1] = await t.turn(None, "Trang A")
+        if edited:
+            await _edit(session, user_a, v1.id, body)
+        trees.append(await _built(t, await _queued(t, (await _ask(t, a1.id)).id)))
+
+    with_edit, plain = (count_messages(b, model_id=_meta().id) for b in trees)
+
+    assert with_edit - plain >= count_text(body, model_id=_meta().id)

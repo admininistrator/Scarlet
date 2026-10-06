@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, Template
+from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.catalog import VISION_CAPABILITY, ModelEntry
@@ -62,7 +63,7 @@ from app.db.models import (
     MessageRole,
     MessageStatus,
 )
-from app.db.repositories import MessageRepository
+from app.db.repositories import ArtifactRepository, MessageRepository
 from app.db.repositories.attachments import AttachmentRepository
 from app.llm.tokens import IMAGE_PART_TYPE, count_message, count_messages
 
@@ -96,6 +97,9 @@ USABLE_STATUSES = frozenset({MessageStatus.COMPLETED, MessageStatus.CANCELLED})
 IMAGE_PLACEHOLDER = "[ảnh: {name}]"
 #: Dòng chữ thay cho tệp ở các lượt cũ, hoặc tệp không có chữ (T-4.6a, NQ-138 ⑥).
 FILE_PLACEHOLDER = "[tệp: {name}]"
+#: Tên khối / dòng nhắc của bản người dùng sửa artifact (T-5.2b, Q-P5-5).
+EDIT_BLOCK_NAME = "artifact: {title} v{version} (người dùng sửa)"
+EDIT_PLACEHOLDER = "[artifact: {title} v{version} — người dùng đã sửa]"
 #: Khối bọc chữ tệp (§20) — system prompt dặn model coi nó là dữ liệu.
 UNTRUSTED_OPEN = '<untrusted_content name="{name}">'
 UNTRUSTED_CLOSE = "</untrusted_content>"
@@ -253,9 +257,13 @@ async def build(
     # Ưu tiên thứ hai của §9.6 — skill descriptions — chèn vào đây ở Phase 7.
 
     attachments = await _attachments(session, path, user_id=user_id)
+    edits: dict[uuid.UUID, list[Row[Any]]] = {}
+    for edit in await ArtifactRepository(session).user_edits(leaf_id=leaf_id, user_id=user_id):
+        edits.setdefault(edit.message_id, []).append(edit)
     blocks = _atomic_blocks(
         path,
         attachments=attachments,
+        edits=edits,
         send_images=_image_turns(path, model_meta),
         send_files=_current_turn(path),
     )
@@ -403,22 +411,25 @@ def _scanned(attachment: Attachment) -> bool:
     return attachment.extract_status == ExtractStatus.NEEDS_VISION and bool(attachment.page_count)
 
 
-def file_block(attachment: Attachment) -> str:
-    """Chữ tệp trong khối `<untrusted_content>` có tên tệp (§20, T-4.6a).
+def untrusted_block(name: str, body: str) -> str:
+    """Chữ không tin cậy trong khối `<untrusted_content>` có tên (§20, T-4.6a).
 
-    Tên escape thành thuộc tính; thẻ đóng lọt trong chữ tệp bị bẻ, để chữ người
+    Tên escape thành thuộc tính; thẻ đóng lọt trong chữ bị bẻ, để chữ người
     dùng không tự "đóng khối" rồi viết tiếp như chỉ dẫn.
     """
-    body = (attachment.extracted_text or "").replace(UNTRUSTED_CLOSE, "</untrusted_content_>")
-    return "\n".join(
-        [UNTRUSTED_OPEN.format(name=html.escape(attachment.original_name)), body, UNTRUSTED_CLOSE]
-    )
+    body = body.replace(UNTRUSTED_CLOSE, "</untrusted_content_>")
+    return "\n".join([UNTRUSTED_OPEN.format(name=html.escape(name)), body, UNTRUSTED_CLOSE])
+
+
+def file_block(attachment: Attachment) -> str:
+    return untrusted_block(attachment.original_name, attachment.extracted_text or "")
 
 
 def _atomic_blocks(
     messages: Iterable[Message],
     *,
     attachments: Mapping[uuid.UUID, list[Attachment]] | None = None,
+    edits: Mapping[uuid.UUID, list[Row[Any]]] | None = None,
     send_images: Callable[[Message], bool] = lambda _message: False,
     send_files: Callable[[Message], bool] = lambda _message: False,
 ) -> list[list[dict[str, Any]]]:
@@ -450,6 +461,7 @@ def _atomic_blocks(
         wire = _to_wire(
             message,
             attachments=(attachments or {}).get(message.id, ()),
+            edits=(edits or {}).get(message.id, ()),
             send_images=send_images(message),
             send_files=send_files(message),
         )
@@ -521,6 +533,7 @@ def _to_wire(
     message: Message,
     *,
     attachments: Sequence[Attachment] = (),
+    edits: Sequence[Row[Any]] = (),
     send_images: bool = False,
     send_files: bool = False,
 ) -> dict[str, Any] | None:
@@ -555,6 +568,10 @@ def _to_wire(
 
     **PDF quét (T-4.6b).** Là ảnh nhiều trang: đi đúng luật ảnh (`send_images`),
     mỗi trang một `image_ref(…, page)` sau các ảnh; không gửi ⇒ dòng `[tệp: <tên>]`.
+
+    **Bản người dùng sửa artifact (T-5.2b, Q-P5-5).** Đi luật chữ tệp: câu hỏi
+    của lượt đang sinh ⇒ khối `<untrusted_content>` trước câu hỏi; lượt cũ ⇒
+    một dòng `[artifact: …]`. Bản nào thuộc câu hỏi nào: `user_edits`.
     """
     if message.status not in USABLE_STATUSES:
         return None
@@ -571,6 +588,12 @@ def _to_wire(
             blocks.append(file_block(f))
         else:
             lines.append(FILE_PLACEHOLDER.format(name=f.original_name))
+    for edit in edits:
+        label = {"title": edit.title or edit.kind, "version": edit.version}
+        if send_files and edit.content is not None:
+            blocks.append(untrusted_block(EDIT_BLOCK_NAME.format(**label), edit.content))
+        else:
+            lines.append(EDIT_PLACEHOLDER.format(**label))
     if not send_images:
         lines += [IMAGE_PLACEHOLDER.format(name=image.original_name) for image in images]
     tail = "\n".join(part for part in [message.content, *lines] if part)

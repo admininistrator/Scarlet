@@ -152,6 +152,7 @@ from app.db.models import (
     UserStatus,
 )
 from app.db.repositories import (
+    ArtifactRepository,
     AttachmentRepository,
     ConversationRepository,
     MessageNotInConversationError,
@@ -405,25 +406,9 @@ async def create_message(
                     ApiErrorCode.ATTACHMENT_NOT_FOUND,
                     "khong tim thay tep",
                 )
-            # T-4.6a — chữ tệp đi vòng qua `MESSAGE_MAX_CHARS` (Cạm bẫy ②): chặn ở
-            # biên vào, không để `202` rồi `CONTEXT_TOO_LARGE` giữa lượt sinh.
-            # Ném trong `session_scope` ⇒ rollback cả message lẫn `attach`.
-            pending, chars = await AttachmentRepository(session).text_gate(
-                user_id=user_id, message_id=uid
-            )
-            if pending:
-                raise ApiError(
-                    status.HTTP_409_CONFLICT,
-                    ApiErrorCode.ATTACHMENT_NOT_READY,
-                    "tep dang duoc trich chu, gui lai sau",
-                )
-            if chars > settings.ATTACHMENT_TEXT_MAX_CHARS:
-                raise ApiError(
-                    status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    ApiErrorCode.ATTACHMENT_TEXT_TOO_LONG,
-                    "chu trong tep vuot tran cho phep",
-                    details={"max_chars": settings.ATTACHMENT_TEXT_MAX_CHARS},
-                )
+        await _untrusted_text_gate(
+            session, user_id=user_id, question_id=uid, files=bool(attachment_ids)
+        )
         generation = await _open_generation(
             session=session,
             messages=messages,
@@ -448,6 +433,38 @@ async def create_message(
         branched=branched,
         quota_warning=generation.quota_warning,
     )
+
+
+async def _untrusted_text_gate(
+    session: AsyncSession, *, user_id: uuid.UUID, question_id: uuid.UUID, files: bool
+) -> None:
+    """MỘT trần cho mọi chữ không tin cậy của một câu hỏi (B-208 / B-353).
+
+    T-4.6a — chữ tệp đi vòng qua `MESSAGE_MAX_CHARS` (Cạm bẫy ②): chặn ở biên
+    vào, không để `202` rồi `CONTEXT_TOO_LARGE` giữa lượt sinh. T-5.2b — bản
+    người dùng sửa artifact vào câu hỏi này (`user_edits`) cộng vào CÙNG tổng.
+    Ném trong `session_scope` của người gọi ⇒ rollback cả message lẫn `attach`.
+    """
+    chars = 0
+    if files:
+        pending, chars = await AttachmentRepository(session).text_gate(
+            user_id=user_id, message_id=question_id
+        )
+        if pending:
+            raise ApiError(
+                status.HTTP_409_CONFLICT,
+                ApiErrorCode.ATTACHMENT_NOT_READY,
+                "tep dang duoc trich chu, gui lai sau",
+            )
+    edits = await ArtifactRepository(session).user_edits(leaf_id=question_id, user_id=user_id)
+    chars += sum(len(edit.content) for edit in edits if edit.content is not None)
+    if chars > settings.ATTACHMENT_TEXT_MAX_CHARS:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ApiErrorCode.ATTACHMENT_TEXT_TOO_LONG,
+            "chu trong tep vuot tran cho phep",
+            details={"max_chars": settings.ATTACHMENT_TEXT_MAX_CHARS},
+        )
 
 
 def _stream_url(request: Request, message_id: uuid.UUID) -> str:
@@ -1210,6 +1227,8 @@ async def edit_message(
         await AttachmentRepository(session).copy_to_message(
             user_id=user_id, source_id=original.id, target_id=uid
         )
+        # T-5.2b — câu hỏi mới có thể nhận bản sửa artifact chưa ai gửi đi.
+        await _untrusted_text_gate(session, user_id=user_id, question_id=uid, files=True)
         generation = await _open_generation(
             session=session,
             messages=messages,

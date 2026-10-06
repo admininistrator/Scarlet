@@ -1,4 +1,4 @@
-"""Repository của bảng `artifacts` — T-5.1 (ghi), T-5.2a (dòng phiên bản, đọc) — §14.2.
+"""Repository của `artifacts` (§14.2) — T-5.1 ghi, T-5.2a dòng phiên bản + đọc, T-5.2b bản sửa.
 
 Bảng **không có `user_id`**: sở hữu suy qua `messages → conversations`, mọi câu
 ĐỌC đi qua `_owned()` — JOIN hai bảng ấy, lọc `user_id` + `deleted_at` trong SQL
@@ -16,12 +16,24 @@ import uuid
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ColumnElement, Insert, Row, Select, func, insert, literal, select
+from sqlalchemy import (
+    ColumnElement,
+    Insert,
+    Row,
+    Select,
+    case,
+    func,
+    insert,
+    literal,
+    or_,
+    select,
+    true,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.db.models import Artifact, Conversation, Message
+from app.db.models import Artifact, ArtifactOrigin, Conversation, Message, MessageRole
 from app.db.repositories.messages import _path_cte
 
 if TYPE_CHECKING:
@@ -60,6 +72,82 @@ class ArtifactRepository:
                 stmt = _insert_statement(message_id, user_id, block)
                 return (await self._session.execute(stmt)).scalar_one()
 
+    async def create_user_version(
+        self, *, user_id: uuid.UUID, artifact_id: uuid.UUID, content: str
+    ) -> Artifact | None:
+        """Bản người dùng sửa (T-5.2b, Q-P5-3): `artifact_id` là phiên bản bất kỳ của dòng.
+
+        Hàng mới `origin = user`, `version` = max dòng + 1, `parent` = gốc,
+        `message_id` / `kind` / `language` / `title` chép từ phiên bản được sửa.
+        Không của mình ⇒ `None` (sở hữu trong SQL). Đua ghi ⇒ tính lại một lần.
+        """
+        try:
+            async with self._session.begin_nested():
+                stmt = _user_version_statement(user_id, artifact_id, content)
+                return (await self._session.execute(stmt)).scalar_one_or_none()
+        except IntegrityError:
+            async with self._session.begin_nested():
+                stmt = _user_version_statement(user_id, artifact_id, content)
+                return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def user_edits(self, *, leaf_id: uuid.UUID, user_id: uuid.UUID) -> Sequence[Row[Any]]:
+        """Bản sửa thuộc về từng câu hỏi trên đường đi tới `leaf_id` — MỘT câu (Q-P5-5).
+
+        Bản sửa thuộc về **câu hỏi đầu tiên gửi sau nó**: với mỗi message user U,
+        mỗi dòng có phiên bản trên đường đi lấy phiên bản mới nhất (`version`) có
+        `created_at` < U; nó vào U khi `origin = user` **và** `created_at` > message
+        user liền trước U. So `created_at` trong SQL (Cạm bẫy ⑥ — hai đồng hồ).
+
+        Hàng `(message_id, title, kind, version, content)`; `content` chỉ có ở câu
+        hỏi cuối (lượt đang sinh) — lượt cũ chỉ cần một dòng nhắc.
+        """
+        path = _path_cte(leaf_id, user_id=user_id)
+        turns = (
+            select(
+                path.c.id,
+                path.c.created_at,
+                func.lag(path.c.created_at).over(order_by=path.c.depth.desc()).label("prev_at"),
+                (func.row_number().over(order_by=path.c.depth) == 1).label("current"),
+            )
+            .join(Message, Message.id == path.c.id)
+            .where(Message.role == MessageRole.USER)
+            .subquery("turns")
+        )
+        latest = (
+            select(
+                Artifact.title,
+                Artifact.kind,
+                Artifact.version,
+                Artifact.origin,
+                Artifact.created_at,
+                Artifact.content,
+            )
+            .where(
+                Artifact.message_id.in_(select(path.c.id)),
+                Artifact.created_at < turns.c.created_at,
+            )
+            .distinct(_lineage(Artifact))
+            .order_by(_lineage(Artifact), Artifact.version.desc())
+            .lateral("latest")
+        )
+        stmt = (
+            select(
+                turns.c.id.label("message_id"),
+                latest.c.title,
+                latest.c.kind,
+                latest.c.version,
+                case((turns.c.current, latest.c.content)).label("content"),
+            )
+            .select_from(turns)
+            .join(latest, true())
+            .where(
+                latest.c.origin == ArtifactOrigin.USER,
+                or_(turns.c.prev_at.is_(None), latest.c.created_at > turns.c.prev_at),
+            )
+            .order_by(turns.c.created_at, latest.c.created_at)
+        )
+        return (await self._session.execute(stmt)).all()
+
     async def get(self, *, user_id: uuid.UUID, artifact_id: uuid.UUID) -> Row[Any] | None:
         """`(Artifact, conversation_id)`. Của người khác, message hay hội thoại
         đã xoá mềm ⇒ `None` — cùng một lối với "không có" (§20)."""
@@ -88,6 +176,7 @@ class ArtifactRepository:
                     Artifact.kind,
                     Artifact.language,
                     Artifact.title,
+                    Artifact.origin,
                     Artifact.message_id,
                     Artifact.created_at,
                 ),
@@ -173,5 +262,36 @@ def _insert_statement(message_id: uuid.UUID, user_id: uuid.UUID, block: Artifact
             parent_artifact_id=lineage,
             version=version,
         )
+        .returning(Artifact)
+    )
+
+
+def _user_version_statement(user_id: uuid.UUID, artifact_id: uuid.UUID, content: str) -> Insert:
+    """MỘT câu `INSERT … SELECT` từ phiên bản được sửa, lọc sở hữu bằng `_owned`."""
+    src = aliased(Artifact, name="src")
+    member = aliased(Artifact, name="member")
+    version = (
+        select(func.coalesce(func.max(member.version), 0) + 1)
+        .where(_lineage(member) == _lineage(src))
+        .scalar_subquery()
+    )
+    source = _owned(
+        select(
+            src.message_id,
+            src.kind,
+            src.language,
+            src.title,
+            literal(content),
+            _lineage(src),
+            version,
+            literal(ArtifactOrigin.USER.value),
+        ),
+        src,
+        user_id,
+    ).where(src.id == artifact_id)
+    columns = ["message_id", "kind", "language", "title", "content"]
+    return (
+        insert(Artifact)
+        .from_select([*columns, "parent_artifact_id", "version", "origin"], source)
         .returning(Artifact)
     )

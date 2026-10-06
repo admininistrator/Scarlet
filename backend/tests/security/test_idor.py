@@ -619,6 +619,18 @@ MATRIX: tuple[CaIDOR, ...] = (
         body=None,
         error_code=ApiErrorCode.ARTIFACT_NOT_FOUND,
     ),
+    # T-5.2b: thủng ⇒ `201` và một phiên bản do A viết nằm trong dòng của B —
+    # vào ngữ cảnh lượt kế tiếp của B (Q-P5-5).
+    CaIDOR(
+        name="POST /artifacts/{cua-B}/versions",
+        resource="artifact",
+        route=f"{API}/artifacts/{{artifact_id}}/versions",
+        method="POST",
+        target="artifact",
+        path=lambda target, _of_a: f"{API}/artifacts/{target}/versions",
+        body=lambda _target: {"content": "A chen ban sua vao artifact cua B"},
+        error_code=ApiErrorCode.ARTIFACT_NOT_FOUND,
+    ),
     # ── byok endpoint (T-S.19b) — lộ ra khi bộ lọc thành "mọi `{…_id}`" (B-342) ──
     CaIDOR(
         name="GET /settings/byok-endpoints/{cua-B}/models",
