@@ -474,6 +474,14 @@ class Settings(BaseSettings):
     #: nặng gấp nhiều lần chữ của nó, nên trần rộng hơn hẳn trần chữ.
     DOCX_XML_MAX_BYTES: int = Field(default=20 * 1024 * 1024, gt=0)
 
+    # ═══ Artifacts (§14) ═══
+    #: §14.1 hàng 2 — khối code KHÔNG tiêu đề thành artifact khi thân có ít nhất
+    #: ngần này dòng (T-5.1). Khối có `title="…"` thì không cần ngưỡng. Ngoài
+    #: Phụ lục B (B-360 ④).
+    ARTIFACT_MIN_CODE_LINES: int = Field(default=20, gt=0)
+    #: Trần tiêu đề artifact, tính bằng KÝ TỰ, sau khi bỏ ký tự điều khiển (T-5.1).
+    ARTIFACT_TITLE_MAX_CHARS: int = Field(default=120, gt=0)
+
     # ═══ Web tools (§12) ═══
     TAVILY_API_KEY: SecretStr = SecretStr("")
     FETCHER_BASE_URL: HttpUrlStr = "http://fetcher:8080"

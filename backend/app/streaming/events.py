@@ -233,18 +233,25 @@ class ToolResultEvent(Event):
 class ArtifactEvent(Event):
     """Có artifact mới/cập nhật → FE mở panel phải.
 
-    **Chưa có người sinh ở Phase 1** — artifact là §14 (Phase 5). `version` có
-    mặt ngay từ đây vì §14.2 nói artifact có phiên bản, và một event không mang
-    số phiên bản thì FE không biết nó đang mở bản nào.
+    Worker phát ở `_close_ledger`, **trước** `done` (T-5.1 Cạm bẫy ①). `kind` là
+    trường Phụ lục F khai; `title` thêm để thẻ hiện ngay không cần request (B-360
+    ⑧) — `""` = khối không tiêu đề, FE tự suy nhãn.
     """
 
     TYPE: ClassVar[EventType] = "artifact"
 
     artifact_id: str
     version: int
+    kind: str
+    title: str
 
     def data(self) -> dict[str, Any]:
-        return {"artifact_id": self.artifact_id, "version": self.version}
+        return {
+            "artifact_id": self.artifact_id,
+            "version": self.version,
+            "kind": self.kind,
+            "title": self.title,
+        }
 
 
 def _usage_payload(usage: Usage) -> dict[str, Any]:

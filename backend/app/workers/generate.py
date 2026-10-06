@@ -11,7 +11,8 @@ model nằm ở đây. Thứ tự các bước bám đúng §7.2 ③ và **khôn
     ③ UPDATE status='streaming'  → ④ XADD start
     ⑤ vòng lặp stream: XADD delta/reasoning/tool_call/usage
                        + kiểm cờ huỷ mỗi KIEM_HUY_MOI_N_CHUNK chunk (§7.5)
-    ⑥ UPDATE messages (content/status/usage)  → ⑦ XADD done|error  → ⑧ EXPIRE
+    ⑥ UPDATE messages (content/status/usage)  → ⑥.2 artifacts (T-5.1)
+                                              → ⑦ XADD done|error  → ⑧ EXPIRE
 
     ╰─ song song từ ③ tới ⑤: task `_heartbeat` ghi `heartbeat_at` mỗi
        `WORKER_HEARTBEAT_S` (§7.6), ĐỘC LẬP với việc có chunk hay không (B-122)
@@ -101,10 +102,11 @@ from app.config.catalog import ModelEntry, ReasoningOption, reasoning_to_send
 from app.config.settings import settings
 from app.core import storage
 from app.db.models import KeySource, MessageStatus
-from app.db.repositories import MessageRepository
+from app.db.repositories import ArtifactRepository, MessageRepository
 from app.db.session import session_scope
 from app.llm import byok_endpoints, context
 from app.llm.adapters.byok import ByokAdapter
+from app.llm.artifact_blocks import artifact_blocks
 from app.llm.client import Chunk, LLMClient, ToolCall, Usage
 from app.llm.credentials import Credential, CredentialUnavailable, resolve_credential
 from app.llm.tokens import IMAGE_PART_TYPE
@@ -112,6 +114,7 @@ from app.llm.vision import prepare_image
 from app.quota import meter
 from app.streaming.cancel import FINISH_REASON_CANCELLED, is_cancel_requested
 from app.streaming.events import (
+    ArtifactEvent,
     DeltaEvent,
     DoneEvent,
     ErrorCode,
@@ -687,9 +690,10 @@ async def _close_ledger(
 ) -> None:
     """Bước ⑥ → ⑧: ghi Postgres, ghi sổ, `XADD done|error`, `EXPIRE`. C19 + C8.
 
-    Bốn việc, bốn `try` riêng. Cố ý: Postgres hỏng **không** được phép nuốt
-    luôn event kết thúc, vì hậu quả của việc không ghi event là client treo vô
-    hạn — nặng hơn hẳn một dòng lịch sử bị mất. Cùng lẽ đó, `EXPIRE` hỏng không
+    Bốn việc, bốn `try` riêng (cộng `try` của ⑥.2 artifact — T-5.1). Cố ý:
+    Postgres hỏng **không** được phép nuốt luôn event kết thúc, vì hậu quả của
+    việc không ghi event là client treo vô hạn — nặng hơn hẳn một dòng lịch sử
+    bị mất. Cùng lẽ đó, `EXPIRE` hỏng không
     được phép làm gì tới event đã phát.
 
     **Ghi sổ (⑥.5) hỏng thì event kết thúc vẫn là `done`, KHÔNG phải `error`.**
@@ -711,6 +715,10 @@ async def _close_ledger(
             # Chữ đã tới người dùng nhưng lịch sử thì không: nói thẳng bằng mã
             # riêng thay vì gửi `done` rồi để họ F5 ra một message rỗng.
             error = GenerationError(ErrorCode.PERSIST_FAILED, "UPDATE messages that bai")
+    else:
+        # ⑥.2 — T-5.1. Chỉ khi `content` đã nằm trong Postgres, và TRƯỚC event
+        # kết thúc: FE đóng stream khi thấy `done`, event tới sau là mất.
+        await _publish_artifacts(mid, producer, result)
 
     # ⑥.5 — §10.2 vế SAU. Chạy TRƯỚC `XADD` vì `cost_usd` đi trên event `done`.
     await _record_usage(ctx, mid, result)
@@ -743,6 +751,33 @@ async def _close_ledger(
         result.usage,
         result.cost_usd,
     )
+
+
+async def _publish_artifacts(mid: uuid.UUID, producer: StreamProducer, result: _Result) -> None:
+    """Bước ⑥.2 — khối code đủ điều kiện ⇒ hàng `artifacts` v1 + `XADD artifact` (T-5.1).
+
+    Mọi ngả khép (xong, huỷ, `length`, lỗi giữa chừng) đi qua cùng luật: chỉ khối
+    rào **đã đóng** — khối dở ở cuối không bao giờ thành artifact (Cạm bẫy ③).
+
+    **Hỏng thì nuốt, như `_record_usage`:** câu trả lời đã nằm trong Postgres;
+    mất artifact là sự cố có log, không phải lỗi đỏ cho người dùng. INSERT cả
+    lô trong một transaction rồi mới XADD — không phát event cho hàng chưa commit.
+    """
+    try:
+        blocks = artifact_blocks(result.content)
+        if not blocks:
+            return
+        async with session_scope() as session:
+            rows = await ArtifactRepository(session).create_initial(message_id=mid, blocks=blocks)
+            await session.commit()
+        for row in rows:
+            await producer.emit(
+                ArtifactEvent(
+                    artifact_id=str(row.id), version=row.version, kind=row.kind, title=row.title
+                )
+            )
+    except Exception:  # noqa: BLE001 — xem docstring
+        logger.exception("generate: %s KHONG tao duoc artifact — cau tra loi van nguyen", mid)
 
 
 async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, result: _Result) -> None:

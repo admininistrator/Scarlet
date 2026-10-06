@@ -5,6 +5,7 @@ Tầng api/worker không tự dựng `select()`: gom SQL về một chỗ là c�
 trong vài phút thay vì đi khắp repo.
 """
 
+from app.db.repositories.artifacts import ArtifactRepository
 from app.db.repositories.attachments import AttachmentRepository
 from app.db.repositories.audit_logs import AuditLogRepository, AuditLogRow
 from app.db.repositories.byok_endpoints import ByokEndpointRepository
@@ -32,6 +33,7 @@ from app.db.repositories.user_settings import UserSettingsRepository
 from app.db.repositories.users import UserRepository
 
 __all__ = [
+    "ArtifactRepository",
     "AttachmentRepository",
     "AuditLogRepository",
     "AuditLogRow",

@@ -55,7 +55,7 @@ def _one_of_each_kind() -> list[object]:
         ReasoningEvent(text="đang nghĩ"),
         ToolCallEvent(call_id="c_1", name="web_search", arguments='{"query":"x"}'),
         ToolResultEvent(call_id="c_1", name="web_search", ok=True, result={"n": 1}),
-        ArtifactEvent(artifact_id="a1", version=2),
+        ArtifactEvent(artifact_id="a1", version=2, kind="html", title='Trang "mã"'),
         UsageEvent(usage=usage),
         DoneEvent(finish_reason="stop", usage=usage),
         ErrorEvent(code=ErrorCode.UPSTREAM_ERROR, message="đứt"),
@@ -91,6 +91,13 @@ def test_payload_keys_match_the_plan() -> None:
         "message_id": "m1",
         "model_id": "mx",
         "reasoning_effort": "low",
+    }
+    # Phụ lục F + `title` (T-5.1, B-360 ⑧) — `sse.ts` đọc đúng bốn khoá này.
+    assert ArtifactEvent(artifact_id="a1", version=1, kind="code", title="").data() == {
+        "artifact_id": "a1",
+        "version": 1,
+        "kind": "code",
+        "title": "",
     }
     # §7.4: {"name":"web_search","args":{"query":"..."},"call_id":"c_1"}
     assert ToolCallEvent(call_id="c_1", name="web_search", arguments='{"q":1}').data() == {

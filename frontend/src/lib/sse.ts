@@ -75,6 +75,9 @@ export interface UsageOut {
  * `start.reasoning_effort` — truong THEM cua §24.2b·S4/S14 (T-S.6), khai o
  * T-S.15 (B-286). FE chua doc no: chip "model · muc" chi dung khi da xong, va
  * luc ay doc `MessageOut.reasoning_effort` cua duong di.
+ *
+ * `artifact.kind` / `artifact.title` — T-5.1 (Phu luc F khai `kind`; `title`
+ * them de the hien ngay, B-360). `title` rong = khoi khong tieu de.
  */
 export type StreamEvent =
   | {
@@ -91,7 +94,10 @@ export type StreamEvent =
       event: "tool_result";
       data: { call_id: string; name: string; ok: boolean; result: unknown };
     }
-  | { event: "artifact"; data: { artifact_id: string; version: number } }
+  | {
+      event: "artifact";
+      data: { artifact_id: string; version: number; kind: string; title: string };
+    }
   | { event: "usage"; data: UsageOut }
   | { event: "done"; data: { finish_reason: string | null; usage: UsageOut | null } }
   | { event: "error"; data: { code: string; message: string } };

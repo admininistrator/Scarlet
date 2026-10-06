@@ -44,6 +44,7 @@ from app.config.catalog import get_model
 from app.config.settings import settings
 from app.core import storage
 from app.db.models import (
+    Artifact,
     Conversation,
     CostConfidence,
     KeySource,
@@ -52,7 +53,7 @@ from app.db.models import (
     MessageStatus,
     UsageEvent,
 )
-from app.db.repositories import ConversationRepository, MessageRepository
+from app.db.repositories import ArtifactRepository, ConversationRepository, MessageRepository
 from app.db.repositories.attachments import AttachmentRepository
 from app.llm import context as llm_context
 from app.llm.adapters import openai_compat
@@ -1884,3 +1885,108 @@ async def test_missing_image_object_ends_with_coded_error(
     reloaded = await _reload(session_factory, message.id)
     assert reloaded.status is MessageStatus.FAILED
     assert reloaded.error_code == "ATTACHMENT_UNAVAILABLE"
+
+
+# ─────────────────────── ⑥.2 artifact từ khối code (T-5.1) ───────────────────────
+
+#: Hai khối có tiêu đề, cắt thành mẩu để khối nằm vắt qua nhiều `delta` như thật.
+TWO_BLOCKS = [
+    'Đây là trang:\n\n```html title="Trang một"\n',
+    "<p>một</p>\n```\n\n",
+    'Và hình:\n\n```svg title="Hình hai"\n',
+    "<svg/>\n```\n",
+]
+
+
+async def _read_artifacts(
+    session_factory: async_sessionmaker[AsyncSession], mid: uuid.UUID
+) -> list[Artifact]:
+    async with session_factory() as s:
+        stmt = select(Artifact).where(Artifact.message_id == mid).order_by(Artifact.created_at)
+        return list((await s.execute(stmt)).scalars())
+
+
+async def test_two_blocks_two_v1_rows_and_artifact_events_before_done(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+) -> None:
+    """T-5.1 DoD dòng 3: 2 hàng v1 của message assistant, 2 `artifact` TRƯỚC `done`.
+
+    `created_at` tăng dần là phép đo của migration 0011: cả lô ghi trong MỘT
+    transaction (ở đây còn chung transaction ngoài của test) — `now()` cho mọi
+    hàng một giá trị.
+    """
+    message = await _minimal_tree(session, user_a)
+
+    await generate(_ctx(fake_redis, FakeClient(_normal_chunks(TWO_BLOCKS))), str(message.id))
+
+    rows = await _read_artifacts(session_factory, message.id)
+    assert [(r.kind, r.title, r.content, r.version) for r in rows] == [
+        ("html", "Trang một", "<p>một</p>", 1),
+        ("svg", "Hình hai", "<svg/>", 1),
+    ]
+    assert all(r.parent_artifact_id is None for r in rows)
+    assert rows[0].created_at < rows[1].created_at
+
+    assert fake_redis.kind[-3:] == ["artifact", "artifact", "done"]
+    events = [fake_redis.data(i) for i, k in enumerate(fake_redis.kind) if k == "artifact"]
+    assert events == [
+        {"artifact_id": str(r.id), "version": 1, "kind": r.kind, "title": r.title} for r in rows
+    ]
+
+
+async def test_artifact_insert_failure_still_done_content_intact_one_log_line(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Câu trả lời đã ghi — mất artifact là sự cố có log, không phải lỗi đỏ."""
+    message = await _minimal_tree(session, user_a)
+
+    async def _boom(*_a: Any, **_k: Any) -> list[Artifact]:
+        raise RuntimeError("deadlock detected")
+
+    monkeypatch.setattr(ArtifactRepository, "create_initial", _boom)
+
+    with caplog.at_level("ERROR", logger="app.workers.generate"):
+        await generate(_ctx(fake_redis, FakeClient(_normal_chunks(TWO_BLOCKS))), str(message.id))
+
+    assert fake_redis.last["type"] == "done"
+    assert "artifact" not in fake_redis.kind
+    reloaded = await _reload(session_factory, message.id)
+    assert reloaded.status is MessageStatus.COMPLETED
+    assert reloaded.content == "".join(TWO_BLOCKS)
+    assert [r.getMessage() for r in caplog.records] == [
+        f"generate: {message.id} KHONG tao duoc artifact — cau tra loi van nguyen"
+    ]
+
+
+async def test_cancel_while_second_block_open_keeps_only_closed_one(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+) -> None:
+    """Huỷ ở chunk thứ `CANCEL_CHECK_EVERY_N_CHUNKS` khi khối hai còn dở ⇒ 1 hàng."""
+    pieces = [
+        '```html title="Xong"\n',
+        "<p>a</p>\n",
+        "```\n",
+        '```svg title="Dở"\n',
+        *(["<g/>\n"] * (CANCEL_CHECK_EVERY_N_CHUNKS - 4)),
+        "```\n",
+    ]
+    message = await _minimal_tree(session, user_a)
+    fake_redis.cancel_flags.add(cancel_key(message.id))
+
+    await generate(_ctx(fake_redis, FakeClient(_normal_chunks(pieces))), str(message.id))
+
+    assert fake_redis.last["data"]["finish_reason"] == FINISH_REASON_CANCELLED
+    rows = await _read_artifacts(session_factory, message.id)
+    assert [r.title for r in rows] == ["Xong"]
+    assert fake_redis.kind[-2:] == ["artifact", "done"]
