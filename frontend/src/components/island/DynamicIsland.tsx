@@ -5,7 +5,6 @@ import {
   GripVertical,
   LoaderCircle,
   MessageSquare,
-  PanelRight,
   Pin,
   Search,
   Settings,
@@ -23,6 +22,7 @@ import { ISLAND_COMPACT_QUERY, readDurationMs } from "../../lib/motion";
 import { useMediaQuery } from "../../lib/viewport";
 import { Hint } from "../chat/Hint";
 import { AccountMenu } from "../sidebar/AccountMenu";
+import { ARTIFACT_PANEL_ID, PanelToggle, type PanelBinding } from "../artifacts/ArtifactPanel";
 import { ComingSoon } from "../ui/ComingSoon";
 import { StaticIcon } from "../ui/Icon";
 import { ThemeToggle } from "../ui/ThemeToggle";
@@ -35,7 +35,7 @@ import { useIslandPhysics } from "./useIslandPhysics";
  *
  * Bon hinh, MOT khoi:
  *   pill     neo tren, thu   — icon + ten ngu canh (+ trang thai ket noi)
- *   bar      neo tren, mo    — dieu huong, 6 hoi thoai gan day, tai khoan, theme, artifact (cho)
+ *   bar      neo tren, mo    — dieu huong, 6 hoi thoai gan day, tai khoan, theme, panel artifact
  *   side     neo hai ben     — sidebar v2 (256), LUON mo; `Layout` day noi dung vao 16 + 256
  *   orb      dang keo        — 56 × 56
  * NQ-136 (nguoi dung, 2026-10-01): neo hai ben KHONG con vien thuoc doc cho re
@@ -44,7 +44,7 @@ import { useIslandPhysics } from "./useIslandPhysics";
  * < 640 px: chi neo tren, khong keo; neo trai / phai da luu duoc giu cho man rong.
  *
  * Moi lop luon o trong DOM; lop khong hien mang `inert` (khong nhan Tab, khong
- * vao cay a11y). Nho vay hang "mount" cua §7b.2 (`T-5.4`, `B-264`) co DUNG mot
+ * vao cay a11y). Nho vay hang "mount" cua §7b.2 (`B-06`, `B-264`) co DUNG mot
  * `data-planned` du dao dang o hinh nao (DoD dong 6).
  */
 
@@ -84,8 +84,8 @@ export function DynamicIsland(props: {
   avatarColor: string | null;
   onLogout: () => Promise<void>;
   reconnecting: boolean;
-  /** NQ-128 c: nut cho panel artifact chi canh hoi thoai (`/`). */
-  artifactPanel: boolean;
+  /** T-5.4 — nut panel artifact; NQ-128 c: chi canh hoi thoai (`/`), noi khac `undefined`. */
+  artifactPanel?: PanelBinding;
   onNewChat: () => void;
   onSelect: (conversationId: string) => void;
   onOpenSearch: () => void;
@@ -116,8 +116,9 @@ export function DynamicIsland(props: {
    *   layer   vao lop vua mo: nut ⋮⋮ (hoac muc dau o man hep)
    *   trigger ve nut mo cua vien thuoc (Esc, sau mot thao tac)
    *   grip    sang ⋮⋮ cua neo moi (doi neo bang phim)
+   *   panel   ve nut panel artifact (panel vua dong tu ben trong — T-5.4)
    */
-  const pendingFocus = useRef<"layer" | "trigger" | "grip" | null>(null);
+  const pendingFocus = useRef<"layer" | "trigger" | "grip" | "panel" | null>(null);
 
   const { dragging, near, handlers } = useIslandPhysics({
     islandRef,
@@ -174,7 +175,9 @@ export function DynamicIsland(props: {
       return;
     }
     const grip = (anchor === "top" ? barGripRef : sideGripRef).current;
-    if (pending === "trigger") {
+    if (pending === "panel") {
+      visiblePanelToggle(islandRef.current)?.focus({ preventScroll: true });
+    } else if (pending === "trigger") {
       pillTriggerRef.current?.focus({ preventScroll: true });
     } else if (grip !== null) {
       grip.focus({ preventScroll: true });
@@ -187,6 +190,27 @@ export function DynamicIsland(props: {
     pendingFocus.current = null;
   }, [shape, anchor]);
   useEffect(() => () => window.clearTimeout(linger.current), []);
+
+  /*
+    T-5.4 — panel dong tu ben trong (Esc, nut X) ⇒ tieu diem ve nut da mo no.
+    Nut o lop dang hien (thanh mo / sidebar doc) ⇒ focus ngay; dao dang thu
+    (neo tren) ⇒ nut nam trong lop `inert`: mo thanh roi focus SAU commit (B-323 ④).
+  */
+  const panelFocusRequest = props.artifactPanel?.focusRequest ?? 0;
+  const seenPanelFocus = useRef(panelFocusRequest);
+  useEffect(() => {
+    if (panelFocusRequest === seenPanelFocus.current) {
+      return;
+    }
+    seenPanelFocus.current = panelFocusRequest;
+    const button = visiblePanelToggle(islandRef.current);
+    if (button !== null) {
+      button.focus({ preventScroll: true });
+      return;
+    }
+    pendingFocus.current = "panel";
+    setExpanded(true);
+  }, [panelFocusRequest]);
 
   /*
     Cham / bam ra ngoai dao ⇒ thu lai (ban ve A1 `onStageDown`). Thieu dong nay
@@ -429,13 +453,8 @@ export function DynamicIsland(props: {
             <div className="flex items-center gap-1">
               <AccountMenu placement="island" user={props.user} avatarColor={props.avatarColor} onLogout={props.onLogout} />
               <ThemeToggle />
-              {props.artifactPanel && (
-                <ComingSoon
-                  planned="T-5.4"
-                  label={t("header.artifactPanel")}
-                  icon={<StaticIcon icon={PanelRight} size={18} />}
-                  className={`${GLASS_BUTTON} control-disabled`}
-                />
+              {props.artifactPanel !== undefined && (
+                <PanelToggle binding={props.artifactPanel} className={GLASS_BUTTON} />
               )}
             </div>
           </Layer>
@@ -471,6 +490,11 @@ export function DynamicIsland(props: {
       </p>
     </>
   );
+}
+
+/** Nut panel artifact cua lop dang hien (thanh mo, hoac chan sidebar doc) — `null` khi lop ay `inert`. */
+function visiblePanelToggle(island: HTMLElement | null): HTMLElement | null {
+  return island?.querySelector<HTMLElement>(`[data-active="true"] [aria-controls="${ARTIFACT_PANEL_ID}"]`) ?? null;
 }
 
 /** `inert`: lop an khong nhan Tab, khong vao cay a11y. React 19: `inert` la boolean, `ref` la prop. */

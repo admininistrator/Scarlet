@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { useSession } from "../../app/Layout";
 import { api } from "../../lib/api";
@@ -13,6 +13,7 @@ import { useModels } from "../../features/models/useModels";
 import { QuotaNotice } from "../../features/quota/QuotaNotice";
 import { byokCovers, isSendBlocked, selectedProviderId } from "../../features/quota/quotaView";
 import { useQuota } from "../../features/quota/useQuota";
+import { ArtifactPanel } from "../artifacts/ArtifactPanel";
 import { AppIsland } from "../island/AppIsland";
 import { ChatStream } from "./ChatStream";
 import { Composer } from "./Composer";
@@ -227,6 +228,18 @@ export function ChatScreen() {
     !endpointTurn && isSendBlocked(quota.block, quota.byokProviders, selectedProvider);
   const draft = chat.phase === "draft";
 
+  /*
+    T-5.4 — panel artifact. Nut o dao (`PanelToggle`); dong tu TRONG panel thi
+    dao tra tieu diem ve nut ay (`focusRequest` tang moi lan).
+  */
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelFocusRequest, setPanelFocusRequest] = useState(0);
+  const togglePanel = useCallback(() => setPanelOpen((was) => !was), []);
+  const closePanel = useCallback(() => {
+    setPanelOpen(false);
+    setPanelFocusRequest((n) => n + 1);
+  }, []);
+
   // On dinh giua cac lan render cua man chat (moi manh chu dang chay) — `AppIsland` la `memo`.
   const { openConversation, newConversation, closeConversation, createdConversationId, connection } = chat;
   const islandChat = useMemo(
@@ -237,8 +250,19 @@ export function ChatScreen() {
       onSelect: (id: string) => void openConversation(id),
       onNewChat: newConversation,
       onDeleted: closeConversation,
+      panel: { open: panelOpen, onToggle: togglePanel, focusRequest: panelFocusRequest },
     }),
-    [tree.conversationId, createdConversationId, connection, openConversation, newConversation, closeConversation],
+    [
+      tree.conversationId,
+      createdConversationId,
+      connection,
+      openConversation,
+      newConversation,
+      closeConversation,
+      panelOpen,
+      togglePanel,
+      panelFocusRequest,
+    ],
   );
 
   /*
@@ -353,6 +377,9 @@ export function ChatScreen() {
           />
         </div>
       </div>
+
+      {/* T-5.3 do artifact vao day; hom nay luon trang thai trong. */}
+      <ArtifactPanel open={panelOpen} onClose={closePanel} artifact={null} />
     </div>
   );
 }

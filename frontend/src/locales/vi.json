@@ -75,6 +75,11 @@
   "chat.attachments": "Tệp đính kèm",
 
   "artifact.open": "Mở",
+  "artifact.panel.label": "Panel artifact",
+  "artifact.panel.close": "Đóng panel artifact",
+  "artifact.panel.resize": "Đổi bề rộng panel artifact",
+  "artifact.panel.empty": "Chưa mở artifact nào",
+  "artifact.panel.emptyHint": "Bấm “Mở” trên thẻ artifact trong câu trả lời để xem ở đây.",
   "artifact.type.code": "Code",
   "artifact.type.document": "Tài liệu",
   "artifact.type.html": "Trang HTML",
@@ -88,7 +93,6 @@
   "nav.newChat": "Hội thoại mới",
   "header.openSidebar": "Mở thanh bên",
   "header.closeSidebar": "Đóng thanh bên",
-  "header.artifactPanel": "Mở panel artifact",
 
   "sidebar.title": "Danh sách hội thoại",
   "sidebar.search": "Tìm hội thoại",

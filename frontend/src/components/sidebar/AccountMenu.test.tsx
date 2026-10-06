@@ -7,7 +7,7 @@
  * "Dang xuat xoa phien roi ve `/dang-nhap`" do tren chinh phien cua `Layout`
  * va chinh URL cua router, khong tren mot ham gia.
  *
- *   - Dao: vien thuoc khong co email; nut cho T-5.4 chi o man chat (NQ-128 c);
+ *   - Dao: vien thuoc khong co email; nut panel artifact (T-5.4) chi o man chat (NQ-128 c);
  *     "Quan tri" la muc cua dao, chi admin — icon o man khac, co nhan o `/admin`.
  *   - Khoi tai khoan: ten trong ⇒ NGUYEN email; ten la CHU, khong phai HTML;
  *     `truncate`; mau avatar; nhan tier (NQ-116).
@@ -157,7 +157,7 @@ afterEach(() => {
 });
 
 describe("dao thay header v2 (NQ-115, NQ-128 b/c, T-S.19a)", () => {
-  it("1. man chat: vien thuoc khong email; nut cho T-5.4 aria-disabled TRONG dao; sang/toi; khong Quan tri", async () => {
+  it("1. man chat: vien thuoc khong email; nut panel artifact (T-5.4) TRONG dao; sang/toi; khong Quan tri", async () => {
     renderAt(PATHS.home);
     await accountTrigger();
 
@@ -165,20 +165,21 @@ describe("dao thay header v2 (NQ-115, NQ-128 b/c, T-S.19a)", () => {
     expect(within(pill).queryByText(EMAIL)).toBeNull();
     expect(within(island()).queryByRole("button", { name: "Đăng xuất" })).toBeNull();
 
-    const artifact = within(bar()).getByRole("button", { name: "Mở panel artifact" });
-    expect(artifact).toHaveAttribute("aria-disabled", "true");
-    expect(artifact).toHaveAttribute("data-planned", "T-5.4");
+    const artifact = within(bar()).getByRole("button", { name: "Panel artifact" });
+    expect(artifact).toHaveAttribute("aria-expanded", "false");
+    expect(artifact).toHaveAttribute("aria-controls", "artifact-panel");
+    expect(artifact).not.toHaveAttribute("data-planned");
     expect(within(bar()).getByRole("button", { name: "Chuyển sang theme tối" })).toBeInTheDocument();
     // Nguoi dung thuong: khong co loi vao Quan tri.
     expect(within(island()).queryByRole("link", { name: "Quản trị" })).toBeNull();
   });
 
-  it("2. /cai-dat: dao KHONG co nut cho T-5.4, khong con nut sidebar; Dang xuat cua tab o ngoai dao", async () => {
+  it("2. /cai-dat: dao KHONG co nut panel artifact (T-5.4), khong con nut sidebar; Dang xuat cua tab o ngoai dao", async () => {
     renderAt(PATHS.settingsAccount);
     const logout = await screen.findByRole("button", { name: "Đăng xuất" });
 
     expect(island()).not.toContainElement(logout);
-    expect(within(island()).queryByRole("button", { name: "Mở panel artifact" })).toBeNull();
+    expect(within(island()).queryByRole("button", { name: "Panel artifact" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Mở thanh bên" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Đóng thanh bên" })).toBeNull();
     // v3: dao co khoi tai khoan o MOI duong co dao (khong con "khong sidebar ⇒ khong khoi").
@@ -293,10 +294,10 @@ describe("menu tai khoan (S10, §7b.2)", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe(PATHS.login));
     expect(api.logout).toHaveBeenCalledTimes(1);
-    // Phien da xoa: khong con dao, nen khong khoi tai khoan, khong nut cho T-5.4.
+    // Phien da xoa: khong con dao, nen khong khoi tai khoan, khong nut panel artifact.
     expect(screen.queryByRole("navigation", { name: "Điều hướng chính" })).toBeNull();
     expect(screen.queryByRole("button", { name: new RegExp(escapeRegExp(EMAIL)) })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Mở panel artifact" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Panel artifact" })).toBeNull();
     expect(await screen.findByLabelText("Email")).toBeInTheDocument();
   });
 });

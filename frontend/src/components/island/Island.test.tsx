@@ -82,7 +82,7 @@ function renderIsland(patch: Partial<Parameters<typeof DynamicIsland>[0]> = {}) 
         avatarColor={null}
         onLogout={async () => {}}
         reconnecting={false}
-        artifactPanel
+        artifactPanel={{ open: false, onToggle: () => {}, focusRequest: 0 }}
         onNewChat={onNewChat}
         onSelect={onSelect}
         onOpenSearch={() => {}}
@@ -290,26 +290,22 @@ describe("dao — neo hai ben (NQ-136)", () => {
 });
 
 describe("dao — muc cho", () => {
-  it("9. Kien thuc (B-06) va panel artifact (T-5.4) la nut cho aria-disabled; bam khong lam gi", async () => {
+  it("9. Kien thuc (B-06) la nut cho aria-disabled; bam khong lam gi", async () => {
     const user = userEvent.setup();
     const { onSelect, onNewChat } = renderIsland();
     const knowledge = within(nav()).getByRole("button", { name: "Kiến thức" });
     expect(knowledge).toHaveAttribute("aria-disabled", "true");
     expect(knowledge).toHaveAttribute("data-planned", "B-06");
-    const artifact = within(nav()).getByRole("button", { name: "Mở panel artifact" });
-    expect(artifact).toHaveAttribute("aria-disabled", "true");
-    expect(artifact).toHaveAttribute("data-planned", "T-5.4");
 
     await user.click(trigger());
     await user.click(knowledge);
-    await user.click(artifact);
     expect(onSelect).not.toHaveBeenCalled();
     expect(onNewChat).not.toHaveBeenCalled();
   });
 
-  it("9b. ngoai man chat (NQ-128 c): khong co nut cho panel artifact", () => {
-    renderIsland({ context: "settings", artifactPanel: false });
-    expect(within(nav()).queryByRole("button", { name: "Mở panel artifact" })).toBeNull();
+  it("9b. ngoai man chat (NQ-128 c): khong co nut panel artifact", () => {
+    renderIsland({ context: "settings", artifactPanel: undefined });
+    expect(within(nav()).queryByRole("button", { name: "Panel artifact" })).toBeNull();
   });
 });
 

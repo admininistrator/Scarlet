@@ -6,6 +6,7 @@ import { conversationHref } from "../../features/chat/useChat";
 import type { SessionState } from "../../features/auth/useSessionState";
 import { ApiError, api, type ConversationOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
+import { PanelToggle, type PanelBinding } from "../artifacts/ArtifactPanel";
 import { AccountMenu } from "../sidebar/AccountMenu";
 import { dayGroupOf } from "../sidebar/dayGroups";
 import { Sidebar, conversationLabel, mergePages, sortConversations } from "../sidebar/Sidebar";
@@ -38,6 +39,8 @@ export interface ChatBindings {
   onSelect: (conversationId: string) => void;
   onNewChat: () => void;
   onDeleted: () => void;
+  /** T-5.4 — panel artifact (NQ-128 c: chi man chat). */
+  panel: PanelBinding;
 }
 
 function errorText(error: unknown): string {
@@ -171,6 +174,7 @@ export const AppIsland = memo(function AppIsland({
   const select = chat?.onSelect ?? ((id: string) => navigate(conversationHref(id)));
   const newChat = chat?.onNewChat ?? (() => navigate(PATHS.home));
   const avatarColor = session.profile?.avatar_color ?? null;
+  const account = <AccountMenu user={user} avatarColor={avatarColor} onLogout={session.logout} />;
 
   return (
     <>
@@ -183,7 +187,7 @@ export const AppIsland = memo(function AppIsland({
         avatarColor={avatarColor}
         onLogout={session.logout}
         reconnecting={chat?.reconnecting ?? false}
-        artifactPanel={context === "chat"}
+        artifactPanel={chat?.panel}
         onNewChat={newChat}
         onSelect={select}
         onOpenSearch={openSearch}
@@ -197,7 +201,24 @@ export const AppIsland = memo(function AppIsland({
             onNewChat={newChat}
             onOpenConversationDeleted={chat?.onDeleted ?? (() => undefined)}
             onItemsChange={onItemsChange}
-            footer={<AccountMenu user={user} avatarColor={avatarColor} onLogout={session.logout} />}
+            /*
+              T-5.4 — cho TAM cua nut panel khi neo hai ben (B-323 ①, B-326):
+              sidebar doc chua co cho cho no; dat canh khoi tai khoan nhu hang
+              cuoi cua thanh mo. Ban ve that: T-HD6 ⑤.
+            */
+            footer={
+              chat === undefined ? (
+                account
+              ) : (
+                <div className="flex items-center gap-1">
+                  <div className="min-w-0 flex-1">{account}</div>
+                  <PanelToggle
+                    binding={chat.panel}
+                    className="motion-control grid size-touch shrink-0 place-items-center rounded-full text-foreground hover:bg-glass-hover"
+                  />
+                </div>
+              )
+            }
           />
         }
       />
