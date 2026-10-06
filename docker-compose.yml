@@ -235,6 +235,9 @@ services:
       # Rong thi widget tu an di (xem components/auth/Turnstile.tsx) - dung
       # khop voi TURNSTILE_SECRET rong o backend.
       VITE_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      # T-5.6 — origin phu cua artifact (ADR-10), cung lo anh xa tren. Bat
+      # buoc (A4): thieu thi `src` cua khung thanh "undefined/".
+      VITE_ARTIFACTS_BASE_URL: ${ARTIFACTS_BASE_URL:?ARTIFACTS_BASE_URL chua dat trong .env}
     healthcheck:
       # node:alpine co busybox wget, khong co curl.
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5173/"]

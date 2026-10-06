@@ -9,6 +9,11 @@ interface ImportMetaEnv {
    * backend.
    */
   readonly VITE_TURNSTILE_SITE_KEY: string;
+  /**
+   * Origin phu cua artifact (T-5.6, ADR-10). docker-compose.yml anh xa tu
+   * `ARTIFACTS_BASE_URL` trong `.env` — cung lo `VITE_TURNSTILE_SITE_KEY`.
+   */
+  readonly VITE_ARTIFACTS_BASE_URL: string;
 }
 
 interface ImportMeta {

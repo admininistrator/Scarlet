@@ -1,4 +1,4 @@
-.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme check-identifiers
+.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme check-identifiers test-artifact-origin
 
 COMPOSE := docker compose --profile core --profile tools
 
@@ -49,6 +49,14 @@ bench:
 #   make audit DUONG=/dang-nhap    mot duong, dung luc sua loi
 audit:
 	docker compose --profile core --profile dev run --rm -T -e DUONG="$(DUONG)" audit
+
+# T-5.6 / S12 — artifact o origin phu khong doc duoc gi cua origin chinh. CUNG
+# ho `test-resume`: can stack dang chay (Nginx, api). Refresh token phat trong
+# `api` roi noi THANG vao stdin cua script (khong qua argv / env); script tu
+# logout o cuoi. Ma thoat = so dong truot. Xem `scripts/test_artifact_origin.mjs`.
+test-artifact-origin:
+	$(COMPOSE) exec -T api python - < scripts/artifact_origin_session.py \
+	  | docker compose --profile core --profile dev run --rm -T --no-deps artifact-origin
 
 lint: check-theme check-identifiers
 	cd backend && .venv/bin/ruff check .

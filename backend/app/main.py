@@ -38,6 +38,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.artifacts_render import router as artifacts_render_router
 from app.api.v1 import router as api_v1_router
 from app.core import errors, idempotency, provider_health
 from app.core.idempotency import IdempotencyMiddleware
@@ -69,6 +70,7 @@ idempotency.register(app)
 app.add_middleware(IdempotencyMiddleware)
 app.add_middleware(OriginCheckMiddleware)
 app.include_router(api_v1_router)
+app.include_router(artifacts_render_router)
 
 
 @app.get("/health")

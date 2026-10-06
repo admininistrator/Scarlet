@@ -36,3 +36,10 @@ RUN ln -sf /usr/bin/chromium /usr/local/bin/google-chrome \
 RUN npm install -g lighthouse@12 @axe-core/cli@4 && npm cache clean --force
 
 WORKDIR /scarlet
+
+# T-5.6 (S12) — `scripts/test_artifact_origin.mjs` lai Chromium bang
+# `puppeteer-core`. Truoc day goi nay chi co vi `lighthouse@12` keo theo (bac
+# cau, nam trong node_modules cua lighthouse — nang lighthouse la mat). Ghim
+# DUNG ban dang chay voi Chromium cua image (do 2026-10-07), cai cuc bo o
+# /scarlet de `import "puppeteer-core"` tu `scripts/` tim thay.
+RUN npm install --no-save --no-package-lock puppeteer-core@24.43.1 && npm cache clean --force

@@ -105,6 +105,29 @@ services:
     depends_on:
       web: { condition: service_healthy }
 
+  # T-5.6 / NQ-142 ④ — S12 (`make test-artifact-origin`). CÙNG image với
+  # `audit` (cùng tên ⇒ một bản build), khác ở chỗ KHÔNG né được Nginx: CSP
+  # và origin phụ đều do Nginx đặt. `network_mode: service:nginx` (lối sidecar
+  # 9Router của T-S.4) ⇒ `https://localhost` / `https://artifacts.localhost`
+  # là 127.0.0.1 của chính Nginx. Chỉ mount cert công khai (ghim SPKI), không
+  # mount khoá; `ArtifactFrame.tsx` để đọc ĐÚNG chuỗi `sandbox` của khung thật.
+  # Hai URL nội suy từ `.env` (A4: thiếu ⇒ compose từ chối chạy).
+  artifact-origin:
+    build: ./audit
+    image: scarlet-audit:latest
+    restart: "no"
+    profiles: [dev]
+    network_mode: service:nginx
+    working_dir: /scarlet
+    volumes:
+      - ./scripts:/scarlet/scripts:ro
+      - ./certs/localhost+3.pem:/scarlet/certs/nginx.pem:ro
+      - ./frontend/src/components/artifacts/ArtifactFrame.tsx:/scarlet/frontend/ArtifactFrame.tsx:ro
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL chưa đặt trong .env}
+      ARTIFACTS_BASE_URL: ${ARTIFACTS_BASE_URL:?ARTIFACTS_BASE_URL chưa đặt trong .env}
+    command: node scripts/test_artifact_origin.mjs
+
   # Publish Postgres ra loopback CHỈ cho test tầng repository (T-1.1).
   # `make test` chạy pytest từ WSL host, ngoài network `internal`, nên không có
   # đường nào tới `postgres:5432`. Test DB dùng database RIÊNG `scarlet_test`
