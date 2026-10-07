@@ -111,7 +111,6 @@ _ALLOWED: dict[str, str] = {
     "scripts/bench_ttft.py::ly_do_hong": "trường của `Run` → khoá JSON trong `evals/results/*.json`",
     "scripts/bench_ttft.py::bo_qua": "dest của cờ `--bo-qua`",
     "scripts/bench_ttft.py::ghi_de": "dest của cờ `--ghi-de`",
-    "scripts/audit.mjs::DUONG": "biến môi trường của `make audit DUONG=…` (Makefile)",
     "scripts/audit.mjs::cho_san_sang": "khoá của `config/audit.json`",
     "scripts/audit.mjs::so_lan_thu": "khoá của `config/audit.json`",
     "scripts/audit.mjs::nghi_giua_hai_lan_ms": "khoá của `config/audit.json`",

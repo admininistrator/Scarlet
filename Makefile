@@ -46,9 +46,9 @@ bench:
 # `make test`.
 #
 #   make audit                     bon duong
-#   make audit DUONG=/dang-nhap    mot duong, dung luc sua loi
+#   make audit ROUTE=/dang-nhap    mot duong, dung luc sua loi
 audit:
-	docker compose --profile core --profile dev run --rm -T -e DUONG="$(DUONG)" audit
+	docker compose --profile core --profile dev run --rm -T -e ROUTE="$(ROUTE)" audit
 
 # T-5.6 / S12 — artifact o origin phu khong doc duoc gi cua origin chinh. CUNG
 # ho `test-resume`: can stack dang chay (Nginx, api). Refresh token phat trong

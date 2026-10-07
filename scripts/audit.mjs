@@ -5,7 +5,7 @@
  * KH tham chieu: §2.3 (S8), §19.1 · tasks.md T-3.2, T-3.10, B-203/NQ-77.
  *
  *     make audit
- *     make audit DUONG=/dang-nhap          # chi mot duong, dung luc sua loi
+ *     make audit ROUTE=/dang-nhap          # chi mot duong, dung luc sua loi
  *
  * Script nay KHONG chay tren host: no can mot Chrome that, va cho duy nhat co
  * Chrome trong he nay la container `audit` (xem `audit/Dockerfile`). `make
@@ -262,11 +262,11 @@ async function main() {
   const config = JSON.parse(await readFile(CONFIG_PATH, "utf8"));
   const timeoutMs = config.timeout_moi_lenh_s * 1000;
 
-  const routeFilter = env.DUONG?.trim();
-  const duongs = routeFilter ? config.routes.filter((d) => d === routeFilter) : config.routes;
-  if (duongs.length === 0) {
+  const routeFilter = env.ROUTE?.trim();
+  const routes = routeFilter ? config.routes.filter((d) => d === routeFilter) : config.routes;
+  if (routes.length === 0) {
     console.error(
-      `DUONG=${routeFilter} khong nam trong \`routes\` cua config/audit.json ` +
+      `ROUTE=${routeFilter} khong nam trong \`routes\` cua config/audit.json ` +
         `(${config.routes.join(" ")})`,
     );
     return 1;
@@ -290,7 +290,7 @@ async function main() {
   await waitForWeb(config.base_url, config.cho_san_sang);
 
   const results = [];
-  for (const route of duongs) {
+  for (const route of routes) {
     const url = new URL(route, config.base_url).toString();
     const startedAt = Date.now();
     const lh = await runLighthouse(url, config.lighthouse, timeoutMs);
@@ -301,8 +301,8 @@ async function main() {
   console.log("");
 
   // ── Bang tom tat ──────────────────────────────────────────────────────────
-  const width = Math.max(...duongs.map((d) => d.length), "DUONG".length);
-  console.log(`${"DUONG".padEnd(width)}  A11Y  AXE nang  AXE can soat  KET LUAN`);
+  const width = Math.max(...routes.map((d) => d.length), "ROUTE".length);
+  console.log(`${"ROUTE".padEnd(width)}  A11Y  AXE nang  AXE can soat  KET LUAN`);
   console.log(`${"-".repeat(width)}  ----  --------  ------------  --------`);
 
   let failedCount = 0;
