@@ -5,7 +5,20 @@
 
 import { describe, expect, it } from "vitest";
 
-import { downloadName, extensionFor, languageName, lineCount, mimeFor, resolvePanelLayout } from "./artifactUtils";
+import {
+  DIFF_MAX_LINES,
+  diffCounts,
+  diffLines,
+  downloadName,
+  extensionFor,
+  foldUnchanged,
+  hasGapBefore,
+  languageName,
+  lineCount,
+  mimeFor,
+  resolvePanelLayout,
+  type DiffLine,
+} from "./artifactUtils";
 
 describe("duoi tep va MIME — MOT bang", () => {
   it("1. kind co duoi co dinh; code theo language; khong biet / du lieu doc ⇒ .txt", () => {
@@ -112,5 +125,50 @@ describe("be rong panel theo cua so va neo (ban T-HD6 1k, B-366)", () => {
       low: 320,
       high: 336,
     });
+  });
+});
+
+describe("khac biet theo dong (T-5.9) — LCS tu viet", () => {
+  const ops = (lines: DiffLine[] | null) => (lines ?? []).map((l) => `${l.op === "same" ? " " : l.op === "add" ? "+" : "-"}${l.text}`);
+
+  it("5. rong ⇒ toan them (khong co 'dong rong' bi bo); nguoc lai ⇒ toan bo", () => {
+    expect(ops(diffLines("", "a\nb\n"))).toEqual(["+a", "+b"]);
+    expect(ops(diffLines("a\nb", ""))).toEqual(["-a", "-b"]);
+    expect(diffLines("", "")).toEqual([]);
+  });
+
+  it("6. giong het ⇒ 0 dong doi; MOT `\\n` cuoi khong phai khac biet", () => {
+    const lines = diffLines("x\ny\nz\n", "x\ny\nz") ?? [];
+    expect(diffCounts(lines)).toEqual({ added: 0, removed: 0 });
+    expect(lines).toHaveLength(3);
+  });
+
+  it("7. doi mot dong giua ⇒ -1 +1, moi dong khac giu nguyen", () => {
+    expect(ops(diffLines("1\n2\n3\n4\n5", "1\n2\nTHREE\n4\n5"))).toEqual([" 1", " 2", "-3", "+THREE", " 4", " 5"]);
+  });
+
+  it("8. doi mot khoi (3 dong tu dau xuong cuoi) ⇒ +3 −3 — dung so cua `diff --minimal`", () => {
+    const lines = diffLines("a\nb\nc\nd\ne\nf", "d\ne\nf\na\nb\nc");
+    expect(diffCounts(lines ?? [])).toEqual({ added: 3, removed: 3 });
+    expect(ops(lines).filter((l) => l.startsWith(" "))).toHaveLength(3);
+  });
+
+  it("9. vuot tran ⇒ `null`; dau / cuoi giong nhau khong tinh vao tran", () => {
+    const many = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join("\n");
+    expect(diffLines(many("x", DIFF_MAX_LINES + 1), many("y", 3))).toBeNull();
+    expect(diffLines(many("x", 3), many("y", DIFF_MAX_LINES + 1))).toBeNull();
+    expect(diffLines(many("x", DIFF_MAX_LINES), many("y", DIFF_MAX_LINES))).not.toBeNull();
+    // 10 000 dong, sua MOT dong ⇒ doan giua 1 × 1, khong cham tran.
+    const long = many("l", 10_000);
+    expect(diffCounts(diffLines(long, long.replace("l5000\n", "L5000\n")) ?? [])).toEqual({ added: 1, removed: 1 });
+  });
+
+  it("10. gap doan giong nhau dai, giu 3 dong quanh cho doi; so ho giua hai phien ban", () => {
+    const before = Array.from({ length: 20 }, (_, i) => `r${i}`).join("\n");
+    const blocks = foldUnchanged(diffLines(before, before.replace("r10", "R10")) ?? []);
+    expect(blocks.map((b) => `${b.type}:${b.lines.length}`)).toEqual(["fold:7", "lines:8", "fold:6"]);
+    expect(hasGapBefore([{ version: 1 }, { version: 4 }, { version: 5 }], 1)).toBe(true);
+    expect(hasGapBefore([{ version: 1 }, { version: 4 }, { version: 5 }], 2)).toBe(false);
+    expect(hasGapBefore([{ version: 1 }], 0)).toBe(false);
   });
 });

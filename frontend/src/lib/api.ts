@@ -212,6 +212,19 @@ export interface ArtifactOut extends PathArtifact {
   created_at: string;
 }
 
+/** Mot phan tu cua `GET /artifacts/{id}/versions` va `201` cua `POST` (T-5.2b) — KHONG `content`. */
+export interface ArtifactVersion {
+  id: string;
+  version: number;
+  kind: string;
+  language: string | null;
+  title: string;
+  /** `model` | `user` — tab "bạn sửa" (T-5.9). */
+  origin: string;
+  message_id: string;
+  created_at: string;
+}
+
 /** Mot tep cua message — `attachment_out` cua backend (T-4.4a). */
 export interface MessageAttachment {
   id: string;
@@ -1020,6 +1033,21 @@ export const api = {
 
   /** T-5.3 — noi dung cua artifact vua toi qua event `artifact` (event khong mang `content`). */
   getArtifact: (id: string) => request<ArtifactOut>(`/artifacts/${id}`),
+
+  /** T-5.9 — moi phien ban cua dong (moi nhanh), tab phien ban. */
+  listArtifactVersions: (id: string) => request<{ items: ArtifactVersion[] }>(`/artifacts/${id}/versions`),
+
+  /**
+   * T-5.9 — nguoi dung sua ⇒ phien ban moi (T-5.2b). Khoa theo LAN SOAN va
+   * theo NOI DUNG (Cam bay ① cua T-5.9): server khong bam than request, hai ban
+   * sua khac nhau chung khoa thi ban thu hai nhan lai ket qua ban thu nhat.
+   */
+  createArtifactVersion: (id: string, content: string, idempotencyKey: string) =>
+    request<ArtifactVersion>(`/artifacts/${id}/versions`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
 
   cancel: (messageId: string) => request<CancelOut>(`/messages/${messageId}/cancel`, { method: "POST" }),
 

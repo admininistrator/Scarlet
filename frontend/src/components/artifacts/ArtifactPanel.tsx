@@ -1,22 +1,30 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import {
+  ArrowRight,
   Atom,
+  ChevronDown,
+  ChevronsUpDown,
   CircleAlert,
   CodeXml,
   Download,
+  Ellipsis,
   File,
   FileCode,
   FileText,
+  GitCompare,
   Image as ImageIcon,
   LoaderCircle,
   PanelRight,
   PanelRightClose,
+  Pencil,
   RotateCcw,
   Workflow,
   X,
   type IconNode,
 } from "lucide";
 import {
+  Fragment,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -28,8 +36,9 @@ import {
   type ReactNode,
 } from "react";
 
-import type { PathArtifact } from "../../lib/api";
+import { ApiError, api, type ArtifactVersion, type PathArtifact } from "../../lib/api";
 import { t, type TextKey } from "../../lib/i18n";
+import { newKey } from "../../lib/idempotency";
 import { ISLAND_COMPACT_QUERY } from "../../lib/motion";
 import { useMediaQuery } from "../../lib/viewport";
 import { plainText } from "../chat/BubbleExtras";
@@ -39,7 +48,19 @@ import { highlightLines } from "../chat/highlight";
 import { setIslandRightInset, useIslandAnchor } from "../island/islandAnchor";
 import { Icon, StaticIcon } from "../ui/Icon";
 import { ArtifactFrame } from "./ArtifactFrame";
-import { downloadName, extensionFor, languageName, lineCount, mimeFor, resolvePanelLayout } from "./artifactUtils";
+import {
+  diffCounts,
+  diffLines,
+  downloadName,
+  extensionFor,
+  foldUnchanged,
+  hasGapBefore,
+  languageName,
+  lineCount,
+  mimeFor,
+  resolvePanelLayout,
+  type DiffBlock,
+} from "./artifactUtils";
 
 /**
  * Panel artifact — khung T-5.4, ve lai theo ban T-HD6 · v1 o T-5.5.
@@ -70,6 +91,15 @@ const KEY_STEP_PX = 16;
 const FRAME_KINDS: ReadonlySet<string> = new Set(["html", "react", "mermaid"]);
 /** Hai che do Xem truoc / Ma. */
 const PREVIEW_KINDS: ReadonlySet<string> = new Set([...FRAME_KINDS, "svg"]);
+/** Sua va So sanh duoc (ban T-HD6): moi `kind` tru `file` (nhi phan / con tro MinIO). */
+const TEXT_KINDS: ReadonlySet<string> = new Set([...PREVIEW_KINDS, "code", "markdown"]);
+
+/**
+ * Phien ban da co `content`, theo id — "nho trong phien" (T-5.9): mot hang
+ * `artifacts` khong bao gio doi (§14.2) nen khong bao gio cu. Song o
+ * `ArtifactPanel` (luon mount trong `ChatScreen`), qua moi lan doi artifact.
+ */
+type VersionCache = Map<string, PathArtifact>;
 
 /** Day tu `ChatScreen` qua dao toi nut. */
 export interface PanelBinding {
@@ -177,8 +207,9 @@ export function ArtifactPanel({
   artifact: PathArtifact | null;
 }) {
   const fullscreen = useMediaQuery(ISLAND_COMPACT_QUERY);
+  const [cache] = useState<VersionCache>(() => new Map());
   if (!fullscreen) {
-    return <FloatingPanel open={open} onClose={onClose} artifact={artifact} />;
+    return <FloatingPanel open={open} onClose={onClose} artifact={artifact} cache={cache} />;
   }
   if (!open) {
     return null;
@@ -195,6 +226,7 @@ export function ArtifactPanel({
         >
           <PanelBody
             artifact={artifact}
+            cache={cache}
             onClose={onClose}
             heading={(text) => <Dialog.Title className={TITLE}>{text}</Dialog.Title>}
           />
@@ -211,8 +243,20 @@ const TEXT_BUTTON =
   "motion-press inline-flex min-h-touch shrink-0 items-center gap-1.5 rounded-md px-3 text-sm font-semibold text-foreground hover:bg-surface-hover";
 const SECONDARY_BUTTON =
   "motion-press inline-flex min-h-touch shrink-0 items-center gap-1.5 rounded-md border border-border-strong bg-surface-panel px-3.5 text-base font-semibold text-foreground hover:bg-surface-hover";
+const PRIMARY_BUTTON =
+  "motion-press control-disabled inline-flex min-h-touch shrink-0 items-center gap-1.5 rounded-md bg-accent px-4 text-base font-semibold text-accent-foreground hover:bg-accent-hover disabled:hover:bg-accent";
 
-function FloatingPanel({ open, onClose, artifact }: { open: boolean; onClose: () => void; artifact: PathArtifact | null }) {
+function FloatingPanel({
+  open,
+  onClose,
+  artifact,
+  cache,
+}: {
+  open: boolean;
+  onClose: () => void;
+  artifact: PathArtifact | null;
+  cache: VersionCache;
+}) {
   const anchor = useIslandAnchor();
   const viewport = useViewportWidth();
   const [limits] = useState(readLimits);
@@ -355,7 +399,12 @@ function FloatingPanel({ open, onClose, artifact }: { open: boolean; onClose: ()
             {t("artifact.panel.resizeHint")}
           </span>
           <div className="flex size-full min-h-0 flex-col overflow-hidden rounded-panel bg-surface-panel text-foreground shadow-panel-float">
-            <PanelBody artifact={artifact} onClose={onClose} heading={(text) => <h2 className={TITLE}>{text}</h2>} />
+            <PanelBody
+              artifact={artifact}
+              cache={cache}
+              onClose={onClose}
+              heading={(text) => <h2 className={TITLE}>{text}</h2>}
+            />
           </div>
         </aside>
       )}
@@ -415,10 +464,12 @@ function PanelHeader({
 
 function PanelBody({
   artifact,
+  cache,
   onClose,
   heading,
 }: {
   artifact: PathArtifact | null;
+  cache: VersionCache;
   onClose: () => void;
   heading: (text: ReactNode) => ReactNode;
 }) {
@@ -434,8 +485,9 @@ function PanelBody({
       </>
     );
   }
-  // `key`: artifact khac ⇒ ve lai tu Xem truoc, khung moi.
-  return <ArtifactView key={artifact.id} artifact={artifact} onClose={onClose} heading={heading} />;
+  // `key`: artifact khac ⇒ ve lai tu Xem truoc, che do xem, tab cua dong moi.
+  // Doi phien ban TRONG dong thi khong doi `key` (giu Xem truoc / Ma — ban T-HD6).
+  return <ArtifactView key={artifact.id} artifact={artifact} cache={cache} onClose={onClose} heading={heading} />;
 }
 
 /** Bay `kind` cua DDL (Phu luc A). `kind` la ⇒ nhu `code`. */
@@ -460,28 +512,110 @@ const KIND_ICON: Readonly<Record<string, IconNode>> = {
 const kindOf = (kind: string) => (Object.hasOwn(KIND_LABEL, kind) ? kind : "code");
 
 type View = "preview" | "source";
+type Mode = "view" | "edit" | "compare";
+/** Mot tab: phan cua `ArtifactVersion` panel can. */
+type VersionTab = Pick<ArtifactVersion, "id" | "version" | "origin">;
+
+/** Thu tu tab theo `version` (Q-P5-2) — KHONG theo `created_at` hay thu tu server tra. */
+const byVersion = <T extends { version: number }>(items: readonly T[]): T[] =>
+  [...items].sort((a, b) => a.version - b.version);
+
+const errorText = (error: unknown): string =>
+  error instanceof ApiError ? `${error.code}: ${error.message}` : error instanceof Error ? error.message : String(error);
 
 function ArtifactView({
   artifact,
+  cache,
   onClose,
   heading,
 }: {
   artifact: PathArtifact;
+  cache: VersionCache;
   onClose: () => void;
   heading: (text: ReactNode) => ReactNode;
 }) {
   const [view, setView] = useState<View>("preview");
-  const kind = kindOf(artifact.kind);
-  const content = artifact.content ?? "";
-  const ext = extensionFor(artifact.kind, artifact.language);
+  const [mode, setMode] = useState<Mode>("view");
+  const [versions, setVersions] = useState<VersionTab[] | null>(null);
+  const [selectedId, setSelectedId] = useState(artifact.id);
+  const selected = useRef(artifact.id);
+  const inflight = useRef(new Map<string, Promise<PathArtifact>>());
+  const [announce, setAnnounce] = useState("");
+  const stageId = useId();
+
+  if (artifact.content !== null && !cache.has(artifact.id)) {
+    cache.set(artifact.id, artifact);
+  }
+  // `selectedId` chi doi khi noi dung DA co (xem `select`) ⇒ tab dang chon va
+  // noi dung dang hien khong bao gio lech nhau (do tren Chrome: lech vai chuc ms).
+  const shown = cache.get(selectedId) ?? artifact;
+
+  useEffect(() => {
+    let live = true;
+    api.listArtifactVersions(artifact.id).then(
+      (out) => live && setVersions(byVersion(out.items)),
+      () => {}, // hong ⇒ con mot tab cua phien ban dang mo
+    );
+    return () => {
+      live = false;
+    };
+  }, [artifact.id]);
+
+  /** `GET /artifacts/{id}` MOT lan moi phien ban: cache, va dung chung lan goi dang bay. */
+  const load = useCallback(
+    (id: string): Promise<PathArtifact> => {
+      const hit = cache.get(id);
+      if (hit !== undefined) {
+        return Promise.resolve(hit);
+      }
+      let pending = inflight.current.get(id);
+      if (pending === undefined) {
+        pending = api.getArtifact(id).then((out) => {
+          cache.set(out.id, out);
+          return out;
+        });
+        pending.finally(() => inflight.current.delete(id)).catch(() => {});
+        inflight.current.set(id, pending);
+      }
+      return pending;
+    },
+    [cache],
+  );
+
+  /** Bam nhanh v1 roi v3: chi lan chon CUOI duoc hien. `GET` hong ⇒ o lai tab cu. */
+  const select = (tab: VersionTab) => {
+    selected.current = tab.id;
+    load(tab.id).then(
+      () => selected.current === tab.id && setSelectedId(tab.id),
+      () => {},
+    );
+  };
+
+  const tabs: VersionTab[] = versions ?? [{ id: artifact.id, version: artifact.version, origin: "" }];
+
+  const saved = (meta: ArtifactVersion, content: string) => {
+    const { id, kind, language, title, version } = meta;
+    cache.set(id, { id, kind, language, title, version, content });
+    // Ban ghi `idem:` phat lai cung phien ban ⇒ khong them tab thu hai.
+    setVersions((was) => byVersion([...(was ?? tabs).filter((tab) => tab.id !== id), meta]));
+    selected.current = id;
+    setSelectedId(id);
+    setMode("view");
+    setAnnounce(`${t("artifact.panel.saved")} ${t("artifact.panel.versionPrefix")}${version}`);
+  };
+
+  const kind = kindOf(shown.kind);
+  const content = shown.content ?? "";
+  const ext = extensionFor(shown.kind, shown.language);
   const previewable = PREVIEW_KINDS.has(kind);
+  const editable = TEXT_KINDS.has(kind);
   const preview = previewable && view === "preview";
-  const title = plainText(artifact.title);
+  const title = plainText(shown.title);
 
   return (
     <>
       <PanelHeader
-        heading={heading(title !== "" ? title : <DerivedTitle artifact={artifact} kind={kind} />)}
+        heading={heading(title !== "" ? title : <DerivedTitle artifact={shown} kind={kind} />)}
         meta={
           <span className="flex items-center gap-1.5 text-xs text-muted">
             <StaticIcon icon={KIND_ICON[kind]} size={13} />
@@ -492,7 +626,7 @@ function ArtifactView({
         actions={
           <button
             type="button"
-            onClick={() => download(artifact, content)}
+            onClick={() => download(shown, content)}
             aria-label={`${t("artifact.panel.download")} ${ext}`}
             className={`${TEXT_BUTTON} px-2.5 font-normal`}
           >
@@ -501,15 +635,410 @@ function ArtifactView({
           </button>
         }
       />
-      {previewable && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-divider p-1 pl-2">
-          <ViewSwitch value={view} onChange={setView} />
+      {mode === "view" && (
+        <>
+          <div className="flex shrink-0 items-stretch border-b border-divider">
+            <VersionTabs tabs={tabs} current={selectedId} stageId={stageId} onSelect={select} />
+            {tabs.length > 1 && editable && (
+              <button
+                type="button"
+                onClick={() => setMode("compare")}
+                className={`${TEXT_BUTTON} rounded-none border-l border-divider`}
+              >
+                <StaticIcon icon={GitCompare} size={16} />
+                {t("artifact.panel.compare")}
+              </button>
+            )}
+          </div>
+          {editable && (
+            <div className="flex shrink-0 items-center gap-2 border-b border-divider p-1 pl-2">
+              {previewable && <ViewSwitch value={view} onChange={setView} />}
+              <span className="flex-1" />
+              <button type="button" onClick={() => setMode("edit")} className={TEXT_BUTTON}>
+                <StaticIcon icon={Pencil} size={16} />
+                {t("artifact.panel.edit")}
+              </button>
+            </div>
+          )}
+          <div id={stageId} role="tabpanel" className="flex min-h-0 flex-1 flex-col">
+            {preview && FRAME_KINDS.has(kind) && <FrameStage key={content} kind={kind} content={content} />}
+            {preview && kind === "svg" && <SvgStage content={content} alt={title !== "" ? title : t(KIND_LABEL.svg)} />}
+            {!preview && kind === "markdown" && <MarkdownStage content={content} />}
+            {!preview && kind !== "markdown" && <SourceStage content={content} language={shown.language ?? ""} />}
+          </div>
+        </>
+      )}
+      {mode === "edit" && <EditMode artifact={shown} onCancel={() => setMode("view")} onSaved={saved} />}
+      {mode === "compare" && (
+        <CompareMode current={shown} tabs={tabs} load={load} onDone={() => setMode("view")} />
+      )}
+      {/* `aria-live` tran (khong `role=status`): dai "Dang chay artifact…" moi la trang thai cua khung. */}
+      <p aria-live="polite" className="sr-only">
+        {announce}
+      </p>
+    </>
+  );
+}
+
+/**
+ * Tab `v1 v2 v3` (ban T-HD6): `tablist` cuon ngang, mui ten trai / phai,
+ * Home / End. So ho (message da xoa mem) ⇒ dau "…" giua hai tab + mot cau
+ * cho trinh doc man hinh.
+ */
+function VersionTabs({
+  tabs,
+  current,
+  stageId,
+  onSelect,
+}: {
+  tabs: readonly VersionTab[];
+  current: string;
+  stageId: string;
+  onSelect: (tab: VersionTab) => void;
+}) {
+  const list = useRef<HTMLDivElement>(null);
+  const gapId = useId();
+  const gap = tabs.some((_, i) => hasGapBefore(tabs, i));
+
+  // Tab dang chon luon trong tam nhin. Khong `scrollIntoView` (cuon ca trang).
+  useEffect(() => {
+    const el = list.current;
+    const tab = el?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!el || !tab) {
+      return;
+    }
+    const left = tab.offsetLeft;
+    const right = left + tab.offsetWidth;
+    if (left < el.scrollLeft) {
+      el.scrollLeft = left;
+    } else if (right > el.scrollLeft + el.clientWidth) {
+      el.scrollLeft = right - el.clientWidth;
+    }
+  }, [current, tabs.length]);
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    const at = tabs.findIndex((tab) => tab.id === current);
+    const next = ({ ArrowLeft: at - 1, ArrowRight: at + 1, Home: 0, End: tabs.length - 1 } as Record<string, number>)[
+      e.key
+    ];
+    if (next === undefined || next < 0 || next >= tabs.length) {
+      return;
+    }
+    e.preventDefault();
+    onSelect(tabs[next]);
+    list.current?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
+  };
+
+  return (
+    <div
+      ref={list}
+      role="tablist"
+      aria-label={t("artifact.panel.versions")}
+      aria-describedby={gap ? gapId : undefined}
+      onKeyDown={onKeyDown}
+      className="scroll-fade-x relative flex flex-1 items-stretch px-1"
+    >
+      {tabs.map((tab, i) => {
+        const on = tab.id === current;
+        return (
+          <Fragment key={tab.id}>
+            {hasGapBefore(tabs, i) && (
+              <span aria-hidden="true" className="grid w-5 shrink-0 place-items-center text-muted">
+                <StaticIcon icon={Ellipsis} size={14} />
+              </span>
+            )}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={on}
+              aria-controls={stageId}
+              tabIndex={on ? 0 : -1}
+              onClick={() => onSelect(tab)}
+              className={`motion-control relative flex min-h-touch min-w-touch shrink-0 items-center justify-center gap-2 px-3 text-sm whitespace-nowrap after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full ${
+                on ? "font-semibold text-foreground after:bg-accent-text" : "text-muted hover:bg-surface-hover hover:text-foreground"
+              }`}
+            >
+              <span className="tabular">
+                {t("artifact.panel.versionPrefix")}
+                {tab.version}
+              </span>
+              {tab.origin === "user" && (
+                <span className="flex items-center gap-1 text-xs font-normal text-muted">
+                  <StaticIcon icon={Pencil} size={12} />
+                  {t("artifact.panel.editedByYou")}
+                </span>
+              )}
+            </button>
+          </Fragment>
+        );
+      })}
+      {gap && (
+        <span id={gapId} className="sr-only">
+          {t("artifact.panel.versionGapHint")}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Sua (Q-P5-3): `<textarea>` chua phien ban dang xem; Luu ⇒ `POST
+ * /artifacts/{id}/versions`. Mount = MOT lan soan. Khoa `Idempotency-Key`
+ * (Cam bay ①): giu qua moi lan Luu lai khi loi (C22 — bam dup / mang rot
+ * sau khi server da ghi ⇒ phat lai, khong hai hang); noi dung doi ⇒ khoa moi,
+ * vi `idempotency.py` khong bam than — khoa cu se tra lai ban sua cu.
+ */
+function EditMode({
+  artifact,
+  onCancel,
+  onSaved,
+}: {
+  artifact: PathArtifact;
+  onCancel: () => void;
+  onSaved: (meta: ArtifactVersion, content: string) => void;
+}) {
+  const original = artifact.content ?? "";
+  const [draft, setDraft] = useState(original);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const attempt = useRef<{ content: string; key: string } | null>(null);
+  const busy = useRef(false);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const noteId = useId();
+  useEffect(() => field.current?.focus(), []);
+
+  const save = async () => {
+    if (busy.current) {
+      return; // hai cu bam cung mot nhip, truoc khi React kip `disabled`
+    }
+    busy.current = true;
+    const key = attempt.current?.content === draft ? attempt.current.key : newKey();
+    attempt.current = { content: draft, key };
+    setSaving(true);
+    setError(null);
+    try {
+      onSaved(await api.createArtifactVersion(artifact.id, draft, key), draft);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      busy.current = false;
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="flex shrink-0 flex-col gap-0.5 border-b border-divider px-4 py-2">
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <StaticIcon icon={Pencil} size={16} className="text-muted" />
+          <span>{t("artifact.panel.editingFrom")}</span>
+          <span className="tabular">
+            {t("artifact.panel.versionPrefix")}
+            {artifact.version}
+          </span>
+        </p>
+        <p id={noteId} className="text-xs text-muted">
+          {t("artifact.panel.editNote")}
+        </p>
+      </div>
+      {error !== null && (
+        <div role="alert" className="motion-enter flex shrink-0 flex-col gap-1 border-b border-divider bg-danger-subtle py-2 pr-2 pl-4">
+          <p className="flex items-center gap-2 text-sm font-semibold text-danger-text">
+            <StaticIcon icon={CircleAlert} size={16} />
+            {t("artifact.panel.saveFailed")}
+          </p>
+          <p className="font-mono text-xs text-foreground wrap-anywhere">{error}</p>
         </div>
       )}
-      {preview && FRAME_KINDS.has(kind) && <FrameStage key={content} kind={kind} content={content} />}
-      {preview && kind === "svg" && <SvgStage content={content} alt={title !== "" ? title : t(KIND_LABEL.svg)} />}
-      {!preview && kind === "markdown" && <MarkdownStage content={content} />}
-      {!preview && kind !== "markdown" && <SourceStage content={content} language={artifact.language ?? ""} />}
+      <div className="flex min-h-0 flex-1 bg-background p-2">
+        {/* `<textarea>` thuong: khong to mau cu phap (P5 khong lam). 16 px duoi 640 de iOS khong phong to. */}
+        <textarea
+          ref={field}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          aria-label={t("artifact.panel.editorLabel")}
+          aria-describedby={noteId}
+          wrap="off"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          className="motion-focus-ring size-full resize-none rounded-xl border border-border-strong bg-surface-panel p-3 font-mono text-input text-foreground outline-none focus:border-ring focus:shadow-focus sm:text-sm sm:leading-5"
+        />
+      </div>
+      <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-divider bg-surface-panel p-2 pb-[max(--spacing(2),env(safe-area-inset-bottom))]">
+        <button type="button" onClick={onCancel} className={SECONDARY_BUTTON}>
+          {t("artifact.panel.cancel")}
+        </button>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={draft === original || draft === "" || saving}
+          className={PRIMARY_BUTTON}
+        >
+          {t("artifact.panel.saveVersion")}
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * So sanh hai phien ban (ban T-HD6): khac biet theo dong, doan giong nhau dai
+ * gap lai. Noi dung qua `load` (cache cua panel). Vuot `DIFF_MAX_LINES` ⇒
+ * thong bao, khong tinh (luong chinh khong treo).
+ */
+function CompareMode({
+  current,
+  tabs,
+  load,
+  onDone,
+}: {
+  current: PathArtifact;
+  tabs: readonly VersionTab[];
+  load: (id: string) => Promise<PathArtifact>;
+  onDone: () => void;
+}) {
+  const at = tabs.findIndex((tab) => tab.id === current.id);
+  const [fromId, setFromId] = useState(tabs[Math.max(0, at - 1)]?.id ?? current.id);
+  const [toId, setToId] = useState(current.id);
+  const [texts, setTexts] = useState<Readonly<Record<string, string>>>({ [current.id]: current.content ?? "" });
+  const [open, setOpen] = useState<ReadonlySet<number>>(new Set());
+
+  useEffect(() => {
+    let live = true;
+    for (const id of [fromId, toId]) {
+      load(id).then(
+        (a) => live && setTexts((was) => (Object.hasOwn(was, id) ? was : { ...was, [id]: a.content ?? "" })),
+        () => {},
+      );
+    }
+    setOpen(new Set());
+    return () => {
+      live = false;
+    };
+  }, [fromId, toId, load]);
+
+  const ready = Object.hasOwn(texts, fromId) && Object.hasOwn(texts, toId);
+  const lines = useMemo(() => (ready ? diffLines(texts[fromId], texts[toId]) : null), [ready, texts, fromId, toId]);
+  const blocks = useMemo(() => (lines === null ? [] : foldUnchanged(lines)), [lines]);
+  const { added, removed } = lines === null ? { added: 0, removed: 0 } : diffCounts(lines);
+
+  return (
+    <>
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-divider p-1 pl-2">
+        <VersionSelect label={t("artifact.panel.compareFrom")} value={fromId} onChange={setFromId} tabs={tabs} />
+        <StaticIcon icon={ArrowRight} size={16} className="text-muted" />
+        <VersionSelect label={t("artifact.panel.compareTo")} value={toId} onChange={setToId} tabs={tabs} />
+        <span className="flex-1" />
+        <button type="button" onClick={onDone} className={TEXT_BUTTON}>
+          {t("artifact.panel.compareDone")}
+        </button>
+      </div>
+      <div className="flex min-h-0 flex-1 bg-background p-2">
+        <div className="flex size-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-surface-code">
+          {!ready ? (
+            <p role="status" className="flex min-h-touch items-center gap-2 px-3 text-sm text-muted">
+              <StaticIcon icon={LoaderCircle} size={16} className="motion-spin" />
+              {t("artifact.panel.loading")}
+            </p>
+          ) : lines === null ? (
+            <p role="status" data-diff="too-long" className="px-3 py-3 text-sm text-muted">
+              {t("artifact.panel.diffTooLong")}
+            </p>
+          ) : added + removed === 0 ? (
+            <p className="px-3 py-3 text-sm text-muted">{t("artifact.panel.diffNone")}</p>
+          ) : (
+            <>
+              <p className="flex h-9 shrink-0 items-center gap-3 border-b border-border px-3 font-mono text-xs tabular">
+                <span data-diff="added" className="text-success-text">
+                  <span className="sr-only">{t("artifact.panel.diffAdded")}</span>+{added}
+                </span>
+                <span data-diff="removed" className="text-danger-text">
+                  <span className="sr-only">{t("artifact.panel.diffRemoved")}</span>−{removed}
+                </span>
+              </p>
+              <div tabIndex={0} className="min-h-0 flex-1 overflow-auto overscroll-contain py-1 font-mono text-xs leading-5">
+                {blocks.map((block, i) => (
+                  <DiffBlockView
+                    key={i}
+                    block={block}
+                    open={block.type === "fold" && open.has(block.id)}
+                    onOpen={(id) => setOpen((was) => new Set(was).add(id))}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function VersionSelect({
+  label,
+  value,
+  onChange,
+  tabs,
+}: {
+  label: string;
+  value: string;
+  onChange: (id: string) => void;
+  tabs: readonly VersionTab[];
+}) {
+  return (
+    <label className="relative flex">
+      <span className="sr-only">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="motion-control min-h-touch cursor-pointer appearance-none rounded-md border border-border-strong bg-background pr-8 pl-3 text-input text-foreground focus-visible:border-ring sm:text-sm"
+      >
+        {tabs.map((tab) => (
+          <option key={tab.id} value={tab.id}>
+            {t("artifact.panel.versionPrefix")}
+            {tab.version}
+            {tab.origin === "user" ? ` · ${t("artifact.panel.editedByYou")}` : ""}
+          </option>
+        ))}
+      </select>
+      <StaticIcon icon={ChevronDown} size={16} className="pointer-events-none absolute inset-y-0 right-2 my-auto text-muted" />
+    </label>
+  );
+}
+
+function DiffBlockView({ block, open, onOpen }: { block: DiffBlock; open: boolean; onOpen: (id: number) => void }) {
+  if (block.type === "fold" && !open) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpen(block.id)}
+        className="motion-control flex min-h-touch w-full items-center gap-2 px-3 text-left text-muted hover:bg-surface-hover hover:text-foreground"
+      >
+        <StaticIcon icon={ChevronsUpDown} size={14} />
+        <span className="tabular">{block.lines.length}</span> <span>{t("artifact.panel.unchangedSuffix")}</span>
+      </button>
+    );
+  }
+  return (
+    <>
+      {block.lines.map((line, i) => {
+        const bg = line.op === "add" ? "bg-success-subtle" : line.op === "del" ? "bg-danger-subtle" : "bg-surface-code";
+        const mark = line.op === "add" ? "text-success-text" : line.op === "del" ? "text-danger-text" : "";
+        return (
+          <div key={i} data-op={line.op} className={`flex w-max min-w-full ${bg}`}>
+            <span aria-hidden="true" className={`sticky left-0 w-7 shrink-0 text-center ${bg} ${mark}`}>
+              {line.op === "add" ? "+" : line.op === "del" ? "−" : " "}
+            </span>
+            {line.op !== "same" && (
+              <span className="sr-only">
+                {t(line.op === "add" ? "artifact.panel.diffAdded" : "artifact.panel.diffRemoved")}
+              </span>
+            )}
+            <span className="pr-4 whitespace-pre text-foreground">{line.text || " "}</span>
+          </div>
+        );
+      })}
     </>
   );
 }

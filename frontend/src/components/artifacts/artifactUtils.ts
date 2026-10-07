@@ -113,3 +113,118 @@ export function resolvePanelLayout(p: {
   const room = available - p.gap;
   return fit(Math.min(p.min, room), Math.min(p.max, room), "overlay");
 }
+
+// ───────────────────── phien ban: so ho, khac biet theo dong (T-5.9, ban T-HD6) ─────────────────────
+
+/** So phien ban danh theo DONG (Q-P5-2): phien ban cua message da xoa mem vang ⇒ "v1 v4". */
+export const hasGapBefore = (versions: readonly { version: number }[], i: number): boolean =>
+  i > 0 && versions[i].version - versions[i - 1].version > 1;
+
+export type DiffOp = "same" | "add" | "del";
+export interface DiffLine {
+  op: DiffOp;
+  text: string;
+}
+export type DiffBlock = { type: "lines"; lines: DiffLine[] } | { type: "fold"; id: number; lines: DiffLine[] };
+
+/**
+ * Tran so dong MOI BEN cua doan giua (sau khi cat dau / cuoi giong nhau).
+ * ponytail: bang LCS O(n·m) thoi gian va bo nho (2000 × 2000 = 16 MB Uint32);
+ * vuot ⇒ `null` ("qua dai de so"), khong treo luong chinh. Can so tep lon ⇒ Myers O(ND).
+ */
+export const DIFF_MAX_LINES = 2000;
+
+/** Chuoi rong = 0 dong (khong phai mot dong rong); MOT `\n` cuoi khong tinh. */
+const linesOf = (text: string): string[] => (text === "" ? [] : text.replace(/\n$/, "").split("\n"));
+
+/**
+ * Khac biet theo dong, LCS tu viet (khong phu thuoc moi). So dong them + bo
+ * = n + m − 2·LCS — dung so cua `diff --minimal`. Cat phan dau / cuoi giong
+ * nhau truoc, nen sua nho tren tep dai van nhanh va khong cham tran.
+ */
+export function diffLines(before: string, after: string): DiffLine[] | null {
+  const a = linesOf(before);
+  const b = linesOf(after);
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start++;
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA--;
+    endB--;
+  }
+  const x = a.slice(start, endA);
+  const y = b.slice(start, endB);
+  const n = x.length;
+  const m = y.length;
+  if (n > DIFF_MAX_LINES || m > DIFF_MAX_LINES) {
+    return null;
+  }
+  const w = m + 1;
+  const dp = new Uint32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i * w + j] = x[i] === y[j] ? dp[(i + 1) * w + j + 1] + 1 : Math.max(dp[(i + 1) * w + j], dp[i * w + j + 1]);
+    }
+  }
+  const same = (text: string): DiffLine => ({ op: "same", text });
+  const out = a.slice(0, start).map(same);
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (x[i] === y[j]) {
+      out.push(same(x[i]));
+      i++;
+      j++;
+    } else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]) {
+      out.push({ op: "del", text: x[i++] });
+    } else {
+      out.push({ op: "add", text: y[j++] });
+    }
+  }
+  while (i < n) out.push({ op: "del", text: x[i++] });
+  while (j < m) out.push({ op: "add", text: y[j++] });
+  return out.concat(a.slice(endA).map(same));
+}
+
+export const diffCounts = (lines: readonly DiffLine[]) => ({
+  added: lines.filter((l) => l.op === "add").length,
+  removed: lines.filter((l) => l.op === "del").length,
+});
+
+/** Gap doan giong nhau dai, giu `context` dong quanh moi cho doi (ban T-HD6). */
+export function foldUnchanged(lines: readonly DiffLine[], context = 3): DiffBlock[] {
+  const blocks: DiffBlock[] = [];
+  let run: DiffLine[] = [];
+  let id = 0;
+  const pushLines = (ls: DiffLine[]) => {
+    if (ls.length === 0) return;
+    const last = blocks[blocks.length - 1];
+    if (last?.type === "lines") last.lines.push(...ls);
+    else blocks.push({ type: "lines", lines: [...ls] });
+  };
+  const flush = (atStart: boolean, atEnd: boolean) => {
+    const keepHead = atStart ? 0 : context;
+    const keepTail = atEnd ? 0 : context;
+    if (run.length > keepHead + keepTail + 1) {
+      pushLines(run.slice(0, keepHead));
+      blocks.push({ type: "fold", id: id++, lines: run.slice(keepHead, run.length - keepTail) });
+      pushLines(run.slice(run.length - keepTail));
+    } else {
+      pushLines(run);
+    }
+    run = [];
+  };
+  let seenChange = false;
+  for (const line of lines) {
+    if (line.op === "same") {
+      run.push(line);
+      continue;
+    }
+    flush(!seenChange, false);
+    seenChange = true;
+    pushLines([line]);
+  }
+  flush(!seenChange, true);
+  return blocks;
+}
