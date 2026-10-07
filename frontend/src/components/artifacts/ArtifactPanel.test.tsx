@@ -1,5 +1,6 @@
 /**
- * Panel artifact — T-5.4 (DoD dong 1).
+ * Panel artifact — T-5.4 (DoD dong 1); khung ve lai theo ban T-HD6 o T-5.5
+ * (nut ⑨, quy tac 640–1279, dao can giua cot chat — ca 4, 10–12).
  *
  * Dung BANG ROUTE THAT + `useSessionState` THAT, chi lop `api` bi thay (cung
  * khuon `AccountMenu.test.tsx`): nut o dao, panel o `ChatScreen`, tra tieu diem
@@ -11,7 +12,7 @@
  * — so trong test la so cua token, khong phai so go tay.
  */
 
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RouterProvider, createMemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -36,7 +37,7 @@ import { routes } from "../../app/routes";
 import { api, type ProfileOut } from "../../lib/api";
 import { ISLAND_COMPACT_QUERY } from "../../lib/motion";
 import themeCss from "../../styles/theme.css?raw";
-import { ANCHOR_STORAGE_KEY } from "../island/islandAnchor";
+import { ANCHOR_STORAGE_KEY, islandRightInset } from "../island/islandAnchor";
 import { PANEL_WIDTH_STORAGE_KEY } from "./ArtifactPanel";
 
 const PROFILE: ProfileOut = {
@@ -61,7 +62,14 @@ const PROFILE: ProfileOut = {
   allowed_upload_mime: ["image/png"],
 };
 
-const TOKENS = ["--spacing-panel-right", "--spacing-panel-min", "--spacing-panel-max"] as const;
+const TOKENS = [
+  "--spacing-panel-right",
+  "--spacing-panel-min",
+  "--spacing-panel-max",
+  "--spacing-island-gap",
+  "--spacing-sidebar",
+  "--spacing-min",
+] as const;
 
 /** Token (rem) cua `theme.css` → px, voi co chu goc cua trinh duyet. */
 function tokenPx(name: string): number {
@@ -75,6 +83,10 @@ function tokenPx(name: string): number {
 const DEFAULT = tokenPx("--spacing-panel-right");
 const MIN = tokenPx("--spacing-panel-min");
 const MAX = tokenPx("--spacing-panel-max");
+/** `--spacing-panel-gap` la bi danh cua `--spacing-island-gap` (theme.css, khoi ARTIFACT). */
+const GAP = tokenPx("--spacing-island-gap");
+const SIDEBAR = GAP + tokenPx("--spacing-sidebar");
+const CHAT_MIN = tokenPx("--spacing-min");
 
 function renderChat() {
   vi.mocked(api.me).mockResolvedValue(PROFILE);
@@ -82,16 +94,14 @@ function renderChat() {
   render(<RouterProvider router={router} />);
 }
 
-function island(): HTMLElement {
-  return screen.getByRole("navigation", { name: "Điều hướng chính" });
+/** Be rong cua so cua jsdom (mac dinh 1024) — `resize` cho `useViewportWidth`. */
+function viewport(width: number) {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  window.dispatchEvent(new Event("resize"));
 }
 
-/** jsdom khong thi hanh `inert`: nut cua lop DANG HIEN (thanh mo hoac sidebar doc). */
-async function toggle(): Promise<HTMLElement> {
-  await screen.findByRole("navigation", { name: "Điều hướng chính" });
-  const buttons = within(island()).getAllByRole("button", { name: "Panel artifact" });
-  const live = buttons.find((b) => b.closest('[data-active="true"]') !== null);
-  return live ?? buttons[0];
+function island(): HTMLElement {
+  return screen.getByRole("navigation", { name: "Điều hướng chính" });
 }
 
 /** Nut cua thanh mo (neo tren), du thanh dang hien hay `inert`. */
@@ -99,6 +109,14 @@ async function barToggle(): Promise<HTMLElement> {
   await screen.findByRole("navigation", { name: "Điều hướng chính" });
   const seeAll = within(island()).getByRole("button", { name: "Xem tất cả" });
   return within(seeAll.closest("[data-active]") as HTMLElement).getByRole("button", { name: "Panel artifact" });
+}
+
+/** Nut ⑨ (neo hai ben): nut panel NGOAI dao, o goc cot chat. */
+async function corner(): Promise<HTMLElement> {
+  await screen.findByRole("navigation", { name: "Điều hướng chính" });
+  const outside = screen.getAllByRole("button", { name: "Panel artifact" }).filter((b) => !island().contains(b));
+  expect(outside).toHaveLength(1);
+  return outside[0];
 }
 
 function panel(): HTMLElement | null {
@@ -136,6 +154,7 @@ beforeEach(() => {
   for (const name of TOKENS) {
     root.style.setProperty(name, `${tokenPx(name) / 16}rem`);
   }
+  root.style.setProperty("--spacing-panel-gap", `${GAP / 16}rem`);
   root.style.fontSize = "16px";
   vi.mocked(api.listModels).mockResolvedValue([]);
   vi.mocked(api.listConversations).mockResolvedValue({ items: [], next_cursor: null, truncated: false });
@@ -146,6 +165,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   document.documentElement.removeAttribute("style");
+  viewport(1024);
 });
 
 describe("panel artifact — dong / mo", () => {
@@ -196,20 +216,26 @@ describe("panel artifact — dong / mo", () => {
     await waitFor(async () => expect(await barToggle()).toHaveFocus());
   });
 
-  it("4. neo hai ben: nut o chan sidebar doc mo / dong panel, Esc tra tieu diem ve chinh nut ay", async () => {
+  it("4. neo hai ben: nut ⑨ o cot chat (NGOAI dao, chan sidebar khong con nut) mo / dong panel, Esc tra tieu diem ve chinh nut ay", async () => {
     localStorage.setItem(ANCHOR_STORAGE_KEY, "left");
     const user = userEvent.setup();
     renderChat();
     await waitFor(() => expect(island()).toHaveAttribute("data-shape", "side"));
-    const sideButton = await toggle();
-    expect(sideButton.closest('[data-active="true"]')).toHaveAttribute("data-anchor", "left");
+    // Lop sidebar doc dang hien KHONG con nut (thanh mo an van giu nut cua no — jsdom khong thi hanh `inert`).
+    const sideLayer = island().querySelector('[data-active="true"]') as HTMLElement;
+    expect(sideLayer).toHaveAttribute("data-anchor", "left");
+    expect(within(sideLayer).queryByRole("button", { name: "Panel artifact" })).toBeNull();
+    const button = await corner();
+    expect(button.closest(".island-glass")).not.toBeNull();
+    expect(button).toHaveAttribute("aria-controls", "artifact-panel");
 
-    await user.click(sideButton);
-    expect(sideButton).toHaveAttribute("aria-expanded", "true");
+    await user.click(button);
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(panel()).toHaveAttribute("data-anchor", "left");
     act(() => within(panel() as HTMLElement).getByRole("button", { name: "Đóng panel artifact" }).focus());
     await user.keyboard("{Escape}");
     expect(panel()).toBeNull();
-    await waitFor(() => expect(sideButton).toHaveFocus());
+    await waitFor(() => expect(button).toHaveFocus());
     expect(island()).toHaveAttribute("data-shape", "side");
   });
 });
@@ -284,9 +310,11 @@ describe("panel artifact — be rong", () => {
     await user.click(button);
     expect(separator()).toHaveAttribute("aria-valuenow", kept);
 
-    await user.click(button);
+    // Mount MOI (tai lai trang): so da luu ngoai khoang bi kep.
     localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, "99999");
-    await user.click(button);
+    cleanup();
+    renderChat();
+    await openPanel(user);
     expect(separator()).toHaveAttribute("aria-valuenow", String(MAX));
   });
 
@@ -317,7 +345,8 @@ describe("panel artifact — < 640 px", () => {
     renderChat();
     const button = await openPanel(user);
 
-    const dialog = screen.getByRole("dialog", { name: "Panel artifact" });
+    // Ten = tieu de dau panel (ban T-HD6: "Artifact" khi chua mo artifact nao).
+    const dialog = screen.getByRole("dialog", { name: "Artifact" });
     expect(dialog).toBe(panel());
     expect(dialog.className).toContain("inset-0");
     expect(screen.queryByRole("separator", { name: "Đổi bề rộng panel artifact" })).toBeNull();
@@ -329,5 +358,68 @@ describe("panel artifact — < 640 px", () => {
     expect(panel()).toBeNull();
     await waitFor(() => expect(button).toHaveFocus());
     expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+});
+
+describe("panel artifact — khung T-HD6 (T-5.5)", () => {
+  it("10. 1024 neo trai, da keo 560 ⇒ day cot chat, kep 361 (cot chat 375); localStorage van 560; rong lai ⇒ 560; neo phai ⇒ hop truoc sidebar", async () => {
+    localStorage.setItem(ANCHOR_STORAGE_KEY, "left");
+    localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(MAX));
+    const user = userEvent.setup();
+    renderChat();
+    await user.click(await corner());
+    const cap = 1024 - SIDEBAR - GAP - CHAT_MIN;
+    expect(cap).toBe(361);
+    const handle = separator();
+    expect(handle).toHaveAttribute("aria-valuenow", String(cap));
+    expect(handle).toHaveAttribute("aria-valuemax", String(cap));
+    expect(panel()).toHaveAttribute("data-mode", "push");
+    expect(localStorage.getItem(PANEL_WIDTH_STORAGE_KEY)).toBe(String(MAX));
+    act(() => handle.focus());
+    await user.keyboard("{ArrowLeft}");
+    expect(handle).toHaveAttribute("aria-valuenow", String(cap));
+
+    // Cua so rong lai ⇒ ve dung be rong da luu (kep KHONG ghi de localStorage).
+    localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(MAX));
+    cleanup();
+    renderChat();
+    act(() => viewport(1440));
+    await user.click(await corner());
+    expect(separator()).toHaveAttribute("aria-valuenow", String(MAX));
+
+    localStorage.setItem(ANCHOR_STORAGE_KEY, "right");
+    cleanup();
+    renderChat();
+    await user.click(await corner());
+    expect(panel()).toHaveAttribute("data-anchor", "right");
+    expect(panel()?.className).toContain(
+      "data-[anchor=right]:right-[calc(var(--spacing-island-gap)_+_var(--spacing-sidebar)_+_var(--spacing-panel-gap))]",
+    );
+  });
+
+  it("11. neo tren 700 px ⇒ hop de len cot chat (o dem 0), tran = min(max, man − 2 le); 1024 ⇒ o dem = panel + le", async () => {
+    const user = userEvent.setup();
+    act(() => viewport(700));
+    renderChat();
+    await openPanel(user);
+    const spacer = panel()?.previousElementSibling as HTMLElement;
+    expect(panel()).toHaveAttribute("data-mode", "overlay");
+    expect(spacer.style.width).toBe("0px");
+    expect(separator()).toHaveAttribute("aria-valuemax", String(Math.min(MAX, 700 - 2 * GAP)));
+
+    act(() => viewport(1024));
+    expect(panel()).toHaveAttribute("data-mode", "push");
+    expect(spacer.style.width).toBe(`${DEFAULT + GAP}px`);
+    expect(spacer).toHaveAttribute("data-panel", "open");
+  });
+
+  it("12. ban T-HD6 ⑦: neo tren mo panel ⇒ dao biet cot chat ngan di dung panel + le; dong ⇒ 0", async () => {
+    const user = userEvent.setup();
+    renderChat();
+    const button = await openPanel(user);
+    expect(islandRightInset()).toBe(DEFAULT + GAP);
+    await user.click(button);
+    expect(panel()).toBeNull();
+    expect(islandRightInset()).toBe(0);
   });
 });

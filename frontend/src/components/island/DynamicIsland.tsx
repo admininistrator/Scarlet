@@ -176,7 +176,7 @@ export function DynamicIsland(props: {
     }
     const grip = (anchor === "top" ? barGripRef : sideGripRef).current;
     if (pending === "panel") {
-      visiblePanelToggle(islandRef.current)?.focus({ preventScroll: true });
+      visiblePanelToggle()?.focus({ preventScroll: true });
     } else if (pending === "trigger") {
       pillTriggerRef.current?.focus({ preventScroll: true });
     } else if (grip !== null) {
@@ -193,8 +193,9 @@ export function DynamicIsland(props: {
 
   /*
     T-5.4 — panel dong tu ben trong (Esc, nut X) ⇒ tieu diem ve nut da mo no.
-    Nut o lop dang hien (thanh mo / sidebar doc) ⇒ focus ngay; dao dang thu
-    (neo tren) ⇒ nut nam trong lop `inert`: mo thanh roi focus SAU commit (B-323 ④).
+    Nut dang bam duoc (thanh mo, hoac nut ⑨ o cot chat khi neo hai ben) ⇒ focus
+    ngay; dao dang thu (neo tren) ⇒ nut nam trong lop `inert`: mo thanh roi focus
+    SAU commit (B-323 ④).
   */
   const panelFocusRequest = props.artifactPanel?.focusRequest ?? 0;
   const seenPanelFocus = useRef(panelFocusRequest);
@@ -203,7 +204,7 @@ export function DynamicIsland(props: {
       return;
     }
     seenPanelFocus.current = panelFocusRequest;
-    const button = visiblePanelToggle(islandRef.current);
+    const button = visiblePanelToggle();
     if (button !== null) {
       button.focus({ preventScroll: true });
       return;
@@ -492,9 +493,16 @@ export function DynamicIsland(props: {
   );
 }
 
-/** Nut panel artifact cua lop dang hien (thanh mo, hoac chan sidebar doc) — `null` khi lop ay `inert`. */
-function visiblePanelToggle(island: HTMLElement | null): HTMLElement | null {
-  return island?.querySelector<HTMLElement>(`[data-active="true"] [aria-controls="${ARTIFACT_PANEL_ID}"]`) ?? null;
+/**
+ * Nut panel artifact dang bam duoc: nut ⑨ o cot chat (neo hai ben, T-5.5) hoac
+ * nut cua thanh mo (neo tren) — `null` khi thanh ay dang `inert` (dao thu).
+ */
+function visiblePanelToggle(): HTMLElement | null {
+  return (
+    [...document.querySelectorAll<HTMLElement>(`[aria-controls="${ARTIFACT_PANEL_ID}"]`)].find(
+      (button) => button.closest("[inert]") === null,
+    ) ?? null
+  );
 }
 
 /** `inert`: lop an khong nhan Tab, khong vao cay a11y. React 19: `inert` la boolean, `ref` la prop. */

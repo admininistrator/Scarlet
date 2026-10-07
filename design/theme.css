@@ -312,6 +312,29 @@
   --spacing-byok-chip: 15rem;        /* 240px — chip tên model rộng tối đa, dài hơn thì cắt ellipsis */
   --shadow-invalid: 0 0 0 1px var(--color-danger-text); /* ô lỗi: border 1px + 1px này = 2px, cùng nhịp --shadow-focus */
   /* ◂ BYOK */
+
+  /* ARTIFACT ▸ PANEL ARTIFACT (T-HD6 · v1) ------------------------------------
+   * Khung của T-5.4 GIỮ NGUYÊN: --spacing-panel-right 380 · -min 320 · -max 560,
+   * --shadow-panel, .motion-panel, bg-surface-panel, border-l border-border, tay nắm 12 (w-3).
+   * 640–1279 px không cần token mới: cột chat không hẹp hơn --spacing-min (375) —
+   * bề rộng mà cột chat đã được thiết kế để chạy đúng. Không đủ chỗ thì panel phủ lên.
+   * Màu diff: không thêm — success-subtle / danger-subtle làm nền dòng, dấu + − dùng
+   * success-text / danger-text. Chuyển động: không thêm token. Thêm 3 utility (cuối file):
+   * .motion-panel-side (hộp vào / ra) · .motion-push (cột chat co / giãn) · .motion-segment
+   * (viên Xem trước / Mã). Dải trạng thái = .motion-enter, vòng quay = .motion-spin,
+   * tab / tay nắm = .motion-control. Icon nút ⑨ = springs.ts · panelToggle. */
+  /* Hộp nổi (T-HD6 · v1, theo yêu cầu): panel bo tròn như sidebar dọc của đảo. Ba token mới là
+   * BÍ DANH của token đảo nên hai thứ luôn cùng nhịp; giá trị tối tự theo vì tham chiếu
+   * --color-glass-rim / --shadow-island đã có giá trị tối. Số đo T-5.4 đổi thế này (1440, neo trên, 380):
+   *   rect 1060, 0, 380 × 900  →  1044, 16, 380 × 868 · border-l + shadow-panel → rim + shadow-island · bo 0 → 24
+   * Bề rộng 380 / 320–560 KHÔNG đổi. < 640 vẫn là dialog phủ kín, không bo, không lề. */
+  --spacing-panel-gap: var(--spacing-island-gap);   /* 16px — cách mép trên, dưới, phải (neo phải: cách sidebar) */
+  --radius-panel: var(--radius-island-side);         /* 24px — khung render bên trong bo 16 (rounded-xl) cho đồng tâm với lề 8 */
+  --shadow-panel-float: 0 0 0 1px var(--color-glass-rim), var(--shadow-island);
+  --spacing-panel-grip: 2.5rem;      /* 40px — vạch tay nắm nhìn thấy khi không hover; rộng 4 (w-1) */
+  --duration-artifact-hang: 8000ms;  /* khung im lặng chừng này (chưa “ready”, hoặc mất nhịp tim) ⇒ treo. JS đọc. KHÔNG về 0 khi reduced-motion: đây là hẹn giờ, không phải chuyển động */
+  --color-surface-artifact: #ffffff; /* nền dưới iframe và <img> của artifact — xem [data-theme="dark"] */
+  /* ◂ ARTIFACT */
 }
 
 [data-theme="dark"] {
@@ -406,6 +429,13 @@
   --shadow-island: 0 18px 40px -14px rgb(0 0 0 / 0.75), 0 4px 12px -4px rgb(0 0 0 / 0.50);
   --shadow-island-lift: 0 30px 60px -16px rgb(0 0 0 / 0.85), 0 8px 18px -6px rgb(0 0 0 / 0.60);
   /* ◂ v3 */
+
+  /* ARTIFACT ▸ theme tối — CỐ Ý cùng giá trị theme sáng.
+   * Trang trong iframe không biết theme của Scarlet: mặc định nó là giấy trắng, chữ đen.
+   * Chromium còn tự sơn nền trắng đục cho iframe khi color-scheme hai bên khác nhau,
+   * nên một nền tối phía sau chỉ lộ ra trong khung hình đầu rồi bị che. */
+  --color-surface-artifact: #ffffff;
+  /* ◂ ARTIFACT */
 
   /* Shadow phải đậm hơn trên nền tối mới nhìn thấy tầng nổi. */
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
@@ -905,6 +935,56 @@
   }
 }
 /* ◂ v3 */
+
+/* ARTIFACT ▸ Dải tab phiên bản cuộn ngang. Cùng kỹ thuật .scroll-frame (lớp local che,
+ * lớp scroll đổ bóng, không JS) nhưng bóng ở CẢ HAI mép: tab đang chọn — thường là bản
+ * mới nhất, nằm bên phải — được cuộn vào tầm nhìn, nên phần bị che thường ở bên trái. */
+@utility scroll-fade-x {
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  background:
+    linear-gradient(to right, var(--color-surface-panel) 40%, transparent) left center / calc(var(--spacing-scroll-shadow) * 3) 100% no-repeat local,
+    linear-gradient(to left, var(--color-surface-panel) 40%, transparent) right center / calc(var(--spacing-scroll-shadow) * 3) 100% no-repeat local,
+    linear-gradient(to right, var(--color-scroll-shadow), transparent) left center / var(--spacing-scroll-shadow) 100% no-repeat scroll,
+    linear-gradient(to left, var(--color-scroll-shadow), transparent) right center / var(--spacing-scroll-shadow) 100% no-repeat scroll,
+    var(--color-surface-panel);
+}
+/* Hộp nổi vào / ra. Vào: trượt từ mép phải, normal + enter. Ra: fast + exit (ra ngắn hơn vào).
+ * Hộp ở neo phải nằm DƯỚI sidebar (z thấp hơn) nên trượt ra từ sau sidebar.
+ * Unmount khi animationend của data-state="closed" (hoặc ngay nếu animation-name = none). */
+@utility motion-panel-side {
+  animation: scarlet-panel-side-in var(--duration-normal) var(--ease-enter) both;
+  &[data-state="closed"] {
+    animation: scarlet-panel-side-out var(--duration-fast) var(--ease-exit) both;
+  }
+}
+/* Cột chat co / giãn khi hộp vào / ra: di chuyển TRONG màn ⇒ move, cùng thời lượng với hộp.
+ * Đang kéo tay nắm (data-resizing="true"): tắt, để cột bám đúng con trỏ. */
+@utility motion-push {
+  transition: width var(--duration-normal) var(--ease-move), margin var(--duration-normal) var(--ease-move),
+    padding var(--duration-normal) var(--ease-move);
+  &[data-panel="closed"] {
+    transition-duration: var(--duration-fast);
+  }
+  &[data-resizing="true"] {
+    transition: none;
+  }
+}
+/* Viên chọn của Xem trước / Mã: trượt giữa hai ô bằng nhau (translate-x-full). */
+@utility motion-segment {
+  transition: translate var(--duration-normal) var(--ease-move), transform var(--duration-normal) var(--ease-move);
+}
+@keyframes scarlet-panel-side-in {
+  from { transform: translateX(calc(100% + var(--spacing-panel-gap))); }
+  to   { transform: none; }
+}
+@keyframes scarlet-panel-side-out {
+  from { transform: none; }
+  to   { transform: translateX(calc(100% + var(--spacing-panel-gap))); }
+}
+/* ◂ ARTIFACT */
 
 @utility tabular {
   font-variant-numeric: tabular-nums;

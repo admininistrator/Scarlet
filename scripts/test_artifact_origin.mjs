@@ -14,9 +14,16 @@
  * spki-list`), khong tat kiem chung chi toan bo. CA mkcert khong o trong
  * container nao.
  *
- * Phien: stdin la `{"refresh": ...}` do `scripts/artifact_origin_session.py`
- * phat trong `api`. Trang cha goi `/auth/refresh` ⇒ cookie phien
- * (`scarlet_session`, NQ-36), cuoi cung `/auth/logout` ⇒ thu hoi ca family.
+ * Phien: stdin la `{"refresh", "conversation_id", "title", "version"}` do
+ * `scripts/artifact_origin_session.py` phat trong `api`. Trang JSON cong khai
+ * goi `/auth/refresh` ⇒ cookie phien (`scarlet_session`, NQ-36), cuoi cung
+ * `/auth/logout` ⇒ thu hoi ca family.
+ *
+ * T-5.5: khung la iframe DO PANEL DUNG, khong tu dung — mo hoi thoai co
+ * artifact `html` trong SPA, bam "Mo" tren the, cho panel bao `rendered`
+ * (het dai "Dang chay artifact…", khong `alert`). SPA KHONG tu goi
+ * `/auth/refresh` (chi `GET /auth/me`), nen dang nhap o trang JSON truoc roi
+ * moi sang SPA thi khong co dua "tai su dung" nao.
  *
  * ┌──────────────────────────────────────────────────────────────────────────┐
  * │  TAM PHEP THU, MOI PHEP MOT LOP                                          │
@@ -39,8 +46,8 @@
  * KHAC cung origin chinh `window.open` khung roi gui `render` ⇒ khung khong
  * doi (chi kiem `event.source` cua khung chan duoc).
  *
- * Chuoi `sandbox` doc tu `ArtifactFrame.tsx` — CUNG chuoi voi khung that. Ma
- * thoat = so dong truot (LOT + doi chung hong).
+ * Chuoi `sandbox` doc tu `ArtifactFrame.tsx` va doi chieu voi thuoc tinh cua
+ * iframe trong panel. Ma thoat = so dong truot (LOT + doi chung hong).
  */
 
 import { createHash, randomInt, X509Certificate } from "node:crypto";
@@ -76,7 +83,8 @@ const SANDBOX = sandboxMatch[1];
 // EAGAIN (do 2026-10-07, mot lan trong ba).
 let stdin = "";
 for await (const chunk of process.stdin) stdin += chunk;
-const { refresh } = JSON.parse(stdin);
+const session = JSON.parse(stdin);
+const { refresh } = session;
 const spki = createHash("sha256")
   .update(new X509Certificate(readFileSync(CERT)).publicKey.export({ type: "spki", format: "der" }))
   .digest("base64");
@@ -144,32 +152,49 @@ try {
     httpOnly: true,
     sameSite: "Lax",
   });
-  // Trang cha: mot trang JSON cong khai cua origin chinh, KHONG phai SPA — SPA
-  // tu goi `/auth/refresh` luc khoi dong, dua voi lan goi duoi day ⇒ "tai su
-  // dung" ⇒ ca family bi thu hoi giua chung.
+  // Dang nhap o mot trang JSON cong khai, roi moi mo SPA (xem dau tep).
   await page.goto(`${PUBLIC_BASE_URL}/api/v1/models`, { waitUntil: "domcontentloaded" });
   const login = await page.evaluate(async () => (await fetch("/api/v1/auth/refresh", { method: "POST" })).status);
   if (login !== 200) throw new Error(`/auth/refresh o trang cha ⇒ ${login}`);
   loggedIn = true;
 
-  console.log(`khung   ${FRAME_URL}`);
-  console.log(`sandbox "${SANDBOX}"`);
-  await page.evaluate(
-    (src, sandbox, timeoutMs) =>
-      new Promise((resolve, reject) => {
-        const frame = document.createElement("iframe");
-        frame.setAttribute("sandbox", sandbox);
-        frame.onload = resolve;
-        frame.src = src;
-        document.body.append(frame);
-        setTimeout(() => reject(new Error("khung khong nap")), timeoutMs);
-      }),
-    FRAME_URL,
-    SANDBOX,
-    LOAD_TIMEOUT_MS,
+  // T-5.5 — iframe THAT cua panel: hoi thoai co artifact `html`, nut "Mo" cua the.
+  // Vite HMR khong bao gio `load` xong ⇒ `domcontentloaded` (Cam bay ⑥ T-5.6).
+  const label = `Mở ${session.title.replace(/\s+/g, " ").trim()}`;
+  console.log(`hội thoại ${session.conversation_id} · thẻ "${label}" v${session.version}`);
+  await page.goto(`${PUBLIC_BASE_URL}/?c=${encodeURIComponent(session.conversation_id)}`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(
+    (name, version) =>
+      [...document.querySelectorAll("button")].some(
+        (b) => b.getAttribute("aria-label") === name && b.parentElement?.textContent?.includes(`v${version}`),
+      ),
+    { timeout: LOAD_TIMEOUT_MS },
+    label,
+    session.version,
   );
-  const frame = page.frames().find((f) => f !== page.mainFrame());
-  if (!frame) throw new Error("khong thay khung trong trang");
+  await page.evaluate(
+    (name, version) =>
+      [...document.querySelectorAll("button")]
+        .find((b) => b.getAttribute("aria-label") === name && b.parentElement?.textContent?.includes(`v${version}`))
+        .click(),
+    label,
+    session.version,
+  );
+  // Panel bao `rendered` (khung tra loi bat tay) ⇒ het dai dang nap; `alert` = khung bao loi.
+  await page.waitForFunction(
+    () => {
+      const panel = document.getElementById("artifact-panel");
+      return panel?.querySelector("iframe") && !panel.querySelector('[role="status"], [role="alert"]');
+    },
+    { timeout: LOAD_TIMEOUT_MS },
+  );
+  const element = await page.$("#artifact-panel iframe");
+  const attrs = await element.evaluate((el) => [el.getAttribute("sandbox"), el.getAttribute("src")]);
+  const attrsOk = attrs[0] === SANDBOX && attrs[1] === FRAME_URL;
+  console.log(`khung   ${attrsOk ? "đạt" : "HỎNG"}  iframe của panel: src ${attrs[1]} · sandbox "${attrs[0]}" (ArtifactFrame.tsx: "${SANDBOX}")`);
+  if (!attrsOk) failures += 1;
+  const frame = await element.contentFrame();
+  if (!frame) throw new Error("khong lay duoc khung cua panel");
 
   for (const [label, leaked, detail] of await frame.evaluate(probes, PUBLIC_BASE_URL, ARTIFACTS_BASE_URL)) {
     console.log(`${label} ${leaked ? "LỌT" : "chặn"}  ${detail}`);

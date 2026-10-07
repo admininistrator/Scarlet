@@ -6,7 +6,7 @@ import { conversationHref } from "../../features/chat/useChat";
 import type { SessionState } from "../../features/auth/useSessionState";
 import { ApiError, api, type ConversationOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
-import { PanelToggle, type PanelBinding } from "../artifacts/ArtifactPanel";
+import type { PanelBinding } from "../artifacts/ArtifactPanel";
 import { AccountMenu } from "../sidebar/AccountMenu";
 import { dayGroupOf } from "../sidebar/dayGroups";
 import { Sidebar, conversationLabel, mergePages, sortConversations } from "../sidebar/Sidebar";
@@ -201,24 +201,8 @@ export const AppIsland = memo(function AppIsland({
             onNewChat={newChat}
             onOpenConversationDeleted={chat?.onDeleted ?? (() => undefined)}
             onItemsChange={onItemsChange}
-            /*
-              T-5.4 — cho TAM cua nut panel khi neo hai ben (B-323 ①, B-326):
-              sidebar doc chua co cho cho no; dat canh khoi tai khoan nhu hang
-              cuoi cua thanh mo. Ban ve that: T-HD6 ⑤.
-            */
-            footer={
-              chat === undefined ? (
-                account
-              ) : (
-                <div className="flex items-center gap-1">
-                  <div className="min-w-0 flex-1">{account}</div>
-                  <PanelToggle
-                    binding={chat.panel}
-                    className="motion-control grid size-touch shrink-0 place-items-center rounded-full text-foreground hover:bg-glass-hover"
-                  />
-                </div>
-              )
-            }
+            // T-5.5 (ban T-HD6 ⑨): nut panel khi neo hai ben o goc cot chat — khoi tai khoan lay lai du be rong.
+            footer={account}
           />
         }
       />

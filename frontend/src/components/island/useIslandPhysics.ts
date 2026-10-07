@@ -9,7 +9,7 @@ import {
   type IslandSpringRole,
   type SpringConfig,
 } from "../../lib/motion";
-import type { Anchor } from "./islandAnchor";
+import { islandRightInset, type Anchor } from "./islandAnchor";
 
 /**
  * Vat ly cua dao dieu huong — T-S.19a, ban Khung chinh v3 (`useIslandPhysics.ts`).
@@ -65,11 +65,15 @@ function restRect(anchor: Anchor, expanded: boolean, m: IslandMeasure, g: Geomet
   const W = window.innerWidth;
   const H = window.innerHeight;
   if (anchor === "top") {
+    // T-5.5 (ban T-HD6 ⑦): giua COT CHAT (trai mep panel), van trong cua so — panel
+    // phu len (640–710 px) thi thanh mo duoc de len panel ("dao noi tren panel").
+    const center = (W - islandRightInset()) / 2;
+    const place = (w: number) => clamp(center - w / 2, g.gap, W - g.gap - w);
     if (expanded) {
       const w = Math.min(g.bar, W - 2 * g.gap);
-      return { x: (W - w) / 2, y: g.gap, w, h: m.barHeight, r: g.radius };
+      return { x: place(w), y: g.gap, w, h: m.barHeight, r: g.radius };
     }
-    return { x: (W - m.pillWidth) / 2, y: g.gap, w: m.pillWidth, h: g.pill, r: g.pill / 2 };
+    return { x: place(m.pillWidth), y: g.gap, w: m.pillWidth, h: g.pill, r: g.pill / 2 };
   }
   // Hai ben: LUON la sidebar doc (NQ-136, ban v3-beta) — `expanded` chi co nghia o neo tren.
   return { x: anchor === "left" ? g.gap : W - g.gap - g.side, y: g.gap, w: g.side, h: H - 2 * g.gap, r: g.sideRadius };

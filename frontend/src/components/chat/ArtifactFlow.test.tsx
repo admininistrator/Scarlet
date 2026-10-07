@@ -10,7 +10,7 @@
  * gia PHAT duoc event, vi stream chinh la thu dang do.
  */
 
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -243,7 +243,10 @@ describe("event `artifact` (UC-10 dong 1, §7.3)", () => {
     const open = await within(answers()[0]).findByRole("button", { name: "Mở Bảng giá" });
     await waitFor(() => expect(answers()[0].querySelectorAll("pre")).toHaveLength(0));
     expect(open.closest("article")).toHaveTextContent("v1");
-    await waitFor(() => expect(panel()).toHaveTextContent("<h1 class=\"gia\">Bảng giá</h1>"));
+    // T-5.5: `html` mo o Xem truoc (khung origin phu); noi dung da `GET` ve doc o che do Ma.
+    await waitFor(() => expect(panel()?.querySelector("iframe")).not.toBeNull());
+    fireEvent.click(within(panel() as HTMLElement).getByRole("radio", { name: "Mã" }));
+    await waitFor(() => expect(panel()?.querySelector("pre")?.textContent).toBe(BLOCK));
     expect(artifactGets()).toHaveLength(1);
   });
 
@@ -295,6 +298,7 @@ describe("the dung tu duong di (B-87) va khop khoi (Q-P5-7)", () => {
 
     await user.click(open);
     expect(panel()).toHaveTextContent("Bảng giá");
+    await user.click(within(panel() as HTMLElement).getByRole("radio", { name: "Mã" }));
     expect(panel()?.querySelector("pre")?.textContent).toBe(BLOCK);
   });
 

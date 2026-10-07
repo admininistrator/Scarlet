@@ -238,6 +238,8 @@ export const SPRING_GENTLE: SpringConfig = { stiffness: 220, damping: 26 };
 export const SPRINGS = {
   sendStop: SPRING_SNAPPY,
   sidebarToggle: SPRING_SNAPPY,
+  /** T-5.5 (ban T-HD6) — nut panel artifact: panel-right ⇄ panel-right-close, cung nhip nut sidebar. */
+  panelToggle: SPRING_SNAPPY,
   themeToggle: SPRING_SETTLE,
   submenuChevron: SPRING_GENTLE,
   accountMenuItemHover: SPRING_GENTLE,

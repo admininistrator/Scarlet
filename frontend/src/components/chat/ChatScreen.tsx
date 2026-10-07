@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 
 import { useSession } from "../../app/Layout";
-import { api } from "../../lib/api";
+import { api, type PathArtifact } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { useTypewriter } from "../../lib/motion";
 import { useResource } from "../../features/admin/useResource";
@@ -13,8 +13,9 @@ import { useModels } from "../../features/models/useModels";
 import { QuotaNotice } from "../../features/quota/QuotaNotice";
 import { byokCovers, isSendBlocked, selectedProviderId } from "../../features/quota/quotaView";
 import { useQuota } from "../../features/quota/useQuota";
-import { ArtifactPanel, type PanelArtifact } from "../artifacts/ArtifactPanel";
+import { ArtifactPanel, ArtifactPanelToggle } from "../artifacts/ArtifactPanel";
 import { AppIsland } from "../island/AppIsland";
+import { useIslandAnchor } from "../island/islandAnchor";
 import { ChatStream } from "./ChatStream";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
@@ -109,19 +110,21 @@ export function ChatScreen() {
   const quota = useQuota(session);
 
   /*
-    T-5.4 — panel artifact. Nut o dao (`PanelToggle`); dong tu TRONG panel thi
-    dao tra tieu diem ve nut ay (`focusRequest` tang moi lan). T-5.3 do artifact
+    T-5.4 — panel artifact. Nut o dao (`PanelToggle`, neo tren) hoac nut ⑨ goc
+    cot chat (neo hai ben, T-5.5); dong tu TRONG panel thi dao tra tieu diem ve
+    nut ay (`focusRequest` tang moi lan). T-5.3 do artifact
     vao: event `artifact` moi (UC-10 dong 1) hoac nut "Mo" tren the.
   */
+  const anchor = useIslandAnchor();
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelFocusRequest, setPanelFocusRequest] = useState(0);
-  const [panelArtifact, setPanelArtifact] = useState<PanelArtifact | null>(null);
+  const [panelArtifact, setPanelArtifact] = useState<PathArtifact | null>(null);
   const togglePanel = useCallback(() => setPanelOpen((was) => !was), []);
   const closePanel = useCallback(() => {
     setPanelOpen(false);
     setPanelFocusRequest((n) => n + 1);
   }, []);
-  const openArtifact = useCallback((artifact: PanelArtifact) => {
+  const openArtifact = useCallback((artifact: PathArtifact) => {
     setPanelArtifact(artifact);
     setPanelOpen(true);
   }, []);
@@ -283,6 +286,8 @@ export function ChatScreen() {
       <AppIsland session={session} context="chat" chat={islandChat} />
 
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* T-5.5 (ban T-HD6 ⑨): dao neo hai ben ⇒ nut panel o goc tren phai cot chat. */}
+        {anchor !== "top" && <ArtifactPanelToggle binding={islandChat.panel} />}
         {/*
           Dai loi khong co trong ban v3: dat NGAY DUOI dao (`mt-island-clear`)
           cho khong bi vien thuoc de len (B-322).

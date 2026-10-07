@@ -36,6 +36,8 @@ type Props = {
   kind: string;
   content: string;
   onResult?: (result: ArtifactFrameResult) => void;
+  /** Khung quanh noi dung (T-5.5, ban T-HD6) — do panel quyet. */
+  className?: string;
 };
 
 /**
@@ -47,7 +49,7 @@ export function ArtifactFrame(props: Props) {
   return <Frame key={`${props.kind}\u0000${props.content}`} {...props} />;
 }
 
-function Frame({ title, kind, content, onResult }: Props) {
+function Frame({ title, kind, content, onResult, className }: Props) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const onResultRef = useRef(onResult);
   useEffect(() => {
@@ -86,7 +88,7 @@ function Frame({ title, kind, content, onResult }: Props) {
       src={`${import.meta.env.VITE_ARTIFACTS_BASE_URL}/`}
       sandbox={ARTIFACT_SANDBOX}
       title={title}
-      className="h-full w-full border-0"
+      className={className}
     />
   );
 }

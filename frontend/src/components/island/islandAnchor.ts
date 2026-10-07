@@ -52,6 +52,18 @@ export function setIslandAnchor(next: Anchor): void {
   }
 }
 
+/**
+ * T-5.5 (ban T-HD6 ⑦) — be ngang panel artifact dang chiem o mep phai, px (0 khi
+ * dong hoac phu kin). Neo tren can giua COT CHAT chu khong giua cua so: panel
+ * 560 + thanh dao 640 can giua 1440 la de len panel 160 px. Khong listener:
+ * `useIslandPhysics` doc moi khung hinh, panel ghi khi doi.
+ */
+let rightInset = 0;
+export const islandRightInset = (): number => rightInset;
+export function setIslandRightInset(px: number): void {
+  rightInset = px;
+}
+
 /** Neo HIEU LUC: < 640 px luon "top"; neo hai ben da luu duoc giu cho man rong. */
 export function useIslandAnchor(): Anchor {
   const stored = useSyncExternalStore(subscribe, snapshot, () => "top" as const);
