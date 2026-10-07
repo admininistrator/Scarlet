@@ -66,8 +66,10 @@ export const PANEL_WIDTH_STORAGE_KEY = "artifact.panelWidth";
 /** Mot lan bam mui ten tren tay nam. */
 const KEY_STEP_PX = 16;
 
-/** Hai che do Xem truoc / Ma. T-5.8 them `react`, `mermaid` (runtime trong khung). */
-const PREVIEW_KINDS: ReadonlySet<string> = new Set(["html", "svg"]);
+/** Chay trong khung origin phu (`react`, `mermaid`: runtime CDN cua khung — T-5.8, Q-P5-6). */
+const FRAME_KINDS: ReadonlySet<string> = new Set(["html", "react", "mermaid"]);
+/** Hai che do Xem truoc / Ma. */
+const PREVIEW_KINDS: ReadonlySet<string> = new Set([...FRAME_KINDS, "svg"]);
 
 /** Day tu `ChatScreen` qua dao toi nut. */
 export interface PanelBinding {
@@ -504,7 +506,7 @@ function ArtifactView({
           <ViewSwitch value={view} onChange={setView} />
         </div>
       )}
-      {preview && kind === "html" && <FrameStage key={content} content={content} />}
+      {preview && FRAME_KINDS.has(kind) && <FrameStage key={content} kind={kind} content={content} />}
       {preview && kind === "svg" && <SvgStage content={content} alt={title !== "" ? title : t(KIND_LABEL.svg)} />}
       {!preview && kind === "markdown" && <MarkdownStage content={content} />}
       {!preview && kind !== "markdown" && <SourceStage content={content} language={artifact.language ?? ""} />}
@@ -592,14 +594,15 @@ function ViewSwitch({ value, onChange }: { value: View; onChange: (v: View) => v
   );
 }
 
-type FrameState = { status: "loading" | "ready" } | { status: "error"; message: string };
+type FrameState = { status: "loading" | "ready" } | { status: "error" | "stalled"; message: string };
 
 /**
- * HTML trong khung origin phu (T-5.6 / T-5.7). Dai trang thai nam PHIA TREN
- * khung, khong de len no (ban T-HD6 ⑥): khung o origin khac, khong ve gi vao
- * trong. "Chay lai" = iframe MOI (`key`). Treo (khung im lang) la T-5.8.
+ * `html` / `react` / `mermaid` trong khung origin phu (T-5.6 / T-5.7 / T-5.8).
+ * Dai trang thai nam PHIA TREN khung, khong de len no (ban T-HD6 ⑥): khung o
+ * origin khac, khong ve gi vao trong. Treo (watchdog C32) ⇒ khung da bi go,
+ * cung dai loi voi tieu de rieng. "Chay lai" = iframe MOI (`key`).
  */
-function FrameStage({ content }: { content: string }) {
+function FrameStage({ kind, content }: { kind: string; content: string }) {
   const [run, setRun] = useState(0);
   const [state, setState] = useState<FrameState>({ status: "loading" });
   const rerun = () => {
@@ -617,12 +620,12 @@ function FrameStage({ content }: { content: string }) {
           {t("artifact.panel.loading")}
         </p>
       )}
-      {state.status === "error" && (
+      {(state.status === "error" || state.status === "stalled") && (
         <div role="alert" className="motion-enter flex shrink-0 flex-col gap-1.5 border-b border-divider bg-danger-subtle py-2 pr-2 pl-4">
           <div className="flex items-center gap-2">
             <p className="flex flex-1 items-center gap-2 text-sm font-semibold text-danger-text">
               <StaticIcon icon={CircleAlert} size={16} />
-              {t("artifact.panel.errorTitle")}
+              {t(state.status === "stalled" ? "artifact.panel.stalledTitle" : "artifact.panel.errorTitle")}
             </p>
             <button type="button" onClick={rerun} className={SECONDARY_BUTTON}>
               <StaticIcon icon={RotateCcw} size={16} />
@@ -639,10 +642,16 @@ function FrameStage({ content }: { content: string }) {
         <ArtifactFrame
           key={run}
           title={t("artifact.panel.frameTitle")}
-          kind="html"
+          kind={kind}
           content={content}
           onResult={(result) =>
-            setState(result.type === "rendered" ? { status: "ready" } : { status: "error", message: result.message })
+            setState(
+              result.type === "rendered"
+                ? { status: "ready" }
+                : result.type === "stalled"
+                  ? { status: "stalled", message: t("artifact.panel.stalledHint") }
+                  : { status: "error", message: result.message },
+            )
           }
           className={`size-full rounded-xl border border-border bg-surface-artifact${
             state.status === "loading" ? " invisible" : ""

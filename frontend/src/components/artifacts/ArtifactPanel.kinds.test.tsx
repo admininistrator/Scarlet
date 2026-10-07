@@ -98,12 +98,19 @@ describe("renderer theo kind", () => {
     expect(source()?.querySelector(".tk-keyword")).toHaveTextContent("def");
     expect(within(panel()).queryByRole("radiogroup")).toBeNull();
 
-    for (const kind of ["react", "mermaid", "constructor"]) {
+    // T-5.8: react / mermaid chay trong khung origin phu, trang khung theo kind.
+    for (const kind of ["react", "mermaid"]) {
       swap(art({ id: kind, kind, language: kind === "react" ? "jsx" : "mermaid", content: "graph TD; A-->B" }));
-      expect(source()).toHaveTextContent("graph TD; A-->B");
-      expect(panel().querySelector("iframe, img")).toBeNull();
-      expect(within(panel()).queryByRole("radiogroup")).toBeNull();
+      const kindFrame = panel().querySelector("iframe");
+      expect(kindFrame).toHaveAttribute("sandbox", ARTIFACT_SANDBOX);
+      expect(kindFrame?.getAttribute("src")).toBe(`${import.meta.env.VITE_ARTIFACTS_BASE_URL}/${kind}`);
+      expect(within(panel()).getByRole("radiogroup", { name: "Chế độ xem" })).toBeInTheDocument();
+      expect(source()).toBeNull();
     }
+    swap(art({ id: "la", kind: "constructor", language: "", content: "graph TD; A-->B" }));
+    expect(source()).toHaveTextContent("graph TD; A-->B");
+    expect(panel().querySelector("iframe, img")).toBeNull();
+    expect(within(panel()).queryByRole("radiogroup")).toBeNull();
     expect(within(panel()).getByText("Code")).toBeInTheDocument();
   });
 
@@ -235,6 +242,42 @@ describe("khung html: dang nap / loi / Chay lai (ban T-HD6 ⑥)", () => {
     expect(first.isConnected).toBe(false);
     expect(within(panel()).getByRole("status")).toHaveTextContent("Đang chạy artifact…");
     expect(within(panel()).queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("khung treo: watchdog C32 ⇒ Chay lai (T-5.8, ban T-HD6 ④)", () => {
+  it("9. react im 6000 ms sau ready ⇒ iframe bi go + alert 'Artifact không phản hồi'; Chay lai ⇒ iframe MOI dang nap", () => {
+    vi.useFakeTimers();
+    try {
+      show(art({ kind: "react", language: "jsx", content: "function App() { while (true) {} }" }));
+      const first = panel().querySelector("iframe") as HTMLIFrameElement;
+      vi.spyOn(first.contentWindow as Window, "postMessage").mockImplementation(() => {});
+      send(first.contentWindow, { type: ARTIFACT_MESSAGE.ready, watchdog: { ping_interval_ms: 2000, timeout_ms: 6000 } });
+      act(() => {
+        vi.advanceTimersByTime(5999);
+      });
+      expect(within(panel()).queryByRole("alert")).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(first.isConnected).toBe(false);
+      expect(panel().querySelector("iframe")).toBeNull();
+      const alert = within(panel()).getByRole("alert");
+      expect(alert).toHaveTextContent("Artifact không phản hồi");
+      expect(alert.querySelector("pre")?.textContent).toBe(
+        "Khung đã bị dừng vì quá lâu không trả lời — code có thể đang lặp vô hạn.",
+      );
+
+      fireEvent.click(within(alert).getByRole("button", { name: "Chạy lại" }));
+      const second = panel().querySelector("iframe");
+      expect(second).not.toBeNull();
+      expect(second).not.toBe(first);
+      expect(second?.getAttribute("src")).toBe(`${import.meta.env.VITE_ARTIFACTS_BASE_URL}/react`);
+      expect(within(panel()).getByRole("status")).toHaveTextContent("Đang chạy artifact…");
+      expect(within(panel()).queryByRole("alert")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -46,6 +46,11 @@
  * KHAC cung origin chinh `window.open` khung roi gui `render` ⇒ khung khong
  * doi (chi kiem `event.source` cua khung chan duoc).
  *
+ * T-5.8, cuoi cung: khung RUNTIME React (`/react` — React 18 UMD + Babel +
+ * Tailwind tu CDN) render component in ma sinh luc chay ⇒ body khung chua
+ * ma; roi chay lai tam phep thu (a)…(h) TRONG khung ay. Runtime moi nap them
+ * ~3.5 MB script khac origin vao khung — moi dong van phai `chan`.
+ *
  * Chuoi `sandbox` doc tu `ArtifactFrame.tsx` va doi chieu voi thuoc tinh cua
  * iframe trong panel. Ma thoat = so dong truot (LOT + doi chung hong).
  */
@@ -70,7 +75,9 @@ function required(name) {
 
 const PUBLIC_BASE_URL = required("PUBLIC_BASE_URL");
 const ARTIFACTS_BASE_URL = required("ARTIFACTS_BASE_URL");
-const FRAME_URL = `${ARTIFACTS_BASE_URL}/`;
+// Trang khung theo `kind` (T-5.8): `/html` khong runtime, `/react` co.
+const FRAME_URL = `${ARTIFACTS_BASE_URL}/html`;
+const REACT_FRAME_URL = `${ARTIFACTS_BASE_URL}/react`;
 
 const sandboxMatch = readFileSync(FRAME_SOURCE, "utf8").match(/ARTIFACT_SANDBOX = "([^"]*)"/);
 if (!sandboxMatch) {
@@ -242,6 +249,42 @@ try {
   const renderOk = reply === '{"type":"rendered"}' && text.includes(code);
   console.log(`render  ${renderOk ? "đạt" : "HỎNG"}  khung trả ${reply}; body ${JSON.stringify(text)}`);
   if (!renderOk) failures += 1;
+
+  // T-5.8 — runtime React: cung bat tay, `kind: "react"`, component dung
+  // `React` toan cuc. Tham do chay SAU khi React da render trong khung.
+  const reactCode = String(randomInt(100_000, 1_000_000));
+  const reactReply = await page.evaluate(
+    (src, sandbox, content, timeoutMs) =>
+      new Promise((resolve) => {
+        const frame = document.createElement("iframe");
+        frame.id = "render-react";
+        frame.setAttribute("sandbox", sandbox);
+        addEventListener("message", (event) => {
+          if (event.source !== frame.contentWindow) return;
+          if (event.data?.type === "ready") {
+            frame.contentWindow.postMessage({ type: "render", kind: "react", content }, "*");
+          } else if (event.data?.type !== "alive") {
+            resolve(JSON.stringify(event.data));
+          }
+        });
+        frame.src = src;
+        document.body.append(frame);
+        setTimeout(() => resolve("hết giờ"), timeoutMs);
+      }),
+    REACT_FRAME_URL,
+    SANDBOX,
+    `function App() { const [n] = React.useState(${reactCode}); return <p className="p-4">react {n}</p>; }`,
+    LOAD_TIMEOUT_MS,
+  );
+  const reactFrame = await (await page.$("#render-react")).contentFrame();
+  const reactText = await reactFrame.evaluate(() => document.body.innerText);
+  const reactOk = reactReply === '{"type":"rendered"}' && reactText.includes(`react ${reactCode}`);
+  console.log(`react   ${reactOk ? "đạt" : "HỎNG"}  khung ${REACT_FRAME_URL} trả ${reactReply}; body ${JSON.stringify(reactText)}`);
+  if (!reactOk) failures += 1;
+  for (const [label, leaked, detail] of await reactFrame.evaluate(probes, PUBLIC_BASE_URL, ARTIFACTS_BASE_URL)) {
+    console.log(`react${label} ${leaked ? "LỌT" : "chặn"}  ${detail}`);
+    if (leaked) failures += 1;
+  }
 
   // (i) Mot trang KHAC cung origin chinh (khong phai cha cua khung) mo khung
   // bang `window.open` roi gui `render` — origin dung, `source` sai. Chi kiem
