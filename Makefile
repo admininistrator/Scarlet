@@ -1,4 +1,4 @@
-.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme check-identifiers test-artifact-origin
+.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme check-identifiers test-artifact-origin check-networks
 
 COMPOSE := docker compose --profile core --profile tools
 
@@ -19,6 +19,11 @@ down:
 test:
 	cd backend && .venv/bin/pytest
 	$(COMPOSE) exec -T web pnpm test
+	$(COMPOSE) run --rm --no-deps -T fetcher python -m pytest -q -p no:cacheprovider
+
+# T-6.5 — dong cuoi cua `test`: test cua `fetcher` chay TRONG image `fetcher`
+# (khong co `app`, khong co `.env` — dung moi truong ma `ssrf.py` phai song duoc),
+# mang gia o tang socket nen khong ra Internet.
 
 # T-1.11 / S3 — ngắt giữa lúc stream rồi nối lại, so byte-by-byte với
 # `messages.content`. KHÁC `make test`: cần cả stack đang chạy (`make up`) và
@@ -58,7 +63,7 @@ test-artifact-origin:
 	$(COMPOSE) exec -T api python - < scripts/artifact_origin_session.py \
 	  | docker compose --profile core --profile dev run --rm -T --no-deps artifact-origin
 
-lint: check-theme check-identifiers
+lint: check-theme check-identifiers check-networks
 	cd backend && .venv/bin/ruff check .
 	cd backend && .venv/bin/mypy app
 	$(COMPOSE) exec -T web pnpm typecheck
@@ -83,6 +88,11 @@ check-theme:
 # script, kem ly do. Bang doi ten cu -> moi: `scripts/renames-T-S.1.tsv`.
 check-identifiers:
 	backend/.venv/bin/python scripts/check_identifiers.py
+
+# T-6.5 / B-117 — lop 1 cua §12.2 doc tren cau hinh compose DA GOP: `fetcher`
+# chi `egress`, khong env/cong; `worker` hai mang; `api` khong `egress`.
+check-networks:
+	backend/.venv/bin/python scripts/check_networks.py
 
 fmt:
 	cd backend && .venv/bin/ruff format .

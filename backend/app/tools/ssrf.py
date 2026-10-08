@@ -43,7 +43,10 @@ from typing import Literal
 
 import httpx
 
-from app.config.settings import settings
+# KHÔNG import `app.*`: file này được chép nguyên vào image `fetcher` (T-6.5,
+# `additional_contexts`), nơi không có `Settings` và không có `.env` — kéo
+# `Settings` vào là bắt `fetcher` đòi đúng những secret lớp 1 muốn giấu (A4).
+# Trần nào cần thì người gọi đọc `Settings` lúc gọi rồi truyền vào.
 
 # §12.2 lớp 2 — luật, không phải cấu hình (xem docstring module).
 _SCHEMES = frozenset({"http", "https"})
@@ -236,28 +239,58 @@ def pinned_client(checked: CheckedUrl, *, timeout: httpx.Timeout | float) -> htt
     )
 
 
+class ResponseTooLarge(Exception):
+    """Body (đếm **sau** giải nén) vượt `max_bytes` — C25. Không tin `Content-Length`."""
+
+    def __init__(self, bytes_read: int) -> None:
+        super().__init__("Nội dung vượt trần kích thước")
+        self.bytes_read = bytes_read
+
+
+async def _read_capped(response: httpx.Response, max_bytes: int) -> None:
+    # `aiter_bytes()` trả byte ĐÃ giải nén ⇒ bom gzip bị đếm theo cỡ thật.
+    # ponytail: một mảnh nén có thể nở ~1000× trước khi tới phép so — trần thật là
+    # max_bytes + một mảnh đã giải nén; giải nén có max_length nếu `mem_limit` chật.
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in response.aiter_bytes():
+        size += len(chunk)
+        if size > max_bytes:
+            raise ResponseTooLarge(size)
+        chunks.append(chunk)
+    # `httpx` không có API công khai để gắn body đã đọc tay; `.content`/`.text`
+    # đọc thuộc tính này.
+    response._content = b"".join(chunks)
+
+
 async def get_following_redirects(
     url: str,
     *,
     headers: dict[str, str] | None = None,
     timeout: httpx.Timeout | float,
+    max_redirects: int,
+    max_bytes: int,
     resolver: Resolver = _system_resolver,
 ) -> httpx.Response:
-    """GET theo redirect — lớp 4 của §12.2, cho chỗ gọi **cần** theo (P6 `fetcher`).
+    """GET theo redirect — lớp 4 của §12.2, cho chỗ gọi **cần** theo (`fetcher`).
 
     Mỗi bước: `validate_url()` lại từ đầu và một transport mới cho host mới.
-    Quá `settings.MAX_REDIRECTS` lần chuyển ⇒ `httpx.TooManyRedirects`.
+    Quá `max_redirects` lần chuyển ⇒ `httpx.TooManyRedirects`. Body đọc theo
+    stream, chỉ ở bước cuối; quá `max_bytes` ⇒ `ResponseTooLarge` (C25). Hai trần
+    là tham số: người gọi đọc `Settings` lúc gọi (Cạm bẫy ③ của T-6.3).
     """
-    # ponytail: đọc trọn body mỗi bước; P6 thêm trần MAX_FETCH_MB (C25) khi cần stream.
     request = httpx.Request("GET", url, headers=headers)
-    # Đọc lúc gọi, không làm mặc định tham số (Cạm bẫy ③ của T-6.3).
-    for _ in range(settings.MAX_REDIRECTS + 1):
+    for _ in range(max_redirects + 1):
         checked = await validate_url(str(request.url), resolver=resolver)
         async with pinned_client(checked, timeout=timeout) as client:
-            response = await client.send(request)
-        next_request = response.next_request
-        if next_request is None:
-            return response
+            response = await client.send(request, stream=True)
+            try:
+                next_request = response.next_request
+                if next_request is None:
+                    await _read_capped(response, max_bytes)
+                    return response
+            finally:
+                await response.aclose()
         # `httpx` tự bỏ `Authorization` khi đổi origin; `x-api-key` (auth_style
         # của catalog, T-2.14) thì nó không biết.
         if _normalized_host(next_request.url) != _normalized_host(request.url):

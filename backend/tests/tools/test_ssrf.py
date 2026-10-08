@@ -367,6 +367,12 @@ async def test_unreachable_checked_ip_falls_back_to_next_checked_ip(network: Fak
     assert network.connects == ["2606:4700:4700::1111", PUBLIC_V4]
 
 
+def _caps() -> dict[str, int]:
+    # T-6.5: `ssrf.py` không còn đọc `Settings` (nó chạy trong `fetcher`); người gọi
+    # đọc lúc gọi rồi truyền vào — đúng như ca này làm sau `monkeypatch`.
+    return {"max_redirects": settings.MAX_REDIRECTS, "max_bytes": settings.MAX_FETCH_MB << 20}
+
+
 # ── Lớp 4 ─────────────────────────────────────────────────────────────────────
 
 
@@ -375,7 +381,7 @@ async def test_redirect_to_metadata_stops_before_second_request(network: FakeNet
 
     with pytest.raises(UnsafeUrlError) as info:
         await get_following_redirects(
-            "https://public.example/", timeout=5, resolver=FakeResolver([PUBLIC_V4])
+            "https://public.example/", timeout=5, resolver=FakeResolver([PUBLIC_V4]), **_caps()
         )
 
     assert info.value.reason == "address"
@@ -395,12 +401,14 @@ async def test_redirect_cap_reads_max_redirects_at_call_time(
 
     if allowed:
         response = await get_following_redirects(
-            "https://loop.example/0", timeout=5, resolver=resolver
+            "https://loop.example/0", timeout=5, resolver=resolver, **_caps()
         )
         assert response.status_code == 200
     else:
         with pytest.raises(httpx.TooManyRedirects):
-            await get_following_redirects("https://loop.example/0", timeout=5, resolver=resolver)
+            await get_following_redirects(
+                "https://loop.example/0", timeout=5, resolver=resolver, **_caps()
+            )
     assert len(network.connects) == min(redirects, 2) + 1
     # Mỗi bước chạy lại `validate_url()`.
     assert len(resolver.calls) == len(network.connects)
@@ -416,6 +424,7 @@ async def test_redirect_to_other_host_drops_credentials(network: FakeNetwork) ->
         headers={"Authorization": "Bearer k", "x-api-key": "k", "X-Trace": "t"},
         timeout=5,
         resolver=resolver,
+        **_caps(),
     )
 
     first, second = (sent.lower() for _, sent in network.requests)

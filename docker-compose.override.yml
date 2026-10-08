@@ -60,6 +60,18 @@ services:
       - ./backend/alembic:/app/alembic
       - ./backend/alembic.ini:/app/alembic.ini:ro
 
+  # T-6.5 — cung ly do B-75 voi `api`: source + `ssrf.py` mount de image build
+  # truoc khong chay ban cu. Mount THU MUC tools (khong mot file: Edit doi inode
+  # la file mount dung o ban cu); chi `ssrf.py` duoc import. `:ro` — test chay
+  # voi `-p no:cacheprovider` + PYTHONDONTWRITEBYTECODE, khong ghi gi.
+  fetcher:
+    command: >-
+      uvicorn server:app --host 0.0.0.0 --port 8080
+      --reload --reload-dir /srv --reload-dir /opt/ssrf
+    volumes:
+      - ./fetcher:/srv:ro
+      - ./backend/app/tools:/opt/ssrf:ro
+
   mailpit:
     image: axllent/mailpit:latest
     ports: ["8025:8025"]

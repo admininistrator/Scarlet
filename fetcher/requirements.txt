@@ -1,0 +1,12 @@
+# T-6.5 — ghim tường minh. `httpx` / `httpcore` / `h11` / `anyio` CÙNG bản image
+# backend (đo 2026-10-08 trong `worker`): `ssrf.py` là một nguồn cho hai nơi, chạy
+# trên hai bản `httpx` là hai bộ chặn có thể lệch nhau (B-208).
+httpx==0.28.1
+httpcore==1.0.9
+h11==0.16.0
+anyio==4.15.1
+trafilatura==2.3.1
+charset-normalizer==3.5.2
+starlette==1.7.0
+uvicorn==0.54.0
+pytest==9.1.1

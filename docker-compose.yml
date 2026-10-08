@@ -69,6 +69,11 @@ services:
     # hoat duoc. Do 3 lan khi ra P2: PID khong doi, RestartCount=0, job nam mai
     # o `queued`. `app/workers/run.py` la vong noi lai; doc docstring cua no.
     command: python -m app.workers.run
+    # T-6.5 — NQ-144 (Q-P6-2): worker la tien trinh DUY NHAT noi toi `fetcher`
+    # (`app/tools/fetch_url.py`), nen no o CA HAI mang. Ghi de `networks` cua
+    # anchor. `api` thi KHONG vao `egress`. Kiem bang `scripts/check_networks.py`
+    # (`make lint`) tren cau hinh da gop. §12.2.
+    networks: [internal, egress]
     # Cung ly do voi `api`: §19.1 dat catalog, gia va prompt trong config/
     # MOUNTED, khong nam trong image. Worker la tien trinh doc ca hai thu do
     # (T-1.6 goi app/llm/context.py -> /config/prompts/system.jinja, va
@@ -245,6 +250,29 @@ services:
       timeout: 5s
       retries: 5
     profiles: [core]
+
+  fetcher:
+    # T-6.5 — §12.2 lop 1, NQ-144 (Q-P6-2). KHONG <<: *common (B-50): anchor ay
+    # gan `internal` VA `env_file` — vao `internal` la go lop 1 (muc dau cua
+    # "Khong bao gio" trong CLAUDE.md), co `.env` la thay moi secret. Chi
+    # `egress`, khong `ports`; moi tran toi theo tung request tu `worker`.
+    # `make lint` (scripts/check_networks.py) do neu sai — doc cau hinh DA GOP.
+    build:
+      context: ./fetcher
+      # `ssrf.py` la MOT nguon voi backend (B-208); context phu chi la thu muc
+      # tools, khong phai goc repo (B-364).
+      additional_contexts:
+        ssrf: ./backend/app/tools
+    restart: unless-stopped
+    networks: [egress]
+    mem_limit: 1g
+    healthcheck:
+      # python:3.12-slim khong co curl (B-30).
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: [tools]
 
 networks:
   internal: {}
