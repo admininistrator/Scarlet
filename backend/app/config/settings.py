@@ -483,7 +483,17 @@ class Settings(BaseSettings):
     ARTIFACT_TITLE_MAX_CHARS: int = Field(default=120, gt=0)
 
     # ═══ Web tools (§12) ═══
+    #: Rỗng ⇒ app vẫn boot (tính năng tuỳ chọn, A4 chỉ áp cho biến bắt buộc);
+    #: `web_search` trả `not_configured` mà không mở kết nối (T-6.1).
     TAVILY_API_KEY: SecretStr = SecretStr("")
+    #: Endpoint Tavily — URL provider nên ở đây, không ở `tools/web_search.py`
+    #: (A3, cùng lối `TURNSTILE_VERIFY_URL`). Ba biến dưới đọc LÚC GỌI.
+    TAVILY_BASE_URL: HttpUrlStr = "https://api.tavily.com"
+    #: Trần TỔNG cho một lượt tìm (cả kết nối lẫn đọc) — `float` để test đặt
+    #: được trần dưới một giây. Biến riêng, không dùng lại `FETCH_TIMEOUT_S`.
+    WEB_SEARCH_TIMEOUT_S: float = Field(default=10.0, gt=0)
+    #: Số kết quả mặc định mỗi lượt; Tavily nhận tối đa 20.
+    WEB_SEARCH_MAX_RESULTS: int = Field(default=5, gt=0, le=20)
     FETCHER_BASE_URL: HttpUrlStr = "http://fetcher:8080"
     MAX_FETCH_MB: int = Field(default=5, gt=0)
     MAX_REDIRECTS: int = Field(default=5, ge=0)
