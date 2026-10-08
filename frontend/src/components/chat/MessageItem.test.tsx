@@ -75,7 +75,6 @@ function renderView(
       node={n}
       tree={tree}
       models={MODELS}
-      notes={[]}
       running={running}
       busy={busy}
       onRetry={onRetry}
@@ -214,7 +213,6 @@ describe("chip model · muc (ban T-HD3-v2 3c)", () => {
         node={node({ status: "completed", content: "x", model_id: "nr-grok", sibling_index: 1, sibling_count: 2 })}
         tree={emptyTree()}
         models={MODELS}
-        notes={[]}
         running={false}
         busy={false}
         onRetry={vi.fn()}

@@ -10,7 +10,8 @@ import { BranchNav, Divider } from "./BranchNav";
 import { Hint } from "./Hint";
 import { Markdown } from "./Markdown";
 import { AnswerActions } from "./AnswerActions";
-import { UserAttachments } from "./BubbleExtras";
+import type { ToolRun } from "../../features/chat/useChat";
+import { SourceList, ToolChips, UserAttachments, toolErrorText, toolKind } from "./BubbleExtras";
 
 /**
  * Mot bong bong tren duong di hien tai — ban T-HD3, §8.2, §7.4, C13.
@@ -76,11 +77,13 @@ import { UserAttachments } from "./BubbleExtras";
  * - **Mot nut Thu lai**, ca o hang nut lan o bong bong loi: model + muc dang
  *   chon tren picker (xem `AnswerActions`).
  */
+const NO_TOOLS: readonly ToolRun[] = [];
+
 export function MessageItem({
   node,
   tree,
   models,
-  notes,
+  tools = NO_TOOLS,
   artifacts,
   onOpenArtifact,
   running,
@@ -97,7 +100,11 @@ export function MessageItem({
    * thi cho chip. Model da bien mat khoi catalog thi chip hien `model_id` tho.
    */
   models: readonly ModelOut[];
-  notes: string[];
+  /**
+   * T-6.7c — tool cua CHINH message nay (`useChat.toolsOf`): chip trang thai +
+   * nguon, TREN chu tra loi (ban ve 3e, ma component `AssistantMessage`).
+   */
+  tools?: readonly ToolRun[];
   /**
    * T-5.3 — artifact cua CHINH message nay (`useChat.artifactsOf`): khoi trung
    * tung byte thanh the tai cho, con lai the duoi chu. On dinh giua cac lan render.
@@ -154,6 +161,16 @@ export function MessageItem({
         />
         {t("chat.assistantLabel")}
       </h3>
+
+      <ToolChips
+        tools={tools.map((run, index) => ({
+          id: String(index),
+          kind: toolKind(run.name),
+          running: run.ok === null,
+          ...(run.ok === false ? { error: toolErrorText(run.reason) } : {}),
+        }))}
+      />
+      <SourceList sources={tools.flatMap((run) => (run.ok === true ? run.sources : []))} />
 
       {waiting && (
         <p aria-live="polite" className="flex min-h-6 items-center gap-2 text-body text-muted">
@@ -217,9 +234,6 @@ export function MessageItem({
             {node.finish_reason !== null && node.finish_reason !== "stop" && (
               <Chip label={node.finish_reason} mono />
             )}
-            {notes.map((chip, i) => (
-              <Chip key={i} label={chip} />
-            ))}
           </ul>
 
           <div className="mt-2 flex items-center gap-1">

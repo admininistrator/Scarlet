@@ -1,4 +1,4 @@
-import { AppWindow, ChartColumn, Check, FileCode, FileText, Image, LoaderCircle, type IconNode } from "lucide";
+import { AppWindow, ChartColumn, Check, CircleAlert, FileCode, FileText, Image, LoaderCircle, type IconNode } from "lucide";
 import { useState } from "react";
 
 import { t, type TextKey } from "../../lib/i18n";
@@ -14,13 +14,13 @@ import { safeUrl } from "./markdownPolicy";
  *
  * | `data-planned` | Thanh phan                               | Ai se gan |
  * |----------------|------------------------------------------|-----------|
- * | `T-6.7`        | Chip "Dang tim web…" + chip nguon/favicon | P6        |
+ * | —              | Chip "Dang tim web…" + chip nguon        | GAN o T-6.7c |
  * | `T-7.9`        | Chip "Dang chay code…"                   | P7        |
  * | —              | The artifact                             | GAN o T-5.3 |
  * | —              | Anh / tep trong bong bong nguoi dung     | GAN o T-4.7 |
  *
- * Hai chip dau chua co du lieu — tool chua ton tai; phase sau GAN vao
- * `MessageItem` (ban ve dat chip cong cu va nguon TREN chu tra loi).
+ * Chip cong cu va nguon GAN o T-6.7c vao `MessageItem`, TREN chu tra loi (ban
+ * ve 3e); bieu tuong nguon la o chu cai (Q-P6-7, favicon that — B-381).
  * `ArtifactCard` gan o T-5.3 (`Markdown`: thay khoi da thanh artifact, hoac
  * duoi chu khi khong khop khoi nao — B-363). `UserAttachments` da gan o
  * T-4.7 (tep TREN chu cua nguoi dung).
@@ -88,27 +88,72 @@ export function sameOriginSrc(raw: string | undefined): string | null {
   }
 }
 
-// ───────────────────── chip trang thai cong cu (T-6.7, T-7.9) ─────────────────────
+// ───────────────────── chip trang thai cong cu (T-6.7c, T-7.9) ─────────────────────
 
-export type ToolKind = "webSearch" | "codeRun";
-export type ToolStatus = { kind: ToolKind; running: boolean };
+export type ToolKind = "webSearch" | "fetchUrl" | "codeRun";
+/**
+ * Mot chip. `id` = `call_id` (hoac vi tri tren duong di) — hai lan tim web
+ * trong mot luot la hai chip. `error` la CAU da dich (`toolErrorText`).
+ */
+export type ToolStatus = { kind: ToolKind; running: boolean; id?: string; error?: string };
 
 const TOOL_TEXT: Record<ToolKind, { running: TextKey; done: TextKey }> = {
   webSearch: { running: "chat.tool.searchingWeb", done: "chat.tool.searchedWeb" },
+  fetchUrl: { running: "chat.tool.readingLink", done: "chat.tool.readLink" },
   codeRun: { running: "chat.tool.runningCode", done: "chat.tool.ranCode" },
 };
 
-/** Cot `data-planned` cua §7b.2: task se gan tung loai chip. */
-const TOOL_PLANNED: Record<ToolKind, "T-6.7" | "T-7.9"> = {
-  webSearch: "T-6.7",
+/**
+ * Cot `data-planned` cua §7b.2 cho chip CHUA gan. Tim web da gan (T-6.7c) —
+ * con chay code (`T-7.9`). Gan dong: hai lenh grep cua DoD P6 khong thay no.
+ */
+const TOOL_PLANNED: Partial<Record<ToolKind, "T-7.9">> = {
   codeRun: "T-7.9",
 };
+
+/** Ten tool cua registry (§13.5) ⇒ loai chip. Ten la ⇒ chip tim web. */
+export function toolKind(name: string): ToolKind {
+  return name === "fetch_url" ? "fetchUrl" : "webSearch";
+}
+
+/**
+ * `reason` (ma co dinh cua `ssrf.py` / `fetcher` / registry / `SearchError`)
+ * ⇒ cau cho chip loi (UC-08 dong 3, 5). Ma la ⇒ cau chung. `Object.hasOwn`:
+ * ma la du lieu tu stream — "constructor" khong duoc thanh mot ham.
+ */
+const TOOL_ERROR_TEXT: Readonly<Record<string, TextKey>> = {
+  address: "chat.tool.error.internal",
+  dns: "chat.tool.error.internal",
+  scheme: "chat.tool.error.blocked",
+  port: "chat.tool.error.blocked",
+  userinfo: "chat.tool.error.blocked",
+  host: "chat.tool.error.blocked",
+  timeout: "chat.tool.error.timeout",
+  web_quota: "chat.tool.error.webQuota",
+  not_configured: "chat.tool.error.searchUnavailable",
+  unauthorized: "chat.tool.error.searchUnavailable",
+  rate_limited: "chat.tool.error.searchUnavailable",
+  upstream: "chat.tool.error.searchUnavailable",
+  too_large: "chat.tool.error.tooLarge",
+  unsupported_type: "chat.tool.error.unsupportedType",
+};
+
+export function toolErrorText(reason: string | null): string {
+  if (reason !== null && Object.hasOwn(TOOL_ERROR_TEXT, reason)) {
+    return t(TOOL_ERROR_TEXT[reason]);
+  }
+  return t(reason !== null && /^http_\d{3}$/.test(reason) ? "chat.tool.error.http" : "chat.tool.error.generic");
+}
 
 /**
  * Chip "Dang tim web…" / "Dang chay code…" — ban ve 3e. Vong quay la icon
  * `loader-circle` trong MOT span rieng mang `.motion-spin`; chu dung yen. Nam
  * ngoai phan chu dang chay nen 300 lan re-render khong cham toi no. Khong bam
  * duoc.
+ *
+ * B-314 ③ (chot o T-6.7c): quay → `check` la HAI phan tu, khong bien hinh —
+ * theo ma component (`MessageBubble.tsx` `ToolChip`). Chip loi (ban ve khong
+ * ve — B-396): `circle-alert` + cau theo `reason`, chu `danger-text`.
  */
 export function ToolChips({ tools }: { tools: readonly ToolStatus[] }) {
   if (tools.length === 0) {
@@ -118,23 +163,23 @@ export function ToolChips({ tools }: { tools: readonly ToolStatus[] }) {
     <div className="flex flex-wrap gap-2">
       {tools.map((tool) => (
         <span
-          key={tool.kind}
+          key={tool.id ?? tool.kind}
           role="status"
           data-planned={TOOL_PLANNED[tool.kind]}
-          className={
-            tool.running
-              ? "inline-flex h-chip items-center gap-2 rounded-full border border-border bg-background pr-3 pl-2.5 text-sm text-foreground"
-              : "inline-flex h-chip items-center gap-2 rounded-full border border-border bg-background pr-3 pl-2.5 text-sm text-muted"
-          }
+          className={`inline-flex min-h-chip max-w-full items-center gap-2 rounded-full border border-border bg-background pr-3 pl-2.5 text-sm ${
+            tool.running ? "text-foreground" : tool.error === undefined ? "text-muted" : "text-danger-text"
+          }`}
         >
           {tool.running ? (
             <span aria-hidden="true" className="motion-spin grid size-4 place-items-center text-accent-text">
               <StaticIcon icon={LoaderCircle} size={16} />
             </span>
           ) : (
-            <StaticIcon icon={Check} size={16} />
+            <StaticIcon icon={tool.error === undefined ? Check : CircleAlert} size={16} className="shrink-0" />
           )}
-          {t(tool.running ? TOOL_TEXT[tool.kind].running : TOOL_TEXT[tool.kind].done)}
+          <span className="min-w-0">
+            {tool.error ?? t(tool.running ? TOOL_TEXT[tool.kind].running : TOOL_TEXT[tool.kind].done)}
+          </span>
         </span>
       ))}
     </div>
@@ -156,7 +201,7 @@ export function SourceList({ sources }: { sources: readonly Source[] }) {
     return null;
   }
   return (
-    <ul aria-label={t("chat.sources")} data-planned="T-6.7" className="mt-0.5 flex flex-wrap gap-x-1.5">
+    <ul aria-label={t("chat.sources")} className="mt-0.5 flex flex-wrap gap-x-1.5">
       {sources.map((source, index) => {
         const title = plainText(source.title);
         const href = sourceHref(source.url);

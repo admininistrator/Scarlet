@@ -54,7 +54,8 @@ describe("chip trang thai cong cu (T-6.7, T-7.9)", () => {
     const chip = screen.getByRole("status");
 
     expect(chip).toHaveTextContent("Đang tìm web…");
-    expect(chip).toHaveAttribute("data-planned", "T-6.7");
+    // T-6.7c — tim web da gan: khong con `data-planned` (DoD P6, NQ-130).
+    expect(chip).not.toHaveAttribute("data-planned");
     const spinner = chip.querySelector(".motion-spin");
     expect(spinner).not.toBeNull();
     expect(spinner).toHaveAttribute("aria-hidden", "true");
@@ -96,7 +97,7 @@ describe("chip nguon (T-6.7)", () => {
       />,
     );
     const list = screen.getByRole("list", { name: "Nguồn" });
-    expect(list).toHaveAttribute("data-planned", "T-6.7");
+    expect(list).not.toHaveAttribute("data-planned");
 
     const links = within(list).getAllByRole("link");
     expect(links).toHaveLength(2);

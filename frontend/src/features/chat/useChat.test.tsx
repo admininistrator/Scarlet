@@ -253,7 +253,7 @@ describe("khoa idempotency cua nut Thu lai (B-231)", () => {
 
     // Cung mot khoa se lam lan goi thu hai nhan BAN PHAT LAI cua lan dau (§11.4),
     // tuc doi model tren picker roi bam Thu lai khong doi duoc model nao ca.
-    expect(retry.mock.calls[1][1]).toEqual({ model_id: PLAIN_MODEL });
+    expect(retry.mock.calls[1][1]).toEqual({ model_id: PLAIN_MODEL, web_tools: false });
     expect(keyOfCall(0)).not.toBe(keyOfCall(1));
   });
 
@@ -273,7 +273,7 @@ describe("khoa idempotency cua nut Thu lai (B-231)", () => {
       await result.current.retry(ANSWER_ID);
     });
 
-    expect(retry.mock.calls[1][1]).toEqual({ model_id: PICKED_MODEL, reasoning_effort: "high" });
+    expect(retry.mock.calls[1][1]).toEqual({ model_id: PICKED_MODEL, reasoning_effort: "high", web_tools: false });
     expect(keyOfCall(0)).not.toBe(keyOfCall(1));
   });
 });
@@ -292,7 +292,7 @@ describe("MOT nut Thu lai gui model + muc cua picker (T-S.15, §24.2b·S4)", () 
 
     // Muc DA NHO (`low`), khong phai mac dinh catalog (`high`): cung muc `send` gui.
     expect(result.current.effectiveEffort).toBe("low");
-    expect(retry.mock.calls[0][1]).toEqual({ model_id: PICKED_MODEL, reasoning_effort: "low" });
+    expect(retry.mock.calls[0][1]).toEqual({ model_id: PICKED_MODEL, reasoning_effort: "low", web_tools: false });
   });
 
   it("model KHONG co khoi `reasoning` ⇒ khong co truong `reasoning_effort` (mot `id` bat ky la `400`)", async () => {
@@ -302,7 +302,7 @@ describe("MOT nut Thu lai gui model + muc cua picker (T-S.15, §24.2b·S4)", () 
       await result.current.retry(ANSWER_ID);
     });
 
-    expect(retry.mock.calls[0][1]).toEqual({ model_id: PLAIN_MODEL });
+    expect(retry.mock.calls[0][1]).toEqual({ model_id: PLAIN_MODEL, web_tools: false });
   });
 
   it("chua biet model nao (`GET /models` chua ve) ⇒ body rong, backend giu model cu", async () => {
@@ -312,7 +312,7 @@ describe("MOT nut Thu lai gui model + muc cua picker (T-S.15, §24.2b·S4)", () 
       await result.current.retry(ANSWER_ID);
     });
 
-    expect(retry.mock.calls[0][1]).toEqual({});
+    expect(retry.mock.calls[0][1]).toEqual({ web_tools: false });
   });
 });
 

@@ -352,7 +352,6 @@ describe("bong bong nguoi dung — tep tu duong di (UC-06 dong 5)", () => {
         node={node}
         tree={emptyTree()}
         models={[]}
-        notes={[]}
         running={false}
         busy={false}
         onRetry={vi.fn()}

@@ -20,6 +20,8 @@ import type { DefaultPick, DefaultTier } from "./defaults";
  */
 /** Capability cho phep gui anh (§9.4) — nut dinh kem va canh bao cua T-4.5 doc no. */
 export const VISION = "vision";
+/** Capability goi tool (§9.4) — cong tac "Tim web" cua T-6.7c doc no (Q-P6-3). */
+export const TOOLS = "tools";
 
 const CAPABILITY_LABELS: Record<string, TextKey> = {
   tools: "model.cap.tools",

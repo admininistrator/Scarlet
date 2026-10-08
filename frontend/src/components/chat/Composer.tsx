@@ -1,9 +1,9 @@
 import { ArrowUp, Globe, Mic, Paperclip, Square, Zap } from "lucide";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
-import type { SendKeys, SendResult } from "../../features/chat/useChat";
+import type { SendKeys, SendResult, WebBlock, WebSearchState } from "../../features/chat/useChat";
 import { usePendingAttachments, type UploadLimits } from "../../features/chat/usePendingAttachments";
-import { DISPLAY_LOCALE, t } from "../../lib/i18n";
+import { DISPLAY_LOCALE, t, type TextKey } from "../../lib/i18n";
 // `newKey` roi khoi file nay o T-3.7 (B-231): nut Thu lai nay cung phai sinh
 // khoa, va mot ban chep thu hai cua duong lui "khong co secure context" la
 // mot ban chep se chi duoc sua mot nua. Xem `lib/idempotency.ts`.
@@ -11,6 +11,7 @@ import { newKey } from "../../lib/idempotency";
 import { useDock } from "../../lib/motion";
 import { ComingSoon } from "../ui/ComingSoon";
 import { AttachButtonNoVision, AttachmentPreviews } from "./Attachments";
+import { Hint } from "./Hint";
 import { Icon, StaticIcon } from "../ui/Icon";
 
 /**
@@ -113,6 +114,7 @@ export function Composer({
   quotaBlocked = false,
   noVision = false,
   uploadLimits = null,
+  webSearch,
 }: {
   running: boolean;
   enabled: boolean;
@@ -141,6 +143,8 @@ export function Composer({
   noVision?: boolean;
   /** T-4.7 — ba tran tai len cua `GET /auth/me`; `null` = chua biet, khong chan. */
   uploadLimits?: UploadLimits | null;
+  /** T-6.7c — cong tac "Tim web" (`useChat.webSearch`). Vang mat ⇒ khong ve. */
+  webSearch?: WebSearchState;
 }) {
   const [draft, setDraft] = useState("");
   const [keyLocked, setKeyLocked] = useState(false);
@@ -317,7 +321,7 @@ export function Composer({
           </label>
 
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
-            {/* §7b.2 — ba nut cho con lai cua o nhap; khong mot handler nao (S12). */}
+            {/* §7b.2 — hai nut cho con lai cua o nhap (skill, mic); khong mot handler nao (S12). */}
             {noVision ? (
               <AttachButtonNoVision />
             ) : (
@@ -346,12 +350,7 @@ export function Composer({
                 />
               </>
             )}
-            <ComingSoon
-              planned="T-6.7"
-              label={t("composer.webSearch")}
-              icon={<StaticIcon icon={Globe} size={18} />}
-              toggle
-            />
+            {webSearch !== undefined && <WebToggle state={webSearch} />}
             <ComingSoon
               planned="T-7.9"
               label={t("composer.skill")}
@@ -423,5 +422,55 @@ export function Composer({
         </div>
       </div>
     </form>
+  );
+}
+
+const WEB_BLOCK_TEXT: Record<WebBlock, TextKey> = {
+  noTools: "composer.webNoTools",
+  disabled: "composer.webDisabled",
+};
+
+const WEB_TOGGLE_CLASS =
+  "motion-press inline-flex min-h-touch shrink-0 items-center gap-1.5 rounded-full border pr-3 pl-2.5 text-sm font-medium";
+
+/**
+ * Cong tac "Tim web" — ban T-HD2-v2 muc G (hinh `ComingSoon toggle` cua
+ * T-S.10), T-6.7c. `aria-pressed` that. Bat: ngon ngu "dang an" cua ma
+ * component (`iconButtonPressed`: vien + nen `accent`) — ban ve chi ve trang
+ * thai cho (B-396). Model khong `tools` hoac `can_use_web: false` ⇒
+ * `aria-disabled` + tooltip ly do, lo `AttachButtonNoVision` (T-4.5): van
+ * focus duoc de nguoi dung ban phim doc ly do.
+ */
+function WebToggle({ state }: { state: WebSearchState }) {
+  const icon = <StaticIcon icon={Globe} size={18} />;
+  if (state.blocked !== null) {
+    return (
+      <Hint label={t(WEB_BLOCK_TEXT[state.blocked])}>
+        <button
+          type="button"
+          aria-disabled="true"
+          aria-pressed={false}
+          className={`${WEB_TOGGLE_CLASS} control-disabled border-transparent text-muted`}
+        >
+          {icon}
+          {t("composer.webSearch")}
+        </button>
+      </Hint>
+    );
+  }
+  return (
+    <button
+      type="button"
+      aria-pressed={state.on}
+      onClick={state.toggle}
+      className={`${WEB_TOGGLE_CLASS} ${
+        state.on
+          ? "border-accent bg-accent-subtle text-accent-text"
+          : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground"
+      }`}
+    >
+      {icon}
+      {t("composer.webSearch")}
+    </button>
   );
 }

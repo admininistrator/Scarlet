@@ -85,6 +85,9 @@ const BASE_PROFILE: ProfileOut = {
   max_upload_mb: 10,
   max_attachments: 5,
   allowed_upload_mime: ["image/png", "image/jpeg", "application/pdf", "text/plain"],
+  can_use_web: true,
+  web_searches_per_day: 50,
+  web_searches_used: 0,
 };
 
 function message(p: Partial<MessageOut> & Pick<MessageOut, "id">): MessageOut {
@@ -268,7 +271,7 @@ describe("mot nut Thu lai gui model + muc cua picker (T-S.15 DoD dong 1)", () =>
     await waitFor(() => expect(retryCalls()).toHaveLength(1));
     const [url, init] = retryCalls()[0];
     expect(String(url)).toBe(`/api/v1/messages/${ANSWER_ID}/retry`);
-    expect(JSON.parse(String(init?.body))).toEqual({ model_id: "deepseek-flash", reasoning_effort: "max" });
+    expect(JSON.parse(String(init?.body))).toEqual({ model_id: "deepseek-flash", reasoning_effort: "max", web_tools: false });
     // B-231 / NQ-93: route bat buoc khoa §11.4.
     expect((init?.headers as Record<string, string>)["Idempotency-Key"]).toMatch(/\S/);
     // Chip cua cau tra loi cu KHONG doi theo picker.
@@ -295,6 +298,7 @@ describe("mot nut Thu lai gui model + muc cua picker (T-S.15 DoD dong 1)", () =>
     expect(JSON.parse(String(retryCalls()[0][1]?.body))).toEqual({
       model_id: "deepseek-flash",
       reasoning_effort: "low",
+      web_tools: false,
     });
   });
 
@@ -306,6 +310,6 @@ describe("mot nut Thu lai gui model + muc cua picker (T-S.15 DoD dong 1)", () =>
     await userEvent.click(within(answer).getByRole("button", { name: "Thử lại" }));
 
     await waitFor(() => expect(retryCalls()).toHaveLength(1));
-    expect(JSON.parse(String(retryCalls()[0][1]?.body))).toEqual({ model_id: "ol-qwen-small" });
+    expect(JSON.parse(String(retryCalls()[0][1]?.body))).toEqual({ model_id: "ol-qwen-small", web_tools: false });
   });
 });

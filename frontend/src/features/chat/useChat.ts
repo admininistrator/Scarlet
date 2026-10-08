@@ -95,10 +95,13 @@ import {
   type ModelOut,
   type PathArtifact,
   type QuotaWarning,
+  type ToolSource,
+  type ToolSummary,
 } from "../../lib/api";
 import { PATHS } from "../../app/paths";
 import { newKey } from "../../lib/idempotency";
 import { isEndpointModel } from "../models/byokModels";
+import { TOOLS } from "../models/chips";
 import { pickDefault, type DefaultPick } from "../models/defaults";
 import { effectiveEffort } from "../models/reasoning";
 import { openStream, type StreamHandle, type ConnectionStatus, type UsageOut } from "../../lib/sse";
@@ -180,6 +183,25 @@ export interface SendKeys {
 }
 
 /**
+ * T-6.7c — mot loi goi tool tren man hinh: `ToolSummary` cua duong di, hoac
+ * phan stream biet (`ok === null` = dang chay, chua co `tool_result`).
+ */
+export type ToolRun = Omit<ToolSummary, "ok"> & { ok: boolean | null };
+
+/** Vi sao cong tac "Tim web" mo — tooltip noi dieu nay (lo `AttachButtonNoVision`). */
+export type WebBlock = "noTools" | "disabled";
+
+/**
+ * T-6.7c — cong tac "Tim web" (Q-P6-3). `on` la lua chon cua nguoi dung;
+ * `blocked` khac `null` ⇒ ca ba duong gui `web_tools: false` du `on`.
+ */
+export interface WebSearchState {
+  on: boolean;
+  blocked: WebBlock | null;
+  toggle: () => void;
+}
+
+/**
  * Man hinh chat dang o dau — T-S.10.
  *
  * `draft`: chua co hoi thoai nao (ban T-HD2-v2: o nhap GIUA man, loi chao).
@@ -240,8 +262,12 @@ export interface ChatState {
   running: string | null;
   busy: boolean;
   usage: UsageOut | null;
-  /** Chip cua `tool_call`/`tool_result`, theo `message_id`. */
-  notes: Record<string, string[]>;
+  /**
+   * T-6.7c — tool cua mot message: `tools` cua duong di (song qua F5, qua
+   * `STREAM_TTL_S` — B-87) khi co, khong thi phan stream biet theo `call_id`.
+   */
+  toolsOf: (node: MessageOut) => readonly ToolRun[];
+  webSearch: WebSearchState;
   /**
    * T-5.3 — artifact cua mot message: `artifacts[]` cua duong di (song qua F5,
    * qua `STREAM_TTL_S` — B-87) cong the vua toi qua event ma duong di chua co.
@@ -327,6 +353,11 @@ export interface ChatOptions {
    * thoai, F5, `XRANGE` phat lai (§7.3) — KHONG goi.
    */
   onArtifact?: (artifact: PathArtifact) => void;
+  /**
+   * T-6.7c — `can_use_web` cua `GET /auth/me` (T-6.8). Vang mat = chua biet,
+   * khong chan; cua that la `422 WEB_DISABLED` cua server.
+   */
+  canUseWeb?: boolean;
 }
 
 /**
@@ -340,9 +371,29 @@ const NO_OPTIONS: ChatOptions = { models: [], accountDefaultModel: null };
 const NO_PREFS: Readonly<Record<string, string>> = {};
 /** Cung ly do: `artifactsOf` tra MOT mang rong cho moi message khong co artifact. */
 const NO_ARTIFACTS: readonly PathArtifact[] = [];
+/** Cung ly do: `toolsOf` tra MOT mang rong cho moi message khong goi tool. */
+const NO_TOOLS: readonly ToolRun[] = [];
+
+function isSource(value: unknown): value is ToolSource {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as ToolSource).url === "string" &&
+    typeof (value as ToolSource).title === "string"
+  );
+}
+
+/** `result` cua `tool_result` la `{sources, reason}` (worker T-6.7a) — doc phong thu: du lieu stream. */
+function resultOf(result: unknown): Pick<ToolRun, "reason" | "sources"> {
+  const r = (typeof result === "object" && result !== null ? result : {}) as { reason?: unknown; sources?: unknown };
+  return {
+    reason: typeof r.reason === "string" ? r.reason : null,
+    sources: Array.isArray(r.sources) ? r.sources.filter(isSource) : [],
+  };
+}
 
 export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
-  const { models, accountDefaultModel, reasoningPrefs = NO_PREFS } = options;
+  const { models, accountDefaultModel, reasoningPrefs = NO_PREFS, canUseWeb = true } = options;
   /*
     Hai callback quota di qua `ref`: `ChatScreen` truyen chung la closure moi
     moi lan render, va dua chung vao phu thuoc cua `openStreamFor`/`gui` se dung
@@ -379,7 +430,6 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
   const [running, setRunning] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [usage, setUsage] = useState<UsageOut | null>(null);
-  const [notes, setNotes] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   /*
     T-S.10 — `true` trong luc `open()` doi `GET /conversations/{id}`. Gia tri
@@ -414,10 +464,22 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     T-S.14 — chuoi (hoac `null`), khong phai object: `send` phu thuoc vao no
     ma khong dung lai o moi khung hinh chi vi `reasoning_prefs` la object moi.
   */
-  const effort = effectiveEffort(
-    models.find((m) => m.id === effectiveModel),
-    reasoningPrefs,
-  );
+  const sendingModel = models.find((m) => m.id === effectiveModel);
+  const effort = effectiveEffort(sendingModel, reasoningPrefs);
+
+  /*
+    T-6.7c — cong tac "Tim web". Model chua biet (danh muc dang tai) ⇒ khong
+    mo, cung luat `noVision` cua `ChatScreen`. Mot `boolean` cho ca ba duong:
+    `send`, `retry`, `editQuestion` doc CUNG gia tri nay.
+  */
+  const [webOn, setWebOn] = useState(false);
+  const webBlocked: WebBlock | null =
+    sendingModel !== undefined && !sendingModel.capabilities.includes(TOOLS)
+      ? "noTools"
+      : canUseWeb
+        ? null
+        : "disabled";
+  const webTools = webOn && webBlocked === null;
 
   //: Luat 4 — ban doc duoc ngay cua cung mot cay.
   const treeRef = useRef<TreeState>(emptyTree());
@@ -447,9 +509,34 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     return next;
   }, []);
 
-  const addNote = useCallback((messageId: string, text: string) => {
-    setNotes((prev) => ({ ...prev, [messageId]: [...(prev[messageId] ?? []), text] }));
+  /*
+    T-6.7c — chip tool vua toi qua stream, theo `message_id`, MOT muc moi
+    `call_id`. `XRANGE` cua mot tab moi phat lai MOI event (§7.3, lo
+    `seenArtifactsRef`): `tool_call` cua mot loi goi da co bi bo qua — khong
+    nhan doi chip, khong keo chip da xong ve "dang chay".
+  */
+  const [streamTools, setStreamTools] = useState<Record<string, (ToolRun & { callId: string })[]>>({});
+
+  const receiveTool = useCallback((messageId: string, run: ToolRun & { callId: string }) => {
+    setStreamTools((prev) => {
+      const list = prev[messageId] ?? [];
+      const at = list.findIndex((r) => r.callId === run.callId);
+      if (at !== -1 && run.ok === null) {
+        return prev;
+      }
+      return { ...prev, [messageId]: at === -1 ? [...list, run] : list.map((r, i) => (i === at ? run : r)) };
+    });
   }, []);
+
+  /*
+    Duong di truoc: sau `done` hang co `tools` (tom tat T-6.7a), song qua F5 va
+    qua `STREAM_TTL_S`. Chip chi dung tu event la chip mat sau mot gio (B-87).
+  */
+  const toolsOf = useCallback(
+    (node: MessageOut): readonly ToolRun[] =>
+      node.tools !== undefined && node.tools.length > 0 ? node.tools : (streamTools[node.id] ?? NO_TOOLS),
+    [streamTools],
+  );
 
   /*
     T-5.3 — artifact vua toi qua stream, theo `message_id`, cho toi khi duong di
@@ -645,13 +732,21 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
               queueDelta(messageId, "reasoning", event.data.t);
               break;
             case "tool_call":
-              addNote(messageId, `tool_call ${event.data.name}`);
+              receiveTool(messageId, {
+                callId: event.data.call_id,
+                name: event.data.name,
+                ok: null,
+                reason: null,
+                sources: [],
+              });
               break;
             case "tool_result":
-              addNote(
-                messageId,
-                `tool_result ${event.data.name} ${event.data.ok ? "ok" : "loi"}`,
-              );
+              receiveTool(messageId, {
+                callId: event.data.call_id,
+                name: event.data.name,
+                ok: event.data.ok,
+                ...resultOf(event.data.result),
+              });
               break;
             case "artifact":
               receiveArtifact(messageId, event.data);
@@ -683,7 +778,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
         },
       });
     },
-    [updateTree, closeStream, flushDeltas, reload, queueDelta, addNote, receiveArtifact],
+    [updateTree, closeStream, flushDeltas, reload, queueDelta, receiveTool, receiveArtifact],
   );
 
   /**
@@ -874,6 +969,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
             ...(effort === null ? {} : { reasoning_effort: effort }),
             // T-4.7 — vang mat khi khong co tep: body cu giu nguyen tung byte.
             ...(attachmentIds.length === 0 ? {} : { attachment_ids: [...attachmentIds] }),
+            web_tools: webTools,
           },
           keys.message,
         );
@@ -909,7 +1005,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
         setBusy(false);
       }
     },
-    [reportQuotaWarning, reportQuotaError, reload, effectiveModel, effort, openStreamFor, updateTree],
+    [reportQuotaWarning, reportQuotaError, reload, effectiveModel, effort, webTools, openStreamFor, updateTree],
   );
 
   /**
@@ -950,7 +1046,8 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
       }
       // Mot bo (message, model, muc) = mot y dinh = mot khoa. Hai lan bam nhanh
       // doc cung gia tri nay vi no la `ref` chu khong `state` (cai bay S5).
-      const identity = `${messageId}:${effectiveModel ?? ""}:${effort ?? ""}`;
+      // T-6.7c — cong tac cung nam trong y dinh: doi no roi bam lai la khoa moi.
+      const identity = `${messageId}:${effectiveModel ?? ""}:${effort ?? ""}:${webTools}`;
       const key = retryKeysRef.current.get(identity) ?? newKey();
       retryKeysRef.current.set(identity, key);
       setBusy(true);
@@ -960,6 +1057,8 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
           {
             ...(effectiveModel === null ? {} : { model_id: effectiveModel }),
             ...(effort === null ? {} : { reasoning_effort: effort }),
+            // Luon gui: vang mat = THUA KE co cua cau tra loi cu (T-6.7a).
+            web_tools: webTools,
           },
           key,
         );
@@ -978,7 +1077,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
         setBusy(false);
       }
     },
-    [reportQuotaWarning, reportQuotaError, reload, openStreamFor, effectiveModel, effort],
+    [reportQuotaWarning, reportQuotaError, reload, openStreamFor, effectiveModel, effort, webTools],
   );
 
   /**
@@ -1017,7 +1116,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
       }
       setBusy(true);
       try {
-        const output = await api.editQuestion(messageId, newContent);
+        const output = await api.editQuestion(messageId, newContent, webTools);
         reportQuotaWarning(output.quota_warning);
         openStreamFor(output.stream_url, output.assistant_message_id, conversationId);
         await reload(conversationId);
@@ -1028,7 +1127,7 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
         setBusy(false);
       }
     },
-    [reportQuotaWarning, reportQuotaError, reload, openStreamFor],
+    [reportQuotaWarning, reportQuotaError, reload, openStreamFor, webTools],
   );
 
   /**
@@ -1080,7 +1179,8 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
     running,
     busy,
     usage,
-    notes,
+    toolsOf,
+    webSearch: { on: webOn, blocked: webBlocked, toggle: () => setWebOn((value) => !value) },
     artifactsOf,
     error,
     changeConversationModel,

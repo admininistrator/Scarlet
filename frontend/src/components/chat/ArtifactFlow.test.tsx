@@ -65,6 +65,9 @@ const PROFILE: ProfileOut = {
   max_upload_mb: 10,
   max_attachments: 5,
   allowed_upload_mime: ["text/plain"],
+  can_use_web: true,
+  web_searches_per_day: 50,
+  web_searches_used: 0,
 };
 
 function message(p: Partial<MessageOut> & Pick<MessageOut, "id">): MessageOut {

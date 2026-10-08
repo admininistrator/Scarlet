@@ -188,6 +188,25 @@ export interface MessageOut {
   attachments?: MessageAttachment[];
   /** T-5.2a — artifact cua message (duong di), thu tu khoi. Tuy chon: cung ly do `attachments`. */
   artifacts?: PathArtifact[];
+  /**
+   * T-6.7a — tom tat tool cua luot (thu tu goi), tu `tool_rounds`. Song qua F5
+   * va qua `STREAM_TTL_S` — chip + nguon dung tu day khi khong con stream (B-87).
+   */
+  tools?: ToolSummary[];
+}
+
+/** Mot nguon cua `tool_result` / `ToolSummary` — tieu de do trang web dat, URL do model dua (§20). */
+export interface ToolSource {
+  url: string;
+  title: string;
+}
+
+/** Mot loi goi tool da chay — `ToolSummary` cua backend (T-6.7a). `reason` la ma co dinh. */
+export interface ToolSummary {
+  name: string;
+  ok: boolean;
+  reason: string | null;
+  sources: ToolSource[];
 }
 
 /**
@@ -553,6 +572,11 @@ export interface ProfileOut extends UserOut {
   max_upload_mb: number;
   max_attachments: number;
   allowed_upload_mime: string[];
+  /** T-6.8 — `false` ⇒ cong tac "Tim web" mo (T-6.7c); server van chan `422 WEB_DISABLED`. */
+  can_use_web: boolean;
+  web_searches_per_day: number;
+  /** Luot `web_search` trong 24 h truot; `null` = Redis khong tra loi. */
+  web_searches_used: number | null;
 }
 
 /**
@@ -1004,6 +1028,8 @@ export const api = {
       reasoning_effort?: string | null;
       /** T-4.4a — id tu `POST /attachments`; co tep thi `content` duoc rong. */
       attachment_ids?: string[];
+      /** T-6.7c — cong tac "Tim web" (Q-P6-3). */
+      web_tools?: boolean;
     },
     idempotencyKey: string,
   ) =>
@@ -1071,7 +1097,7 @@ export const api = {
    */
   retry: (
     messageId: string,
-    body: { model_id?: string | null; reasoning_effort?: string | null },
+    body: { model_id?: string | null; reasoning_effort?: string | null; web_tools?: boolean },
     idempotencyKey: string,
   ) =>
     request<RetryOut>(`/messages/${messageId}/retry`, {
@@ -1103,10 +1129,11 @@ export const api = {
       ),
     }),
 
-  editQuestion: (messageId: string, content: string) =>
+  /** T-6.7c — `web_tools` vang mat la `false` o backend: luon gui trang thai cong tac. */
+  editQuestion: (messageId: string, content: string, webTools: boolean) =>
     request<EditMessageOut>(`/messages/${messageId}`, {
       method: "PATCH",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, web_tools: webTools }),
     }),
 
   siblings: (messageId: string) => request<SiblingsOut>(`/messages/${messageId}/siblings`),

@@ -137,6 +137,8 @@ export function ChatScreen() {
     onQuotaWarning: quota.noteWarning,
     onQuotaStale: () => void session.refreshProfile(),
     onArtifact: openArtifact,
+    // T-6.7c — `false` ⇒ cong tac "Tim web" mo (T-6.8); profile chua ve ⇒ khong chan.
+    canUseWeb: session.profile?.can_use_web,
   });
   const { tree } = chat;
   /*
@@ -347,7 +349,8 @@ export function ChatScreen() {
                     tree={tree}
                     // T-S.15 — ten hien thi cho chip "model · muc" (ban T-HD3-v2 3c).
                     models={models}
-                    notes={chat.notes[node.id] ?? []}
+                    // T-6.7c — chip tool + nguon: duong di, khong thi stream.
+                    tools={chat.toolsOf(node)}
                     // T-5.3 — CHI artifact cua message nay (Q-P5-7: khop trong chinh no).
                     artifacts={chat.artifactsOf(node)}
                     onOpenArtifact={openArtifact}
@@ -382,6 +385,7 @@ export function ChatScreen() {
             quotaBlocked={quotaBlocked}
             noVision={noVision}
             uploadLimits={uploadLimits}
+            webSearch={chat.webSearch}
             quotaNotice={
               <QuotaNotice
                 readings={quota.readings}
