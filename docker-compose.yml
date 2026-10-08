@@ -265,6 +265,11 @@ services:
         ssrf: ./backend/app/tools
     restart: unless-stopped
     networks: [egress]
+    # B-382 / NQ-145 — `fetcher/entrypoint.sh` dung rao iptables (chan dai rieng,
+    # gom cong publish cua host) roi bo moi cap truoc khi chay server.
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP]
+    security_opt: ["no-new-privileges:true"]
     mem_limit: 1g
     healthcheck:
       # python:3.12-slim khong co curl (B-30).
