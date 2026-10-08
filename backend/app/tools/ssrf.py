@@ -247,7 +247,7 @@ class ResponseTooLarge(Exception):
         self.bytes_read = bytes_read
 
 
-async def _read_capped(response: httpx.Response, max_bytes: int) -> None:
+async def read_capped(response: httpx.Response, max_bytes: int) -> None:
     # `aiter_bytes()` trả byte ĐÃ giải nén ⇒ bom gzip bị đếm theo cỡ thật.
     # ponytail: một mảnh nén có thể nở ~1000× trước khi tới phép so — trần thật là
     # max_bytes + một mảnh đã giải nén; giải nén có max_length nếu `mem_limit` chật.
@@ -287,7 +287,7 @@ async def get_following_redirects(
             try:
                 next_request = response.next_request
                 if next_request is None:
-                    await _read_capped(response, max_bytes)
+                    await read_capped(response, max_bytes)
                     return response
             finally:
                 await response.aclose()

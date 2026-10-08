@@ -4,7 +4,8 @@ KH tham chiếu: §13.5, §12, §20 · NQ-144 (Q-P6-1, Q-P6-3).
 
 `ToolProvider` là điểm cắm §13.5 viết sẵn cho MCP: thêm một nguồn tool là thêm
 một provider vào `registry`, không sửa dòng nào ở `workers/generate.py`. Hôm nay
-một nguồn — `BuiltinTools` — và một tool: `fetch_url` (client T-6.5).
+một nguồn — `BuiltinTools` — và hai tool: `fetch_url` (client T-6.5) và
+`web_search` (`SearchProvider` T-6.1, T-6.7b), cùng một công tắc (Q-P6-3).
 
 **Không bao giờ ném.** Tool lạ, tham số hỏng, tool nổ ⇒ `ToolResult(ok=False,
 reason=<mã cố định>)` cho model đọc; lượt sinh đi tiếp tới `done`. Mã không
@@ -20,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from app.tools.fetch_url import fetch_url
+from app.tools.web_search import SearchHit, SearchProvider, TavilySearch
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,13 @@ REASON_INVALID_ARGUMENTS = "invalid_arguments"
 REASON_TOOL_ERROR = "tool_error"
 #: Worker đặt: lời gọi vượt `MAX_TOOL_CALLS_PER_TURN` của lượt — không chạy.
 REASON_TOO_MANY_CALLS = "too_many_calls"
+
+#: `web_search` hỏng (UC-08 dòng 5): câu CỦA MÌNH cho model, đi sau dòng lỗi có
+#: mã — để model trả lời bằng kiến thức sẵn có thay vì im hay bịa nguồn.
+SEARCH_UNAVAILABLE = (
+    "Không tìm được trên web lúc này. Hãy trả lời bằng kiến thức sẵn có và nói rõ "
+    "là chưa kiểm được trên web."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +68,8 @@ class ToolSpec:
 @dataclass(frozen=True, slots=True)
 class ToolResult:
     ok: bool
-    #: Chữ cho model — CHƯA cắt, chưa bọc `untrusted_block` (worker làm).
+    #: `ok`: chữ cho model — CHƯA cắt, chưa bọc `untrusted_block` (worker làm).
+    #: `not ok`: câu của registry (không bao giờ chữ của bên ngoài), hoặc rỗng.
     content: str = ""
     #: `[{url, title}]` — lên chip nguồn (§7.4 `tool_result`); không mang chữ trang.
     sources: list[dict[str, str]] = field(default_factory=list)
@@ -88,11 +98,35 @@ FETCH_URL = ToolSpec(
 )
 
 
+WEB_SEARCH = ToolSpec(
+    name="web_search",
+    description=(
+        "Tìm trên web, trả về danh sách kết quả (tiêu đề, URL, đoạn trích). Dùng khi "
+        "cần thông tin mới, sự kiện gần đây hoặc cần nguồn để dẫn."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "Câu cần tìm"}},
+        "required": ["query"],
+    },
+)
+
+#: Nguồn tìm của `web_search` — biến module để test thay (lối `fetch_url`).
+search_provider: SearchProvider = TavilySearch()
+
+
+def _hits_text(hits: tuple[SearchHit, ...]) -> str:
+    """`title · url · content` từng kết quả — chữ do trang đặt, worker bọc `untrusted_block`."""
+    return "\n\n".join(f"{i}. {h.title} · {h.url}\n{h.content}" for i, h in enumerate(hits, 1))
+
+
 class BuiltinTools:
     def list_tools(self, ctx: UserContext) -> list[ToolSpec]:
-        return [FETCH_URL]
+        return [FETCH_URL, WEB_SEARCH]
 
     async def call(self, name: str, args: dict[str, Any], ctx: UserContext) -> ToolResult:
+        if name == WEB_SEARCH.name:
+            return await _web_search(args)
         if name != FETCH_URL.name:
             return ToolResult(ok=False, reason=REASON_UNKNOWN_TOOL)
         url = args.get("url")
@@ -106,6 +140,20 @@ class BuiltinTools:
             content=page.text,
             sources=[{"url": page.final_url or url, "title": page.title or ""}],
         )
+
+
+async def _web_search(args: dict[str, Any]) -> ToolResult:
+    query = args.get("query")
+    if not isinstance(query, str) or not query.strip():
+        return ToolResult(ok=False, reason=REASON_INVALID_ARGUMENTS)
+    found = await search_provider.search(query)
+    if found.error is not None:
+        return ToolResult(ok=False, content=SEARCH_UNAVAILABLE, reason=found.error.value)
+    return ToolResult(
+        ok=True,
+        content=_hits_text(found.results),
+        sources=[{"url": h.url, "title": h.title} for h in found.results],
+    )
 
 
 class Registry:

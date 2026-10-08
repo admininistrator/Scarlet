@@ -34,7 +34,14 @@ from app.config.catalog import _VERSION_SEGMENT, ModelEntry
 from app.config.settings import settings
 from app.db.repositories import ByokEndpointRepository
 from app.db.repositories.model_overrides import with_override
-from app.tools.ssrf import CheckedUrl, UnsafeUrlError, pinned_client, validate_url
+from app.tools.ssrf import (
+    CheckedUrl,
+    ResponseTooLarge,
+    UnsafeUrlError,
+    pinned_client,
+    read_capped,
+    validate_url,
+)
 
 #: Tiền tố của model id và của `usage_events.provider` cho endpoint tự nhập.
 BYOK_PREFIX = "byok:"
@@ -43,6 +50,7 @@ BYOK_PREFIX = "byok:"
 MODELS_PATH = "/models"
 
 _BEARER_PREFIX = "Bearer "
+_BYTES_PER_MB = 1024 * 1024
 _STATUS_KEY_REJECTED = frozenset({httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN})
 #: Endpoint không có `/models` — lưu được, chưa xác thực, FE cho gõ tay (C42).
 _STATUS_NO_LIST = frozenset({httpx.codes.NOT_FOUND, httpx.codes.METHOD_NOT_ALLOWED})
@@ -124,18 +132,25 @@ class ProbeUnavailable(Exception):
 async def probe(base_url: str, key: str) -> ProbeResult:
     """`GET {base_url}/models` bằng khoá này, qua transport ghim IP (T-6.3).
 
-    `base_url` đã qua `normalize_base_url`. Không theo redirect.
+    `base_url` đã qua `normalize_base_url`. Không theo redirect. Body đọc theo
+    stream qua trần `MAX_FETCH_MB` của T-6.5 (B-330, B-335): một `/models` khổng
+    lồ là RAM của `api`.
 
     Raises:
         UnsafeUrlError: lớp 2–3 của §12.2 từ chối.
-        ProbeUnavailable: mạng hỏng, timeout, hay endpoint trả mã lạ.
+        ProbeUnavailable: mạng hỏng, timeout, body vượt trần, hay endpoint trả mã lạ.
     """
     checked = await check_base_url(base_url)
     headers = {"Authorization": f"{_BEARER_PREFIX}{key}"}
     try:
-        async with pinned_client(checked, timeout=settings.BYOK_VERIFY_TIMEOUT_S) as client:
-            resp = await client.get(f"{base_url}{MODELS_PATH}", headers=headers)
-    except httpx.HTTPError:
+        async with (
+            pinned_client(checked, timeout=settings.BYOK_VERIFY_TIMEOUT_S) as client,
+            client.stream("GET", f"{base_url}{MODELS_PATH}", headers=headers) as resp,
+        ):
+            # Chỉ body của `2xx` được đọc — mã khác không cần thân.
+            if resp.is_success:
+                await read_capped(resp, settings.MAX_FETCH_MB * _BYTES_PER_MB)
+    except (httpx.HTTPError, ResponseTooLarge):
         # Thông điệp của `httpx` có URL, không có header — nhưng không cần nó.
         raise ProbeUnavailable from None
 

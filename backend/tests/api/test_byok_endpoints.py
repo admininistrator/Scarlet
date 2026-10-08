@@ -236,6 +236,28 @@ async def test_probe_network_failure_is_503(
     assert resp.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
 
 
+async def test_probe_body_over_cap_is_503_and_stops_reading(
+    client: AsyncClient, user_a: uuid.UUID, net: _Net, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B-330 / B-335: `/models` khổng lồ ⇒ mã lỗi; byte đã đọc ≤ trần + một mảnh."""
+    monkeypatch.setattr(settings, "MAX_FETCH_MB", 1)
+    cap, chunk = 1024 * 1024, b"x" * 65536
+    served: list[int] = []
+
+    async def _endless() -> AsyncIterator[bytes]:
+        while True:
+            served.append(len(chunk))
+            yield chunk
+
+    net.handler = lambda _r: httpx.Response(200, content=_endless())
+
+    resp = await client.post(PROBE, headers=_auth(user_a), json={"base_url": BASE, "key": KEY})
+
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+    assert cap < sum(served) <= cap + len(chunk)
+
+
 # ─────────────────────────── CRUD ───────────────────────────
 
 

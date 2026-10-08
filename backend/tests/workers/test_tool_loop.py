@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from test_generate import FakeRedis, _ctx, _read_ledger, _reload, _WireRecorder
@@ -35,7 +36,9 @@ from app.llm.parser import StreamParser
 from app.llm.tokens import count_messages
 from app.quota.estimator import estimate
 from app.tools import registry as registry_mod
+from app.tools import web_search as web_search_mod
 from app.tools.fetch_url import FetchResult
+from app.tools.web_search import SearchHit, SearchResult
 from app.workers.generate import generate
 
 FIXTURES = Path(__file__).parents[1] / "llm" / "fixtures"
@@ -529,3 +532,134 @@ async def test_one_turn_one_message_row(
         ).scalar_one()
     assert count == 2
     assert len(await _rounds(session_factory, message.id)) == 2
+
+
+# ───────────────────────────── `web_search` (T-6.7b) ─────────────────────────────
+
+HITS = (
+    SearchHit(title="Tin B", url="https://b.example/2", content="Đoạn trích B"),
+    SearchHit(title="Tin A", url="https://a.example/1", content="Đoạn trích A"),
+)
+
+
+class SearchRecorder:
+    def __init__(self, result: SearchResult) -> None:
+        self.result = result
+        self.queries: list[str] = []
+
+    async def search(self, query: str, *, max_results: int | None = None) -> SearchResult:
+        self.queries.append(query)
+        return self.result
+
+
+def _search(call_id: str = "c_s") -> ToolCall:
+    return ToolCall(call_id=call_id, name="web_search", arguments='{"query": "tin mới"}')
+
+
+async def test_web_search_ok_sources_in_order_in_tool_result_and_rounds(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    search = SearchRecorder(SearchResult(results=HITS))
+    monkeypatch.setattr(registry_mod, "search_provider", search)
+    message = await _tree(session, user_a)
+    client = SeqClient(_calls_turn(_search()), ROUND2)
+
+    await generate(_ctx(fake_redis, client), str(message.id))  # type: ignore[arg-type]
+
+    sources = [{"url": h.url, "title": h.title} for h in HITS]
+    assert [t["function"]["name"] for t in client.calls[0]["tools"]] == [
+        "fetch_url",
+        "web_search",
+    ]
+    result = fake_redis.data(fake_redis.kind.index("tool_result"))
+    assert result["ok"] is True and result["name"] == "web_search"
+    assert result["result"] == {"sources": sources, "reason": None}
+    assert "Đoạn trích" not in json.dumps(result, ensure_ascii=False)
+    assert search.queries == ["tin mới"]
+    sent = client.calls[1]["messages"][-1]["content"]
+    assert sent.startswith('<untrusted_content name="web_search">')
+    assert "1. Tin B · https://b.example/2\nĐoạn trích B" in sent
+    assert sent.index("Tin B") < sent.index("Tin A")
+    rounds = await _rounds(session_factory, message.id)
+    assert rounds[0]["results"][0]["sources"] == sources
+    assert fake_redis.last["type"] == "done"
+
+
+def _real_tavily(monkeypatch: pytest.MonkeyPatch, key: str, handler: Any) -> list[httpx.Request]:
+    """`TavilySearch` THẬT sau registry; chỉ tầng mạng giả (`MockTransport`)."""
+    sent: list[httpx.Request] = []
+
+    def _record(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return handler(request)
+
+    monkeypatch.setattr(settings, "TAVILY_API_KEY", SecretStr(key))
+    monkeypatch.setattr(
+        web_search_mod,
+        "_client",
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(_record)),
+    )
+    return sent
+
+
+async def test_web_search_error_is_ok_false_turn_done_with_content(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UC-08 dòng 5: Tavily hết giờ ⇒ `ok: false`, model được báo, lượt `done` có chữ."""
+
+    def _stalled(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("tavily im lang", request=request)
+
+    sent = _real_tavily(monkeypatch, "tvly-khoa-gia", _stalled)
+    message = await _tree(session, user_a)
+    client = SeqClient(_calls_turn(_search()), ROUND2)
+
+    await generate(_ctx(fake_redis, client), str(message.id))  # type: ignore[arg-type]
+
+    assert len(sent) == 1
+    result = fake_redis.data(fake_redis.kind.index("tool_result"))
+    assert (result["ok"], result["result"]) == (False, {"sources": [], "reason": "timeout"})
+    told = client.calls[1]["messages"][-1]["content"]
+    assert told == f"[web_search lỗi: timeout] {registry_mod.SEARCH_UNAVAILABLE}"
+    assert fake_redis.kind[-2:] == ["usage", "done"]
+    reloaded = await _reload(session_factory, message.id)
+    assert reloaded.status is MessageStatus.COMPLETED and reloaded.content.strip()
+
+
+async def test_web_search_empty_key_zero_requests_not_configured(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent = _real_tavily(monkeypatch, "", lambda _r: httpx.Response(200, json={"results": []}))
+    message = await _tree(session, user_a)
+    client = SeqClient(_calls_turn(_search()), ROUND2)
+
+    await generate(_ctx(fake_redis, client), str(message.id))  # type: ignore[arg-type]
+
+    result = fake_redis.data(fake_redis.kind.index("tool_result"))
+    assert (result["ok"], result["result"]["reason"]) == (False, "not_configured")
+    assert sent == []
+    assert fake_redis.last["type"] == "done"
+
+
+async def test_web_search_blank_query_is_invalid_arguments_no_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    search = SearchRecorder(SearchResult(results=HITS))
+    monkeypatch.setattr(registry_mod, "search_provider", search)
+    ctx = registry_mod.UserContext(user_id=uuid.uuid4())
+
+    out = await registry_mod.registry.call("web_search", '{"query": "  "}', ctx)
+
+    assert (out.ok, out.reason) == (False, "invalid_arguments")
+    assert search.queries == []

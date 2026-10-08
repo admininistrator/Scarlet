@@ -643,12 +643,15 @@ def _tool_message(
 ) -> tuple[str, dict[str, Any]]:
     """Message `role=tool` cho một kết quả: (chữ đã cắt, message trên dây)."""
     if not out.ok:
+        # `out.content` của ca hỏng là câu của registry (UC-08 dòng 5), không chữ ngoài.
+        error = TOOL_ERROR_TEXT.format(name=tc.name, reason=out.reason)
         return "", {
             "role": MessageRole.TOOL.value,
             "tool_call_id": tc.call_id,
-            "content": TOOL_ERROR_TEXT.format(name=tc.name, reason=out.reason),
+            "content": f"{error} {out.content}" if out.content else error,
         }
-    name = out.sources[0]["url"] if out.sources else tc.name
+    # Một nguồn (`fetch_url`) ⇒ khối mang tên URL; nhiều nguồn (`web_search`) ⇒ tên tool.
+    name = out.sources[0]["url"] if len(out.sources) == 1 else tc.name
     text = out.content[: settings.TOOL_RESULT_MAX_CHARS]
     while True:
         message = {
