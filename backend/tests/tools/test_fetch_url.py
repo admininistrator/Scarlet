@@ -37,6 +37,8 @@ async def test_sends_caps_read_at_call_time_and_parses(monkeypatch: pytest.Monke
     monkeypatch.setattr(settings, "MAX_FETCH_MB", 3)
     monkeypatch.setattr(settings, "FETCH_TIMEOUT_S", 7)
     monkeypatch.setattr(settings, "MAX_REDIRECTS", 2)
+    monkeypatch.setattr(settings, "JS_ESCALATE_MIN_CHARS", 150)
+    monkeypatch.setattr(settings, "PLAYWRIGHT_TIMEOUT_S", 11)
     monkeypatch.setattr(settings, "FETCHER_BASE_URL", "http://fetcher.test:8080")
     reply = {
         "ok": True,
@@ -58,9 +60,11 @@ async def test_sends_caps_read_at_call_time_and_parses(monkeypatch: pytest.Monke
         "max_bytes": 3 * 1024 * 1024,
         "timeout_s": 7,
         "max_redirects": 2,
+        "js_escalate_min_chars": 150,
+        "playwright_timeout_s": 11,
     }
-    # B-71: trần của client lớn hơn trần gửi cho `fetcher`.
-    assert timeout > 7
+    # B-71: trần của client lớn hơn trần của từng chặng gửi cho `fetcher`.
+    assert timeout > 11
 
 
 async def test_fetcher_refusal_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:

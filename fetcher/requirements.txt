@@ -10,3 +10,10 @@ charset-normalizer==3.5.2
 starlette==1.7.0
 uvicorn==0.54.0
 pytest==9.1.1
+# T-6.6 — client Playwright; trình duyệt (chỉ Chromium) cài bằng lệnh của chính
+# gói này trong Dockerfile. Ba gói dưới là phụ thuộc bắc cầu, ghim tường minh
+# (T-5.6 ⑦; đo `pip freeze` trong image 2026-10-08).
+playwright==1.63.0
+pyee==13.0.1
+greenlet==3.5.6
+typing_extensions==4.16.0

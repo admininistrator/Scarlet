@@ -29,5 +29,9 @@ for net in ::1/128 ::ffff:0:0/96 fc00::/7 fe80::/10 ff00::/8; do
   ip6tables -A OUTPUT -d "$net" -j REJECT
 done
 
+# T-6.6 — `tini` làm PID 1, đã ở uid 1000 không cap nào: tiến trình Chromium mồ
+# côi (driver Playwright dừng khi khởi lại browser, `uvicorn --reload`) về PID 1,
+# và uvicorn không dọn chúng ⇒ zombie (đo: 3 sau 50 lượt). Không dùng `init: true`
+# của compose: `docker-init` là PID 1 ROOT giữ NET_ADMIN suốt đời container.
 exec setpriv --reuid=fetcher --regid=fetcher --init-groups \
-  --inh-caps=-all --bounding-set=-all -- "$@"
+  --inh-caps=-all --bounding-set=-all -- tini -- "$@"

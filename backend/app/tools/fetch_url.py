@@ -64,6 +64,9 @@ async def fetch_url(url: str) -> FetchResult:
         "max_bytes": settings.MAX_FETCH_MB * _BYTES_PER_MB,
         "timeout_s": settings.FETCH_TIMEOUT_S,
         "max_redirects": settings.MAX_REDIRECTS,
+        # T-6.6 — luật leo thang §12.3 bước 4 và trần của chặng trình duyệt.
+        "js_escalate_min_chars": settings.JS_ESCALATE_MIN_CHARS,
+        "playwright_timeout_s": settings.PLAYWRIGHT_TIMEOUT_S,
     }
     timeout = settings.FETCH_TIMEOUT_S + settings.PLAYWRIGHT_TIMEOUT_S
     try:

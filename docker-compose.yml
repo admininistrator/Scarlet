@@ -270,6 +270,7 @@ services:
     cap_drop: [ALL]
     cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP]
     security_opt: ["no-new-privileges:true"]
+    # T-6.6 — C24 / Phu luc C. Chromium (khoi luoi) song trong tran nay.
     mem_limit: 1g
     healthcheck:
       # python:3.12-slim khong co curl (B-30).

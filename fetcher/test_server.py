@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import logging
+import socket
 import ssl
-from collections.abc import Sequence
+import time
+from collections.abc import Awaitable, Callable, Sequence
 
 import httpcore
 import httpx
@@ -18,8 +21,15 @@ import pytest
 import server
 
 PUBLIC_V4 = "93.184.215.14"
+CDN_V4 = "93.184.215.15"
 VI = "Tiếng Việt có dấu: đường, nghiêng, ở, ữ"
-CAPS = {"max_bytes": 64 * 1024, "timeout_s": 5.0, "max_redirects": 5}
+CAPS = {
+    "max_bytes": 64 * 1024,
+    "timeout_s": 5.0,
+    "max_redirects": 5,
+    "js_escalate_min_chars": 200,
+    "playwright_timeout_s": 10.0,
+}
 
 
 class _Stream(httpcore.AsyncMockStream):
@@ -31,7 +41,9 @@ class _Stream(httpcore.AsyncMockStream):
         if not buffer:  # `h11` báo hết request bằng một lần ghi rỗng
             return
         path = buffer.split(b" ", 2)[1].decode()
-        self._pending = list(self._network.routes[(self._ip, path)])
+        self._network.requests.append((self._ip, path))
+        not_found = [b"HTTP/1.1 404 X\r\nContent-Length: 0\r\n\r\n"]
+        self._pending = list(self._network.routes.get((self._ip, path), not_found))
 
     async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
         if not self._pending:
@@ -54,6 +66,7 @@ class FakeNetwork:
         self.routes: dict[tuple[str, str], list[bytes]] = {}
         self.connects: list[str] = []
         self.reads = 0
+        self.requests: list[tuple[str, str]] = []
 
 
 @pytest.fixture
@@ -80,6 +93,21 @@ class SequenceResolver:
         return self.answers[min(self.calls, len(self.answers)) - 1]
 
 
+Resolver = Callable[[str, int], Awaitable[Sequence[str]]]
+
+
+def by_host(**table: Resolver | list[str]) -> Resolver:
+    """Resolver theo tên (`page_example` ⇒ `page.example`); tên lạ ⇒ không resolve."""
+
+    async def resolve(host: str, port: int) -> Sequence[str]:
+        answer = table.get(host.replace(".", "_"))
+        if answer is None:
+            raise socket.gaierror(socket.EAI_NONAME, "không có")
+        return answer if isinstance(answer, list) else await answer(host, port)
+
+    return resolve
+
+
 def _response(body: bytes, *, status: int = 200, headers: str = "") -> list[bytes]:
     head = f"HTTP/1.1 {status} X\r\nContent-Length: {len(body)}\r\n{headers}\r\n"
     return [head.encode() + body]
@@ -98,8 +126,16 @@ def _article(marker: str) -> str:
     )
 
 
-def _fetch(url: str, resolver: SequenceResolver, **caps: object) -> server.FetchResult:
-    return asyncio.run(server.fetch(url, resolver=resolver, **{**CAPS, **caps}))  # type: ignore[arg-type]
+def _fetch(url: str, resolver: Resolver, **caps: object) -> server.FetchResult:
+    async def run() -> server.FetchResult:
+        try:
+            return await server.fetch(url, resolver=resolver, **{**CAPS, **caps})  # type: ignore[arg-type]
+        finally:
+            # Đối tượng Playwright gắn với event loop đã mở nó — mỗi `asyncio.run`
+            # một loop, nên mỗi ca dừng browser của chính nó.
+            await server.close_browser()
+
+    return asyncio.run(run())
 
 
 # ── Ghim IP (C23) ─────────────────────────────────────────────────────────────
@@ -247,6 +283,8 @@ async def _post(body: dict[str, object]) -> httpx.Response:
         {"url": 1, **CAPS},
         {"url": "https://x.example/", **CAPS, "max_bytes": 0},
         {"url": "https://x.example/", **CAPS, "max_redirects": True},
+        {"url": "https://x.example/", **CAPS, "js_escalate_min_chars": -1},
+        {"url": "https://x.example/", **CAPS, "playwright_timeout_s": 0},
     ],
 )
 def test_endpoint_rejects_bad_body(body: dict[str, object]) -> None:
@@ -273,3 +311,150 @@ def test_endpoint_returns_result_shape(monkeypatch: pytest.MonkeyPatch) -> None:
         "reason": "dns",
     }
     assert seen == {"url": "https://x.example/", **CAPS}
+
+
+# ── Leo thang Playwright (T-6.6) — Chromium THẬT, mạng giả ───────────────────
+# Trình duyệt chỉ thấy byte do `route` tự lấy qua `connect_tcp` giả ở trên. Request
+# nào để Chromium tự đi (`continue_`, `fetch`, bỏ `route`) thì vào proxy chết,
+# không bao giờ tới mạng giả ⇒ mã không có trong trang ⇒ đỏ.
+
+
+def _js_page(last_script: str, *, scripts: int = 4) -> bytes:
+    filler = "<script>var x = 1;</script>" * (scripts - 1)
+    return (
+        "<html><head><meta charset='utf-8'><title>JS</title></head>"
+        f"<body><div id='out'></div>{filler}{last_script}</body></html>"
+    ).encode()
+
+
+def _writer_js(marker: str) -> bytes:
+    para = f"<p>{VI}. Mã kiểm tra {marker} chỉ có sau khi script chạy. </p>"
+    return (
+        f"document.getElementById('out').innerHTML = "
+        f"'<article>' + {para!r}.repeat(6) + '</article>';"
+    ).encode()
+
+
+def _html(body: bytes) -> list[bytes]:
+    return _response(body, headers="Content-Type: text/html\r\n")
+
+
+def _js(body: bytes) -> list[bytes]:
+    return _response(body, headers="Content-Type: text/javascript\r\n")
+
+
+@pytest.mark.parametrize(("scripts", "method"), [(4, "playwright"), (3, "httpx")])
+def test_js_heavy_page_escalates_and_subrequests_are_pinned(
+    network: FakeNetwork, scripts: int, method: str
+) -> None:
+    network.routes[(PUBLIC_V4, "/")] = _html(
+        _js_page('<script src="https://cdn.example/app.js"></script>', scripts=scripts)
+    )
+    network.routes[(CDN_V4, "/app.js")] = _js(_writer_js("R8B3"))
+    # Rebinding: lần resolve thứ hai của `cdn.example` là loopback. Mã chỉ tới
+    # trang khi script được lấy từ đúng IP đã kiểm lần đầu.
+    cdn = SequenceResolver([CDN_V4], ["127.0.0.1"])
+
+    result = _fetch("https://page.example/", by_host(page_example=[PUBLIC_V4], cdn_example=cdn))
+
+    assert result.ok and result.fetch_method == method
+    if method == "httpx":  # 3 thẻ <script> — không leo thang (§12.3: "> 3")
+        assert "R8B3" not in result.text
+        assert (CDN_V4, "/app.js") not in network.requests
+    else:
+        assert "R8B3" in result.text and VI in result.text
+        assert set(network.connects) == {PUBLIC_V4, CDN_V4}
+        assert cdn.calls == 1
+
+
+def test_browser_requests_outside_checked_path_are_blocked(
+    network: FakeNetwork, caplog: pytest.LogCaptureFixture
+) -> None:
+    blocked = {
+        # Cổng lạ, tên công khai. `http://` từ trang `https` thì Chromium tự chặn
+        # (mixed content) trước khi tới `route` — xanh giả, đã đo.
+        "https://page.example:8443/": "port",
+        "https://intra.example/": "address",  # tên trỏ vào IP riêng
+        "https://cdn.example/post": "method",
+        "https://cdn.example/pic.png": "type",  # ảnh (§12.3 bước 5)
+    }
+    calls = "".join(
+        f"fetch('{url}', {{mode: 'no-cors'}}).catch(() => {{}});"
+        for url in ("https://page.example:8443/", "https://intra.example/")
+    )
+    calls += (
+        "fetch('https://cdn.example/post', {method: 'POST', mode: 'no-cors', body: 'x'})"
+        ".catch(() => {});"
+    )
+    calls += "fetch('https://cdn.example/ok.json').catch(() => {});"  # đối chứng: được đi
+    network.routes[(PUBLIC_V4, "/")] = _html(
+        _js_page(f"<img src='https://cdn.example/pic.png'><script>{calls}</script>")
+    )
+    network.routes[(CDN_V4, "/ok.json")] = _response(
+        b"{}", headers="Content-Type: application/json\r\n"
+    )
+    resolver = by_host(page_example=[PUBLIC_V4], cdn_example=[CDN_V4], intra_example=["10.0.0.5"])
+
+    with caplog.at_level(logging.INFO, logger="fetcher"):
+        result = _fetch("https://page.example/", resolver)
+
+    assert result.ok and result.fetch_method == "playwright"
+    # Mạng chỉ thấy trang (lượt httpx + lượt trình duyệt) và đối chứng.
+    assert set(network.requests) == {(PUBLIC_V4, "/"), (CDN_V4, "/ok.json")}
+    for url, reason in blocked.items():
+        line = f"reason={reason} "
+        digest = f"url_sha={server._url_digest(url)}"
+        assert any(line in m and digest in m for m in caplog.messages), url
+
+
+def test_one_byte_cap_for_all_browser_requests(
+    network: FakeNetwork, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Mỗi script 40 KiB < trần 64 KiB, nhưng hai cái cộng lại thì vượt.
+    big = b"/*" + b"a" * (40 * 1024) + b"*/"
+    network.routes[(PUBLIC_V4, "/")] = _html(
+        _js_page(
+            '<script src="https://cdn.example/a.js"></script>'
+            '<script src="https://cdn.example/b.js"></script>',
+            scripts=3,
+        )
+    )
+    network.routes[(CDN_V4, "/a.js")] = _js(big)
+    network.routes[(CDN_V4, "/b.js")] = _js(big)
+
+    with caplog.at_level(logging.INFO, logger="fetcher"):
+        result = _fetch(
+            "https://page.example/", by_host(page_example=[PUBLIC_V4], cdn_example=[CDN_V4])
+        )
+
+    assert result.fetch_method == "playwright"
+    assert sum("reason=too_large type=script" in m for m in caplog.messages) == 1
+
+
+def test_stuck_page_times_out_and_next_render_works(network: FakeNetwork) -> None:
+    network.routes[(PUBLIC_V4, "/hang")] = _html(_js_page("<script>while (true) {}</script>"))
+    network.routes[(PUBLIC_V4, "/ok")] = _html(
+        _js_page('<script src="https://cdn.example/app.js"></script>')
+    )
+    network.routes[(CDN_V4, "/app.js")] = _js(_writer_js("H5N2"))
+    resolver = by_host(page_example=[PUBLIC_V4], cdn_example=[CDN_V4])
+
+    async def run() -> tuple[server.FetchResult, float, server.FetchResult]:
+        try:
+            started = time.monotonic()
+            stuck = await server.fetch(
+                "https://page.example/hang",
+                resolver=resolver,
+                **{**CAPS, "playwright_timeout_s": 2.0},  # type: ignore[arg-type]
+            )
+            elapsed = time.monotonic() - started
+            after = await server.fetch("https://page.example/ok", resolver=resolver, **CAPS)  # type: ignore[arg-type]
+            return stuck, elapsed, after
+        finally:
+            await server.close_browser()
+
+    stuck, elapsed, after = asyncio.run(run())
+
+    assert (stuck.ok, stuck.reason, stuck.fetch_method) == (False, "timeout", "playwright")
+    assert elapsed < 2.0 * 1.1 + 0.5  # trần + lượt httpx giả (B-278: biên 10 %)
+    assert after.ok and "H5N2" in after.text
