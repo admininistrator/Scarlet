@@ -185,6 +185,7 @@ request kế tiếp của tab đó nhận `401` mà không ai hiểu vì sao.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
@@ -231,6 +232,7 @@ from app.db.repositories.users import UserRepository
 from app.db.session import session_scope
 from app.quota.snapshot import WindowSnapshot, read_snapshot
 from app.quota.tiers import get_effective_limits
+from app.quota.web_searches import searches_in_window
 
 logger = logging.getLogger(__name__)
 
@@ -583,6 +585,12 @@ class ProfileOut(UserOut):
     max_upload_mb: int
     max_attachments: int
     allowed_upload_mime: list[str]
+    #: Công tắc "Tìm web" (T-6.8) — FE T-6.7c mờ công tắc. Hai trường đầu là
+    #: hạn mức đã gộp ghi đè (§10.4); `web_searches_used` là số lượt trong 24 h
+    #: trượt, `null` = Redis không trả lời (lối `quota`).
+    can_use_web: bool
+    web_searches_per_day: int
+    web_searches_used: int | None
 
 
 def _set_session_cookie(response: Response, user: UserOut) -> None:
@@ -1134,4 +1142,16 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> ProfileO
         max_upload_mb=limits.max_upload_mb,
         max_attachments=limits.max_attachments,
         allowed_upload_mime=list(settings.allowed_upload_mime),
+        can_use_web=limits.can_use_web,
+        web_searches_per_day=limits.web_searches_per_day,
+        web_searches_used=await _web_searches_used(user_id),
     )
+
+
+async def _web_searches_used(user_id: UUID) -> int | None:
+    """Redis chết ⇒ `None`, không `500` — `/me` không chết vì một con số (lối `read_snapshot`)."""
+    try:
+        return len(await searches_in_window(user_id, now=time.time()))
+    except Exception:
+        logger.warning("khong doc duoc bo dem web cua user %s", user_id)
+        return None

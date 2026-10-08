@@ -11,6 +11,8 @@ worker (`app.tools.registry.fetch_url`). Postgres, `context.build`, meter là th
 from __future__ import annotations
 
 import json
+import math
+import time
 import uuid
 from collections.abc import AsyncIterator
 from decimal import Decimal
@@ -20,13 +22,13 @@ from typing import Any
 import httpx
 import pytest
 from pydantic import SecretStr
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from test_generate import FakeRedis, _ctx, _read_ledger, _reload, _WireRecorder
 
 from app.config.catalog import get_model
 from app.config.settings import settings
-from app.db.models import Conversation, Message, MessageRole, MessageStatus
+from app.db.models import Conversation, Message, MessageRole, MessageStatus, User
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.llm import context as llm_context
 from app.llm.adapters import openai_compat
@@ -34,6 +36,7 @@ from app.llm.adapters.system import SystemAdapter
 from app.llm.client import Chunk, ToolCall, Usage
 from app.llm.parser import StreamParser
 from app.llm.tokens import count_messages
+from app.quota import web_searches
 from app.quota.estimator import estimate
 from app.tools import registry as registry_mod
 from app.tools import web_search as web_search_mod
@@ -114,6 +117,14 @@ class FetchRecorder:
 @pytest.fixture
 def fake_redis() -> FakeRedis:
     return FakeRedis()
+
+
+@pytest.fixture(autouse=True)
+def quota_redis(monkeypatch: pytest.MonkeyPatch, quota_redis_fake: Any) -> Any:
+    """`web_search` đọc hạn mức + bộ đếm `web:{uid}` qua `get_redis` (T-6.8)."""
+    monkeypatch.setattr("app.quota.tiers.get_redis", lambda: quota_redis_fake)
+    monkeypatch.setattr("app.quota.web_searches.get_redis", lambda: quota_redis_fake)
+    return quota_redis_fake
 
 
 @pytest.fixture(autouse=True)
@@ -663,3 +674,80 @@ async def test_web_search_blank_query_is_invalid_arguments_no_search(
 
     assert (out.ok, out.reason) == (False, "invalid_arguments")
     assert search.queries == []
+
+
+# ═══════════════ T-6.8: `web_searches_per_day` — cửa sổ trượt 24 h ═══════════════
+
+
+async def test_override_one_search_per_day_second_search_is_web_quota_turn_done(
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    quota_redis: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ghi đè từng người (B-153) `1` ⇒ lời gọi thứ hai không tới Tavily, `ok: false`, `done`."""
+    await session.execute(
+        update(User)
+        .where(User.id == user_a)
+        .values(limit_override_json={"web_searches_per_day": 1})
+    )
+    await session.commit()
+    search = SearchRecorder(SearchResult(results=HITS))
+    monkeypatch.setattr(registry_mod, "search_provider", search)
+    message = await _tree(session, user_a)
+    client = SeqClient(_calls_turn(_search("c_s1"), _search("c_s2")), ROUND2)
+
+    await generate(_ctx(fake_redis, client), str(message.id))  # type: ignore[arg-type]
+
+    assert search.queries == ["tin mới"]
+    first, second = (
+        fake_redis.data(i) for i, k in enumerate(fake_redis.kind) if k == "tool_result"
+    )
+    assert first["ok"] is True
+    assert (second["ok"], second["result"]["reason"]) == (False, "web_quota")
+    told = client.calls[1]["messages"][-1]["content"]
+    assert told.startswith("[web_search lỗi: web_quota] Đã dùng hết 1 lượt")
+    assert "có lại một lượt lúc" in told
+    assert len(quota_redis.zset[f"web:{user_a}"]) == 1
+    assert fake_redis.last["type"] == "done"
+    reloaded = await _reload(session_factory, message.id)
+    assert reloaded.status is MessageStatus.COMPLETED
+
+
+async def test_fetch_url_does_not_count_as_web_search(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    quota_redis: Any,
+    fetch: FetchRecorder,
+) -> None:
+    """§12.4 nói "lượt search" — `fetch_url` không chạm bộ đếm."""
+    message = await _tree(session, user_a)
+    client = SeqClient(_calls_turn(_fetch("c_f")), ROUND2)
+
+    await generate(_ctx(fake_redis, client), str(message.id))  # type: ignore[arg-type]
+
+    assert fetch.urls == [PAGE_URL]
+    assert not any(k.startswith(web_searches.WEB_PREFIX) for k in quota_redis.zset)
+
+
+async def test_entry_older_than_24h_is_not_counted_and_is_cleaned(quota_redis: Any) -> None:
+    """Score đặt tường minh (B-290): 24 h + 1 s trước rơi ra; 24 h − 1 s trước còn tính."""
+    uid = uuid.uuid4()
+    now = time.time()
+    key = f"{web_searches.WEB_PREFIX}{uid}"
+    quota_redis.zset[key] = {"cu": now - web_searches.DAY_S - 1}
+
+    assert await web_searches.take_search(uid, limit=1, now=now) is None
+    assert "cu" not in quota_redis.zset[key] and len(quota_redis.zset[key]) == 1
+
+    quota_redis.zset[key] = {"sat": now - web_searches.DAY_S + 1}
+    refill_at = await web_searches.take_search(uid, limit=1, now=now)
+    assert refill_at == pytest.approx(now + 1)
+    assert list(quota_redis.zset[key]) == ["sat"]
+
+
+async def test_limit_zero_never_refills(quota_redis: Any) -> None:
+    assert await web_searches.take_search(uuid.uuid4(), limit=0, now=time.time()) == math.inf

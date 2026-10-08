@@ -16,10 +16,15 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from app.quota.tiers import get_effective_limits
+from app.quota.web_searches import take_search
 from app.tools.fetch_url import fetch_url
 from app.tools.web_search import SearchHit, SearchProvider, TavilySearch
 
@@ -31,6 +36,8 @@ REASON_INVALID_ARGUMENTS = "invalid_arguments"
 REASON_TOOL_ERROR = "tool_error"
 #: Worker đặt: lời gọi vượt `MAX_TOOL_CALLS_PER_TURN` của lượt — không chạy.
 REASON_TOO_MANY_CALLS = "too_many_calls"
+#: Hết `web_searches_per_day` trong 24 h trượt (T-6.8) — không gọi Tavily.
+REASON_WEB_QUOTA = "web_quota"
 
 #: `web_search` hỏng (UC-08 dòng 5): câu CỦA MÌNH cho model, đi sau dòng lỗi có
 #: mã — để model trả lời bằng kiến thức sẵn có thay vì im hay bịa nguồn.
@@ -39,10 +46,17 @@ SEARCH_UNAVAILABLE = (
     "là chưa kiểm được trên web."
 )
 
+#: Câu cho model khi hết lượt search (T-6.8), cùng vai `SEARCH_UNAVAILABLE`.
+WEB_QUOTA_TEXT = (
+    "Đã dùng hết {limit} lượt tìm web trong 24 giờ{refill}. Hãy trả lời bằng kiến "
+    "thức sẵn có và nói rõ là chưa kiểm được trên web."
+)
+WEB_QUOTA_REFILL = "; có lại một lượt lúc {at} (UTC)"
+
 
 @dataclass(frozen=True, slots=True)
 class UserContext:
-    """Ai đang gọi tool — §13.5. T-6.8 / P7 đọc quyền từ đây."""
+    """Ai đang gọi tool — §13.5. Quyền đọc lúc gọi qua `get_effective_limits` (T-6.8)."""
 
     user_id: uuid.UUID
 
@@ -126,7 +140,7 @@ class BuiltinTools:
 
     async def call(self, name: str, args: dict[str, Any], ctx: UserContext) -> ToolResult:
         if name == WEB_SEARCH.name:
-            return await _web_search(args)
+            return await _web_search(args, ctx)
         if name != FETCH_URL.name:
             return ToolResult(ok=False, reason=REASON_UNKNOWN_TOOL)
         url = args.get("url")
@@ -142,10 +156,26 @@ class BuiltinTools:
         )
 
 
-async def _web_search(args: dict[str, Any]) -> ToolResult:
+async def _web_search(args: dict[str, Any], ctx: UserContext) -> ToolResult:
     query = args.get("query")
     if not isinstance(query, str) or not query.strip():
         return ToolResult(ok=False, reason=REASON_INVALID_ARGUMENTS)
+    # Trần đọc lúc gọi (B-153), kiểm TRƯỚC Tavily; hết ⇒ tool lỗi, lượt vẫn chạy (UC-08).
+    limit = (await get_effective_limits(ctx.user_id)).web_searches_per_day
+    refill_at = await take_search(ctx.user_id, limit=limit, now=time.time())
+    if refill_at is not None:
+        refill = (
+            ""
+            if math.isinf(refill_at)
+            else WEB_QUOTA_REFILL.format(
+                at=datetime.fromtimestamp(refill_at, UTC).isoformat(timespec="seconds")
+            )
+        )
+        return ToolResult(
+            ok=False,
+            content=WEB_QUOTA_TEXT.format(limit=limit, refill=refill),
+            reason=REASON_WEB_QUOTA,
+        )
     found = await search_provider.search(query)
     if found.error is not None:
         return ToolResult(ok=False, content=SEARCH_UNAVAILABLE, reason=found.error.value)

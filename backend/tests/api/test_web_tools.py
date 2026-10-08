@@ -9,6 +9,7 @@ và câu của `get_path` không kéo `tool_rounds` (chữ trang) về.
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -16,15 +17,16 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, func, select, update
+from sqlalchemy import event, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from app.config import catalog
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
-from app.db.models import Message, MessageRole, MessageStatus, UserRole, UserStatus
+from app.db.models import Message, MessageRole, MessageStatus, User, UserRole, UserStatus
 from app.db.repositories import ConversationRepository, MessageRepository
 from app.main import app
+from app.quota.tiers import tier_cache_key
 
 API = "/api/v1"
 NO_TOOLS = "MODEL_NO_TOOLS"
@@ -371,3 +373,121 @@ async def test_siblings_carry_tool_summary_too(
     assert resp.status_code == 200, resp.text
     (item,) = resp.json()["items"]
     assert item["tools"] == [{"name": "fetch_url", "ok": False, "reason": "blocked", "sources": []}]
+
+
+# ═══════════════ T-6.8: `can_use_web` đọc lúc gọi (B-153) + `/auth/me` ═══════════════
+
+
+async def _web_off(factory: async_sessionmaker[AsyncSession], user_id: uuid.UUID) -> None:
+    """Ghi đè TỪNG NGƯỜI (`limit_override_json`) — đọc thẳng `tiers` sẽ không thấy (B-153)."""
+    async with factory() as session:
+        await session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(limit_override_json={"can_use_web": False})
+        )
+        await session.commit()
+
+
+@pytest.mark.parametrize("route", ["post", "retry", "patch"])
+async def test_can_use_web_false_is_422_web_disabled_writes_nothing(
+    route: str,
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    fake_arq: _FakeArq,
+) -> None:
+    model = _model(tools=True)
+    conv, question, answer = await _turn(
+        session_factory, user_a, model_id=model, default_model=model
+    )
+    await _web_off(session_factory, user_a)
+    before = await _count(session_factory)
+
+    if route == "post":
+        resp = await client.post(
+            f"{API}/conversations/{conv}/messages",
+            headers=_auth(user_a),
+            json={"content": "tim web", "model_id": model, "web_tools": True},
+        )
+    elif route == "retry":
+        resp = await client.post(
+            f"{API}/messages/{answer}/retry", headers=_auth(user_a), json={"web_tools": True}
+        )
+    else:
+        resp = await client.patch(
+            f"{API}/messages/{question}",
+            headers=_auth(user_a),
+            json={"content": "tim web", "web_tools": True},
+        )
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "WEB_DISABLED"
+    assert await _count(session_factory) == before
+    assert fake_arq.pushed == []
+
+
+async def test_retry_inherited_flag_is_dropped_when_web_disabled(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], user_a: uuid.UUID
+) -> None:
+    """Cờ thừa kế (không ai ghi rõ) + web tắt ⇒ bỏ cờ, `202` — lối model không `tools`."""
+    _, _, answer = await _turn(session_factory, user_a, model_id=_model(tools=True), web_tools=True)
+    await _web_off(session_factory, user_a)
+
+    resp = await client.post(f"{API}/messages/{answer}/retry", headers=_auth(user_a))
+
+    assert resp.status_code == 202, resp.text
+    assert await _web_tools_of(session_factory, resp.json()["assistant_message_id"]) is False
+
+
+async def test_tier_change_applies_once_tier_cache_expires(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    quota_redis: Any,
+) -> None:
+    """NQ-51: đổi `tiers` ⇒ hiệu lực khi khoá `tier:limits:{uid}` (TTL `TIER_CACHE_TTL_S`) hết."""
+    model = _model(tools=True)
+    conv, _, _ = await _turn(session_factory, user_a, model_id=model)
+    url = f"{API}/conversations/{conv}/messages"
+    body = {"content": "tim web", "model_id": model, "web_tools": True}
+
+    warm = await client.post(url, headers=_auth(user_a), json=body)
+    async with session_factory() as session:
+        await session.execute(text("UPDATE tiers SET can_use_web = false WHERE name = 'free'"))
+        await session.commit()
+    cached = await client.post(url, headers=_auth(user_a), json=body)
+    del quota_redis.store[tier_cache_key(user_a)]  # TTL trôi qua
+    expired = await client.post(url, headers=_auth(user_a), json=body)
+
+    assert (warm.status_code, cached.status_code) == (202, 202), (warm.text, cached.text)
+    assert expired.status_code == 422, expired.text
+    assert expired.json()["error"]["code"] == "WEB_DISABLED"
+
+
+async def test_me_returns_three_web_fields(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    quota_redis: Any,
+) -> None:
+    async with session_factory() as session:
+        await session.execute(
+            update(User)
+            .where(User.id == user_a)
+            .values(limit_override_json={"web_searches_per_day": 3})
+        )
+        await session.commit()
+    now = time.time()
+    # Một lượt trong 24 h, một lượt quá hạn (score tường minh — B-290).
+    quota_redis.zset[f"web:{user_a}"] = {"trong": now - 60, "cu": now - 24 * 3600 - 1}
+
+    resp = await client.get(f"{API}/auth/me", headers=_auth(user_a))
+
+    assert resp.status_code == 200, resp.text
+    me = resp.json()
+    assert (me["can_use_web"], me["web_searches_per_day"], me["web_searches_used"]) == (
+        True,
+        3,
+        1,
+    )

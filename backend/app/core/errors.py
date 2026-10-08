@@ -341,6 +341,9 @@ class ApiErrorCode(StrEnum):
     #: (Q-P6-3, T-6.7a). Cả ba đường sinh chữ (lối S9); `details` mang
     #: `{model_id}`. Không message nào được tạo.
     MODEL_NO_TOOLS = "MODEL_NO_TOOLS"
+    #: `422` — `web_tools: true` mà `can_use_web` của user (tier + ghi đè, đọc lúc
+    #: gọi — B-153, T-6.8) tắt. Cả ba đường sinh chữ. Không message nào được tạo.
+    WEB_DISABLED = "WEB_DISABLED"
     #: `415` — `.txt` không phải UTF-8 (có/không BOM) hay UTF-16 có BOM, hoặc
     #: giải mã ra `\x00` (NQ-138 ⑦, T-4.6a). Không đoán bảng mã, không `replace`.
     ATTACHMENT_TEXT_ENCODING = "ATTACHMENT_TEXT_ENCODING"

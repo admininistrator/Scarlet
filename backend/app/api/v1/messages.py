@@ -261,7 +261,7 @@ class CreateMessageRequest(BaseModel):
     #: có trong bộ từ vựng không".
     reasoning_effort: str | None = None
     #: Công tắc "Tìm web" (Q-P6-3, T-6.7a). `true` + model không `tools` ⇒ `422
-    #: MODEL_NO_TOOLS` — xem `_pick_web_tools`.
+    #: MODEL_NO_TOOLS`; `can_use_web` tắt ⇒ `422 WEB_DISABLED` — xem `_pick_web_tools`.
     web_tools: bool = False
 
     @model_validator(mode="after")
@@ -368,7 +368,7 @@ async def create_message(
         reasoning_effort = await _pick_reasoning(
             session, user_id=user_id, model=model, requested=body.reasoning_effort
         )
-        web_tools = _pick_web_tools(model, requested=body.web_tools)
+        web_tools = await _pick_web_tools(model, user_id=user_id, requested=body.web_tools)
 
         # C14 — đọc `active_leaf_id` TRƯỚC khi ghi đè nó, nếu không `branched`
         # luôn là `False` (so một giá trị với chính nó).
@@ -769,17 +769,23 @@ async def _pick_reasoning(
     return model.reasoning.default
 
 
-def _pick_web_tools(
-    model: catalog.ModelEntry, *, requested: bool | None, inherited: bool = False
+async def _pick_web_tools(
+    model: catalog.ModelEntry,
+    *,
+    user_id: uuid.UUID,
+    requested: bool | None,
+    inherited: bool = False,
 ) -> bool:
     """Cờ "Tìm web" của lượt sinh (Q-P6-3, T-6.7a) — lối `_pick_reasoning`.
 
-    Chỉ `true` NGƯỜI GỌI ghi rõ mới được hỏng: model thiếu `tools` ⇒ `422`, gọi
-    TRƯỚC mọi `INSERT` nên không hàng nào được ghi (lối S9 / T-4.5). Cờ thừa kế
-    của `retry` mà model mới không có `tools` thì bị bỏ, không lỗi.
+    Chỉ `true` NGƯỜI GỌI ghi rõ mới được hỏng: model thiếu `tools` ⇒ `422`,
+    `can_use_web` (đọc lúc gọi qua `get_effective_limits` — B-153, T-6.8) tắt ⇒
+    `422`; gọi TRƯỚC mọi `INSERT` nên không hàng nào được ghi (lối S9 / T-4.5).
+    Cờ thừa kế của `retry` mà model mới không có `tools` hoặc web đã tắt thì bị
+    bỏ, không lỗi.
 
     Raise:
-        ApiError 422 `MODEL_NO_TOOLS`.
+        ApiError 422 `MODEL_NO_TOOLS` / `WEB_DISABLED`.
     """
     has_tools = catalog.TOOLS_CAPABILITY in model.capabilities
     if requested and not has_tools:
@@ -789,9 +795,16 @@ def _pick_web_tools(
             f"model khong dung duoc tool: {model.id}",
             details={"model_id": model.id},
         )
-    if requested is not None:
-        return requested
-    return inherited and has_tools
+    wanted = requested if requested is not None else inherited and has_tools
+    if not wanted or (await get_effective_limits(user_id)).can_use_web:
+        return wanted
+    if requested:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ApiErrorCode.WEB_DISABLED,
+            "tai khoan khong duoc dung cong cu web",
+        )
+    return False
 
 
 async def _day_job(assistant_message_id: uuid.UUID) -> None:
@@ -1164,8 +1177,9 @@ async def retry_message(
             requested=body.reasoning_effort if body is not None else None,
             inherited=original.reasoning_effort,
         )
-        web_tools = _pick_web_tools(
+        web_tools = await _pick_web_tools(
             model,
+            user_id=user_id,
             requested=body.web_tools if body is not None else None,
             inherited=original.web_tools,
         )
@@ -1248,7 +1262,7 @@ async def edit_message(
         reasoning_effort = await _pick_reasoning(
             session, user_id=user_id, model=model, requested=None
         )
-        web_tools = _pick_web_tools(model, requested=body.web_tools)
+        web_tools = await _pick_web_tools(model, user_id=user_id, requested=body.web_tools)
 
         try:
             user_message = await messages.create_message(

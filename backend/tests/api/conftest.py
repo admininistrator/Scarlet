@@ -103,4 +103,6 @@ def quota_redis(monkeypatch: pytest.MonkeyPatch, quota_redis_fake: Any) -> Any:
     monkeypatch.setattr("app.quota.estimator.get_redis", lambda: quota_redis_fake)
     monkeypatch.setattr("app.quota.tiers.get_redis", lambda: quota_redis_fake)
     monkeypatch.setattr("app.quota.snapshot.get_redis", lambda: quota_redis_fake)
+    # T-6.8: bộ đếm `web:{uid}` — `/auth/me` đọc nó.
+    monkeypatch.setattr("app.quota.web_searches.get_redis", lambda: quota_redis_fake)
     return quota_redis_fake
