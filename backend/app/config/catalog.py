@@ -1021,6 +1021,8 @@ def get_default_model() -> ModelEntry | None:
 
 #: Cờ capability của catalog (§9.2, §9.4) cho phép gửi ảnh.
 VISION_CAPABILITY = "vision"
+#: Cờ capability cho phép gửi `tools` (§9.4, C18) — thiếu ⇒ model không thấy khoá ấy.
+TOOLS_CAPABILITY = "tools"
 
 
 def with_vision(model: ModelEntry, vision: bool | None) -> ModelEntry:

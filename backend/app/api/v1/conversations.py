@@ -138,6 +138,20 @@ class ConversationOut(BaseModel):
     updated_at: datetime
 
 
+class ToolSource(BaseModel):
+    url: str
+    title: str
+
+
+class ToolSummary(BaseModel):
+    """Một lời gọi tool đã chạy — phần chip của `tool_result` (§7.4), không chữ trang."""
+
+    name: str
+    ok: bool
+    reason: str | None
+    sources: list[ToolSource]
+
+
 class PathMessage(BaseModel):
     """Một message trên đường đi hiện tại, kèm vị trí giữa các anh em (C13).
 
@@ -185,6 +199,10 @@ class PathMessage(BaseModel):
     #: Artifact của message (T-5.2a), thứ tự khối. Điền bởi `with_artifacts` —
     #: cũng một câu cho cả danh sách.
     artifacts: list[PathArtifact] = []
+    #: Tóm tắt tool của lượt (T-6.7a): `[{name, ok, reason, sources: [{url,
+    #: title}]}]`, thứ tự gọi. Điền bởi `with_tools` — một câu, không kéo chữ
+    #: trang; FE dựng chip sau `STREAM_TTL_S` từ đây (B-87).
+    tools: list[ToolSummary] = []
 
     @classmethod
     def from_path_node(cls, node: PathNode) -> PathMessage:
@@ -574,6 +592,7 @@ async def _path(
     nodes = await MessageRepository(session).get_path(conversation.active_leaf_id, user_id=user_id)
     items = [PathMessage.from_path_node(node) for node in nodes]
     await with_attachments(session, items, user_id=user_id)
+    await with_tools(session, items, user_id=user_id)
     return await with_artifacts(session, items, user_id=user_id)
 
 
@@ -608,6 +627,20 @@ async def with_artifacts(
         by_message.setdefault(row.message_id, []).append(path_artifact(row))
     for item in items:
         item.artifacts = by_message.get(item.id, [])
+    return items
+
+
+async def with_tools(
+    session: AsyncSession, items: list[PathMessage], *, user_id: uuid.UUID
+) -> list[PathMessage]:
+    """Điền `tools` cho cả danh sách bằng MỘT truy vấn (T-6.7a, lối `with_artifacts`)."""
+    if not items:
+        return items
+    by_message = await MessageRepository(session).tool_summaries(
+        [item.id for item in items], user_id=user_id
+    )
+    for item in items:
+        item.tools = [ToolSummary.model_validate(t) for t in by_message.get(item.id, [])]
     return items
 
 

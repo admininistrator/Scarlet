@@ -12,7 +12,8 @@ dependencies = [
     "pydantic-settings>=2.5",
     "redis>=5.0",
     "arq>=0.26",
-    "openai>=1.50",
+    # B-328 — GHIM mot ban cho .venv va image: manh tool_calls do SDK dung (T-6.7a).
+    "openai==3.24.0",
     "tiktoken>=0.8",
     "argon2-cffi>=23.1",
     # AES-256-GCM + HKDF cho BYOK (§10.5, T-2.14, app/core/crypto.py).

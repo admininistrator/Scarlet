@@ -79,15 +79,21 @@ API đã giải mức (body › đã nhớ › mặc định) và ghi nó lên h
 tên model gửi LiteLLM, `omit_temperature` bỏ hẳn khoá `temperature`. Code không
 biết tên tham số nào của provider nào (A3) — nó chỉ chép khối của catalog.
 
-**Chưa có, cố ý:** `tools=None` (tool registry là §12/§13, Phase 6–7, và §7.2
-ghi vòng lặp tool ở đó); `raw_response` (§17.2) chưa có người ghi — hoãn sang
-Phase 6, khi tool-call bắt đầu vỡ thật và hình dạng "response cuối" mới kiểm
-chứng được (B-79).
+**Vòng lặp tool (T-6.7a, §7.2 ③ "lặp lại", §13.5).** Hàng có `web_tools` và
+model có capability `tools` ⇒ gửi schema của `tools/registry.py`; model gọi
+tool ⇒ `tool_call` → chạy → `tool_result` → gọi lại, tới `MAX_TOOL_ROUNDS`.
+Cả lượt vẫn là MỘT message (Q-P6-1): chữ mọi vòng nối vào `content`, các vòng
+vào cột `tool_rounds`, MỘT dòng `usage_events` (B-160). Xem `_run`.
+
+**Không ghi, cố ý:** `raw_response` (§17.2) — Q-P6-5 / B-79 đóng: `tool_rounds`
+đã giữ nguyên văn `tool_calls` + `finish_reason` từng vòng, thứ §17.2 muốn để
+debug tool-call vỡ; cột ở lại DDL, luôn NULL.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -98,10 +104,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from app.config.catalog import ModelEntry, ReasoningOption, reasoning_to_send
+from app.config.catalog import TOOLS_CAPABILITY, ModelEntry, ReasoningOption, reasoning_to_send
 from app.config.settings import settings
 from app.core import storage
-from app.db.models import KeySource, MessageStatus
+from app.db.models import KeySource, MessageRole, MessageStatus
 from app.db.repositories import ArtifactRepository, MessageRepository
 from app.db.session import session_scope
 from app.llm import byok_endpoints, context
@@ -109,7 +115,7 @@ from app.llm.adapters.byok import ByokAdapter
 from app.llm.artifact_blocks import artifact_blocks
 from app.llm.client import Chunk, LLMClient, ToolCall, Usage
 from app.llm.credentials import Credential, CredentialUnavailable, resolve_credential
-from app.llm.tokens import IMAGE_PART_TYPE
+from app.llm.tokens import IMAGE_PART_TYPE, count_message, count_messages, count_text
 from app.llm.vision import prepare_image
 from app.quota import meter
 from app.streaming.cancel import FINISH_REASON_CANCELLED, is_cancel_requested
@@ -123,9 +129,11 @@ from app.streaming.events import (
     ReasoningEvent,
     StartEvent,
     ToolCallEvent,
+    ToolResultEvent,
     UsageEvent,
 )
 from app.streaming.producer import StreamProducer
+from app.tools.registry import REASON_TOO_MANY_CALLS, ToolResult, UserContext, registry
 from app.tools.ssrf import UnsafeUrlError, pinned_client
 from app.workers.extract import PAGE_MIME, render_pdf_page
 
@@ -152,6 +160,11 @@ CTX_LLM_CLIENT = "llm_client"
 CANCEL_CHECK_EVERY_N_CHUNKS = 8
 
 
+#: Message `role=tool` khi tool hỏng (T-6.7a) — chữ của mình, không phải
+#: `untrusted_block`; `reason` là mã cố định, không host / IP (§20).
+TOOL_ERROR_TEXT = "[{name} lỗi: {reason}]"
+
+
 class GenerationError(Exception):
     """Lỗi đã phân loại được thành một `ErrorCode` của §7.4.
 
@@ -165,6 +178,50 @@ class GenerationError(Exception):
         super().__init__(f"{code.value}: {message}")
         self.code = code
         self.details = message
+
+
+@dataclass(slots=True)
+class _Call:
+    """MỘT lần gọi model trong lượt — vòng tool có nhiều lần (T-6.7a, Q-P6-1).
+
+    Giữ riêng từng lần vì hai thứ không cộng được ở mức lượt: `sent` (mỗi lần
+    gửi lại cả ngữ cảnh — đường lùi C40 của meter đếm từng lần) và chữ của
+    vòng (dây vòng tool cần đúng `content` + `tool_calls` của lần ấy).
+    """
+
+    #: Đúng danh sách message đã gửi lên ở lần này (bản chụp — dây còn lớn thêm).
+    sent: list[dict[str, Any]]
+    text: list[str] = field(default_factory=list)
+    reasoning: list[str] = field(default_factory=list)
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: Usage | None = None
+
+    def spent(self, model: ModelEntry) -> meter.Spent:
+        """Token của lần gọi này — số provider, hoặc tự đếm (C40, B-94)."""
+        return meter.measure(
+            model,
+            usage=self.usage,
+            sent=self.sent,
+            content="".join(self.text),
+            reasoning="".join(self.reasoning),
+            tool_calls=[tc.to_wire() for tc in self.tool_calls] or None,
+        )
+
+
+def _sum_usage(usages: list[Usage]) -> Usage:
+    """Cộng `usage` các lần gọi (B-160: một dòng sổ, token cộng mọi vòng)."""
+
+    def total(values: list[int | None]) -> int | None:
+        known = [v for v in values if v is not None]
+        return sum(known) if known else None
+
+    return Usage(
+        prompt_tokens=sum(u.prompt_tokens for u in usages),
+        completion_tokens=sum(u.completion_tokens for u in usages),
+        total_tokens=sum(u.total_tokens for u in usages),
+        reasoning_tokens=total([u.reasoning_tokens for u in usages]),
+        cached_prompt_tokens=total([u.cached_prompt_tokens for u in usages]),
+    )
 
 
 @dataclass(slots=True)
@@ -184,11 +241,13 @@ class _Result:
     #: này chỉ lấy được một lần, ở `_prepare`, và `usage_events.user_id` là
     #: cột NOT NULL cần nó.
     user_id: uuid.UUID | None = None
-    #: Đúng danh sách message đã gửi lên. Giữ **tham chiếu**, không phải bản
-    #: sao: `_chay` vẫn đang giữ chính list đó suốt lượt sinh, nên nó không tốn
-    #: thêm gì. Chỉ được đọc trên đường lùi C40 — khi provider không báo
-    #: `usage` thì đây là thứ duy nhất đếm lại được phần prompt (B-67, B-94).
-    sent: list[dict[str, Any]] = field(default_factory=list)
+    #: Mọi lần gọi model của lượt, theo thứ tự (T-6.7a). Lượt không tool có
+    #: đúng một. Đường lùi C40 của meter đếm `sent` của TỪNG lần (B-67, B-94).
+    calls: list[_Call] = field(default_factory=list)
+    #: Cột `messages.tool_rounds` (Q-P6-1) — mỗi vòng tool một phần tử.
+    rounds: list[dict[str, Any]] = field(default_factory=list)
+    #: Số lời gọi tool đã CHẠY trong lượt — so với `MAX_TOOL_CALLS_PER_TURN`.
+    tools_run: int = 0
     #: Thời điểm **gọi model**, dùng để tra bảng giá theo khung giờ (A7, B-35).
     #: KHÁC thời điểm ghi sổ: một lượt sinh mười phút có thể bắt đầu lúc 16:58
     #: giờ cao điểm và kết thúc lúc 17:08 giờ thường — giá phải là giá 16:58.
@@ -203,10 +262,7 @@ class _Result:
     #: B-78). `None` = chưa ghi sổ được, và khi đó khoá `cost_usd` **vắng mặt**
     #: trên dây chứ không bằng 0.
     cost_usd: Decimal | None = None
-    text: list[str] = field(default_factory=list)
-    reasoning: list[str] = field(default_factory=list)
-    tool_calls: list[ToolCall] = field(default_factory=list)
-    usage: Usage | None = None
+    #: Của lần gọi CUỐI (provider), hoặc `cancelled` (§7.5).
     finish_reason: str | None = None
     error: GenerationError | None = None
     #: §7.5 — người dùng đã bấm Dừng và vòng lặp đã thoát vì thế. Cờ RIÊNG chứ
@@ -222,8 +278,31 @@ class _Result:
         Nối bằng `str.join` chứ không cộng dồn theo byte: C9 là lỗi cắt một ký
         tự tiếng Việt làm đôi, và nó chỉ xuất hiện khi có chỗ nào đó làm việc
         với `bytes`. Ở đây không có chỗ nào như vậy.
+
+        Mọi lần gọi của lượt nối vào cùng `content` (T-6.7a) — đúng thứ tự mà
+        `delta` đã ra dây.
         """
-        return "".join(self.text)
+        return "".join(t for call in self.calls for t in call.text)
+
+    @property
+    def reasoning(self) -> str:
+        return "".join(r for call in self.calls for r in call.reasoning)
+
+    @property
+    def tool_calls(self) -> list[ToolCall]:
+        return [tc for call in self.calls for tc in call.tool_calls]
+
+    @property
+    def usage(self) -> Usage | None:
+        """Tổng `usage` provider báo — `None` nếu MỘT lần gọi nào không báo.
+
+        Không trộn số provider với số tự đếm trên cột `messages.*_tokens`
+        (NQ-23, NQ-26); meter đếm từng lần qua `_Call.spent`.
+        """
+        usages = [call.usage for call in self.calls]
+        if not usages or any(u is None for u in usages):
+            return None
+        return _sum_usage([u for u in usages if u is not None])
 
     @property
     def billable(self) -> bool:
@@ -248,7 +327,7 @@ class _Result:
         """
         if self.model is None or self.user_id is None or self.started_at is None:
             return False
-        return bool(self.usage or self.text or self.reasoning or self.tool_calls)
+        return any(c.usage or c.text or c.reasoning or c.tool_calls for c in self.calls)
 
 
 async def _heartbeat_loop(mid: uuid.UUID) -> None:
@@ -341,16 +420,30 @@ async def _run(
     producer: StreamProducer,
     result: _Result,
 ) -> None:
-    """Bước ① → ⑤ của §7.2 ③. Ném `GenerationError` cho mọi ngả không đi tiếp được."""
-    model_meta, wire_messages, user_id, credential, level = await _prepare(mid)
+    """Bước ① → ⑤ của §7.2 ③. Ném `GenerationError` cho mọi ngả không đi tiếp được.
+
+    **Vòng lặp tool (§7.2 ③ "lặp lại", T-6.7a).** Lần gọi có `tools` mà model
+    trả `tool_calls` ⇒ chạy tool, nối vòng vào dây, gọi lại. Dừng khi: model
+    không gọi tool · lần gọi không mang `tools` (hết `MAX_TOOL_ROUNDS`, hoặc
+    ngữ cảnh + schema vượt `token_budget()` — B-208, không `CONTEXT_TOO_LARGE`
+    giữa lượt) · huỷ (kiểm trước mỗi vòng sau vòng đầu và trước mỗi lời gọi tool
+    — B-96). Mọi ngả vẫn ra `_close_ledger` (C19): vòng lặp không mở đường thoát
+    nào mới.
+    """
+    model_meta, wire, user_id, credential, level, web_tools = await _prepare(mid)
     result.model = model_meta
     result.user_id = user_id
-    result.sent = wire_messages
     result.key_source = credential.key_source
+    tool_ctx = UserContext(user_id=user_id)
+    # C18 / Q-P6-3: công tắc VÀ capability — thiếu một ⇒ `tools=None` như cũ.
+    schema = (
+        [spec.to_wire() for spec in registry.specs(tool_ctx)]
+        if web_tools and TOOLS_CAPABILITY in model_meta.capabilities
+        else []
+    )
 
     # Nhịp tim mở NGAY sau `_prepare` (nơi `mark_streaming` chạy) chứ không
-    # đợi chunk đầu: quãng `client.stream(...)` bên dưới chính là TTFT, và đó
-    # đúng là quãng mà bản cũ để trống — xem `_heartbeat` (B-122).
+    # đợi chunk đầu, và sống suốt mọi vòng + mọi tool (B-122).
     async with _heartbeat(mid), _turn_client(ctx, credential) as client:
         await producer.emit(
             StartEvent(
@@ -360,64 +453,214 @@ async def _run(
             )
         )
 
-        await _inline_images(wire_messages)
+        await _inline_images(wire)
 
-        # Mốc giá của A7: bảng giá dùng để ghi sổ là bảng giá của **lúc gọi**,
-        # không phải lúc lượt sinh kết thúc. Đặt ngay trước `await` chứ không
-        # ở đầu `_chay`: quãng `_prepare` có thể mất vài chục mili-giây vì
-        # recursive CTE của §8.3, và mốc giá phải là mốc gửi request.
+        # Mốc giá của A7: bảng giá của **lúc gọi lần đầu**. ponytail: vòng sau
+        # vắt qua mốc khung giờ cao điểm DeepSeek vẫn tính giá vòng đầu — đổi
+        # sang giá từng lần khi meter ghi được nhiều mốc cho một dòng sổ.
         result.started_at = datetime.now(UTC)
-        try:
-            stream = await client.stream(
-                # Alias LiteLLM hay tên gốc của provider — tuỳ credential, và
-                # `Credential` là chỗ biết cả hai (T-2.15). Mức có `alias` thì
-                # alias ấy thay tên trên đường system (9Router chọn mức bằng
-                # tên model — T-S.2); BYOK bỏ qua nó.
+        while True:
+            if result.calls and await _is_cancelled(ctx, mid):
+                _stop_for_cancel(mid, result, 0)
+                break
+            offer = (
+                bool(schema)
+                and len(result.rounds) < settings.MAX_TOOL_ROUNDS
+                and _fits(wire, schema, model_meta)
+            )
+            call = await _call_model(
+                ctx,
+                mid,
+                client,
+                producer,
+                result,
                 model=credential.model_name(model_meta, level),
-                messages=wire_messages,
-                # Tool registry là §12/§13 (Phase 6–7). `None` chứ không `[]`:
-                # adapter đổi nó thành `omit`, model không có capability `tools`
-                # (§9.4) thì không được thấy khoá đó (C18).
-                tools=None,
-                # §10.2 `est_max` KHÔNG đổi (Cạm bẫy ④ của T-S.6): token suy
-                # luận nằm trong `max_tokens` ở mọi provider đã đo, nên trần
-                # này vẫn là trường hợp xấu nhất của lượt sinh.
+                wire=wire,
+                tools=schema if offer else None,
                 max_tokens=model_meta.max_output,
-                # `None` = không gửi khoá (Cạm bẫy ① của T-S.6): Anthropic bật
-                # thinking trả `400` cho mọi `temperature` khác 1, và
-                # `drop_params` của LiteLLM không cứu — đo ở T-S.2.
                 temperature=(
                     None
                     if level is not None and level.omit_temperature
                     else settings.LLM_TEMPERATURE
                 ),
-                # `params` (hoặc `byok_params`) của mức, trộn NGUYÊN VĂN vào body
-                # (§24.2b·S3b). Bản sao sâu — xem `Credential.reasoning_params`.
                 extra=credential.reasoning_params(level),
             )
-        except Exception as exc:
-            # `await` này là chỗ gửi request và nhận header, nên 401/400/429 nổ
-            # tại đây chứ không đội lốt stream rỗng (điểm 1 docstring `client.py`).
-            raise GenerationError(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
+            if result.cancelled or not offer or not call.tool_calls:
+                break
+            await _run_tools(ctx, mid, producer, result, call, wire, tool_ctx, model_meta)
+            if result.cancelled:
+                break
 
-        so_chunk = 0
-        try:
-            async for chunk in stream:
-                # `_phat` chạy TRƯỚC phép kiểm: chunk thứ 8 vẫn ra dây và vẫn vào
-                # `result.chu`. §7.5 đòi "vẫn lưu phần đã sinh", mà phần đã sinh
-                # tính tới mẩu cuối cùng provider đã gửi — bỏ nó đi là để màn hình
-                # và `messages.content` nói hai chuyện khác nhau.
-                await _emit(producer, result, chunk)
-                so_chunk += 1
-                if so_chunk % CANCEL_CHECK_EVERY_N_CHUNKS == 0 and await _is_cancelled(ctx, mid):
-                    _stop_for_cancel(mid, result, so_chunk)
-                    break
-        except GenerationError:
-            raise
-        except Exception as exc:
-            # Đứt giữa chừng: đây là ca chính của C19. Phần chữ đã gom trong
-            # `result` vẫn được ghi xuống Postgres ở `_close_ledger`.
-            raise GenerationError(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
+        # MỘT event `usage` cho cả lượt, tổng mọi lần gọi (B-160) — trước
+        # artifact và `done` như cũ. Ngả huỷ không có `usage` của provider (B-94).
+        if result.usage is not None:
+            await producer.emit(UsageEvent(usage=result.usage))
+
+
+async def _call_model(
+    ctx: dict[str, Any],
+    mid: uuid.UUID,
+    client: LLMClient,
+    producer: StreamProducer,
+    result: _Result,
+    *,
+    model: str,
+    wire: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    max_tokens: int,
+    temperature: float | None,
+    extra: dict[str, Any],
+) -> _Call:
+    """Một lần gọi model + vòng chunk của nó (§7.2 ③ ⑤). Trả `_Call` đã gom."""
+    call = _Call(sent=list(wire))
+    result.calls.append(call)
+    try:
+        stream = await client.stream(
+            # Alias LiteLLM hay tên gốc của provider — tuỳ credential (T-2.15);
+            # mức có `alias` thay tên trên đường system (T-S.2).
+            model=model,
+            messages=call.sent,
+            # `None` chứ không `[]`: adapter đổi nó thành `omit`, model không có
+            # capability `tools` (§9.4) thì không được thấy khoá đó (C18). Lần
+            # gọi cuối của vòng lặp cũng `None` — đo T-6.7a: cả ba model `200`
+            # khi dây có `tool_calls` mà request không có `tools`.
+            tools=tools,
+            # §10.2 `est_max` KHÔNG đổi (Cạm bẫy ④ của T-S.6): token suy luận
+            # nằm trong `max_tokens` ở mọi provider đã đo.
+            max_tokens=max_tokens,
+            # `None` = không gửi khoá (Cạm bẫy ① của T-S.6).
+            temperature=temperature,
+            # `params` (hoặc `byok_params`) của mức, trộn NGUYÊN VĂN (§24.2b·S3b).
+            extra=extra,
+        )
+    except Exception as exc:
+        # `await` này là chỗ gửi request và nhận header, nên 401/400/429 nổ
+        # tại đây chứ không đội lốt stream rỗng (điểm 1 docstring `client.py`).
+        raise GenerationError(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
+
+    so_chunk = 0
+    try:
+        async for chunk in stream:
+            # `_emit` chạy TRƯỚC phép kiểm: chunk thứ 8 vẫn ra dây và vẫn vào
+            # `call.text` — §7.5 "vẫn lưu phần đã sinh" tính tới mẩu cuối.
+            await _emit(producer, result, call, chunk)
+            so_chunk += 1
+            if so_chunk % CANCEL_CHECK_EVERY_N_CHUNKS == 0 and await _is_cancelled(ctx, mid):
+                _stop_for_cancel(mid, result, so_chunk)
+                break
+    except GenerationError:
+        raise
+    except Exception as exc:
+        # Đứt giữa chừng: ca chính của C19. Phần chữ đã gom vẫn được ghi.
+        raise GenerationError(ErrorCode.UPSTREAM_ERROR, f"{type(exc).__name__}: {exc}") from exc
+    return call
+
+
+def _schema_tokens(schema: list[dict[str, Any]], model_id: str) -> int:
+    return count_text(json.dumps(schema, ensure_ascii=False), model_id=model_id) if schema else 0
+
+
+def _fits(wire: list[dict[str, Any]], schema: list[dict[str, Any]], model: ModelEntry) -> bool:
+    """Ngữ cảnh + schema tool ≤ `token_budget()` (§9.6) — trước MỖI lần mời tool."""
+    used = count_messages(wire, model_id=model.id) + _schema_tokens(schema, model.id)
+    return used <= context.token_budget(model)
+
+
+async def _run_tools(
+    ctx: dict[str, Any],
+    mid: uuid.UUID,
+    producer: StreamProducer,
+    result: _Result,
+    call: _Call,
+    wire: list[dict[str, Any]],
+    tool_ctx: UserContext,
+    model: ModelEntry,
+) -> None:
+    """Chạy các `tool_calls` của một lần gọi, ghi vòng, nối dây cho lần gọi kế.
+
+    `tool_result` ra dây TRƯỚC mọi `delta` của vòng sau và trước `done`
+    (Cạm bẫy ① T-6.7a). Kết quả lên dây trong `untrusted_block` (§20), cắt
+    theo `TOOL_RESULT_MAX_CHARS` rồi cắt mềm cho dây vẫn vừa `token_budget()`
+    (B-208 ⑤) — vòng kế không bao giờ là `CONTEXT_TOO_LARGE`; hết chỗ cho
+    schema thì vòng kế là lần gọi cuối, không tool.
+    """
+    calls = [tc.to_wire() for tc in call.tool_calls]
+    round_: dict[str, Any] = {
+        # NQ-22: `ToolCall.to_wire()` là nguồn duy nhất của hình dạng này.
+        "tool_calls": calls,
+        "reasoning": "".join(call.reasoning) or None,
+        "finish_reason": result.finish_reason,
+        "results": [],
+    }
+    result.rounds.append(round_)
+    # Suy luận KHÔNG gửi lại (B-266 / B-283, đo T-6.7a: DeepSeek `200` cả qua
+    # LiteLLM lẫn gọi thẳng, `prompt_tokens` bằng nhau có hay không có nó).
+    wire.append(
+        {
+            "role": MessageRole.ASSISTANT.value,
+            "content": "".join(call.text) or None,
+            "tool_calls": calls,
+        }
+    )
+    # Dây (không schema) luôn vừa ngân sách ⇒ lần gọi kế ít nhất đi được KHÔNG
+    # tool; còn chỗ cho schema hay không là việc của `_fits` ở đầu vòng.
+    room = context.token_budget(model) - count_messages(wire, model_id=model.id)
+    for tc in call.tool_calls:
+        if await _is_cancelled(ctx, mid):
+            _stop_for_cancel(mid, result, 0)
+            return
+        if result.tools_run >= settings.MAX_TOOL_CALLS_PER_TURN:
+            out = ToolResult(ok=False, reason=REASON_TOO_MANY_CALLS)
+        else:
+            result.tools_run += 1
+            out = await registry.call(tc.name, tc.arguments, tool_ctx)
+        text, message = _tool_message(tc, out, room=room, model_id=model.id)
+        room -= count_message(message, model_id=model.id)
+        wire.append(message)
+        round_["results"].append(
+            {
+                "tool_call_id": tc.call_id,
+                "name": tc.name,
+                "ok": out.ok,
+                "content": text,
+                "sources": out.sources,
+                "reason": out.reason,
+            }
+        )
+        await producer.emit(
+            ToolResultEvent(
+                call_id=tc.call_id,
+                name=tc.name,
+                ok=out.ok,
+                # Không mang chữ trang — chip chỉ cần nguồn và lý do.
+                result={"sources": out.sources, "reason": out.reason},
+            )
+        )
+
+
+def _tool_message(
+    tc: ToolCall, out: ToolResult, *, room: int, model_id: str
+) -> tuple[str, dict[str, Any]]:
+    """Message `role=tool` cho một kết quả: (chữ đã cắt, message trên dây)."""
+    if not out.ok:
+        return "", {
+            "role": MessageRole.TOOL.value,
+            "tool_call_id": tc.call_id,
+            "content": TOOL_ERROR_TEXT.format(name=tc.name, reason=out.reason),
+        }
+    name = out.sources[0]["url"] if out.sources else tc.name
+    text = out.content[: settings.TOOL_RESULT_MAX_CHARS]
+    while True:
+        message = {
+            "role": MessageRole.TOOL.value,
+            "tool_call_id": tc.call_id,
+            "content": context.untrusted_block(name, text),
+        }
+        cost = count_message(message, model_id=model_id)
+        if cost <= room or not text:
+            return text, message
+        # Cắt mềm theo tỉ lệ rồi đo lại — tokenizer không tuyến tính tuyệt đối.
+        text = text[: max(0, len(text) * max(room, 0) // cost - 1)]
 
 
 async def _inline_images(messages: list[dict[str, Any]]) -> None:
@@ -504,7 +747,7 @@ async def _turn_client(ctx: dict[str, Any], credential: Credential) -> AsyncIter
 
 async def _prepare(
     mid: uuid.UUID,
-) -> tuple[ModelEntry, list[dict[str, Any]], uuid.UUID, Credential, ReasoningOption | None]:
+) -> tuple[ModelEntry, list[dict[str, Any]], uuid.UUID, Credential, ReasoningOption | None, bool]:
     """Bước ① → ③ (+ ①.5): đọc message, chọn credential, dựng ngữ cảnh, `streaming`.
 
     Cả bốn trong **một** session rồi đóng ngay: một lượt sinh có thể kéo mười
@@ -584,10 +827,11 @@ async def _prepare(
     # `user_id` đi ra cùng các thứ kia vì đây là chỗ DUY NHẤT đọc được nó:
     # `messages` không có cột `user_id` (Phụ lục A), nó nằm ở hội thoại chứa
     # message. Bước ghi sổ ⑥.5 cần nó cho `usage_events.user_id`.
-    return model_meta, wire_messages, owned.user_id, credential, level
+    # `web_tools` đi từ hàng `queued` như mức suy luận (Q-P6-3, lối T-S.6).
+    return model_meta, wire_messages, owned.user_id, credential, level, owned.message.web_tools
 
 
-async def _emit(producer: StreamProducer, result: _Result, chunk: Chunk) -> None:
+async def _emit(producer: StreamProducer, result: _Result, call: _Call, chunk: Chunk) -> None:
     """Một `Chunk` của §9.1 → một event của §7.4. Map một-một, không bảng dịch.
 
     `Chunk.kind` cố ý trùng tên `event` của SSE (điểm 2 docstring `client.py`),
@@ -597,16 +841,16 @@ async def _emit(producer: StreamProducer, result: _Result, chunk: Chunk) -> None
     match chunk.kind:
         case "delta":
             text = chunk.text or ""
-            result.text.append(text)
+            call.text.append(text)
             await producer.emit(DeltaEvent(text=text))
         case "reasoning":
             text = chunk.text or ""
             # KHÔNG vào `result.chu`: reasoning đi vào cột `messages.reasoning`
             # và không bao giờ quay lại ngữ cảnh lượt sau (B-33, `context.py`).
-            result.reasoning.append(text)
+            call.reasoning.append(text)
             await producer.emit(ReasoningEvent(text=text))
         case "tool_call" if chunk.tool_call is not None:
-            result.tool_calls.append(chunk.tool_call)
+            call.tool_calls.append(chunk.tool_call)
             await producer.emit(
                 ToolCallEvent(
                     call_id=chunk.tool_call.call_id,
@@ -615,15 +859,16 @@ async def _emit(producer: StreamProducer, result: _Result, chunk: Chunk) -> None
                 )
             )
         case "usage" if chunk.usage is not None:
-            result.usage = chunk.usage
-            await producer.emit(UsageEvent(usage=chunk.usage))
+            # Chỉ GOM — event `usage` ra MỘT lần cho cả lượt ở cuối `_run`
+            # (tổng mọi lần gọi, B-160), không một lần mỗi vòng tool.
+            call.usage = chunk.usage
         case "done":
             # Chỉ NHẶT, không phát. Event `done` ra dây ở `_close_ledger`, sau khi
             # Postgres đã ghi xong (luật 2 ở docstring module).
             result.finish_reason = chunk.finish_reason
             # Provider gửi `usage` ở chunk riêng **trước** `done` (C40); giữ số
             # cũ nếu `done` không mang gì, thay bằng số mới nếu có.
-            result.usage = chunk.usage or result.usage
+            call.usage = chunk.usage or call.usage
         case _:
             logger.warning("generate: bo qua chunk kind=%r khong co du lieu", chunk.kind)
 
@@ -830,10 +1075,16 @@ async def _record_usage(ctx: dict[str, Any], mid: uuid.UUID, result: _Result) ->
                 at=started_at,
                 now=time.time(),
                 usage=result.usage,
-                sent=result.sent,
+                sent=result.calls[0].sent,
                 content=result.content,
-                reasoning="".join(result.reasoning),
+                reasoning=result.reasoning,
                 tool_calls=[tc.to_wire() for tc in result.tool_calls] or None,
+                # T-6.7a / B-160: MỘT dòng sổ, token cộng từng lần gọi — mỗi
+                # lần đo riêng (số provider, hoặc tự đếm `sent` của lần ấy).
+                spent=sum(
+                    (call.spent(model) for call in result.calls[1:]),
+                    result.calls[0].spent(model),
+                ),
                 # §10.5 — `byok` thì `record_usage` ghi dòng sổ nhưng KHÔNG
                 # `ZADD` hai cửa sổ quota. Luật nằm ở `quota/meter.py`, chỗ
                 # duy nhất biết cả hai vế; ở đây chỉ chở giá trị (B-157).
@@ -895,13 +1146,18 @@ async def _write_result(mid: uuid.UUID, result: _Result) -> None:
     """
     error = result.error
     usage = result.usage
+    executed = {tc["id"] for round_ in result.rounds for tc in round_["tool_calls"]}
     async with session_scope() as session:
         await MessageRepository(session).finish_generation(
             mid,
             status=_final_status(result),
             content=result.content,
-            reasoning="".join(result.reasoning) or None,
-            tool_calls=[tc.to_wire() for tc in result.tool_calls] or None,
+            reasoning=result.reasoning or None,
+            # Lời gọi đã chạy sống trong `tool_rounds` (Q-P6-1); cột cũ chỉ còn
+            # giữ lời gọi KHÔNG chạy (lần gọi không mời tool mà model vẫn gọi).
+            tool_calls=[tc.to_wire() for tc in result.tool_calls if tc.call_id not in executed]
+            or None,
+            tool_rounds=result.rounds or None,
             finish_reason=result.finish_reason,
             error_code=error.code.value if error is not None else None,
             prompt_tokens=usage.prompt_tokens if usage is not None else None,

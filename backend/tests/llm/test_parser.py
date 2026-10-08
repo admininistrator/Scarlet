@@ -82,7 +82,7 @@ def test_manifest_covers_all_catalog_providers() -> None:
 
 
 def test_fixtures_exist_for_both_cases() -> None:
-    assert {e["case"] for e in ENTRIES} == {"text", "tools"}
+    assert {e["case"] for e in ENTRIES} == {"text", "tools", "fetch_url", "fetch_url_round2"}
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)

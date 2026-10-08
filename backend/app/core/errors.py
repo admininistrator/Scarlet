@@ -337,6 +337,10 @@ class ApiErrorCode(StrEnum):
     #: admin; model endpoint BYOK luôn không) thiếu `vision` (§9.4, S9, T-4.5).
     #: Cả ba đường sinh chữ; `details` mang `{model_id}`. Không message nào được tạo.
     MODEL_NO_VISION = "MODEL_NO_VISION"
+    #: `422` — `web_tools: true` mà model hiệu lực thiếu capability `tools`
+    #: (Q-P6-3, T-6.7a). Cả ba đường sinh chữ (lối S9); `details` mang
+    #: `{model_id}`. Không message nào được tạo.
+    MODEL_NO_TOOLS = "MODEL_NO_TOOLS"
     #: `415` — `.txt` không phải UTF-8 (có/không BOM) hay UTF-16 có BOM, hoặc
     #: giải mã ra `\x00` (NQ-138 ⑦, T-4.6a). Không đoán bảng mã, không `replace`.
     ATTACHMENT_TEXT_ENCODING = "ATTACHMENT_TEXT_ENCODING"

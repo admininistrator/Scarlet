@@ -152,17 +152,23 @@ class QuotaWarning(BaseModel):
     remaining_pct: int
 
 
-def estimate(model: catalog.ModelEntry, messages: list[dict[str, Any]]) -> Estimate:
+def estimate(
+    model: catalog.ModelEntry, messages: list[dict[str, Any]], *, web_tools: bool = False
+) -> Estimate:
     """`est_max` của §10.2 cho một ngữ cảnh đã dựng.
 
     Tách khỏi `check_quota` vì nó là phần **thuần tính toán**: không Redis,
     không Postgres, không `ApiError`. Nhờ vậy phép nhân tiền — thứ A7 đòi đúng
     tới 1e-6 — kiểm được mà không phải dựng một request giả.
     """
-    return estimate_from_tokens(model, count_messages(messages, model_id=model.id))
+    return estimate_from_tokens(
+        model, count_messages(messages, model_id=model.id), web_tools=web_tools
+    )
 
 
-def estimate_from_tokens(model: catalog.ModelEntry, context_tokens: int) -> Estimate:
+def estimate_from_tokens(
+    model: catalog.ModelEntry, context_tokens: int, *, web_tools: bool = False
+) -> Estimate:
     """`est_max` khi đã có sẵn số token của ngữ cảnh.
 
     Là hàm mà `estimate` gọi, và cũng là đường đi của ca lùi trong
@@ -173,6 +179,9 @@ def estimate_from_tokens(model: catalog.ModelEntry, context_tokens: int) -> Esti
     này giá bao nhiêu" (A3, B-35, B-65). **Không** truyền `at`: dự toán là dự
     toán cho **bây giờ**, và giờ này là giờ model sẽ chạy. Giá chốt vào lịch
     sử là việc của T-2.12, với `at` của chính lượt sinh ấy.
+
+    **Lượt bật web (Q-P6-6, T-6.7a):** `est_max × (MAX_TOOL_ROUNDS + 1)` — mỗi
+    vòng tool là một lần gọi nữa, gửi lại cả ngữ cảnh. Trần đọc LÚC GỌI.
     """
     cat = catalog.get_catalog()
     est_in = context_tokens + cat.prompt_overhead_tokens(model.id)
@@ -191,6 +200,8 @@ def estimate_from_tokens(model: catalog.ModelEntry, context_tokens: int) -> Esti
         Decimal(est_in) * Decimal(str(pricing.input_per_1m))
         + Decimal(model.max_output) * Decimal(str(pricing.output_per_1m))
     ) / TOKENS_PER_PRICE_UNIT
+    if web_tools:
+        est_max *= settings.MAX_TOOL_ROUNDS + 1
 
     return Estimate(
         model_id=model.id,
@@ -207,6 +218,7 @@ async def check_quota(
     user_id: uuid.UUID,
     leaf_id: uuid.UUID,
     model: catalog.ModelEntry,
+    web_tools: bool = False,
 ) -> QuotaWarning | None:
     """Cửa chặn TRƯỚC của §10.2. Trả cảnh báo (hoặc `None`) khi cho qua.
 
@@ -222,7 +234,9 @@ async def check_quota(
         ApiError 503 `SERVICE_UNAVAILABLE`: không hỏi được Redis — xem
             docstring module.
     """
-    estimate = await _estimate(session, leaf_id=leaf_id, model=model, user_id=user_id)
+    estimate = await _estimate(
+        session, leaf_id=leaf_id, model=model, user_id=user_id, web_tools=web_tools
+    )
     limits = await get_effective_limits(user_id)
 
     now = time.time()
@@ -266,6 +280,7 @@ async def _estimate(
     leaf_id: uuid.UUID,
     model: catalog.ModelEntry,
     user_id: uuid.UUID,
+    web_tools: bool,
 ) -> Estimate:
     """Dự toán theo ngữ cảnh thật; ngữ cảnh dựng không nổi thì theo **cả ngân sách**.
 
@@ -288,8 +303,8 @@ async def _estimate(
             leaf_id,
             cap,
         )
-        return estimate_from_tokens(model, cap)
-    return estimate(model, messages)
+        return estimate_from_tokens(model, cap, web_tools=web_tools)
+    return estimate(model, messages, web_tools=web_tools)
 
 
 def _over_limit(

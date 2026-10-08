@@ -90,7 +90,9 @@ class ArtifactRepository:
                 stmt = _user_version_statement(user_id, artifact_id, content)
                 return (await self._session.execute(stmt)).scalar_one_or_none()
 
-    async def user_edits(self, *, leaf_id: uuid.UUID, user_id: uuid.UUID) -> Sequence[Row[Any]]:
+    async def user_edits(
+        self, *, leaf_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Sequence[Row[*tuple[Any, ...]]]:
         """Bản sửa thuộc về từng câu hỏi trên đường đi tới `leaf_id` — MỘT câu (Q-P5-5).
 
         Bản sửa thuộc về **câu hỏi đầu tiên gửi sau nó**: với mỗi message user U,
@@ -148,7 +150,9 @@ class ArtifactRepository:
         )
         return (await self._session.execute(stmt)).all()
 
-    async def get(self, *, user_id: uuid.UUID, artifact_id: uuid.UUID) -> Row[Any] | None:
+    async def get(
+        self, *, user_id: uuid.UUID, artifact_id: uuid.UUID
+    ) -> Row[*tuple[Any, ...]] | None:
         """`(Artifact, conversation_id)`. Của người khác, message hay hội thoại
         đã xoá mềm ⇒ `None` — cùng một lối với "không có" (§20)."""
         stmt = _owned(select(Artifact, Message.conversation_id), Artifact, user_id).where(
@@ -158,7 +162,7 @@ class ArtifactRepository:
 
     async def list_versions(
         self, *, user_id: uuid.UUID, artifact_id: uuid.UUID
-    ) -> Sequence[Row[Any]]:
+    ) -> Sequence[Row[*tuple[Any, ...]]]:
         """Mọi phiên bản của dòng chứa `artifact_id`, mọi nhánh, `ORDER BY version`.
 
         **Không** `content` (Cạm bẫy ⑤ — đây là danh sách tab). Rỗng ⇒ không có
@@ -210,7 +214,7 @@ def _normalized(title: Any) -> ColumnElement[str]:
     return func.btrim(func.regexp_replace(func.lower(title), r"\s+", " ", "g"))
 
 
-def _owned(stmt: Select[Any], table: Any, user_id: uuid.UUID) -> Select[Any]:
+def _owned[*Ts](stmt: Select[*Ts], table: Any, user_id: uuid.UUID) -> Select[*Ts]:
     """JOIN sở hữu `messages → conversations` trong SQL (§20); xoá mềm ⇒ vắng (C12)."""
     return (
         stmt.join(Message, Message.id == table.message_id)

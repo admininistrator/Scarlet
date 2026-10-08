@@ -141,6 +141,19 @@ class Spent:
     #: `True` = số của provider; `False` = `tiktoken` tự đếm (B-67, B-94).
     measured: bool
 
+    def __add__(self, other: Spent) -> Spent:
+        """Cộng hai lần gọi của MỘT lượt (vòng tool T-6.7a, B-160): một dòng sổ.
+
+        `measured` chỉ còn `True` khi MỌI lần gọi đều có số provider — một vòng
+        tự đếm là cả dòng `low`.
+        """
+        return Spent(
+            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+            completion_tokens=self.completion_tokens + other.completion_tokens,
+            cached_tokens=self.cached_tokens + other.cached_tokens,
+            measured=self.measured and other.measured,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class UsageRecord:
@@ -301,6 +314,7 @@ async def record_usage(
     tool_calls: list[dict[str, Any]] | None,
     key_source: KeySource = KeySource.SYSTEM,
     purpose: UsagePurpose = UsagePurpose.CHAT,
+    spent: Spent | None = None,
 ) -> UsageRecord:
     """Ghi sổ một lượt sinh đã khép: `INSERT usage_events` rồi `ZADD` hai cửa sổ.
 
@@ -334,9 +348,17 @@ async def record_usage(
         một lượt sinh đã xong có được phép chết vì lỗi ghi sổ hay không — cùng
         lối `read_window`/`add_to_windows`.
     """
-    spent = measure(
-        model, usage=usage, sent=sent, content=content, reasoning=reasoning, tool_calls=tool_calls
-    )
+    # `spent` có sẵn = lượt nhiều lần gọi (vòng tool, T-6.7a): người gọi đã
+    # `measure` từng lần rồi cộng — `usage`…`tool_calls` khi ấy bị bỏ qua.
+    if spent is None:
+        spent = measure(
+            model,
+            usage=usage,
+            sent=sent,
+            content=content,
+            reasoning=reasoning,
+            tool_calls=tool_calls,
+        )
     if key_source is KeySource.BYOK:
         # NQ-134 ③: BYOK chỉ đếm token — `cost_usd = 0`, không snapshot giá
         # (endpoint tự nhập không có giá nào để chụp). `cost_confidence` lúc

@@ -65,6 +65,31 @@ TOOLS_SCHEMA: list[dict[str, Any]] = [
     }
 ]
 
+#: T-6.7a (B-66) — vòng lặp tool thật: vòng 1 gọi `fetch_url`, vòng 2 trả lời
+#: sau kết quả tool. Schema cùng hình với `app/tools/registry.py` (không import
+#: `app` — kéo `Settings` fail-fast, A4); trang trả về là chữ cố định.
+FETCH_URL_PROMPT = (
+    "Đọc https://httpbin.org/html và cho biết tên tác giả được nhắc trong trang."
+)
+FETCH_URL_SCHEMA: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": "Đọc nội dung chữ của một trang web công khai theo URL http(s).",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string", "description": "URL đầy đủ"}},
+                "required": ["url"],
+            },
+        },
+    }
+]
+FETCH_URL_PAGE = (
+    '<untrusted_content name="fetch_url">\nHerman Melville - Moby-Dick\n'
+    "Avast, me hearties...\n</untrusted_content>"
+)
+
 #: `deepseek-flash` tiêu `max_tokens` cho reasoning TRƯỚC khi sinh content
 #: (B-33): để 60 thì content rỗng mà `finish_reason` vẫn là `stop`. Đặt rộng
 #: tay để fixture có cả khối reasoning lẫn khối content.
@@ -82,18 +107,19 @@ def record_case(
     base_url: str,
     api_key: str,
     model_id: str,
-    with_tools: bool,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
     body: dict[str, Any] = {
         "model": model_id,
-        "messages": [{"role": "user", "content": TOOLS_PROMPT if with_tools else TEXT_PROMPT}],
+        "messages": messages,
         "max_tokens": MAX_TOKENS,
         "temperature": 0.0,
         "stream": True,
         "stream_options": {"include_usage": True},
     }
-    if with_tools:
-        body["tools"] = TOOLS_SCHEMA
+    if tools:
+        body["tools"] = tools
         body["tool_choice"] = "auto"
 
     chunks: list[dict[str, Any]] = []
@@ -114,6 +140,43 @@ def record_case(
                 break
             chunks.append(json.loads(payload))
     return chunks
+
+
+def round_two(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Dây vòng 2: câu hỏi + `tool_calls` ghép từ mảnh vòng 1 + kết quả tool.
+
+    Không gửi lại `reasoning_content` — đo T-6.7a: `200` cả hai cách, `prompt_tokens`
+    bằng nhau (B-266 / B-283).
+    """
+    calls: dict[int, dict[str, Any]] = {}
+    for chunk in chunks:
+        for choice in chunk.get("choices") or ():
+            for frag in (choice.get("delta") or {}).get("tool_calls") or ():
+                call = calls.setdefault(
+                    frag.get("index", 0),
+                    {
+                        "id": "",
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    },
+                )
+                call["id"] = frag.get("id") or call["id"]
+                function = frag.get("function") or {}
+                call["function"]["name"] = (
+                    function.get("name") or call["function"]["name"]
+                )
+                call["function"]["arguments"] += function.get("arguments") or ""
+    if not calls:
+        raise RuntimeError("vòng 1 không gọi tool — không dựng được vòng 2")
+    wire = [calls[i] for i in sorted(calls)]
+    return [
+        {"role": "user", "content": FETCH_URL_PROMPT},
+        {"role": "assistant", "content": None, "tool_calls": wire},
+        *(
+            {"role": "tool", "tool_call_id": c["id"], "content": FETCH_URL_PAGE}
+            for c in wire
+        ),
+    ]
 
 
 def main() -> int:
@@ -153,17 +216,39 @@ def main() -> int:
 
     with httpx.Client(timeout=300.0) as client:
         for model in models:
-            cases = [("text", False)]
+            cases: list[tuple[str, str, list[dict[str, Any]] | None, Any]] = [
+                ("text", TEXT_PROMPT, [{"role": "user", "content": TEXT_PROMPT}], None)
+            ]
             if "tools" in model.get("capabilities", []):
-                cases.append(("tools", True))
-            for case_name, with_tools in cases:
+                cases += [
+                    (
+                        "tools",
+                        TOOLS_PROMPT,
+                        [{"role": "user", "content": TOOLS_PROMPT}],
+                        TOOLS_SCHEMA,
+                    ),
+                    (
+                        "fetch_url",
+                        FETCH_URL_PROMPT,
+                        [{"role": "user", "content": FETCH_URL_PROMPT}],
+                        FETCH_URL_SCHEMA,
+                    ),
+                    # `None` = dây dựng từ chunk của ca `fetch_url` ngay trên.
+                    ("fetch_url_round2", FETCH_URL_PROMPT, None, FETCH_URL_SCHEMA),
+                ]
+            recorded: dict[str, list[dict[str, Any]]] = {}
+            for case_name, prompt, messages, tools in cases:
                 chunks = record_case(
                     client,
                     base_url=args.base_url.rstrip("/"),
                     api_key=api_key,
                     model_id=model["id"],
-                    with_tools=with_tools,
+                    messages=messages
+                    if messages is not None
+                    else round_two(recorded["fetch_url"]),
+                    tools=tools,
                 )
+                recorded[case_name] = chunks
                 path = args.out_dir / f"{model['id']}.{case_name}.jsonl"
                 with path.open("w", encoding="utf-8", newline="\n") as fh:
                     for chunk in chunks:
@@ -174,7 +259,7 @@ def main() -> int:
                         "model": model["id"],
                         "provider": model["provider"],
                         "case": case_name,
-                        "prompt": TOOLS_PROMPT if with_tools else TEXT_PROMPT,
+                        "prompt": prompt,
                         "chunks": len(chunks),
                     }
                 )
@@ -205,7 +290,9 @@ def main() -> int:
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"{manifest_path.name}: ghi {len(entries)} mục, tổng {len(manifest['entries'])} mục")
+    print(
+        f"{manifest_path.name}: ghi {len(entries)} mục, tổng {len(manifest['entries'])} mục"
+    )
     return 0
 
 

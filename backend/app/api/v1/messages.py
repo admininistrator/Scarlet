@@ -127,7 +127,7 @@ from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.conversations import PathMessage, with_artifacts, with_attachments
+from app.api.v1.conversations import PathMessage, with_artifacts, with_attachments, with_tools
 from app.config import catalog
 from app.config.settings import FEEDBACK_REASON_MAX_CHARS, settings
 from app.core.deps import (
@@ -260,6 +260,9 @@ class CreateMessageRequest(BaseModel):
     #: ở đây: câu hỏi đúng là "model NÀY có mức ấy không", không phải "chữ này
     #: có trong bộ từ vựng không".
     reasoning_effort: str | None = None
+    #: Công tắc "Tìm web" (Q-P6-3, T-6.7a). `true` + model không `tools` ⇒ `422
+    #: MODEL_NO_TOOLS` — xem `_pick_web_tools`.
+    web_tools: bool = False
 
     @model_validator(mode="after")
     def _content_or_files(self) -> CreateMessageRequest:
@@ -365,6 +368,7 @@ async def create_message(
         reasoning_effort = await _pick_reasoning(
             session, user_id=user_id, model=model, requested=body.reasoning_effort
         )
+        web_tools = _pick_web_tools(model, requested=body.web_tools)
 
         # C14 — đọc `active_leaf_id` TRƯỚC khi ghi đè nó, nếu không `branched`
         # luôn là `False` (so một giá trị với chính nó).
@@ -419,6 +423,7 @@ async def create_message(
             parent_id=uid,
             model=model,
             reasoning_effort=reasoning_effort,
+            web_tools=web_tools,
         )
         await session.commit()
 
@@ -483,6 +488,7 @@ async def _open_generation(
     parent_id: uuid.UUID | None,
     model: catalog.ModelEntry,
     reasoning_effort: str | None,
+    web_tools: bool,
 ) -> NewGeneration:
     """Bốn bước cuối của §7.2 ① — assistant `queued`, dời lá, KIỂM QUOTA, đẩy job.
 
@@ -556,6 +562,8 @@ async def _open_generation(
             model_id=model.id,
             # Cùng lý lẽ cho mức suy luận (T-S.6): chốt ở đây, worker đọc lại.
             reasoning_effort=reasoning_effort,
+            # Q-P6-3 — cùng lối: chốt ở đây, worker đọc lại (T-6.7a).
+            web_tools=web_tools,
         )
     except MessageNotInConversationError as exc:
         raise ApiError(
@@ -590,7 +598,9 @@ async def _open_generation(
     # thì **vẫn** áp — nó là dependency của route, không đi qua đây.
     warning = None
     if key_source is KeySource.SYSTEM:
-        warning = await check_quota(session, user_id=user_id, leaf_id=amid, model=model)
+        warning = await check_quota(
+            session, user_id=user_id, leaf_id=amid, model=model, web_tools=web_tools
+        )
 
     # §10.6 hàng "Đồng thời" (T-2.9, B-85, NQ-49). Ở **đây** chứ không ở một
     # dependency vì phép kiểm cần `message_id`, mà id đó chỉ ra đời ở dòng
@@ -757,6 +767,31 @@ async def _pick_reasoning(
     if remembered is not None:
         return remembered
     return model.reasoning.default
+
+
+def _pick_web_tools(
+    model: catalog.ModelEntry, *, requested: bool | None, inherited: bool = False
+) -> bool:
+    """Cờ "Tìm web" của lượt sinh (Q-P6-3, T-6.7a) — lối `_pick_reasoning`.
+
+    Chỉ `true` NGƯỜI GỌI ghi rõ mới được hỏng: model thiếu `tools` ⇒ `422`, gọi
+    TRƯỚC mọi `INSERT` nên không hàng nào được ghi (lối S9 / T-4.5). Cờ thừa kế
+    của `retry` mà model mới không có `tools` thì bị bỏ, không lỗi.
+
+    Raise:
+        ApiError 422 `MODEL_NO_TOOLS`.
+    """
+    has_tools = catalog.TOOLS_CAPABILITY in model.capabilities
+    if requested and not has_tools:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ApiErrorCode.MODEL_NO_TOOLS,
+            f"model khong dung duoc tool: {model.id}",
+            details={"model_id": model.id},
+        )
+    if requested is not None:
+        return requested
+    return inherited and has_tools
 
 
 async def _day_job(assistant_message_id: uuid.UUID) -> None:
@@ -954,6 +989,9 @@ class RetryRequest(BaseModel):
     #: lại nếu model hiệu lực còn khai mức ấy, rồi tới mức đã nhớ và mặc định
     #: (xem `_pick_reasoning`). Có mà model không khai ⇒ `400`.
     reasoning_effort: str | None = None
+    #: Vắng ⇒ dùng lại `messages.web_tools` của câu trả lời đang thử lại nếu model
+    #: hiệu lực có `tools` (lối `_pick_reasoning`). `true` mà không ⇒ `422`.
+    web_tools: bool | None = None
 
 
 class RetryResponse(BaseModel):
@@ -992,6 +1030,8 @@ class EditMessageRequest(BaseModel):
     """
 
     content: str = Field(min_length=1, max_length=settings.MESSAGE_MAX_CHARS)
+    #: Công tắc "Tìm web" của lượt sinh lại (T-6.7a). Vắng ⇒ `false`.
+    web_tools: bool = False
 
 
 class EditMessageResponse(BaseModel):
@@ -1124,6 +1164,11 @@ async def retry_message(
             requested=body.reasoning_effort if body is not None else None,
             inherited=original.reasoning_effort,
         )
+        web_tools = _pick_web_tools(
+            model,
+            requested=body.web_tools if body is not None else None,
+            inherited=original.web_tools,
+        )
         generation = await _open_generation(
             session=session,
             messages=messages,
@@ -1134,6 +1179,7 @@ async def retry_message(
             parent_id=original.parent_id,
             model=model,
             reasoning_effort=reasoning_effort,
+            web_tools=web_tools,
         )
         await session.commit()
 
@@ -1202,6 +1248,7 @@ async def edit_message(
         reasoning_effort = await _pick_reasoning(
             session, user_id=user_id, model=model, requested=None
         )
+        web_tools = _pick_web_tools(model, requested=body.web_tools)
 
         try:
             user_message = await messages.create_message(
@@ -1239,6 +1286,7 @@ async def edit_message(
             parent_id=uid,
             model=model,
             reasoning_effort=reasoning_effort,
+            web_tools=web_tools,
         )
         await session.commit()
 
@@ -1288,6 +1336,7 @@ async def list_siblings(
             user_id=user_id,
         )
         await with_artifacts(session, items, user_id=user_id)
+        await with_tools(session, items, user_id=user_id)
         mine = next(i for i in items if i.id == message_id)
         return SiblingsResponse(
             message_id=message_id,

@@ -100,6 +100,9 @@ FILE_PLACEHOLDER = "[tệp: {name}]"
 #: Tên khối / dòng nhắc của bản người dùng sửa artifact (T-5.2b, Q-P5-5).
 EDIT_BLOCK_NAME = "artifact: {title} v{version} (người dùng sửa)"
 EDIT_PLACEHOLDER = "[artifact: {title} v{version} — người dùng đã sửa]"
+#: Dòng thay cho kết quả tool ở các lượt cũ (T-6.7a, C33 — luật chữ tệp Q-P4-6):
+#: chữ trang chỉ đủ trong vòng lặp của chính lượt chứa nó.
+WEB_PLACEHOLDER = "[đã dùng web: {count} nguồn]"
 #: Khối bọc chữ tệp (§20) — system prompt dặn model coi nó là dữ liệu.
 UNTRUSTED_OPEN = '<untrusted_content name="{name}">'
 UNTRUSTED_CLOSE = "</untrusted_content>"
@@ -249,21 +252,27 @@ async def build(
         BudgetTooSmallError: ngân sách không chứa nổi system prompt + khối
             message mới nhất.
     """
-    path = [
-        node.message for node in await MessageRepository(session).get_path(leaf_id, user_id=user_id)
-    ]
+    repo = MessageRepository(session)
+    path = [node.message for node in await repo.get_path(leaf_id, user_id=user_id)]
 
     system_message = _system_message(model_meta)
     # Ưu tiên thứ hai của §9.6 — skill descriptions — chèn vào đây ở Phase 7.
 
     attachments = await _attachments(session, path, user_id=user_id)
-    edits: dict[uuid.UUID, list[Row[Any]]] = {}
+    edits: dict[uuid.UUID, list[Row[*tuple[Any, ...]]]] = {}
     for edit in await ArtifactRepository(session).user_edits(leaf_id=leaf_id, user_id=user_id):
         edits.setdefault(edit.message_id, []).append(edit)
+    # T-6.7a — một câu, chỉ số nguồn; chữ trang không rời Postgres (C33).
+    summaries = await repo.tool_summaries([m.id for m in path], user_id=user_id)
+    web = {
+        mid: sum(len(t.get("sources") or ()) for t in tools if t.get("ok"))
+        for mid, tools in summaries.items()
+    }
     blocks = _atomic_blocks(
         path,
         attachments=attachments,
         edits=edits,
+        web=web,
         send_images=_image_turns(path, model_meta),
         send_files=_current_turn(path),
     )
@@ -429,7 +438,8 @@ def _atomic_blocks(
     messages: Iterable[Message],
     *,
     attachments: Mapping[uuid.UUID, list[Attachment]] | None = None,
-    edits: Mapping[uuid.UUID, list[Row[Any]]] | None = None,
+    edits: Mapping[uuid.UUID, list[Row[*tuple[Any, ...]]]] | None = None,
+    web: Mapping[uuid.UUID, int] | None = None,
     send_images: Callable[[Message], bool] = lambda _message: False,
     send_files: Callable[[Message], bool] = lambda _message: False,
 ) -> list[list[dict[str, Any]]]:
@@ -462,6 +472,7 @@ def _atomic_blocks(
             message,
             attachments=(attachments or {}).get(message.id, ()),
             edits=(edits or {}).get(message.id, ()),
+            web_sources=(web or {}).get(message.id),
             send_images=send_images(message),
             send_files=send_files(message),
         )
@@ -533,7 +544,8 @@ def _to_wire(
     message: Message,
     *,
     attachments: Sequence[Attachment] = (),
-    edits: Sequence[Row[Any]] = (),
+    edits: Sequence[Row[*tuple[Any, ...]]] = (),
+    web_sources: int | None = None,
     send_images: bool = False,
     send_files: bool = False,
 ) -> dict[str, Any] | None:
@@ -572,6 +584,11 @@ def _to_wire(
     **Bản người dùng sửa artifact (T-5.2b, Q-P5-5).** Đi luật chữ tệp: câu hỏi
     của lượt đang sinh ⇒ khối `<untrusted_content>` trước câu hỏi; lượt cũ ⇒
     một dòng `[artifact: …]`. Bản nào thuộc câu hỏi nào: `user_edits`.
+
+    **Lượt cũ có vòng tool (T-6.7a, Q-P6-1).** `web_sources` có giá trị ⇒ lên dây
+    như assistant chữ thường + một dòng `[đã dùng web: N nguồn]` — không
+    `tool_calls`, không kết quả (C33). Lượt đang chạy tự dựng dây vòng tool ở
+    worker, không qua đây.
     """
     if message.status not in USABLE_STATUSES:
         return None
@@ -596,6 +613,8 @@ def _to_wire(
             lines.append(EDIT_PLACEHOLDER.format(**label))
     if not send_images:
         lines += [IMAGE_PLACEHOLDER.format(name=image.original_name) for image in images]
+    if web_sources is not None:
+        lines.append(WEB_PLACEHOLDER.format(count=web_sources))
     tail = "\n".join(part for part in [message.content, *lines] if part)
     text = "\n\n".join(part for part in [*blocks, tail] if part)
 

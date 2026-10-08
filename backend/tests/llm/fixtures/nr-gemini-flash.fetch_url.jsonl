@@ -1,0 +1,4 @@
+{"id": "chatcmpl-cvHHaozmBvyk9tMPobvb0Qc", "object": "chat.completion.chunk", "created": 1791488370, "model": "nr-gemini-flash", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}
+{"id": "chatcmpl-cvHHaozmBvyk9tMPobvb0Qc", "created": 1791488370, "model": "nr-gemini-flash", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"tool_calls": [{"id": "call_1565383", "function": {"arguments": "{\"url\":\"https://httpbin.org/html\"}", "name": "fetch_url"}, "type": "function", "index": 0}]}}]}
+{"id": "chatcmpl-cvHHaozmBvyk9tMPobvb0Qc", "object": "chat.completion.chunk", "created": 1791488370, "model": "nr-gemini-flash", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
+{"id": "chatcmpl-cvHHaozmBvyk9tMPobvb0Qc", "created": 1791488370, "model": "nr-gemini-flash", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}}], "usage": {"completion_tokens": 23, "prompt_tokens": 2084, "total_tokens": 2107}}

@@ -8,6 +8,24 @@
   },
   "entries": [
     {
+      "file": "claude-haiku.fetch_url.jsonl",
+      "model": "claude-haiku",
+      "provider": "anthropic",
+      "case": "fetch_url",
+      "prompt": "Đọc https://httpbin.org/html và cho biết tên tác giả được nhắc trong trang.",
+      "chunks": 15,
+      "recorded_at": "2026-10-08T19:39:32+00:00"
+    },
+    {
+      "file": "claude-haiku.fetch_url_round2.jsonl",
+      "model": "claude-haiku",
+      "provider": "anthropic",
+      "case": "fetch_url_round2",
+      "prompt": "Đọc https://httpbin.org/html và cho biết tên tác giả được nhắc trong trang.",
+      "chunks": 23,
+      "recorded_at": "2026-10-08T19:39:32+00:00"
+    },
+    {
       "file": "claude-haiku.text.jsonl",
       "model": "claude-haiku",
       "provider": "anthropic",
@@ -22,6 +40,24 @@
       "case": "tools",
       "prompt": "Thời tiết ở Hà Nội hôm nay thế nào? Hãy dùng công cụ để tra.",
       "chunks": 9
+    },
+    {
+      "file": "deepseek-flash.fetch_url.jsonl",
+      "model": "deepseek-flash",
+      "provider": "deepseek",
+      "case": "fetch_url",
+      "prompt": "Đọc https://httpbin.org/html và cho biết tên tác giả được nhắc trong trang.",
+      "chunks": 30,
+      "recorded_at": "2026-10-08T19:39:32+00:00"
+    },
+    {
+      "file": "deepseek-flash.fetch_url_round2.jsonl",
+      "model": "deepseek-flash",
+      "provider": "deepseek",
+      "case": "fetch_url_round2",
+      "prompt": "Đọc https://httpbin.org/html và cho biết tên tác giả được nhắc trong trang.",
+      "chunks": 74,
+      "recorded_at": "2026-10-08T19:39:32+00:00"
     },
     {
       "file": "deepseek-flash.text.jsonl",
@@ -47,6 +83,24 @@
       "prompt": "Hãy viết một đoạn ngắn khoảng bốn câu bằng tiếng Việt có dấu, giới thiệu về phở Hà Nội. Không dùng danh sách gạch đầu dòng.",
       "chunks": 103,
       "recorded_at": "2026-09-22T18:29:38+00:00"
+    },
+    {
+      "file": "nr-gemini-flash.fetch_url.jsonl",
+      "model": "nr-gemini-flash",
+      "provider": "ninerouter",
+      "case": "fetch_url",
+      "prompt": "Đọc https://httpbin.org/html và cho biết tên tác giả được nhắc trong trang.",
+      "chunks": 4,
+      "recorded_at": "2026-10-08T19:39:32+00:00"
+    },
+    {
+      "file": "nr-gemini-flash.fetch_url_round2.jsonl",
+      "model": "nr-gemini-flash",
+      "provider": "ninerouter",
+      "case": "fetch_url_round2",
+      "prompt": "Đọc https://httpbin.org/html và cho biết tên tác giả được nhắc trong trang.",
+      "chunks": 6,
+      "recorded_at": "2026-10-08T19:39:32+00:00"
     },
     {
       "file": "nr-gemini-flash.text.jsonl",

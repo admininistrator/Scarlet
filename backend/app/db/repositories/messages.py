@@ -33,10 +33,11 @@ from sqlalchemy import (
     literal_column,
     or_,
     select,
+    text,
     true,
     update,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.selectable import LateralFromClause
@@ -124,6 +125,7 @@ class MessageRepository:
         model_id: str | None = None,
         tool_call_id: str | None = None,
         reasoning_effort: str | None = None,
+        web_tools: bool = False,
     ) -> Message:
         """Thêm một node vào cây.
 
@@ -156,6 +158,7 @@ class MessageRepository:
             model_id=model_id,
             tool_call_id=tool_call_id,
             reasoning_effort=reasoning_effort,
+            web_tools=web_tools,
         )
         # `content` và `status` có DEFAULT trong DDL (Phụ lục A). `None` nghĩa là
         # KHÔNG đặt thuộc tính, để Postgres áp default của nó — không chép hai
@@ -516,6 +519,7 @@ class MessageRepository:
         content: str,
         reasoning: str | None = None,
         tool_calls: list[dict[str, Any]] | None = None,
+        tool_rounds: list[dict[str, Any]] | None = None,
         finish_reason: str | None = None,
         error_code: str | None = None,
         prompt_tokens: int | None = None,
@@ -545,6 +549,7 @@ class MessageRepository:
                 content=content,
                 reasoning=reasoning,
                 tool_calls=tool_calls,
+                tool_rounds=tool_rounds,
                 finish_reason=finish_reason,
                 error_code=error_code,
                 prompt_tokens=prompt_tokens,
@@ -554,6 +559,39 @@ class MessageRepository:
             .execution_options(synchronize_session=False)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def tool_summaries(
+        self, message_ids: Sequence[uuid.UUID], *, user_id: uuid.UUID
+    ) -> dict[uuid.UUID, list[dict[str, Any]]]:
+        """Tóm tắt tool của từng message: `[{name, ok, reason, sources}]` (T-6.7a).
+
+        MỘT câu cho cả danh sách (lối `with_artifacts`), và tách khỏi `get_path`:
+        `tool_rounds` mang chữ trang web nên là cột deferred — Postgres bóc
+        `results` ngay trong SQL, `content` không bao giờ ra khỏi DB ở đây.
+        Message không gọi tool vắng khỏi dict. `user_id` lọc trong SQL (§20).
+        """
+        if not message_ids:
+            return {}
+        stmt = text(
+            """
+            SELECT m.id, jsonb_agg(jsonb_build_object(
+                       'name', res -> 'name', 'ok', res -> 'ok',
+                       'reason', res -> 'reason', 'sources', res -> 'sources')
+                   ORDER BY rd.i, rs.j) AS tools
+            FROM messages m
+            JOIN conversations c ON c.id = m.conversation_id
+            CROSS JOIN LATERAL jsonb_array_elements(m.tool_rounds) WITH ORDINALITY rd(round, i)
+            CROSS JOIN LATERAL jsonb_array_elements(rd.round -> 'results')
+                 WITH ORDINALITY rs(res, j)
+            WHERE m.id = ANY(:ids) AND m.tool_rounds IS NOT NULL
+              AND c.user_id = :user_id AND c.deleted_at IS NULL
+            GROUP BY m.id
+            """
+        ).bindparams(
+            bindparam("ids", list(message_ids), type_=ARRAY(UUID(as_uuid=True))),
+            bindparam("user_id", user_id, type_=UUID(as_uuid=True)),
+        )
+        return {mid: tools for mid, tools in (await self._session.execute(stmt)).all()}
 
     # ─────────────────────── truy vấn cây (§8.3) ───────────────────────
 

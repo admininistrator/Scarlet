@@ -39,6 +39,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import app.db.session as db_session
+import app.workers.generate as generate_mod
 from app.config import catalog
 from app.config.catalog import get_model
 from app.config.settings import settings
@@ -494,6 +495,34 @@ async def test_postgres_write_failure_reports_persist_failed(
 # ───────────────────────────── §7.6 heartbeat ─────────────────────────────
 
 
+def _serialized_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: async_sessionmaker[AsyncSession],
+    mid: uuid.UUID,
+) -> Any:
+    """Đọc `heartbeat_at` mà không đua với task nhịp tim trên MỘT kết nối test.
+
+    Hai session (lần đọc của test + `_write_heartbeat`) dùng chung kết nối với
+    `create_savepoint`; xen nhau giữa chừng là `savepoint … does not exist`
+    (đo T-6.7a: đỏ 3/3 khi gom `tests/workers` với một tệp `tests/api`). Khoá
+    chỉ tuần tự hoá hai bên — hàm ghi nhịp THẬT vẫn chạy theo nhịp của nó.
+    """
+    lock = asyncio.Lock()
+    real_write = generate_mod._write_heartbeat
+
+    async def locked_write(message_id: uuid.UUID) -> None:
+        async with lock:
+            await real_write(message_id)
+
+    monkeypatch.setattr(generate_mod, "_write_heartbeat", locked_write)
+
+    async def read_heartbeat() -> Any:
+        async with lock:
+            return (await _reload(session_factory, mid)).heartbeat_at
+
+    return read_heartbeat
+
+
 async def test_writes_heartbeat_while_generating(
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -505,8 +534,7 @@ async def test_writes_heartbeat_while_generating(
     message = await _minimal_tree(session, user_a)
     monkeypatch.setattr(settings, "WORKER_HEARTBEAT_S", TEST_BEAT_S)
 
-    async def read_heartbeat() -> Any:
-        return (await _reload(session_factory, message.id)).heartbeat_at
+    read_heartbeat = _serialized_heartbeat(monkeypatch, session_factory, message.id)
 
     mark: list[Any] = []
 
@@ -544,8 +572,7 @@ async def test_heartbeat_beats_even_before_model_returns_ANY_chunk(
     message = await _minimal_tree(session, user_a)
     monkeypatch.setattr(settings, "WORKER_HEARTBEAT_S", TEST_BEAT_S)
 
-    async def read_heartbeat() -> Any:
-        return (await _reload(session_factory, message.id)).heartbeat_at
+    read_heartbeat = _serialized_heartbeat(monkeypatch, session_factory, message.id)
 
     mark: list[Any] = []
 

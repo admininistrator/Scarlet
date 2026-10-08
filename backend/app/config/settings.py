@@ -500,6 +500,17 @@ class Settings(BaseSettings):
     JS_ESCALATE_MIN_CHARS: int = Field(default=200, ge=0)
     FETCH_TIMEOUT_S: int = Field(default=10, gt=0)
     PLAYWRIGHT_TIMEOUT_S: int = Field(default=20, gt=0)
+    #: Vòng lặp tool của một lượt (T-6.7a, §13.5) — đọc LÚC GỌI. Hết vòng ⇒ lần
+    #: gọi cuối KHÔNG gửi `tools`; estimator nhân `est_max` với `MAX_TOOL_ROUNDS
+    #: + 1` (Q-P6-6). Lời gọi vượt `MAX_TOOL_CALLS_PER_TURN` (cả lượt) ⇒ `ok:
+    #: false` cho model, không chạy.
+    MAX_TOOL_ROUNDS: int = Field(default=3, ge=0)
+    MAX_TOOL_CALLS_PER_TURN: int = Field(default=5, gt=0)
+    #: Trần chữ MỘT kết quả tool lên dây, tính bằng KÝ TỰ. 24000 = trần
+    #: `MESSAGE_MAX_CHARS`; đo T-6.7a: PEP 8 qua `fetcher` 40 971 ký tự ≈ 8 971
+    #: token ⇒ cắt còn ~5.2k token. Cộng dồn trong lượt còn cắt mềm theo
+    #: `token_budget()` (B-208 ⑤).
+    TOOL_RESULT_MAX_CHARS: int = Field(default=24000, gt=0)
 
     # ═══ Sandbox (§13) ═══
     SANDBOX_BASE_URL: HttpUrlStr = "http://sandbox:8090"

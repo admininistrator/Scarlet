@@ -16,7 +16,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, Text, func, text
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -115,6 +115,18 @@ class Message(Base):
     #: `reasoning.default` nếu catalog vừa bỏ mức ấy). `NULL` = không gửi tham số
     #: suy luận nào: model không khai khối `reasoning`, hoặc hàng có từ trước 0006.
     reasoning_effort: Mapped[str | None] = mapped_column(Text)
+    #: Công tắc "Tìm web" của lượt (T-6.7a, Q-P6-3, migration 0014) — API ghi
+    #: lên hàng `queued`, worker đọc. `true` ⇒ gửi `tools` nếu model có capability.
+    web_tools: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    #: Các vòng tool của lượt (Q-P6-1): `[{tool_calls, reasoning, finish_reason,
+    #: results: [{tool_call_id, name, ok, content, sources, reason}]}]`. NULL =
+    #: không gọi tool — SQL NULL (`none_as_null`), không phải JSON `null`, để
+    #: `tool_summaries` lọc được bằng `IS NOT NULL`. **deferred**: chữ trang web
+    #: nằm ở đây, và `get_path` / mọi `select(Message)` không được kéo nó về
+    #: (T-3.7a ①, B-244) — đường đi đọc bản tóm tắt qua `tool_summaries`.
+    tool_rounds: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB(none_as_null=True), deferred=True
+    )
     #: `clock_timestamp()` chứ KHÔNG phải `now()` — migration 0002, B-53.
     #: `now()` là `transaction_timestamp()`, nên mọi message ghi trong cùng một
     #: transaction sẽ có `created_at` bằng nhau và §8.3 không sắp được chúng.

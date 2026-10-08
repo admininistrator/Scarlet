@@ -1,0 +1,6 @@
+{"id": "chatcmpl-c_HHapGxN8a01e8Pr92s4Qg", "object": "chat.completion.chunk", "created": 1791488372, "model": "nr-gemini-flash", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}
+{"id": "chatcmpl-c_HHapGxN8a01e8Pr92s4Qg", "object": "chat.completion.chunk", "created": 1791488372, "model": "nr-gemini-flash", "choices": [{"index": 0, "delta": {"content": "Tên"}}]}
+{"id": "chatcmpl-c_HHapGxN8a01e8Pr92s4Qg", "object": "chat.completion.chunk", "created": 1791488372, "model": "nr-gemini-flash", "choices": [{"index": 0, "delta": {"content": " tác giả được nhắc đến trong trang là **Herman Melville** (với tác phẩm *"}}]}
+{"id": "chatcmpl-c_HHapGxN8a01e8Pr92s4Qg", "object": "chat.completion.chunk", "created": 1791488372, "model": "nr-gemini-flash", "choices": [{"index": 0, "delta": {"content": "Moby-Dick*)."}}]}
+{"id": "chatcmpl-c_HHapGxN8a01e8Pr92s4Qg", "object": "chat.completion.chunk", "created": 1791488372, "model": "nr-gemini-flash", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+{"id": "chatcmpl-c_HHapGxN8a01e8Pr92s4Qg", "created": 1791488372, "model": "nr-gemini-flash", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}}], "usage": {"completion_tokens": 27, "prompt_tokens": 2157, "total_tokens": 2184, "completion_tokens_details": {"reasoning_tokens": 0}}}

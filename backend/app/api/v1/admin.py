@@ -158,7 +158,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from ipaddress import IPv4Address, IPv6Address
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Path, Query, Request, status
@@ -789,7 +789,9 @@ def _check_overrides(overrides: dict[str, Any]) -> None:
         )
     for name, value in overrides.items():
         try:
-            TypeAdapter(EffectiveLimits.model_fields[name].annotation).validate_python(value)
+            TypeAdapter(cast("Any", EffectiveLimits.model_fields[name].annotation)).validate_python(
+                value
+            )
         except ValidationError as exc:
             raise ApiError(
                 status.HTTP_400_BAD_REQUEST,
