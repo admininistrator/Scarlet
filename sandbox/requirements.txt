@@ -1,0 +1,26 @@
+# T-7.2 — thư viện cài SẴN cho skill (§13.3, §19.1). `sandbox` chạy
+# `network_mode: none` nên code trong đó không `pip install` được: skill cần gói
+# mới = sửa file này + `docker compose build sandbox`. Một nguồn duy nhất.
+# Ghim tường minh cả phụ thuộc bắc cầu (lối `fetcher/requirements.txt`; đo
+# `pip freeze` trong `python:3.12-slim` 2026-10-09). Giấy phép đều tự do (T-7.1).
+python-docx==1.2.0
+openpyxl==3.1.5
+python-pptx==1.0.2
+pypdf==6.19.0
+pillow==12.3.0
+pandas==3.0.6
+matplotlib==3.11.2
+# bắc cầu
+contourpy==1.4.0
+cycler==0.12.1
+et_xmlfile==2.0.0
+fonttools==4.66.1
+kiwisolver==1.5.1
+lxml==6.1.3
+numpy==2.5.3
+packaging==26.3
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+six==1.17.0
+typing_extensions==4.16.0
+xlsxwriter==3.2.9

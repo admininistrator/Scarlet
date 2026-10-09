@@ -4,10 +4,10 @@ HUONG-DAN-AGENT §8.3 (B-49, B-117).
 Grep trên `docker-compose.yml` trả rỗng khi đúng **và** khi sai mà thụt đầu dòng
 lệch, và không thấy `docker-compose.override.yml`. Ở đây đọc
 `docker compose config --format json` — thứ Docker thật sự chạy — và đòi đối
-tượng phải TỒN TẠI: thiếu `fetcher` là đỏ, không phải "xanh rỗng".
+tượng phải TỒN TẠI: thiếu `fetcher` / `sandbox` là đỏ, không phải "xanh rỗng".
 
 `env_file` đã được compose gộp vào `environment`, nên "không `env_file`" nghĩa
-là `fetcher` không có biến môi trường nào từ cấu hình.
+là `fetcher` / `sandbox` không có biến môi trường nào từ cấu hình (C27).
 """
 
 from __future__ import annotations
@@ -23,7 +23,10 @@ EXPECTED = {
     "fetcher": {"egress"},
     "worker": {"internal", "egress"},
     "api": {"internal"},
+    "sandbox": set(),
 }
+# ADR-09 + T-7.2: service vắng ở đây thì KHÔNG được có `network_mode`.
+NETWORK_MODE = {"sandbox": "none"}
 
 
 def main() -> int:
@@ -38,15 +41,16 @@ def main() -> int:
             continue
         svc = services[name]
         actual = set(svc.get("networks") or {})
-        if "network_mode" in svc or actual != nets:
+        mode = NETWORK_MODE.get(name)
+        if svc.get("network_mode") != mode or actual != nets:
             errors.append(
                 f"{name}: mang {sorted(actual)} / network_mode "
-                f"{svc.get('network_mode')!r}, phai la {sorted(nets)}"
+                f"{svc.get('network_mode')!r}, phai la {sorted(nets)} / {mode!r}"
             )
-    fetcher = services.get("fetcher", {})
-    for key in ("env_file", "environment", "ports"):
-        if fetcher.get(key):
-            errors.append(f"fetcher: co `{key}` — lop 1 khong duoc thay secret / mo cong")
+    for name in ("fetcher", "sandbox"):
+        for key in ("env_file", "environment", "ports"):
+            if services.get(name, {}).get(key):
+                errors.append(f"{name}: co `{key}` — lop 1 khong duoc thay secret / mo cong")
     for line in errors:
         print(f"check-networks: FAIL {line}")
     if not errors:

@@ -2,7 +2,7 @@
 """T-S.1 / KE-HOACH §24.2b·S2 — canh định danh tiếng Việt không dấu.
 
 `CLAUDE.md` cấm đặt tên biến/hàm/lớp/prop/file dạng tiếng Việt không dấu
-(NQ-109). Script này quét `backend/`, `frontend/src/`, `scripts/`, `fetcher/` và in mỗi
+(NQ-109). Script này quét `backend/`, `frontend/src/`, `scripts/`, `fetcher/`, `sandbox/` và in mỗi
 phát hiện một dòng `file:dòng: tên`; mã thoát 1 nếu có ít nhất một phát hiện.
 
 Cách nhận ra một định danh "tiếng Việt":
@@ -41,7 +41,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SCOPES = ("backend/", "frontend/src/", "scripts/", "fetcher/")
+SCOPES = ("backend/", "frontend/src/", "scripts/", "fetcher/", "sandbox/")
 PY_SUFFIXES = {".py"}
 TS_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mjs"}
 

@@ -85,6 +85,21 @@ def _http_url(value: str) -> str:
 HttpUrlStr = Annotated[str, AfterValidator(_http_url)]
 
 
+def _unix_socket_url(value: str) -> str:
+    """``unix://`` + đường dẫn tuyệt đối tới socket (T-7.2, Phụ lục C cách a).
+
+    ``sandbox`` chạy ``network_mode: none`` (ADR-09) nên không URL HTTP nào tới
+    được nó; nhận ``http://…`` là để worker boot rồi hỏng lúc gọi.
+    """
+    path = value.removeprefix("unix://")
+    if path == value or not path.startswith("/"):
+        raise ValueError("phải có dạng unix:///đường/dẫn/tuyệt/đối")
+    return value
+
+
+UnixSocketUrlStr = Annotated[str, AfterValidator(_unix_socket_url)]
+
+
 class Settings(BaseSettings):
     """Toàn bộ biến môi trường của backend. Thứ tự nhóm bám theo KH Phụ lục B."""
 
@@ -513,7 +528,8 @@ class Settings(BaseSettings):
     TOOL_RESULT_MAX_CHARS: int = Field(default=24000, gt=0)
 
     # ═══ Sandbox (§13) ═══
-    SANDBOX_BASE_URL: HttpUrlStr = "http://sandbox:8090"
+    #: Socket trên volume chung `sandbox_socket` (`docker-compose.yml`, T-7.2).
+    SANDBOX_BASE_URL: UnixSocketUrlStr = "unix:///run/sandbox/sandbox.sock"
     SANDBOX_TIMEOUT_S: int = Field(default=30, gt=0)
     MAX_SKILL_OUTPUT_MB: int = Field(default=20, gt=0)
 

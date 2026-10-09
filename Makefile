@@ -90,7 +90,8 @@ check-identifiers:
 	backend/.venv/bin/python scripts/check_identifiers.py
 
 # T-6.5 / B-117 — lop 1 cua §12.2 doc tren cau hinh compose DA GOP: `fetcher`
-# chi `egress`, khong env/cong; `worker` hai mang; `api` khong `egress`.
+# chi `egress`, khong env/cong; `worker` hai mang; `api` khong `egress`;
+# T-7.2 — `sandbox` `network_mode: none`, khong mang, khong env/cong (ADR-09, C27).
 check-networks:
 	backend/.venv/bin/python scripts/check_networks.py
 

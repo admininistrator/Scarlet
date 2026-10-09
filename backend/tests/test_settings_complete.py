@@ -149,6 +149,15 @@ def test_base_url_gets_no_extra_slash(monkeypatch: pytest.MonkeyPatch) -> None:
     assert Settings().PUBLIC_BASE_URL == "https://scarlet.example"
 
 
+def test_sandbox_base_url_must_be_unix_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    # T-7.2: `sandbox` không có mạng (ADR-09) ⇒ URL HTTP là cấu hình hỏng, chặn lúc boot.
+    monkeypatch.setenv("SANDBOX_BASE_URL", "http://sandbox:8090")
+    with pytest.raises(ValidationError):
+        Settings()
+    monkeypatch.setenv("SANDBOX_BASE_URL", "unix:///run/sandbox/sandbox.sock")
+    assert Settings().SANDBOX_BASE_URL == "unix:///run/sandbox/sandbox.sock"
+
+
 def test_module_import_provides_settings_instance() -> None:
     from app.config import settings as module
 
