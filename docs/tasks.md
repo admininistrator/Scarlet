@@ -67,11 +67,11 @@ Hai file, hai vai trò. **Đừng gộp, đừng chép nội dung của file kia
 | **PS** | Standardize *(chèn giữa P3 và P4 — §7b)* | 20 | 64 h *(+ T-S.19 chưa ước lượng)* | ✅ (2026-10-03) |
 | **P4** | Ảnh & vision | 9 | 25.5 h | ✅ (2026-10-06) |
 | **P5** | Artifacts | 10 | 25 h | ✅ (2026-10-07) |
-| **P6** | Web tools *(T-6.2…6.4 đã làm ở PS — NQ-134 ①)* | 7 | 18 h | ☐ |
-| **P7** | Skills & sandbox | 9 | 30 h | ☐ |
+| **P6** | Web tools *(T-6.2…6.4 đã làm ở PS — NQ-134 ①)* | 7 | 18 h | ✅ (2026-10-09) |
+| **P7** | Skills & sandbox *(T-7.7 tách a/b — NQ-147)* | 10 | 21.5 h | ☐ |
 | **P8** | Share, voice, export, PWA | 8 | 20 h | ☐ |
 | **P9** | Hoàn thiện | 7 | 19 h | ☐ |
-| | **Tổng** | **132** | **360.5 h** *(chưa gồm T-S.19)* | |
+| | **Tổng** | **133** | **352 h** *(chưa gồm T-S.19)* | |
 
 > ⚠️ **Chênh lệch với KE-HOACH §24.2 là có chủ ý.** Kế hoạch ước 180–250 h khi nhìn từ trên xuống. Sau khi bẻ nhỏ thành 104 task, con số thật là ~262 h. Đây là hiện tượng bình thường: ước lượng từ trên xuống luôn lạc quan. **Dùng con số trong bảng này, không dùng con số trong kế hoạch.** Ghi vào Nhật ký quyết định NQ-01.
 
@@ -3045,17 +3045,322 @@ Luật áp cho P6 — giữ luật của P5 vì nó đúng hơn luật của P4 
 
 ---
 
-## 11. Phase 7 — Skills & Sandbox *(gạch đầu dòng)*
+## 11. Phase 7 — Skills & Sandbox ⭐
 
-- **T-7.1** 🔒 **Task thí nghiệm:** chứng minh worker gọi được `sandbox` qua **Unix socket** khi `network_mode: none`. *Nếu hướng này không chạy, DỪNG và viết lại ADR-09 trước khi làm tiếp* *(Phụ lục C, ghi chú cuối)*
-- **T-7.2** Image sandbox: rootfs read-only, tmpfs `/work`, `cap_drop: ALL`, non-root, **không** `env_file` *(C27)*
-- **T-7.3** Server sandbox: `POST /exec`, thư mục tạm riêng mỗi lần, dọn sạch sau khi xong
-- **T-7.4** 🔒 `tests/sandbox/test_isolation.py`: không ra mạng được, `while True` bị kill, `os.environ` không thấy secret *(S11)*
-- **T-7.5** Loader skill format Anthropic: đọc frontmatter, đăng ký vào bảng `skills`
-- **T-7.6** Progressive disclosure ba tầng + tool `load_skill` *(C30)*
-- **T-7.7** Tool `run_code` → sandbox; file sinh ra → MinIO → artifact *(C29)*
-- **T-7.8** Quyền `can_execute_skills`; bị chặn thì model nhận `tool_result` báo lỗi rõ, không im lặng
-- **T-7.9** FE: panel chọn skill, bật/tắt theo user, hiện trạng thái chạy code
+**Mục tiêu:** UC-09 chạy đầu-cuối — bật một skill thì chỉ `name` + `description` vào system prompt (tầng 1), model gọi `load_skill` để lấy `SKILL.md` (tầng 2), và nếu user **có** `can_execute_skills` thì `run_code` chạy trong service `sandbox` (ADR-09, `network_mode: none`), file sinh ra lên MinIO thành artifact `kind=file` có nút Tải; user **không** có quyền thì model nhận `tool_result` báo rõ và trả lời cách khác, không im lặng. S11 (sandbox không ra mạng, `while True` bị kill, `os.environ` không thấy secret) và C30 (bật 10 skill không làm phình prompt) là hai tiêu chí nghiệm thu. Hết phase không còn `planned="T-7.*"` nào trong code.
+
+**Mở rộng 2026-10-09** từ chín gạch đầu dòng, theo kết quả P0 → P6 và Backlog còn mở. Như P4 / P5 / P6: mọi chỗ còn ngỏ hỏi **trước** khi phase bắt đầu — sáu câu Q-P7-1…6 chốt cùng ngày (**NQ-147**), bảng ở cuối phần mở đầu; Việc của từng task viết theo câu trả lời. **T-7.7 tách a/b, giữ ID gốc** (tiền lệ T-4.4, T-5.2, T-6.7): T-7.7a (tool `run_code` → sandbox → MinIO → artifact) + T-7.7b (bốn skill tự viết). P6 đã rà và đóng — "Đóng P6" ngay dưới.
+
+**Đóng P6 — rà 2026-10-09, trước khi mở rộng P7: 7/7 task ✅, P6 sạch, đóng được.**
+- `make test`: lượt đầu đỏ 1 ca `test_hash_time_within_50_200ms` (208.7 ms — máy tải; cùng họ B-219 / B-378, không phải lỗi P6), chạy lại xanh: backend **1946 passed**, FE **40 file / 569 passed**, `fetcher` **25 passed** — `EXIT 0`. `make lint` `EXIT 0` (`check-theme: OK`, `check-identifiers: OK`, `check-networks: OK`, ruff `All checks passed!`, mypy sạch, `tsc` sạch); `make check-hardcode` ⇒ `check-hardcode: OK`; `make test-artifact-origin` ⇒ `S12 đạt` (P6 không chạm origin phụ); `docker compose ps` ⇒ 10 service `healthy` gồm `fetcher`.
+- Hai lệnh grep `T-6` của DoD phase ⇒ rỗng cả hai (exit 1). `can_use_web` / `web_searches_per_day` đọc qua `get_effective_limits` (B-153 phần web đóng ở T-6.8).
+- Ba lệnh grep §8.3: ① rỗng; ② chỉ hai dòng **docstring** trong `messages.py` (602, 635) cạnh CTE của `get_path` (như Đóng P5); ③ nay có người: `fetcher` chỉ `egress`, kiểm bằng `make check-networks` (B-117) — "xanh rỗng" đã hết với `fetcher`; **với `sandbox` vẫn là "xanh rỗng"** vì `docker-compose.yml` chưa có service đó ⇒ T-7.2 thay nó bằng phép kiểm đọc cấu hình (mở rộng `check_networks.py`).
+- Tốc độ P6: 18 h → **~12 h (~67 %)**; T-6.5 vượt kỳ vọng (3.5 → 2 h), T-6.6 (3.5 → 1.5 h), T-6.7a sát (4 → 3.5 h); không task nào vỡ.
+- `git status` (từ WSL): chỉ bốn tệp ngoài commit cố ý (`RUNBOOK-AWS.md`, `docs/account-test.txt`, hai `*:Zone.Identifier`).
+- Backlog sinh ở P6 còn mở — **không** chặn P7: B-384, B-385, B-386, B-387, B-388, B-389, B-390, B-391, B-392, B-393, B-394, B-395, B-396, B-397, B-398.
+
+**Đo trước khi viết (2026-10-09).** P5 / P6 cho thấy bề mặt lần đầu đo ngay ở phiên mở rộng thì task không vỡ. Cùng cách (mọi phép đo chạy trong container tạm, KHÔNG đụng repo, dọn sau):
+
+| Đo | Kết quả | Dùng ở |
+|---|---|---|
+| Unix socket giữa `network_mode: none` và image `worker` (ghi chú cuối Phụ lục C, T-7.1) | Volume riêng (`/run/sandbox`), server trong container `--network none` nghe `AF_UNIX`, client trong image `scarlet-worker` gọi bằng `httpx.HTTPTransport(uds=…)` ⇒ **chạy được** (`GET /health` ⇒ `pid=1 uid=…`, `POST /exec` chạy code trong `/work`); đối chứng trong sandbox: `socket.create_connection(('1.1.1.1',53))` ⇒ `OSError(101) Network is unreachable`, `getaddrinfo('example.com')` ⇒ `gaierror(-3)`, `if_nameindex()` ⇒ chỉ `lo`. **Hướng (a) của Phụ lục C đứng — không phải viết lại ADR-09** | T-7.1, T-7.3 |
+| Volume socket mới, không khởi tạo | Chủ sở hữu `root:root 0755` ⇒ server chạy `user: 65534` (như §13.3) **không bind được** (`PermissionError`); phải `chown` thư mục cho đúng uid trước, hoặc server khởi động root rồi hạ quyền | T-7.2, T-7.3 |
+| Cách ly server ↔ code khi **cùng** uid (đúng chữ §13.3: `user: 65534` cho cả service) | Server và code cùng 65534 ⇒ code chạy trong sandbox có đủ quyền trên thư mục socket để **thay** tệp socket và dựng tiến trình nghe của riêng nó ⇒ lượt gọi kế của worker không còn nói chuyện với server thật. "Một uid cho cả hai" **không** cách ly được hai người dùng khác lượt. Phải tách danh tính: server chạy bằng một identity, code bằng một identity khác kém quyền hơn, thư mục socket không cho code ghi (Q-P7-1) | T-7.1, T-7.2, T-7.3, T-7.4 |
+| Dọn tiến trình sau mỗi lượt `exec` | Code `fork` rồi để tiến trình con sống, hoặc giữ pipe mở, qua được `timeout` của `subprocess.run` ⇒ con mồ côi ở lại; dưới một PID 1 là `python` không gặt, con thoát thành **zombie** (đo: 5 zombie sau 5 lượt). Cần PID 1 gặt (tini) **và** giết cả nhóm tiến trình của lượt (kill theo session/process-group) khi xong hay hết giờ | T-7.3, T-7.4 |
+| `os.environ` trong sandbox `--network none`, không `env_file` (C27) | Chỉ `GPG_KEY HOME HOSTNAME LANG PATH PYTHON_SHA256 PYTHON_VERSION` — **0** secret của Scarlet; `CapEff: 0000000000000000` khi chạy `user: 65534` + `cap_drop ALL` + `no-new-privileges`; rootfs read-only ⇒ `open('/etc/x','w')` ⇒ `OSError(30) Read-only file system`, chỉ `/work` ghi được | T-7.2, T-7.4 |
+| Thư viện §13.3 (chỉ `pip --dry-run`, không cài vào repo) | `python-docx 1.2.0` MIT · `openpyxl 3.1.5` MIT · `python-pptx 1.0.2` MIT · `pypdf 6.19.0` BSD-3 · `pillow 12.3.0` MIT-CMU · `pandas 3.0.6` BSD-3 · `matplotlib 3.11.2` (+ `numpy 2.5.3`, `fonttools`, `contourpy`, `kiwisolver`, `lxml 6.1.3`) — đều tự do, cài được **không** LibreOffice / pandoc / Node. `matplotlib` import đòi ghi cache ⇒ đặt `MPLCONFIGDIR=/work/.mpl` (rootfs read-only); `numpy` mở 16 thread trong container 1 cpu — đặt trần thread nếu cần | T-7.2, T-7.7b |
+| Bộ skill Anthropic (`anthropics/skills`, đọc, không nhúng vào repo) | `docx` / `xlsx` / `pptx` / `pdf` **giấy phép độc quyền** (`LICENSE.txt`: cấm sao chép ra ngoài dịch vụ Anthropic, cấm tạo bản phái sinh, cấm phân phối) ⇒ **không nhúng** (Q-P7-2); chúng còn đòi `soffice`/LibreOffice, `pandoc`, Poppler, npm `docx`/`pptxgenjs`. `description` của skill thật dài **31–290 token** (trung vị 104; spec agentskills.io ghi "~100 token"), không phải ~30 như §13.2 giả định | T-7.5, T-7.6, T-7.7b |
+| Thuế schema `tools` (B-390, đo lại) | `claude-haiku` cộng **~743 token** mỗi request có `tools` (prompt tool-use riêng của Anthropic), độc lập với số skill ⇒ C30 "0 so với 10 skill" trượt chắc trên model này; phải đo **phần tăng do skill** (Q-P7-3) | T-7.6 |
+| `check_identifiers.py` trên tên ứng viên | `skill(s)`, `sandbox`, `run_code`, `load_skill`, `frontmatter`, `setpriv`, `tini`, `reap`, `zombie`, `orphan`, `workdir`, `requires_execution`, `user_skills`, `can_execute_skills`, `exec_code`, `files_out`, `kill_tree`, `killpg`, `process_group`, `pids`, `slot`, `lock` sạch; **`mem` đỏ** (cùng họ `pong`, `hop` đã gặp ở P5/P6 — không dùng, viết `memory`) | mọi task |
+
+**Luật riêng của phase — bốn điều:**
+
+1. **Cách ly là nhiều lớp, mỗi lớp một phép thử phòng vệ chỉ nó chặn** (Luật ① của P5/P6): `network_mode: none` (không ra mạng), `cap_drop ALL` + `no-new-privileges` (không leo quyền), `read_only` + tmpfs `/work` (không ghi rootfs), không `env_file` (không thấy secret — C27), danh tính server ≠ danh tính code (code không chiếm được socket — đo hôm nay). Mỗi phép thử ở T-7.4 **phải đỏ được** khi gỡ đúng lớp nó canh, và là **test phòng vệ** (khẳng định "không làm được X" + "gỡ lớp ⇒ làm được X" trên bản vá tạm), không phải khai thác để lại.
+2. **Code do model/skill sinh là mã thù địch** (A6, RR-2, §13.1): backend không bao giờ tự chạy nó (A6) — luôn qua `sandbox`; `run_code` là tác dụng phụ, chỉ chạy khi `can_execute_skills` thật (gated per-user, §13.4); không tool nào tự gọi tool khác mà không qua model (RR-10). RR-2 là rủi ro cố hữu của mức (b), **không về 0** — P7 dựng đủ lớp của ADR-09, không hứa tuyệt đối; gVisor/Firecracker ở lại Backlog (B-02).
+3. **"Một lượt = một message assistant" giữ nguyên** (như P6, Q-P6-1): `load_skill` và `run_code` là tool trong vòng lặp của T-6.7a — thêm vào `BuiltinTools` của registry, **không** sửa dòng nào ở `_run` của `generate.py` (§13.5, điểm cắm MCP). Kết quả tool vào `tool_rounds`, một dòng `usage_events` mỗi lượt; file sinh ra thành artifact phát cùng event `artifact` của T-5.1.
+4. **Một task tách, giữ ID gốc:** T-7.7 → **T-7.7a** (tool `run_code`: client UDS + MinIO + artifact `kind=file`) + **T-7.7b** (bốn skill tự viết). Gộp lại là hai bề mặt khác nhau (vòng lặp tool/lưu trữ · nội dung skill) và > 4 h.
+
+**Thứ tự:** T-7.1 → T-7.2 → T-7.3 → T-7.4 → T-7.5 → T-7.6 → T-7.7a → T-7.7b → T-7.8 → T-7.9. T-7.1 (🔒⭐) đi đầu vì nó quyết ADR-09 còn đứng hay không (§24.1 ②, cùng lý do T-5.6 / T-6.5) — đo sơ bộ hôm nay cho thấy đứng, nhưng task phải chứng minh đủ trên stack thật. T-7.2 → T-7.3 → T-7.4 là bộ ba hạ tầng sandbox (image → server → test phòng vệ), T-7.4 🔒 kiểm **sau** khi server xong. T-7.5 → T-7.6 là mức (a) nạp tri thức (hữu ích một mình, §13.1). T-7.7a dựng mức (b). T-7.8 gate quyền. T-7.9 FE cuối.
+
+**Việc của NGƯỜI trong P7:**
+- **T-H9 (chọn skill) — đã chốt Q-P7-2:** không dùng bộ Anthropic (giấy phép độc quyền + đòi LibreOffice/Node). Scarlet **tự viết** bốn skill `docx` / `xlsx` / `pptx` / `pdf` ngắn, chỉ dùng thư viện Python tự do của §13.3 (T-7.7b). Không còn chờ người.
+- **T-HD11 (bản vẽ panel chọn skill) — mới, Q-P7-4:** T-7.5 viết sẵn prompt ở `design/T-HD11-prompt.md` (tiền lệ T-HD6 / T-5.4); người dùng vẽ bằng Claude Design. Chặn phần panel của T-7.9; **không** chặn các task backend hay nút mount trong ô nhập (T-S.10 đã dựng `data-planned="T-7.9"`).
+
+**Ước lượng: 21.5 h cho 10 task**, không phải 30 h / 9 task của §2 cũ (§2 đã sửa — Q-P7-5). Nền số là **thực tế task P6 cùng hình dạng** (P6 về ~67 %), cộng ~0.5 h cho mỗi bề mặt lần đầu **chưa** gặp (service `network_mode: none` + UDS; lược đồ danh tính root→setpriv cho sandbox; loader frontmatter):
+
+| Task | §2 cũ | Đề xuất | Gần nhất | Cơ sở |
+|---|---|---|---|---|
+| T-7.1 🔒⭐ | — *(30 h / 9 task cả phase)* | **1.5 h** | T-0.6 (~2 h thí nghiệm) | task thí nghiệm, phần lớn là đo — đã đo sơ bộ hôm nay; dựng đủ trên stack, dọn sau |
+| T-7.2 🔒 | | **2.5 h** | T-6.5 (~2 h) | image + service mới (như `fetcher`); lược đồ danh tính root→setpriv (chưa đo trong compose); `check_networks.py` mở rộng sang `sandbox` |
+| T-7.3 | | **2.5 h** | T-6.5, T-4.1 (~1.5 h) | server UDS + thư mục tạm mỗi lượt + dọn nhóm tiến trình + PID 1 gặt (tini) |
+| T-7.4 🔒 | | **2 h** | T-6.4 (~0.5 h) + T-2.18 (1.5 h) | bộ test phòng vệ S11, chạy trong image `sandbox`, mỗi lớp đỏ được |
+| T-7.5 | | **2 h** | T-4.1 (~1.5 h) | loader frontmatter + bảng `skills` / `user_skills` + prompt T-HD11 |
+| T-7.6 | | **2.5 h** | T-6.7a phần registry, T-3.0 | ba tầng + `load_skill` (một `BuiltinTools` nữa) + chèn tầng 1 vào `context.build` |
+| T-7.7a 🔒 | | **3 h** | T-6.7a (~3.5 h) | `run_code` → client UDS → MinIO → artifact `kind=file`; hai timeout lồng (B-71) |
+| T-7.7b | | **1.5 h** | — | bốn skill tự viết + test một skill sinh `.docx` thật qua sandbox |
+| T-7.8 | | **1.5 h** | T-6.8 (~1 h) | `can_execute_skills` qua `get_effective_limits` lúc gọi (lối T-6.8) |
+| T-7.9 | | **2.5 h** | T-6.7c (~2 h), T-4.7 | panel + toggle per-user + chip "Đang chạy code…"; chờ T-HD11 |
+| | **30 h / 9 task** | **21.5 h / 10 task** | | −28 % so với §2 cũ: registry + vòng lặp tool đã có (T-6.7a), artifact `kind=file` chỉ là `KIND_BY_LANGUAGE` + con trỏ MinIO (T-5.1), quyền đi qua `get_effective_limits` có sẵn (T-6.8) |
+
+**DoD của phase:** KE-HOACH §24.3 dòng P7 (`tests/sandbox/test_isolation.py`: `socket.create_connection` ⇒ thất bại · `while True: pass` ⇒ bị kill trong `SANDBOX_TIMEOUT_S` · `os.environ` không thấy secret — S11, C27 · bật 10 skill ⇒ `prompt_tokens` tăng < 500 — C30). Bổ sung:
+- Lớp 1 có phép kiểm **đỏ được**: `make check-networks` (mở rộng từ T-6.5) khẳng định `sandbox` có `network_mode: none`, không `env_file`, không `ports`, không mạng nào; đỏ khi gỡ `network_mode: none` (thay grep ③ cho `sandbox` — B-117).
+- UC-09 đủ năm dòng trên stack thật: dòng 1 (T-7.6 — chỉ `name`+`description` vào prompt, đo `prompt_tokens`), dòng 2 (T-7.6 — model gọi `load_skill`), dòng 3 (T-7.7a + T-7.7b — user có quyền, code chạy, output về), dòng 4 (T-7.8 — user không quyền, `tool_result` báo rõ, không im lặng), dòng 5 (T-7.7a + T-7.7b — skill sinh `.docx` lên MinIO, hiện trong panel có nút Tải).
+- `grep -rnE '(^|[^-])planned="T-7\.' frontend/src --include=*.tsx | grep -v '\.test\.'` **và** `grep -rn 'data-planned="T-7' frontend/src --include=*.tsx | grep -v '\.test\.'` đều rỗng (cách đếm NQ-130), **cộng** `[data-planned^="T-7"]` trên DOM màn chat ⇒ `0` (chip `run_code` gắn `data-planned` động như T-6.7c).
+- `make test-artifact-origin` vẫn `S12 đạt` (P7 không chạm origin phụ) — artifact `kind=file` tải qua presigned URL của MinIO (origin chính), không render trong iframe.
+
+**Không làm ở P7:** gVisor/Firecracker (B-02 — RR-2 chấp nhận); MCP (B-05 — registry có `ToolProvider`, không nguồn thứ hai); RAG (B-06); đưa **tệp đính kèm của người dùng** vào sandbox (Q-P7-6 — `run_code` chỉ nhận script skill + code model sinh; → B-401); skill cần LibreOffice/pandoc/Node (Q-P7-2 — bốn skill tự viết chỉ dùng thư viện §13.3); mạng trong sandbox (ADR-09); sửa `SADeprecationWarning` của SQLAlchemy 2.1.4 (B-388, ngoài Việc).
+
+**Sáu câu hỏi của phase — chốt 2026-10-09 (NQ-147), người dùng chọn phương án đề xuất cả sáu:**
+
+| # | Task | Câu hỏi | Đã chốt |
+|---|---|---|---|
+| Q-P7-1 | T-7.1, T-7.2, T-7.3, T-7.4 | §13.3 đặt `user: 65534` cho cả service — đo cho thấy code cùng uid chiếm được socket, không cách ly hai người dùng khác lượt. Cách ly server ↔ code thế nào | **Danh tính server ≠ danh tính code:** container khởi động root (`cap_drop ALL` + chỉ `cap_add [SETUID, SETGID]`, **bỏ** `user:` của §13.3), server chạy dưới `tini` và **không bao giờ** chạy code trong tiến trình của nó; mỗi lượt `exec` chạy code bằng `setpriv` xuống uid không đặc quyền với 0 cap + `NoNewPrivs`; thư mục socket thuộc root `0755` (code không ghi); sau mỗi lượt giết cả nhóm tiến trình của lượt dưới uid ấy rồi xoá thư mục tạm; chạy **tuần tự** từng lượt. Lệch §13.3 / Phụ lục C (bỏ `user: 65534`) — ghi B-399; tiền lệ NQ-145 (root sống tới `setpriv` rồi bỏ cap) |
+| Q-P7-2 | T-H9, T-7.5, T-7.7b | Bộ skill mặc định của T-H9 (`docx`/`xlsx`/`pptx`/`pdf` của Anthropic) | **Scarlet tự viết bốn skill** cùng tên, chỉ dùng thư viện Python tự do của §13.3 (`python-docx`, `openpyxl`, `python-pptx`, `pypdf`) — bộ Anthropic giấy phép độc quyền (cấm nhúng/phái sinh/phân phối) và đòi LibreOffice/pandoc/Node. Giấy phép skill tự viết theo repo |
+| Q-P7-3 | T-7.6 | C30 "0 so với 10 skill, `prompt_tokens` tăng < 500" | **Đo phần tăng DO SKILL:** `prompt_tokens(10 skill bật) − prompt_tokens(1 skill bật) < 500`, cùng model cùng câu; thuế cố định (schema `load_skill` + prompt tool-use của provider, B-390 đo +743 trên `claude-haiku`) đo và ghi riêng, không tính vào ngưỡng. Tầng 1 cắt `description` ở biến mới `SKILL_DESCRIPTION_MAX_CHARS` (giá trị chốt bằng số đo: trung vị 104 token) |
+| Q-P7-4 | T-7.9 | Chưa có bản vẽ cho panel chọn skill | **Người dùng vẽ T-HD11**; T-7.5 viết sẵn `design/T-HD11-prompt.md` (lối T-HD6). Nút mount trong ô nhập (`data-planned="T-7.9"`, T-S.10) và chip "Đang chạy code…" (T-S.15 dựng sẵn) đã có; chờ bản vẽ chỉ là phần panel |
+| Q-P7-5 | — | Sửa bảng §2 (ngoài vùng được giao) | **Cho sửa** — P6 ✅, dòng P7 (10 task / 21.5 h), dòng Tổng (133 task / 352 h) |
+| Q-P7-6 | T-7.7a | Tệp nào vào sandbox cho `run_code` | **Chỉ script của skill đã bật + code model sinh;** tệp đính kèm của người dùng **không** vào sandbox ở P7 (upload hôm nay cũng không nhận `.xlsx`/`.pptx` — `ALLOWED_UPLOAD_MIME`). → B-401 |
+
+**Chọn trong phiên mở rộng theo tiền lệ, không hỏi — đổi được khi duyệt:** ① `load_skill` và `run_code` là hai `BuiltinTools` trong registry của T-6.7a, **cùng công tắc**? Không — khác T-6.7c: skill có **công tắc riêng per-user** (bảng `user_skills`, nút "Chọn skill" T-7.9), còn `run_code` gated bằng `can_execute_skills`; `load_skill` xuất hiện khi user bật ≥ 1 skill, `run_code` xuất hiện khi user có quyền chạy; ② `sandbox` gửi file ra bằng **base64 trong response** (C29), worker đẩy MinIO ngay, trần `MAX_SKILL_OUTPUT_MB`; ③ artifact từ skill là `kind=file`, `content=NULL`, nội dung ở `storage_key` — Tải lấy từ MinIO (B-372), **không** render iframe; ④ timeout hai lớp (C28): `SANDBOX_TIMEOUT_S` trong sandbox, client UDS của worker đặt trần ngắn hơn ~5 s (lối B-71); ⑤ `can_execute_skills` đọc qua `get_effective_limits` lúc gọi (lối T-6.8, gộp `limit_override_json`).
+
+**Chung cho cả phase:**
+- **Đầu phiên `docker compose ps`** (B-275) — DoD trên stack cần `api`, `worker`, `nginx`, `web`, `fetcher` (và `sandbox` từ T-7.2) `healthy`; đếm đủ 10 service (11 từ T-7.2).
+- **`make test` không chạm mạng, không chạm `sandbox` thật.** Giả ở **một** chỗ nối (client UDS của `run_code`; loader đọc thư mục skill giả). Hành vi thật (cách ly, giết tiến trình, sinh `.docx`) là lệnh DoD trong container. Test của `sandbox` chạy **trong image `sandbox`** (`docker compose run --rm --no-deps sandbox python -m pytest`), gắn vào `make test` như `fetcher` / `web`.
+- **Kiểm ngược như P5/P6:** mỗi phép phá một dòng trong báo cáo; khôi phục xong **`touch`** (T-S.8); **thêm service `sandbox`** ⇒ `up -d sandbox` **không** `--force-recreate` (B-139: kéo theo `redis`/`postgres`, `worker` không sống qua), rồi `docker compose ps` đủ `healthy`; lệnh dừng stack luôn kèm `--profile core --profile tools` (B-340); `git diff --stat` sạch sau cùng.
+- **Lượt model thật ≤ 0.10 USD mỗi task** (NQ-122), đo `claude-haiku` trước (DeepSeek quá tải — B-329; lỗi 4xx của DeepSeek qua LiteLLM méo thành `500`/`200 null` — B-282); dán `SELECT sum(cost_usd) FROM usage_events WHERE created_at > '<mốc đầu phiên>'`.
+- **Đồng hồ:** monotonic trong container chậm 5–7.5 % (B-278) ⇒ mọi trần thời gian trong DoD có biên ±10 %; ca test đặt mốc tường minh (B-290).
+- **Phụ thuộc mới chỉ ở `sandbox/`** (`python-docx`, `openpyxl`, `python-pptx`, `pypdf`, `pillow`, `pandas`, `matplotlib` — ghim bản trong `sandbox/requirements.txt`, §13.3). Backend **không** thêm gói (client UDS qua `httpx` có sẵn). FE không thêm gói.
+- **Ngoài commit, cố ý:** `RUNBOOK-AWS.md`, `docs/account-test.txt`, hai `*:Zone.Identifier`. `git add` từng file, từ WSL; soi `git diff --cached --stat` trước khi commit.
+
+---
+
+### T-7.1 — 🔒⭐ Thí nghiệm: worker gọi `sandbox` qua Unix socket khi `network_mode: none`, và code không chiếm được socket — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** — · **Ước lượng:** 1.5 h
+- **KH:** §13.1, §13.3, ADR-09, Phụ lục C (ghi chú cuối "cách (a) Unix socket") · §6.9 (prompt task thí nghiệm) · NQ-04, NQ-147 (Q-P7-1)
+- **Rủi ro:** cao — nếu Unix socket **không** chạy khi `network_mode: none`, cả P7 phải dừng và viết lại ADR-09 (NQ-04). Đo sơ bộ 2026-10-09 cho thấy chạy, nhưng "đúng cấu hình §13.3" lại **không cách ly** server khỏi code — task phải chốt cả hai trước khi T-7.2 dựng thật.
+- **Việc:**
+  - [ ] **Đây là task thí nghiệm (§6.9):** viết mã tối thiểu, vứt đi sau cũng được; không đụng code sản phẩm. Trả lời **hai** câu: (1) worker có gọi được `sandbox` qua Unix socket (volume mount) khi sandbox `network_mode: none` không; (2) một cấu hình nào cho phép server chạy mà code do model sinh **không** chiếm/thay được socket để lừa lượt gọi sau.
+  - [ ] Dựng tối thiểu: container `sandbox` giả (`--network none`, `--read-only`, tmpfs `/work`, `cap_drop ALL`, `no-new-privileges`) nghe `AF_UNIX` trên volume mount; "client" chạy trong image `scarlet-worker` gọi bằng `httpx.HTTPTransport(uds=…)`. Đo cả đối chứng: trong sandbox `socket.create_connection(('1.1.1.1',53))` và `getaddrinfo` phải hỏng.
+  - [ ] Thử cấu hình danh tính của Q-P7-1 (server dưới identity A, code dưới identity B kém quyền hơn, thư mục socket không cho B ghi): **định nghĩa phép thử phòng vệ** — sau khi chạy một đoạn code tuỳ ý trong sandbox, lượt `exec` kế của client vẫn tới **đúng** server thật (không phải một listener do code dựng). Mô tả expected PASS/FAIL; **không** cần để lại đoạn khai thác.
+  - [ ] Nếu **không** làm được: liệt kê phương án thay thế (cách (b) shim ở network riêng; cổng TCP trên mạng riêng không `internal`) kèm đánh đổi, ghi rõ ADR-09 phần nào phải viết lại.
+- **Xong khi (DoD):**
+  - [ ] Dán output: `GET /health` của client qua UDS ⇒ `200` + thân JSON; `POST /exec {code}` ⇒ chạy, trả `exit_code`/`stdout`. Và đối chứng trong sandbox: `create_connection(('1.1.1.1',53))` ⇒ `OSError` "Network is unreachable", `getaddrinfo('example.com',443)` ⇒ `gaierror`, `socket.if_nameindex()` ⇒ chỉ `[(1,'lo')]` — **mỗi dòng dán nguyên văn**.
+  - [ ] Phép thử phòng vệ "code không chiếm được socket" cho **PASS** với cấu hình danh tính đã chọn, và cho **FAIL** khi hạ về "cùng một uid cho server và code" (chứng minh lớp này có tác dụng) — dán hai kết quả, mỗi bên một dòng kết luận (PASS/FAIL), không dán mã khai thác.
+  - [ ] Một câu kết luận rõ: "Unix socket (cách a) **đứng** — không viết lại ADR-09" **hoặc** "không đứng — viết lại ADR-09 phần X". (Đo sơ bộ: đứng.)
+  - [ ] Dọn sạch: `docker ps -a | grep p7` ⇒ rỗng, `docker volume ls | grep p7` ⇒ rỗng; `git status` ⇒ chỉ bốn tệp ngoài commit cố ý (task thí nghiệm không để lại code sản phẩm).
+- **Cạm bẫy:**
+  - ① **"KHÔNG LÀM ĐƯỢC" là câu trả lời hợp lệ** (§6.9 ③) — đừng ép ra kết quả mong muốn. Nếu UDS không chạy, nói thẳng và viết lại ADR-09.
+  - ② **Cấu hình §13.3 nguyên văn (`user: 65534` cho cả service) không cách ly được hai người dùng** — đã đo. Đây là phát hiện chính của task, không phải chi tiết phụ: T-7.2/T-7.3 dựng theo cấu hình danh tính tách (Q-P7-1), không theo §13.3 nguyên văn.
+  - ③ **Volume socket mới thuộc `root:root 0755`** — server `user: 65534` không bind được. Thứ tự: tạo thư mục / `chown` trước khi server bind (T-7.3 xử lý bằng entrypoint root rồi hạ quyền).
+  - ④ **Đây là task phòng vệ, không phải khai thác** (phạm vi phiên): định nghĩa phép thử + expected result; không reproduce/để lại exploit. Mọi container tạm dọn sau.
+
+---
+
+### T-7.2 — 🔒 Image + service `sandbox`: `network_mode: none`, read-only, tmpfs `/work`, `cap_drop ALL`, **không** `env_file`; danh tính tách — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-7.1 ✅ · **Ước lượng:** 2.5 h
+- **KH:** §13.1, §13.3, ADR-09, C27, Phụ lục C (`sandbox`) · RR-2 · NQ-147 (Q-P7-1)
+- **Rủi ro:** cao — đây là ranh giới cách ly của cả subsystem. Thêm `env_file` hoặc bỏ `network_mode: none` là gỡ lớp phòng thủ mà không test nào đỏ (B-117, cùng họ `fetcher` ở T-6.5). "Sửa cho tiện" bằng cách cho `sandbox` vào `internal` là mục "Không bao giờ" của `CLAUDE.md` — dừng, hỏi.
+- **Việc:**
+  - [ ] `docker-compose.yml`: `sandbox` **không** `<<: *common` (B-50: anchor gắn `internal` + `env_file`), `network_mode: "none"`, `read_only: true`, `tmpfs: ["/work:size=256m,mode=1777"]`, `mem_limit`, `pids_limit`, `cpus`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, `restart`, `profiles: [tools]`, **không** `env_file`, **không** `ports`. Danh tính tách (Q-P7-1): khởi động root với `cap_add: [SETUID, SETGID]` (chỉ hai cap để `setpriv`), **không** `user:` ở compose — hạ quyền trong entrypoint. `SANDBOX_BASE_URL` của worker trỏ socket mount (`FETCHER`-style). Chú thích trỏ §13.3 + NQ-147.
+  - [ ] `sandbox/Dockerfile`: `python:3.12-slim`, cài `tini`, `requirements.txt` ghim §13.3 (`python-docx 1.2.0`, `openpyxl 3.1.5`, `python-pptx 1.0.2`, `pypdf 6.19.0`, `pillow`, `pandas`, `matplotlib` + phụ thuộc bắc cầu ghim tường minh); entrypoint: `tini` làm PID 1, tạo + `chown` thư mục socket cho identity server, chạy server. Ghi kích thước image.
+  - [ ] `sandbox/requirements.txt` (§13.3, §19.1 "thư viện cho sandbox") — một nguồn; thêm skill cần gói mới = sửa file + rebuild (ghi rõ trong docstring / README vận hành).
+  - [ ] `scripts/check_networks.py` (mở rộng từ T-6.5): thêm `sandbox` phải `network_mode: none`, không `env_file`/`environment`/`ports`, không mạng nào; service vắng ⇒ đỏ (không "xanh rỗng"). `check_identifiers.py` quét thêm `sandbox/`.
+  - [ ] `sandbox/.dockerignore` + context chỉ `./sandbox` (B-364: `backend/` không `.dockerignore` làm build ~20 phút).
+- **Xong khi (DoD):**
+  - [ ] `docker compose config` ⇒ `sandbox.network_mode == "none"`, không khoá `env_file`/`environment`/`ports`; `docker compose exec sandbox env | grep -cE 'JWT_SECRET|MASTER_ENCRYPTION_KEY|DATABASE_URL|TAVILY|MINIO_|POSTGRES_'` ⇒ `0`; `docker compose exec sandbox python -c "import app.config"` ⇒ `ModuleNotFoundError` — dán.
+  - [ ] `docker inspect scarlet-sandbox-1` ⇒ `HostConfig.NetworkMode=none`, `ReadonlyRootfs=true`, `CapDrop=[ALL]`, `HostConfig.Memory`/`PidsLimit` đúng `mem_limit`/`pids_limit`; `/proc/1/comm` ⇒ `tini` — dán.
+  - [ ] `make check-networks` ⇒ `OK`; **đỏ được**: thêm `network_mode` sai (hoặc `env_file`) ⇒ `check-networks: FAIL sandbox: …` (exit ≠ 0) — dán, rồi gỡ.
+  - [ ] `docker image ls` ⇒ kích thước image `sandbox` trước/sau; `docker compose ps` ⇒ 11 service `healthy` gồm `sandbox`.
+  - [ ] Kiểm ngược: thêm `sandbox` vào `internal` ⇒ `check-networks` đỏ (dán, gỡ); thêm `env_file: [.env]` ⇒ DoD dòng 1 thấy secret (dán số > 0, gỡ).
+  - [ ] `make test && make lint && make check-hardcode && docker compose ps`.
+- **Cạm bẫy:**
+  - ① **B-50:** `<<: *common` gắn `internal` + `env_file` cho mọi service kế thừa. Viết tay từng khoá (lối `litellm`, `web`, `fetcher`).
+  - ② **C27 / A6:** sandbox không `env_file` — đó là lớp "không thấy secret". Kiểm bằng DoD dòng 1, có kiểm ngược đỏ.
+  - ③ **B-30:** image slim không `curl` — healthcheck bằng `python` (hoặc bỏ healthcheck vì `network_mode: none` không có cổng; dùng `test` kiểu `python -c "import os; os.path.exists(SOCK)"`).
+  - ④ **B-139 / B-195:** thêm service là `up -d sandbox` **không** `--force-recreate` (kéo theo `redis`/`postgres`, `worker` mồ côi); rồi `docker compose ps` đủ `healthy`.
+  - ⑤ **B-364:** context build là `./sandbox` + `.dockerignore`, không gốc repo.
+  - ⑥ **`cap_add` chỉ `SETUID, SETGID`** để `setpriv` chạy — không thêm cap nào khác; `no-new-privileges` giữ nguyên (đo T-7.1: code dưới uid hạ quyền có `CapEff: 0`).
+
+---
+
+### T-7.3 — Server `sandbox`: `POST /exec` qua Unix socket, thư mục tạm mỗi lượt, giết nhóm tiến trình + gặt zombie, dọn sạch
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-7.2 ✅ · **Ước lượng:** 2.5 h
+- **KH:** §13.3 (giao thức `POST /exec`), C28, C29, ADR-09 · NQ-147 (Q-P7-1) · B-71 (hai timeout lồng)
+- **Việc:**
+  - [ ] `sandbox/server.py` (§23): nghe `AF_UNIX` trên socket mount; `POST /exec {files: {...}, cmd: [...], timeout_s}` ⇒ ghi `files` vào thư mục tạm **riêng mỗi lượt** dưới `/work`, chạy `cmd` bằng `setpriv` xuống uid không đặc quyền (Q-P7-1) trong một **process group / session** mới, trần `SANDBOX_TIMEOUT_S`; trả `{exit_code, stdout, stderr, files_out: {<tên>: <base64>}}` (C29, chỉ file trong thư mục tạm, trần `MAX_SKILL_OUTPUT_MB`). Không bao giờ ném ra socket — mọi ngả hỏng ⇒ JSON có `exit_code`/`error`.
+  - [ ] Hết giờ hoặc xong ⇒ **giết cả nhóm tiến trình** của lượt (`killpg`/kill theo session) dưới uid ấy, **xoá thư mục tạm**; PID 1 (`tini`) gặt zombie. Chạy **tuần tự** (một khoá): server không chạy hai lượt cùng lúc (RR-2: giảm bề mặt; song song để Backlog).
+  - [ ] `app/tools/sandbox_client.py` (phía worker, §23 `tools/`): client `httpx` UDS tới `SANDBOX_BASE_URL`, gửi `files`/`cmd`/`timeout_s`, trần client > `SANDBOX_TIMEOUT_S` nhưng **ngắn hơn** `GENERATE_TIMEOUT_S` (B-71, C28); sandbox chết / JSON sai hình ⇒ kết quả `ok=False, reason="sandbox_unavailable"`, không ném.
+  - [ ] Biến mới vào `Settings` + `.env.example` nếu lệch Phụ lục B: `SANDBOX_BASE_URL`, `SANDBOX_TIMEOUT_S`, `MAX_SKILL_OUTPUT_MB` đã có; thêm nếu cần (vd. `SANDBOX_PID_LIMIT` nếu không đặt được ở compose).
+- **Xong khi (DoD):**
+  - [ ] Từ `worker`, qua client UDS thật: `POST /exec {code: "print(1+1)"}` ⇒ `exit_code=0`, `stdout="2\n"` — dán.
+  - [ ] `while True: pass` với `timeout_s` nhỏ ⇒ `exit_code` báo bị giết (hoặc `timeout: true`) trong `SANDBOX_TIMEOUT_S` ±10 % (B-278); **ngay sau đó** `docker exec sandbox sh -c "ps -eo pid,stat,comm"` ⇒ **0** tiến trình `R`/`S` của lượt đó còn sống, **0** zombie (`Z`) — dán cả hai (phép thử dọn tiến trình).
+  - [ ] Code sinh file: `exec {code: "open('/work/a.txt','w').write('x')", ...}` ⇒ `files_out` có `a.txt` base64 = `eA==`; lượt kế thư mục tạm **mới** (không thấy `a.txt` của lượt trước) — dán.
+  - [ ] File vượt `MAX_SKILL_OUTPUT_MB` ⇒ bị cắt/từ chối có mã, không tràn RAM — dán.
+  - [ ] Kiểm ngược: bỏ bước giết nhóm tiến trình ⇒ sau lượt `fork` con mồ côi còn sống (dán `ps`); bỏ `tini`/PID-1-gặt ⇒ zombie tích lại sau vài lượt (dán số); bỏ xoá thư mục tạm ⇒ lượt kế thấy file lượt trước. Mỗi phép một dòng, khôi phục + `touch`.
+  - [ ] `make test && make lint && make check-hardcode && docker compose ps`.
+- **Cạm bẫy:**
+  - ① **C29:** `/work` là tmpfs — file mất khi container kết thúc; trả base64 trong response, worker đẩy MinIO ngay (T-7.7a). Đừng dựa vào volume lâu bền.
+  - ② **Con mồ côi và zombie** (đo T-7.1): `subprocess` timeout chỉ giết tiến trình trực tiếp; con `fork` hoặc giữ pipe sống qua được. Giết theo **nhóm** (session/pgid) + PID 1 gặt (tini) — cùng lối `tini` của `fetcher` ở T-6.6 Ghi nhận ⑤.
+  - ③ **B-71 / C28:** hai timeout lồng — client worker > `SANDBOX_TIMEOUT_S`, cả hai < `GENERATE_TIMEOUT_S`; cái trong nổ trước.
+  - ④ **Thư mục tạm mỗi lượt + xoá sau** (§13.3): lượt này không thấy file lượt kia; dọn trong `finally` (lối C24 của `fetcher`).
+  - ⑤ **Chạy tuần tự** (RR-2): một khoá cho cả server; song song nhiều lượt là bề mặt mới (Backlog), không mở ở P7.
+
+---
+
+### T-7.4 — 🔒 `sandbox/test_isolation.py`: bộ test phòng vệ S11 + C27, mỗi lớp đỏ được — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-7.3 ✅ · **Ước lượng:** 2 h
+- **KH:** §13.6 (C27, C28), S11, ADR-09, RR-2 · HUONG-DAN-AGENT §2.3 (T-7.4 "như T-2.18": test bảo mật độc lập với code nó kiểm)
+- **Rủi ro:** cao — đây là văn bản chứng minh cách ly đứng. Một test "xanh giả" (khẳng định điều luôn đúng, hoặc trình runtime tự chặn chứ không phải lớp của ta — cùng họ B-236 / B-368 / Cạm bẫy ⑦ T-6.6) là tệ hơn không có test. Mỗi phép thử phải **đỏ được** khi gỡ đúng lớp nó canh.
+- **Việc:**
+  - [ ] `sandbox/test_isolation.py` chạy **trong image `sandbox`** (`docker compose run --rm --no-deps sandbox python -m pytest`), gắn vào `make test`. Đây là **test phòng vệ**: mỗi ca khẳng định "không làm được X" **và** kèm một kiểm ngược (bản vá tạm gỡ lớp ⇒ ca đỏ) ghi trong báo cáo, không để exploit lại trong cây.
+  - [ ] Ca S11 — mạng: `socket.create_connection(('1.1.1.1',53))` ⇒ `OSError` (không ra mạng); `getaddrinfo` ⇒ `gaierror`. Ca S11 — CPU/treo: `while True: pass` ⇒ bị kill trong `SANDBOX_TIMEOUT_S` (đo qua server, mốc tường minh — B-290). Ca C27 — secret: `os.environ` không chứa khoá nào của Scarlet (assert tập con của danh sách trắng đã đo); rootfs read-only (`open('/etc/x','w')` ⇒ `OSError(30)`), chỉ `/work` ghi được.
+  - [ ] Ca phòng vệ danh tính (Q-P7-1): sau khi chạy code tuỳ ý một lượt, lượt `exec` kế của client vẫn tới **đúng** server (khẳng định bằng một dấu hiệu server đặt mà code dưới uid hạ quyền **không** đặt được — vd. uid của tiến trình server trong response `/health`). Kiểm ngược: hạ về "cùng uid" ⇒ ca đỏ.
+  - [ ] Ca dọn: sau một lượt `fork`, `ps` trong sandbox ⇒ 0 con mồ côi, 0 zombie (tái dùng phép đo T-7.3).
+- **Xong khi (DoD):**
+  - [ ] `docker compose run --rm --no-deps sandbox python -m pytest -v` ⇒ ≥ 6 ca xanh — dán tên ca.
+  - [ ] Kiểm ngược, mỗi lớp một dòng **đỏ**: gỡ `network_mode: none` (bản vá compose tạm) ⇒ ca mạng đỏ; nâng `SANDBOX_TIMEOUT_S` lên rất lớn ⇒ ca `while True` đỏ (hoặc treo tới trần — ghi); thêm `env_file` ⇒ ca secret đỏ; "cùng uid" ⇒ ca danh tính đỏ; bỏ giết nhóm tiến trình ⇒ ca dọn đỏ — dán năm kết quả, khôi phục + `touch` + `docker compose up -d sandbox` sau mỗi phép.
+  - [ ] `make test` (gồm `sandbox`) && `make lint` && `make check-hardcode` && `docker compose ps`.
+- **Cạm bẫy:**
+  - ① **Xanh giả** (B-236 / B-368 / Cạm bẫy ⑦ T-6.6): một ca "xanh nhờ runtime, không nhờ lớp của ta". Mỗi ca phải có kiểm ngược đỏ chứng minh chính lớp của Scarlet chặn.
+  - ② **Test độc lập với code** (như T-2.18): `test_isolation.py` ở `sandbox/`, không import code sản phẩm của backend — nó kiểm **hành vi container**, không kiểm hàm Python.
+  - ③ **B-278:** trần thời gian `while True` có biên ±10 %; mốc tường minh.
+  - ④ **Phạm vi phiên:** đây là test phòng vệ với expected PASS/FAIL, không phải exploit để lại trong repo; mọi bản vá kiểm ngược khôi phục ngay.
+
+---
+
+### T-7.5 — Loader skill (spec agentskills.io): đọc frontmatter, đăng ký `skills` + `user_skills`; prompt T-HD11
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-7.2 ✅ · **Ước lượng:** 2 h
+- **KH:** §13.2 (format, ba tầng), §17.1 (`skills`, `user_skills`), §18.3 (`GET /skills`, `PUT /skills/{name}/toggle`) · NQ-147 (Q-P7-2, Q-P7-4) · B-21 (bảng `user_skills`)
+- **Việc:**
+  - [ ] `app/skills/loader.py` (§23): đọc thư mục `skills/<name>/SKILL.md`, phân tích YAML frontmatter theo spec (`name` ≤ 64 ký tự, chữ thường/số/gạch, khớp tên thư mục; `description` ≤ 1024; `license`, `metadata`, `allowed-tools` tuỳ chọn); frontmatter hỏng / `name` lệch thư mục ⇒ bỏ qua skill đó + log `WARNING`, **không** chết loader (một skill hỏng không gãy cả bộ). Đăng ký vào bảng `skills` (`name`, `display_name`, `description`, `path`, `requires_execution`, `enabled`) — upsert theo `name`.
+  - [ ] `GET /skills` (đã lọc theo user: skill `enabled` + trạng thái `user_skills.enabled`), `PUT /skills/{name}/toggle` (ghi `user_skills`) — §18.3. `requires_execution` suy từ skill có `scripts/` hay không (hoặc frontmatter).
+  - [ ] `design/T-HD11-prompt.md`: prompt cho người dùng vẽ panel chọn skill (lối `design/T-HD6-prompt.md` do T-5.4 viết). Chỉ viết prompt — không vẽ.
+  - [ ] Bốn thư mục skill để loader có cái đọc: T-7.7b viết nội dung thật; T-7.5 chỉ cần loader + ít nhất một skill **tối thiểu** (hoặc skill test trong `tests/`) để DoD chạy.
+- **Xong khi (DoD):**
+  - [ ] `pytest -v` ≥ 6 ca: frontmatter hợp lệ ⇒ đăng ký đúng `name`/`description`; `name` lệch thư mục ⇒ bỏ qua + log; `description` > 1024 ⇒ bỏ qua (hoặc cắt — chốt theo spec); YAML hỏng ⇒ bỏ qua, skill khác vẫn nạp; `GET /skills` của user chưa bật gì ⇒ danh sách với `enabled=false`; `PUT …/toggle` ⇒ `user_skills` đổi, `GET` phản ánh — dán tên ca.
+  - [ ] Stack thật: đặt một skill vào `skills/`, gọi loader (hoặc restart `api`) ⇒ `SELECT name, requires_execution FROM skills` thấy nó; `curl` `GET /skills` với cookie ⇒ JSON có skill; `PUT /skills/<name>/toggle` ⇒ `200`, `SELECT * FROM user_skills` có hàng — dán.
+  - [ ] `design/T-HD11-prompt.md` tồn tại, `git status` thấy nó.
+  - [ ] Kiểm ngược: frontmatter thiếu `name` ⇒ ca "bỏ qua" đỏ khi loader vẫn đăng ký; `PUT toggle` không ghi `user_skills` ⇒ ca toggle đỏ.
+  - [ ] `make test && make lint && make check-hardcode && docker compose ps`.
+- **Cạm bẫy:**
+  - ① **B-21:** `user_skills` có trong DDL Phụ lục A (`0001`) nhưng §17.1 liệt 15 bảng thiếu nó — dùng bảng đã có, ghi lệch vào B-399 (KH chưa biết), không sửa KH.
+  - ② **`description` dài hơn §13.2 tưởng** (đo: tới 290 token) — tầng 1 phải cắt ở `SKILL_DESCRIPTION_MAX_CHARS` (T-7.6), không nạp nguyên.
+  - ③ **Một skill hỏng không gãy cả bộ** (lối T-6.1 "lỗi là dữ liệu"): loader bỏ qua skill lỗi + log, không raise.
+  - ④ **A3:** đường dẫn thư mục skill, tên bảng là cấu hình/dữ liệu — không hardcode tên skill trong `.py`.
+
+---
+
+### T-7.6 — Progressive disclosure ba tầng + tool `load_skill` (C30)
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-7.5 ✅, T-6.7a ✅ · **Ước lượng:** 2.5 h
+- **KH:** §13.2 (ba tầng), §13.5 (registry), §9.6 (ưu tiên context: sau system prompt), C30 · NQ-147 (Q-P7-3)
+- **Việc:**
+  - [ ] Tầng 1: skill đã bật của user ⇒ `name` + `description` (cắt `SKILL_DESCRIPTION_MAX_CHARS`) chèn vào context **ngay sau system prompt** (`context.build`, chỗ docstring đã chừa: "sau `_system_message`"), ưu tiên §9.6; không skill nào bật ⇒ không chèn gì (0 thuế).
+  - [ ] Tầng 2: tool `load_skill(name)` vào `BuiltinTools` của registry (T-6.7a) ⇒ trả `SKILL.md` đầy đủ trong `untrusted_block`? Không — `SKILL.md` là nội dung **của ta** (skill tự viết), không phải web; trả thẳng, cắt theo trần. Tool chỉ liệt skill user đã bật (không lộ skill người khác). Skill lạ ⇒ `ok=False, reason`.
+  - [ ] Công tắc: `load_skill` xuất hiện trong `tools` khi user bật ≥ 1 skill (khác công tắc "Tìm web" của T-6.7c; chọn theo tiền lệ ①). Dùng chung vòng lặp tool của `_run` — **không** sửa `generate.py` phần vòng lặp (§13.5).
+  - [ ] `SKILL_DESCRIPTION_MAX_CHARS` vào `Settings` + `.env.example`; giá trị chốt bằng số đo (trung vị 104 token ≈ ~400 ký tự tiếng Anh — chốt ở task, ghi lý do).
+- **Xong khi (DoD):**
+  - [ ] `pytest -v` ≥ 6 ca: 0 skill bật ⇒ context không có khối skill, `tools` không có `load_skill`; 1 skill bật ⇒ tầng 1 có `name`+`description` (đã cắt), `tools` có `load_skill`; model gọi `load_skill(x)` ⇒ `tool_result` có thân `SKILL.md`; `load_skill` tên lạ ⇒ `ok=False`; `description` dài ⇒ bị cắt ở trần — dán tên ca.
+  - [ ] **C30 trên stack thật** (Q-P7-3), `claude-haiku`: `prompt_tokens` của cùng một câu với **1** skill bật và với **10** skill bật ⇒ hiệu **< 500** — dán hai số và hiệu. Thuế cố định đo riêng: `prompt_tokens` với 0 skill (không `tools`) so với 1 skill (có `tools` + `load_skill`) — dán hiệu (thuế schema + tool-use, B-390, ~743+).
+  - [ ] UC-09 dòng 1–2 trên stack: bật skill, hỏi việc cần skill ⇒ `curl -N` thấy model gọi `load_skill`, rồi trả lời dùng nội dung skill — dán chuỗi event.
+  - [ ] Kiểm ngược: nạp **toàn bộ** `SKILL.md` vào tầng 1 (thay vì chỉ description) ⇒ ca C30 đỏ (hiệu ≫ 500); bỏ cắt `SKILL_DESCRIPTION_MAX_CHARS` ⇒ ca "đã cắt" đỏ.
+  - [ ] `make test && make lint && make check-hardcode && docker compose ps`.
+- **Cạm bẫy:**
+  - ① **C30 là lý do chi phí cụ thể** (§13.2): nạp cả nội dung skill vào mỗi request là nhân đôi hoá đơn cho tính năng dùng 5 % thời gian. Chỉ `name`+`description` ở tầng 1.
+  - ② **Thuế tool-use của `claude-haiku` (+743, B-390)** độc lập với số skill — "0 so với 10" trượt chắc; đo **phần tăng do skill** (1 so với 10), thuế cố định ghi riêng (Q-P7-3).
+  - ③ **§13.5:** `load_skill` là một `BuiltinTools` nữa — không sửa vòng lặp `_run`. Nếu phải sửa `_run`, dừng và hỏi (registry là điểm cắm).
+  - ④ **§9.6 ưu tiên:** skill description đứng **sau** system prompt, **trước** message — cắt khi ngân sách hẹp theo đúng thứ tự ấy (lối B-208).
+  - ⑤ **`SKILL.md` là nội dung của ta, không phải web** — trả thẳng, không `untrusted_block` (khác kết quả `fetch_url`/`web_search`).
+
+---
+
+### T-7.7a — 🔒 Tool `run_code` → sandbox → MinIO → artifact `kind=file`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-7.3 ✅, T-7.6 ✅ · **Ước lượng:** 3 h
+- **KH:** §13.3 (giao thức `exec`), C29, §14.1 (artifact `kind=file`), ADR-09, A6 · NQ-147 (Q-P7-1, Q-P7-6) · B-372 (`kind=file`)
+- **Rủi ro:** cao — đây là chỗ chạy code do model sinh (A6, RR-2). Một đường cho code chạy mà không qua `can_execute_skills` (T-7.8 làm gate, nhưng T-7.7a phải để chỗ) hay không qua sandbox là thủng cả subsystem.
+- **Việc:**
+  - [ ] `run_code` vào `BuiltinTools` (registry T-6.7a): nhận `code` (+ tuỳ chọn `files` = script của skill đã bật — Q-P7-6, **không** tệp đính kèm của user), gọi `sandbox_client` (T-7.3) qua UDS; trả `stdout`/`stderr`/`exit_code` cho model (cắt trần), `files_out` ⇒ đẩy MinIO (`storage.put`) ⇒ tạo artifact `kind=file`, `content=NULL`, `storage_key`, phát `ArtifactEvent` của T-5.1.
+  - [ ] Artifact `kind=file`: `KIND_BY_LANGUAGE`/repository của T-5.1 nhận `file`; đường đi (`GET /artifacts/{id}`) trả presigned URL MinIO cho nút Tải (B-372) — **không** render iframe (origin chính, không CSP).
+  - [ ] `run_code` chỉ có trong `tools` khi user có `can_execute_skills` — T-7.8 làm cửa thật; T-7.7a để hook đọc quyền (có thể tạm luôn-bật trong test, gate ở T-7.8). Ghi rõ "gate ở T-7.8".
+  - [ ] Kết quả `run_code` vào `tool_rounds` + `usage_events` một dòng mỗi lượt (như T-6.7a); file lớn vượt `MAX_SKILL_OUTPUT_MB` ⇒ `ok=False, reason`.
+- **Xong khi (DoD):**
+  - [ ] `pytest -v` ≥ 8 ca (client UDS giả): `run_code` ⇒ `tool_result` có `stdout`; sinh file ⇒ `storage.put` được gọi, artifact `kind=file` tạo, `ArtifactEvent` phát; sandbox chết ⇒ `ok=False reason=sandbox_unavailable`, lượt vẫn `done`; `while True` ⇒ `ok=False` (timeout), lượt `done`; file vượt trần ⇒ `ok=False`; `run_code` khi không quyền (mô phỏng) ⇒ không có trong `tools` — dán tên ca.
+  - [ ] Stack thật, `claude-haiku`, user có quyền: "vẽ biểu đồ cột [1,2,3] bằng matplotlib và lưu PNG" ⇒ `curl -N` thấy `tool_call run_code` → `tool_result ok:true` → `artifact` (`kind=file`) → `done`; `SELECT kind, storage_key FROM artifacts WHERE …` có hàng `file`; `GET /artifacts/{id}` trả URL tải được object từ MinIO (dán `curl -sI` của URL ⇒ `200` + `content-type`); `usage_events` một dòng — dán.
+  - [ ] C33 / tiền: lượt sau lượt `run_code` ⇒ `prompt_tokens` không mang nội dung file (artifact `kind=file` không vào `content`) — dán.
+  - [ ] Kiểm ngược: bỏ đẩy MinIO ⇒ ca "artifact tạo" đỏ; để sandbox lỗi thành ngoại lệ ⇒ ca "sandbox chết ⇒ done" đỏ (lượt ra `event: error`); artifact `kind=file` đọc `content` thay `storage_key` ⇒ Tải ra tệp rỗng (B-372).
+  - [ ] `SELECT sum(cost_usd) …` ≤ 0.10 — dán. `make test && make lint && make check-hardcode && docker compose ps`.
+- **Cạm bẫy:**
+  - ① **A6:** backend không tự chạy code — mọi `run_code` qua `sandbox`. Không có nhánh "chạy tạm trong worker".
+  - ② **C29:** file ở tmpfs `/work` — lấy base64 từ response, đẩy MinIO **ngay**; đừng giả định volume lâu bền.
+  - ③ **B-372:** artifact `kind=file` có `content=NULL` — Tải phải lấy từ `storage_key`/MinIO, không từ `content` (ra tệp rỗng).
+  - ④ **Q-P7-6:** tệp đính kèm của user **không** vào sandbox ở P7 — chỉ script skill + code model. → B-401.
+  - ⑤ **B-71 / C28:** trần client > `SANDBOX_TIMEOUT_S`, cả lượt < `GENERATE_TIMEOUT_S`; `run_code` cộng vào `MAX_TOOL_ROUNDS × (tool + model)` (B-392 — ca xấu nhất ngân sách thời gian).
+  - ⑥ **"Chat không chết" (UC-09 nhánh lỗi):** sandbox chết / hết giờ là `ok=False` cho model (lối T-6.1 ①), không ngoại lệ ra event `error`.
+
+---
+
+### T-7.7b — Bốn skill Scarlet tự viết (`docx`, `xlsx`, `pptx`, `pdf`), chỉ thư viện §13.3
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-7.5 ✅, T-7.7a ✅ · **Ước lượng:** 1.5 h
+- **KH:** §13.2 (format), §13.3 (`sandbox/requirements.txt`), Q-06 (bộ skill) · NQ-147 (Q-P7-2) · T-H9
+- **Việc:**
+  - [ ] `skills/docx/`, `skills/xlsx/`, `skills/pptx/`, `skills/pdf/`: mỗi thư mục `SKILL.md` (frontmatter `name`/`description` ≤ 1024/`license` theo repo) + `scripts/*.py` ngắn dùng **chỉ** thư viện §13.3 (`python-docx`, `openpyxl`, `python-pptx`, `pypdf`; `pillow`/`pandas`/`matplotlib` nếu cần). **Không** LibreOffice/pandoc/Node (Q-P7-2). `description` viết để model kích đúng lúc, ≤ `SKILL_DESCRIPTION_MAX_CHARS`.
+  - [ ] Nội dung Scarlet tự viết — **không** sao chép từ bộ Anthropic (giấy phép độc quyền, Q-P7-2). Chữ tiếng Việt / tiếng Anh tuỳ, nhưng tên biến/hàm không phải tiếng Việt không dấu (CLAUDE.md, `check_identifiers.py`).
+  - [ ] `requirements.txt` của `sandbox` đã ghim đủ (T-7.2) — nếu skill cần gói chưa có, thêm vào đó + rebuild (ghi rõ).
+- **Xong khi (DoD):**
+  - [ ] Loader (T-7.5) đăng ký đủ bốn: `SELECT name FROM skills ORDER BY name` ⇒ `docx, pdf, pptx, xlsx` — dán.
+  - [ ] Stack thật (UC-09 dòng 5), user có quyền: "tạo một file Word có tiêu đề X" ⇒ `load_skill(docx)` → `run_code` chạy `scripts/` của skill trong sandbox → artifact `kind=file` `.docx` → `GET /artifacts/{id}` tải được; mở file bằng `python-docx` ngoài sandbox đọc lại thấy tiêu đề X — dán (chứng minh file hợp lệ, không chỉ "có tạo").
+  - [ ] Mỗi skill một phép kiểm tối thiểu: script của skill chạy trong sandbox với input mẫu ⇒ file ra mở lại được bằng chính thư viện (docx→python-docx, xlsx→openpyxl, pptx→python-pptx, pdf→pypdf) — dán bốn dòng.
+  - [ ] Kiểm ngược: skill cần một gói **không** có trong `requirements.txt` ⇒ `run_code` của skill ấy `ok=False` (ImportError trong sandbox) — chứng minh không có đường `pip install` (ADR-09 §13.3).
+  - [ ] `make test && make lint && make check-hardcode && docker compose ps`.
+- **Cạm bẫy:**
+  - ① **Giấy phép** (Q-P7-2): bộ Anthropic cấm sao chép/phái sinh — viết mới, không chép. Giấy phép skill theo repo.
+  - ② **`network_mode: none` ⇒ không `pip install`** (§13.3): mọi gói phải ở `requirements.txt` + rebuild; skill thiếu gói là `ok=False`, không tự cài.
+  - ③ **File hợp lệ, không chỉ "có tạo"** (lối "output thật"): DoD mở lại file bằng thư viện, không dừng ở "có `storage_key`".
+  - ④ **`matplotlib` cần `MPLCONFIGDIR=/work/.mpl`** (đo: rootfs read-only) — nếu skill nào dùng, đặt env trong script hoặc entrypoint.
+
+---
+
+### T-7.8 — Quyền `can_execute_skills`: đọc qua `get_effective_limits` lúc gọi; bị chặn ⇒ `tool_result` báo rõ, không im lặng
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-7.7a ✅ · **Ước lượng:** 1.5 h
+- **KH:** §13.4, §10.4 (tier là dữ liệu), §16.3 (admin bật per-user), UC-09 dòng 4 · NQ-51 (cache tier), NQ-147 · B-153
+- **Việc:**
+  - [ ] `can_execute_skills` đọc qua `get_effective_limits` **lúc gọi** (gộp `limit_override_json`, lối T-6.8): user không quyền ⇒ `run_code` **không** vào `tools` (model không thấy tool nó không được dùng — C18); nếu model vẫn cố (qua `load_skill` gợi ý chạy) ⇒ registry trả `tool_result` `ok=False` với câu **báo rõ** "bạn chưa được bật quyền chạy code" để model trả lời cách khác (UC-09 dòng 4, §13.4 — không im lặng).
+  - [ ] Admin bật per-user đã có đường (`PATCH /admin/users/{id}` ghi `limit_override.can_execute_skills` — T-2.16, `OVERRIDABLE_FIELDS`); tier `free` mặc định `false`, `trusted` `true` (DDL `0001`). T-7.8 chỉ nối đường đọc, không thêm endpoint admin.
+  - [ ] `load_skill` (mức a) **không** cần `can_execute_skills` — chỉ `run_code` (mức b) cần. Mức (a) hữu ích một mình (§13.1).
+- **Xong khi (DoD):**
+  - [ ] `pytest -v` ≥ 6 ca: user `can_execute_skills=false` ⇒ `run_code` không trong `tools`; model gọi `run_code` dù không được mời ⇒ `tool_result ok=false` câu báo rõ, lượt `done`; `load_skill` vẫn chạy khi không có quyền chạy code; override `can_execute_skills=true` cho user `free` ⇒ `run_code` xuất hiện; đổi tier có hiệu lực ≤ `TIER_CACHE_TTL_S` (NQ-51); kiểm ngược hằng `true` thay `get_effective_limits` ⇒ ca override đỏ — dán tên ca.
+  - [ ] Stack thật (UC-09 dòng 4): user không quyền, hỏi việc cần chạy code ⇒ model nhận `tool_result` báo rõ (hoặc không có tool), trả lời cách khác, lượt `done`, **không** im lặng thất bại — dán chuỗi event + `messages.content` không rỗng.
+  - [ ] Admin `PATCH /admin/users/{id}` `{limit_override: {can_execute_skills: true}}` ⇒ trong ≤ `TIER_CACHE_TTL_S` user ấy có `run_code`; trước đó không — dán đối chứng.
+  - [ ] Kiểm ngược: đọc thẳng `tiers.can_execute_skills` (bỏ override) ⇒ ca override đỏ (B-153); guard chỉ ở `load_skill` không ở `run_code` ⇒ ca "không quyền vẫn chạy code" đỏ.
+  - [ ] `make test && make lint && make check-hardcode && docker compose ps`.
+- **Cạm bẫy:**
+  - ① **B-153:** `can_execute_skills` là một trong chín trường `EffectiveLimits` — đọc qua `get_effective_limits` (gộp override), không thẳng `tiers` (bỏ qua ghi đè per-user).
+  - ② **UC-09 dòng 4 / §13.4:** bị chặn phải **báo rõ** cho model (`tool_result`), không im lặng — model tự chuyển hướng. "Im lặng thất bại" là trượt AC.
+  - ③ **C18:** `tools=None` khác `tools=[]`; user không quyền thì model không thấy `run_code` (không thuế schema cho tool không dùng được).
+  - ④ **B-395 (cùng họ):** quyền đọc ở route hay ở worker? Đọc lúc dựng `schema` trong `generate` (lối T-6.8); cửa hở lượt đã enqueue chấp nhận với 15–20 người (ghi nếu cần).
+  - ⑤ **Mức (a) không cần quyền** (§13.1): đừng gate `load_skill` — chỉ `run_code`.
+
+---
+
+### T-7.9 — FE: panel chọn skill, bật/tắt per-user, chip "Đang chạy code…" (T-HD11)
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-7.8 ✅, **T-HD11** · **Ước lượng:** 2.5 h
+- **KH:** UC-09 dòng 1, 3 · §7.4 (`tool_call`/`tool_result`) · §7b.2 hàng `T-7.9` · bản vẽ T-HD2-v2 (nút ô nhập), T-HD3-v2 (chip), T-HD11 (panel — mới)
+- **Việc:**
+  - [ ] Thay `ComingSoon planned="T-7.9"` ở `Composer.tsx` (nút "Chọn skill") bằng panel thật (theo T-HD11): liệt skill từ `GET /skills`, công tắc per-user (`PUT /skills/{name}/toggle`), mờ + tooltip khi user không `can_execute_skills` cho skill cần chạy (lối `AttachButtonNoVision` T-4.5 / `WebToggle` T-6.7c).
+  - [ ] Chip "Đang chạy code…" / "Đã chạy code" theo `call_id` của `run_code` (dựng sẵn ở T-S.15, `codeRun` trong `TOOL_PLANNED`), chống lặp khi `XRANGE` phát lại (lối T-6.7c); artifact `kind=file` hiện thẻ + nút Tải (B-372, màn T-HD6 `kind=file`).
+  - [ ] Gỡ `data-planned="T-7.9"` / `planned="T-7.9"` **và** hàng `codeRun` của `TOOL_PLANNED` (chip gắn `data-planned` động như T-6.7c — hai lệnh grep không thấy); khoá mới vào `vi.json`.
+- **Xong khi (DoD):**
+  - [ ] `pnpm test` (container `web`) ≥ 10 ca: panel liệt skill; toggle gọi `PUT …/toggle`; user không quyền ⇒ skill cần chạy mờ + tooltip; `tool_call run_code` ⇒ chip "Đang chạy code…"; `tool_result ok` ⇒ "Đã chạy code" + thẻ file; `ok=false` ⇒ chip lỗi câu theo `reason`; cùng event phát lại ⇒ không nhân đôi; đường đi có tóm tắt tool ⇒ chip không cần stream — dán tên ca.
+  - [ ] Chrome qua Nginx (Chromium của `audit`, lối T-6.7c), `claude-haiku`: bật skill, hỏi việc sinh file ⇒ thấy chip "Đang chạy code…" rồi thẻ file có nút Tải; bấm Tải ⇒ tải được (dán `content-type`/kích thước); tải lại trang ⇒ chip + thẻ còn — dán mốc thời gian.
+  - [ ] 375 px: panel, chip, thẻ file không tràn ngang (probe NQ-103) — dán.
+  - [ ] Hai lệnh grep `T-7` của DoD phase ⇒ rỗng; `document.querySelectorAll('[data-planned^="T-7"]').length` ở màn có chip ⇒ `0` — dán.
+  - [ ] Kiểm ngược: chip chỉ dựng từ stream ⇒ ca đường đi đỏ; bỏ chống lặp ⇒ ca phát lại đỏ; toggle không gọi API ⇒ ca toggle đỏ.
+  - [ ] `make audit` 4/4; `make test && make lint && make check-hardcode && docker compose ps`.
+- **Cạm bẫy:**
+  - ① **Chờ T-HD11** (Q-P7-4): phần panel theo bản vẽ; chỗ lệch ⇒ Backlog cho người thiết kế, không tự vẽ (lối B-396). Nút mount + chip đã dựng (T-S.10, T-S.15) — các task backend không chờ.
+  - ② **B-87 / T-5.3 ②:** thứ chỉ có trong stream mất sau `STREAM_TTL_S` — chip + thẻ dựng lại từ `tool_rounds`/artifact của đường đi.
+  - ③ **T-S.19a ② / T-4.7 ①:** jsdom không layout — DoD trên Chromium của `audit`; tab nền dùng `page.goto`, không F5.
+  - ④ **B-372:** thẻ `kind=file` Tải từ MinIO (presigned), không render iframe — khác artifact code/html của P5.
+  - ⑤ **B-260:** StrictMode bắn đôi effect ⇒ đếm request/chip ở dev lệch.
 
 ---
 
@@ -3109,7 +3414,7 @@ Luật áp cho P6 — giữ luật của P5 vì nó đúng hơn luật của P4 
 | B-18 | `ValidationError` in kèm giá trị bị từ chối (`input_value='short'`) — một secret yếu sẽ lọt vào log lúc app từ chối boot. Cân nhắc bọc `Settings()` để in bản tóm tắt đã che giá trị | T-0.3 |
 | ~~B-19~~ | **ĐÃ SỬA 2026-09-15 cùng B-75.** Nửa `./frontend` → `web` xong từ T-0.10; nửa `./backend` nay đã có: `api` và `worker` bind-mount `./backend/app` → `/app/app`, cộng `--reload`/`--watch`. Xem B-75 | T-0.4 → đóng 2026-09-15 cùng B-75 |
 | B-20 | **Chỉ quan sát khi thao tác qua đường dẫn UNC `\\wsl.localhost\...`:** `docker compose down`/`stop` **không kèm** `-p <project>` thoát mã 0 nhưng **không dừng container nào** (no-op lặng lẽ) — kể cả khi đã đặt `COMPOSE_PROJECT_NAME` trong `.env`. Chỉ `docker compose -p scarlet down` mới dừng đúng. Chưa xác nhận có tái hiện khi chạy từ một shell WSL gốc (`cd ~/scarlet`) hay không — cần người kiểm tra vì CLAUDE.md yêu cầu làm việc trong WSL, không qua UNC | T-0.4, quan sát trong phiên làm việc |
-| B-21 | Bảng §17.1 liệt kê 15 bảng nhưng DDL Phụ lục A có 16 bảng — thiếu `user_skills` (bảng nối user↔skill, được nhắc gián tiếp ở dòng "bật/tắt theo user" của `skills`). Không tự sửa KH (chỉ Backlog/Nhật ký quyết định của tasks.md được sửa) — cần chốt: thêm dòng `user_skills` vào bảng §17.1 hay coi đây là điều đã biết | T-0.5, phát hiện khi chạy DoD `\dt` |
+| B-21 | **→ T-7.5 (P7) dùng `user_skills`; "dùng hay không" đã chốt (dùng) — ghi vào B-399 ①②.** Bảng §17.1 liệt kê 15 bảng nhưng DDL Phụ lục A có 16 bảng — thiếu `user_skills` (bảng nối user↔skill, được nhắc gián tiếp ở dòng "bật/tắt theo user" của `skills`). Không tự sửa KH (chỉ Backlog/Nhật ký quyết định của tasks.md được sửa) — cần chốt: thêm dòng `user_skills` vào bảng §17.1 hay coi đây là điều đã biết | T-0.5, phát hiện khi chạy DoD `\dt` |
 | ~~B-22~~ | **ĐÃ SỬA 2026-09-15 cùng B-75.** Câu "chưa mount code vì `api`/`worker` chưa tồn tại" trong `docker-compose.override.yml` đã được thay bằng phần bind-mount thật. Xem B-75 | T-0.5 → đóng 2026-09-15 cùng B-75 |
 | B-23 | `wsl.exe -d Ubuntu -- bash -c '...; echo $?'` luôn in `0` bất kể lệnh trước thật sự thành công hay thất bại (tái hiện cả với `false; echo $?`) — nghi do cách `wsl.exe` tách các lệnh phân tách bằng `;` qua lớp interop, không do lỗi cấu hình repo. Không dùng mã thoát qua kênh này để quyết định DoD; dùng nội dung stdout thật hoặc chạy lệnh qua `docker compose` từ phía Windows (đường dẫn UNC) nơi `$?` phản ánh đúng | Quan sát trong phiên T-0.5 |
 | B-24 | **Docker Desktop tắt WSL integration cho `Ubuntu`.** Docker Desktop đang chạy (server 29.5.2, distro `docker-desktop` Running) nhưng distro `Ubuntu` không có `/var/run/docker.sock`. Socket proxy `/mnt/wsl/docker-desktop/shared-sockets/guest-services/docker.proxy.sock` là `root:root srwxr-xr-x` → user không connect được, dù `dmin` đã ở group `docker` (gid 1001). **Không tự đặt `DOCKER_HOST` trỏ vào socket đó để lách** — vá tạm ngoài phạm vi task, và quyền vẫn sai. Cách đúng: bật integration trong Settings. Nghi vấn cần người xác nhận: T-0.4/T-0.5 chạy docker được, nên integration bị tắt **sau** đó (Docker Desktop update? restart?) — nếu nó tự tắt lại thì mọi task sau đều gãy | T-0.6 |
@@ -3493,7 +3798,7 @@ P1 **nghiêng hẳn về nhóm B** (Redis stream, SSE qua Nginx, trình duyệt,
 | ~~B-369~~ | **ĐÃ ĐÓNG 2026-10-07 — commit riêng `fix(B-369)` trước T-5.5 (task chạm `make audit`):** `make audit ROUTE=/…` (Makefile + chú thích), `env.ROUTE` + biến `routes` + cột `ROUTE` trong `scripts/audit.mjs`, bỏ dòng `scripts/audit.mjs::DUONG` khỏi `_ALLOWED` của `check_identifiers.py` (`check-identifiers: OK`). Đo: `make audit ROUTE=/dang-nhap` ⇒ `audit: OK — 1/1 duong dat`. Chữ `DUONG=` trong thân các task cũ của `tasks.md` để nguyên (vùng cấm, chỉ là lịch sử). **Nguyên văn cũ:** **`DUONG` (tiếng Việt không dấu) còn sống ở `Makefile` (`make audit DUONG=/…`) và `scripts/audit.mjs`** — CLAUDE.md cấm và bảo sửa khi gặp; `check-identifiers` không bắt vì nó là tên biến môi trường / biến Make. Không sửa ở T-5.6 (🔒, một commit riêng, không gộp). **Đề xuất:** đổi thành `ROUTE` ở cả hai chỗ + chú thích `make audit` + mọi chữ trong `tasks.md` trỏ tới `DUONG=` — một task nhỏ riêng hoặc gộp vào T-5.5 (task chạm `make audit`) | T-5.6 |
 | ~~B-370~~ | **ĐÃ ĐÓNG 2026-10-07 — T-5.8:** khung gắn lại listener `ping` ngay sau `document.close()` của `html`; `react` / `mermaid` dựng vào `#root`, không `document.open()`. Đo Chrome: khung `html` đã `rendered` trả `alive` cho 6/6 `ping` (1 s / lần). **Khung artifact là "dùng một lần" — T-5.8 phải biết trước khi thêm `ping`.** T-5.7 viết nội dung bằng `document.open()` / `write()`; `document.open()` **xoá mọi listener của `window`** (HTML spec) ⇒ sau `render`, script bắt tay của khung không còn nghe gì. Watchdog C32 (cha gửi `ping`, khung trả lời) cần một listener **sống sau** `render`: hoặc runtime chèn listener `ping` vào chính document được viết (cùng kiểm `source` / `origin` như bắt tay), hoặc dựng nội dung không qua `document.open()` (vd. `react` / `mermaid` vào `#root` của khung, chỉ `html` dùng `write`). Làm sai thì mọi khung bị coi là treo sau nhịp đầu ⇒ "Chạy lại" lặp. Đổi nội dung đã chốt là iframe mới (`key`), nên không cần `render` lần hai. | T-5.7 (đo) → T-5.8 |
 | B-371 | **Ảnh trong artifact markdown: bản vẽ T-HD6 vẽ nhãn "Ảnh không hiện trong panel" + `alt`, T-5.5 theo chữ task — không gì cả.** Chữ Việc của T-5.5 là "`Markdown` có sẵn (ba lớp NQ-95; `img` vẫn bị chặn, B-235)", Cạm bẫy ③ gọi "ảnh hiện… không gì cả" là cố ý; bản vẽ (bảng "Bảy loại artifact" + `MarkdownStage` của mã kèm) lại thay `img` bằng một nhãn có `alt`. Làm nhãn ấy bằng `components.img` như mã kèm thì `img` phải LỌT qua `rehype-sanitize` — nới lớp 1 của NQ-95 cho panel, và gỡ override là ảnh ngoài tải thật (đường rò B-235). Code theo task (lối B-314). **Đề xuất:** nếu muốn nhãn, dùng một plugin remark đổi nút `image` của mdast thành chữ TRƯỚC sanitize (allowlist giữ nguyên), áp cho cả bong bóng lẫn panel để hai nơi một hành vi — chốt cùng B-235 | T-5.5 |
-| B-372 | **`kind = file` chưa có màn của bản vẽ ("Loại này không xem trước được…" + nút Tải chính).** Hôm nay không đường nào sinh artifact `file` (`KIND_BY_LANGUAGE` của T-5.1 không có; `file` là con trỏ MinIO của skill, P7) — T-5.5 cho `file` hiện như Mã, nút Tải ở đầu panel vẫn có. Khi P7 sinh `file`: `content` có thể `null` (nội dung ở `storage_key`) ⇒ Tải phải lấy từ MinIO, không từ `content` — Tải hôm nay sẽ ra tệp rỗng | T-5.5 |
+| B-372 | **→ T-7.7a sinh `kind=file` (con trỏ MinIO), màn + nút Tải ở T-7.9 / T-HD11.** **`kind = file` chưa có màn của bản vẽ ("Loại này không xem trước được…" + nút Tải chính).** Hôm nay không đường nào sinh artifact `file` (`KIND_BY_LANGUAGE` của T-5.1 không có; `file` là con trỏ MinIO của skill, P7) — T-5.5 cho `file` hiện như Mã, nút Tải ở đầu panel vẫn có. Khi P7 sinh `file`: `content` có thể `null` (nội dung ở `storage_key`) ⇒ Tải phải lấy từ MinIO, không từ `content` — Tải hôm nay sẽ ra tệp rỗng | T-5.5 |
 | B-373 | **Nhãn suy ra lệch giữa thẻ (T-5.3) và đầu panel (T-5.5).** Panel theo bản vẽ T-HD6: tên ngôn ngữ đẹp (`languageName`: "Python") hoặc nhãn bảy loại ("Ảnh SVG"), số dòng bỏ một `\n` cuối (`lineCount`). Thẻ (`artifactLabel`, bản vẽ 3e) giữ chữ thô của `language` ("python") hoặc nhãn bốn loại ("Biểu đồ"), đếm `split("\n").length`. Cùng một artifact không tiêu đề ⇒ thẻ "python · 42 dòng", panel "Python · 42 dòng"; SVG không `language` ⇒ thẻ "Biểu đồ · 1 dòng", panel "Ảnh SVG · 1 dòng". **Đề xuất:** thẻ dùng `languageName` + `lineCount` của `artifactUtils.ts` (một nguồn đếm), nhãn loại giữ đúng bản vẽ của mỗi nơi | T-5.5 |
 | B-374 | **Mọi khung artifact của origin phụ chung MỘT tiến trình renderer trên Chromium — `while (true)` ở một khung đóng băng mọi khung còn sống cùng tiến trình, "Chạy lại" không cứu được khi còn khung khác.** Đo T-5.8 (Chromium 153 qua Nginx): ① trang có 11 iframe artifact, gỡ khung treo, khung `react` mới **không** `ready` trong 15 s; ② trang sạch (khung treo là khung duy nhất) ⇒ gỡ ⇒ khung mới `ready` sau 301–658 ms kể cả chờ 0 ms (Chrome giết tiến trình rỗng). Trang cha không đứng (OOPIF; trễ `setInterval` lớn nhất 102–119 ms). Panel chỉ có một khung mỗi tab nên ca một tab đạt DoD; ca dự đoán dính (CHƯA đo — suy từ ①): **hai tab** cùng mở panel artifact ⇒ khung tab B im theo, watchdog tab B cũng huỷ; "Chạy lại" ở A kẹt ở "Đang chạy" khi khung mới vào tiến trình đang kẹt (không `ready` ⇒ watchdog chưa đếm). Hướng: (a) mỗi khung một subdomain ngẫu nhiên (`<id>.artifacts.<domain>` — cert wildcard, `server_name`, `frame-ancestors`, S12 đổi) ⇒ mỗi khung một site; (b) ghi bổ sung ADR-10 là giới hạn đã biết; (c) watchdog cũng đếm từ lúc chèn iframe (ngưỡng nạp riêng, dài hơn — Mermaid 3.6 MB) để "Chạy lại" không kẹt mãi ở "Đang chạy". **Cần người quyết** — không chặn T-5.9 (so sánh là khác biệt theo dòng, không dựng hai khung) | T-5.8 (đo) |
 | B-375 | **Chữ trạng thái treo của panel tự viết, chưa đối chiếu bản vẽ T-HD6 ④.** `artifact.panel.stalledTitle` = "Artifact không phản hồi", `artifact.panel.stalledHint` = "Khung đã bị dừng vì quá lâu không trả lời — code có thể đang lặp vô hạn." (dải `role=alert` + "Chạy lại" dùng lại của trạng thái lỗi). Bản vẽ ở Claude Design, T-5.8 không đọc lại (DesignSync chỉ dùng qua `/design-sync`). Người dùng so với bản vẽ; khác thì sửa hai khoá `vi.json` (ca vitest 9 của `ArtifactPanel.kinds.test.tsx` khẳng định nguyên văn) | T-5.8 |
@@ -3520,6 +3825,9 @@ P1 **nghiêng hẳn về nhóm B** (Redis stream, SSE qua Nginx, trình duyệt,
 | B-396 | **Bản vẽ thiếu ba thứ T-6.7c phải dựng (code theo một bên, không sửa bản vẽ):** ① công tắc "Tìm web" BẬT — `ShellComposer.dc.html` chỉ vẽ trạng thái chờ (`aria-disabled`, mờ 0.45) ⇒ code dùng ngôn ngữ "đang ấn" của mã component (`iconButtonPressed`: viền `accent`, nền `accent-subtle`, chữ `accent-text`), mờ thì `control-disabled` + tooltip lý do (lối `AttachButtonNoVision`); ② chip LỖI của tool (3e chỉ có đang chạy / xong) ⇒ `circle-alert` + chữ `danger-text`, `min-h-chip` thay `h-chip` để câu dài xuống dòng ở 375 px; ③ chip của `fetch_url` ("Đang đọc link…" / "Đã đọc link") — `ToolKind` của bản vẽ chỉ có `webSearch` / `codeRun`. **Cần:** người thiết kế vẽ / chốt ①②③ | T-6.7c (2026-10-09) |
 | B-397 | **DoD "hỏi đọc `http://169.254.169.254/latest/meta-data/` ⇒ chip lỗi" (T-6.7c dòng 2, DoD phase UC-08 dòng 3) không đo được bằng câu hỏi: model tự từ chối, KHÔNG gọi `fetch_url`.** Đo 2026-10-09: `claude-haiku` hỏi thẳng (xong t+2.52 s), qua `httpbin.org/redirect-to?url=…169.254…` (t+2.38 s — model đọc được đích trong query), khung "quản trị kiểm tra SSRF" (t+3.78 s); `deepseek-flash` hỏi thẳng (t+5.29 s) — cả bốn `done`, 0 `tool_call`, không treo. Đường app đo bằng `http://localtest.me/` (DNS công khai ⇒ `127.0.0.1`): chip "Link trỏ vào địa chỉ nội bộ — đã từ chối", `reason=address`, xong t+3.74 s. Lớp chặn 169.254 của `ssrf.py` / `fetcher` có test riêng (T-6.2…6.5). **Cần chốt:** DoD phase UC-08 dòng 3 chấp nhận đích "tên miền công khai trỏ IP nội bộ" thay 169.254 nguyên văn, hay đo 169.254 bằng redirect mà model không đọc được đích (dịch vụ rút gọn link — thêm một bên thứ ba) | T-6.7c (2026-10-09) |
 | B-398 | **`ComingSoon` hình dạng `toggle` hết người dùng sau T-6.7c** — chỉ còn `ComingSoon.test.tsx` gọi nó (công tắc "Tìm web" là nút thật). Xoá nhánh + test, hay giữ cho nút chờ dạng công tắc tương lai (§7b.2 hôm nay không còn hàng nào cần). **Cần chốt:** xoá hay giữ | T-6.7c (2026-10-09) |
+| B-399 | **KH chưa biết những gì P7 chốt — KH là vùng cấm của agent (cùng họ B-348 / B-360 / B-380).** ① §13.3 / Phụ lục C: `sandbox` **không** đặt `user: 65534` cho cả service — danh tính server tách khỏi danh tính code (root khởi động + `cap_add [SETUID, SETGID]`, `setpriv` xuống uid không đặc quyền mỗi lượt `exec`), vì đo 2026-10-09 cho thấy "một uid cho cả hai" để code chiếm được socket (Q-P7-1); ② §17.1 liệt 15 bảng thiếu `user_skills` (có trong DDL Phụ lục A `0001`) — P7 dùng nó (đóng B-21 phần "dùng hay không": dùng); ③ §13.2 giả định `description` ~30 token/skill, đo thật 31–290 (trung vị 104) ⇒ tầng 1 cắt ở `SKILL_DESCRIPTION_MAX_CHARS` (biến mới, Phụ lục B chưa có); ④ C30 đo **phần tăng do skill** (1 so với 10), không "0 so với 10", vì thuế tool-use cố định của `claude-haiku` +743 (B-390, Q-P7-3); ⑤ artifact `kind=file`: `content=NULL`, Tải từ `storage_key`/MinIO (B-372); ⑥ bộ skill mặc định là **Scarlet tự viết** (Q-P7-2), không bộ Anthropic (giấy phép độc quyền); ⑦ `SANDBOX_*` của Phụ lục B đã có ở `Settings`, thêm `SKILL_DESCRIPTION_MAX_CHARS` (và `SANDBOX_PID_LIMIT` nếu cần) cùng commit. Task tạo ra lệch nào thì cập nhật dòng này thay vì mở dòng mới | Mở rộng P7 (2026-10-09) |
+| B-400 | **C30 "0 skill so với 10 skill, `prompt_tokens` tăng < 500" không đo được trên model có thuế tool-use.** Đo 2026-10-09: `claude-haiku` cộng ~743 token mỗi request có `tools` (B-390), độc lập số skill ⇒ "0 so với 10" trượt chắc trên nó. Q-P7-3 chốt: đo hiệu **1 skill so với 10 skill** (cùng model, cùng câu) < 500; thuế cố định (schema `load_skill` + prompt tool-use) đo và ghi riêng. KH §13.6 C30 viết "0 so với 10" — không sửa KH, ghi ở đây + T-7.6 | Mở rộng P7 (2026-10-09), Q-P7-3 |
+| B-401 | **Tệp đính kèm của người dùng KHÔNG vào sandbox ở P7 (Q-P7-6).** `run_code` chỉ nhận script của skill đã bật + code model sinh; upload hôm nay cũng không nhận `.xlsx`/`.pptx` (`ALLOWED_UPLOAD_MIME` chỉ ảnh/PDF/DOCX/TXT). UC-09 chỉ đòi skill **sinh** file, không đòi sửa file người dùng gửi. **Cần chốt khi muốn:** đưa tệp đính kèm (đọc từ MinIO, có trần tổng) vào `files` của `exec` — thêm một đường dữ liệu người dùng vào sandbox, và phải quyết loại MIME nào được phép | Mở rộng P7 (2026-10-09), Q-P7-6 |
 
 **Ghi chú lệch nhỏ:** B-28 ghi "chưa nghiệm thu được vì `ANTHROPIC_API_KEY` rỗng" — **đã cũ**, key nay có giá trị (kiểm hôm nay, không in giá trị). T-1.3 không còn bị chặn vì lý do đó.
 
@@ -3820,6 +4128,7 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 | **NQ-144** | 2026-10-07 | **Mở rộng Phase 6 — chín câu Q-P6-1…9 chốt trước khi phase bắt đầu, người dùng chọn phương án đề xuất cả chín; T-6.7 tách a/b/c, giữ ID gốc; T-6.5 làm đầu tiên; P5 đóng (10/10); §2 sửa (B-379).** ① lượt có gọi tool là **một** message assistant, các vòng trong một cột JSONB mới (`tool_rounds`), `context.build` trải ra thành dây OpenAI — không dùng role `tool` / `tool_call_id`; ② `worker` vào thêm mạng `egress`, `api` thì không; `fetcher` không `env_file`; ③ link người dùng dán đọc bằng tool `fetch_url` do model gọi, chỉ khi công tắc "Tìm web" bật và model có `tools` (một công tắc cho cả `web_search`); ④ không đăng ký `create_artifact` ở P6 (B-358 ở lại Backlog); ⑤ không ghi `messages.raw_response` (B-79 đóng); ⑥ lượt bật web ước tính `est_max × (MAX_TOOL_ROUNDS + 1)`; ⑦ chip nguồn dùng ô chữ cái, favicon thật → B-381; ⑧ cho sửa §2; ⑨ giữ chặn `img` trong markdown (B-235 đóng), B-361 ghi thêm đường rò "khung tự điều hướng", không đổi CSP ở P6. **Chọn theo tiền lệ, không hỏi:** `web_searches_per_day` là cửa sổ trượt 24 h; `worker` gửi các trần cho `fetcher` theo từng request; cờ `web_tools` ở body ba route + ghi lên hàng `messages`, `422 MODEL_NO_TOOLS` ở cả ba; một dòng `usage_events` mỗi lượt | ①: giữ "một lượt = một message" là giữ nguyên hình của §7 (khoá stream, huỷ, reaper) và §8 (Thử lại, chuyển nhánh, đếm anh em) — hai chỗ đắt nhất để sửa lại (§1); §7.2 ③ cũng viết "lặp lại" rồi **một** `UPDATE messages`. Giá: lệch DDL (role `tool`), luật khối tool nguyên tử C15 của `context.py` dùng trong lúc trải ra chứ không trên cây. ②: đo 2026-10-07 — Phụ lục C để hai service không tới nhau (`scarlet_egress` chưa từng tồn tại); trên một bridge riêng, tên service không resolve (lớp 1 đúng); Unix socket chưa chứng minh trên Docker Desktop (T-7.1). ③: tắt công tắc ⇒ `tools=None` như hôm nay — không thuế schema, không đụng B-283 ở lượt thường; tool tự quyết khi nào đọc link. ④: khối code đã chạy cho cả năm model; artifact từ tool không có khối để FE khớp (B-358 ②). ⑤: cột vòng tool đã giữ nguyên văn `tool_calls` + `finish_reason` (NQ-22); thêm cột là nhân bản nội dung người dùng (§20, NQ-55 ③). ⑥: giữ S6 "0 USD khi hết quota" đúng nghĩa trường hợp xấu nhất. ⑦: không thêm lượt fetch nào mỗi lần tìm, không giải mã ảnh của trang lạ; lệch UC-08 dòng 1 và bản vẽ 3e. ⑨: P6 làm đường rò `![](…?d=…)` thành thật; đo 2026-10-07 — khung artifact tự điều hướng / submit form ra `https://example.com/?d=…` được, nên siết `img-src` một mình không bịt được rò. **Thứ tự:** T-6.5 trước theo §24.1 ② — hỏng ở đó là viết lại Phụ lục C / ADR-09; T-6.7a dùng `fetch_url` làm tool đầu tiên nên không chờ T-H7 (khoá Tavily — đo rỗng). **Ước lượng:** 18 h / 7 task theo task P5 cùng hình dạng (P5 về ở ~82 %), +44 % so với 12.5 h còn lại của bảng cũ vì vòng lặp tool chưa task nào nhận và hai lỗ đo được (worker không tới `fetcher`; trình duyệt tự đi request con — B-382) |
 | **NQ-145** | 2026-10-08 | **B-382 → cách (c): rào `iptables` trong netns của `fetcher`, dựng bởi chính entrypoint của nó (không sidecar), rồi bỏ mọi cap.** Không (a) chấp nhận, không (b) thu `litellm` về `127.0.0.1` | Người dùng giao "xử lí B-382 theo phương án tối ưu". Đo trước: (b) vô hiệu trên Docker Desktop — Postgres publish `127.0.0.1` vẫn tới được qua `host.docker.internal`, và 9Router (20128) là tiến trình của host, compose không thu được; (a) để lớp 1 chỉ chặn tên, trong khi T-6.6 đưa một trình duyệt vào chính netns này. Sidecar (lối `scarlet-netblock`) mất rule khi `fetcher` khởi động lại ⇒ mở lặng lẽ; entrypoint dựng lại mỗi lần và dừng nếu hỏng. Đổi: `fetcher` không còn `USER` trong image — root chỉ sống tới `setpriv`. Commit riêng sau T-6.5 vì rào cần `fetcher` tồn tại |
 | **NQ-146** | 2026-10-09 | **T-6.7a — năm lựa chọn trong task, không hỏi (lối "chọn theo tiền lệ" của NQ-144):** ① B-266 / B-283 đóng bằng đo — không gửi lại suy luận; ② `messages.tool_calls` chỉ giữ lời gọi không chạy, lời gọi đã chạy ở `tool_rounds`; ③ event `usage` một lần cuối lượt (tổng); ④ kết quả tool cắt mềm theo phần ngân sách còn lại của dây, schema không vừa ⇒ lần kế không `tools`; ⑤ không kiểm huỷ trước lần gọi đầu (B-96 mở). Mặc định `MAX_TOOL_ROUNDS=3`, `MAX_TOOL_CALLS_PER_TURN=5`, `TOOL_RESULT_MAX_CHARS=24000` (đo PEP 8) | Người dùng giao "xử lí Backlog theo phương án tối ưu, bí thì hỏi" — cả năm có số đo hoặc tiền lệ đứng sau; đổi được khi duyệt |
+| **NQ-147** | 2026-10-09 | **Mở rộng Phase 7 — sáu câu Q-P7-1…6 chốt trước khi phase bắt đầu, người dùng chọn phương án đề xuất cả sáu; T-7.7 tách a/b (giữ ID); T-7.1 làm đầu tiên; P6 đóng (7/7); §2 sửa (Q-P7-5).** ① danh tính server tách khỏi code trong sandbox (root khởi động → `setpriv` mỗi lượt, **bỏ** `user: 65534` của §13.3) vì đo cho thấy cùng uid thì code chiếm được socket; ② Scarlet **tự viết** bốn skill `docx`/`xlsx`/`pptx`/`pdf` (bộ Anthropic giấy phép độc quyền + đòi LibreOffice/Node); ③ C30 đo **phần tăng do skill** (1 so với 10 < 500), thuế tool-use cố định ghi riêng (B-390); ④ người dùng vẽ T-HD11 cho panel chọn skill; ⑤ cho sửa §2 (P6 ✅, P7 10 task/21.5 h, Tổng 133/352 h); ⑥ `run_code` chỉ nhận script skill + code model, **không** tệp đính kèm người dùng (→ B-401). **Chọn theo tiền lệ, không hỏi:** `load_skill` (mức a) không cần quyền, `run_code` (mức b) gated `can_execute_skills`; file ra base64 → MinIO → artifact `kind=file`; timeout hai lớp (C28). Đo trước: Unix socket (cách a Phụ lục C) **đứng** — không viết lại ADR-09 | Người dùng giao "mở rộng T-7.1…T-7.9 đầy đủ 7 trường, DoD chạy được, cạm bẫy từ P0–P6 thật, gán Backlog, ước lượng theo tốc độ thật, giữ ID, đánh 🔒"; sáu chỗ ngỏ hỏi trước dòng code đầu (lối NQ-144); đổi được khi duyệt |
 
 ---
 
