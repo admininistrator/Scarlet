@@ -532,6 +532,14 @@ class Settings(BaseSettings):
     SANDBOX_BASE_URL: UnixSocketUrlStr = "unix:///run/sandbox/sandbox.sock"
     SANDBOX_TIMEOUT_S: int = Field(default=30, gt=0)
     MAX_SKILL_OUTPUT_MB: int = Field(default=20, gt=0)
+    #: T-7.3 — trần client UDS = `SANDBOX_TIMEOUT_S` + biên này (C28 "5 s", B-71):
+    #: cái trong nổ trước, còn thời gian giết + dọn + gửi `files_out`. Tổng phải
+    #: dưới `GENERATE_TIMEOUT_S` — `test_sandbox_client.py` khẳng định.
+    SANDBOX_CLIENT_GRACE_S: int = Field(default=5, gt=0)
+    #: T-7.3 — RLIMIT_NPROC của code mỗi lượt (đếm theo uid 65534, gồm cả luồng).
+    #: Phải DƯỚI `pids_limit: 128` của service `sandbox`: fork bomb chạm trần
+    #: này trước, server root còn chỗ `fork` tiến trình phụ để giết nó.
+    SANDBOX_PID_LIMIT: int = Field(default=64, gt=0)
 
     # ═══ Upload (§15.2) ═══
     ALLOWED_UPLOAD_MIME: str = (

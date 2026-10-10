@@ -306,9 +306,9 @@ services:
     # (`SANDBOX_BASE_URL=unix:///run/sandbox/sandbox.sock`).
     volumes: ["sandbox_socket:/run/sandbox"]
     healthcheck:
-      # Khong cong, khong curl (B-30). T-7.2 chua co server: kiem bat bien cua
-      # Q-P7-1 (thu muc socket root 0755). T-7.3 doi sang `connect` socket.
-      test: ["CMD", "python", "-c", "import os,sys; s=os.stat('/run/sandbox'); sys.exit(0 if s.st_uid == 0 and s.st_mode & 0o777 == 0o755 else 1)"]
+      # Khong cong, khong curl (B-30). T-7.3: `connect` toi socket cua server
+      # (B-402 ④) — dang ban mot luot thi van `connect` duoc (hang doi `listen`).
+      test: ["CMD", "python", "-c", "import socket; socket.socket(socket.AF_UNIX).connect('/run/sandbox/sandbox.sock')"]
       interval: 10s
       timeout: 5s
       retries: 5

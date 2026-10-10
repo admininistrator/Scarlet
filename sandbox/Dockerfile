@@ -5,8 +5,9 @@ FROM python:3.12-slim
 
 # `tini` làm PID 1 gặt zombie (T-7.1: 5 zombie sau 5 lượt khi PID 1 là python).
 # `setpriv` (util-linux) có sẵn — T-7.3 dùng nó hạ code xuống uid 65534 mỗi lượt.
+# T-7.3: `procps` cho `ps` của DoD / test dọn tiến trình (B-402 ④).
 # `/run/sandbox` thuộc root 0755: volume socket mới chép đúng quyền này (NQ-147).
-RUN apt-get update && apt-get install -y --no-install-recommends tini \
+RUN apt-get update && apt-get install -y --no-install-recommends procps tini \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sandbox && chmod 0755 /run/sandbox
 
@@ -16,12 +17,13 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r /tmp/requirements.tx
 
 # `--chmod`: Edit qua `\\wsl.localhost` làm mất bit thực thi của tệp nguồn.
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY server.py test_server.py /srv/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
-WORKDIR /work
+WORKDIR /srv
 
 # Không `USER`: server là root (chỉ SETUID/SETGID, compose), code là 65534 (Q-P7-1).
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-# T-7.3 thay bằng server UDS (`server.py`) và đổi healthcheck sang `connect` socket.
-CMD ["sleep", "infinity"]
+# T-7.3 — server UDS; đường socket khớp volume `sandbox_socket` + `SANDBOX_BASE_URL`.
+CMD ["python", "/srv/server.py", "/run/sandbox/sandbox.sock"]

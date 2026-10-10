@@ -20,10 +20,13 @@ test:
 	cd backend && .venv/bin/pytest
 	$(COMPOSE) exec -T web pnpm test
 	$(COMPOSE) run --rm --no-deps -T fetcher python -m pytest -q -p no:cacheprovider
+	$(COMPOSE) run --rm --no-deps -T -e TMPDIR=/work sandbox python -m pytest -q -p no:cacheprovider
 
 # T-6.5 — dong cuoi cua `test`: test cua `fetcher` chay TRONG image `fetcher`
 # (khong co `app`, khong co `.env` — dung moi truong ma `ssrf.py` phai song duoc),
 # mang gia o tang socket nen khong ra Internet.
+# T-7.3 — test cua `sandbox` cung vay, trong image `sandbox` voi cap / tmpfs cua
+# service. `TMPDIR=/work`: rootfs read-only, `pytest` can mot cho tao tep tam.
 
 # T-1.11 / S3 — ngắt giữa lúc stream rồi nối lại, so byte-by-byte với
 # `messages.content`. KHÁC `make test`: cần cả stack đang chạy (`make up`) và
