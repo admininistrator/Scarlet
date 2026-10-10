@@ -41,7 +41,9 @@ services:
     # parents[3]/config/model_catalog.json -> trong container la /config/.
     # Bind-mount la dieu kien de §19.1 dung: sua catalog + POST
     # /admin/catalog/reload co hieu luc ma KHONG phai build lai image.
-    volumes: ["./config:/config:ro"]
+    # T-7.5: skills/ cung mount (khong nam trong image) — loader doc /skills
+    # luc khoi dong (app/skills/loader.py::SKILLS_DIR, cung lo parents[3]).
+    volumes: ["./config:/config:ro", "./skills:/skills:ro"]
     healthcheck:
       # Phu luc C ghi curl, nhung image python:3.12-slim KHONG co curl
       # -> healthcheck luon unhealthy va nginx (depends_on: service_healthy)

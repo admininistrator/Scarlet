@@ -330,6 +330,9 @@ class ApiErrorCode(StrEnum):
     #: `ATTACHMENT_TEXT_MAX_CHARS` — cùng trần với chữ tệp của một lượt (B-208).
     #: `details` mang `{max_chars}`. Không hàng nào được tạo.
     ARTIFACT_TOO_LONG = "ARTIFACT_TOO_LONG"
+    #: `404` — `PUT /skills/{name}/toggle` (T-7.5): không có trong sổ `skills`, hoặc
+    #: loader đã tắt nó (thư mục mất / hỏng).
+    SKILL_NOT_FOUND = "SKILL_NOT_FOUND"
     #: `400` — `attachment_ids` nhiều hơn `max_attachments` của tier (đọc lúc
     #: gọi). `details` mang `{max_attachments}`.
     ATTACHMENT_LIMIT_EXCEEDED = "ATTACHMENT_LIMIT_EXCEEDED"

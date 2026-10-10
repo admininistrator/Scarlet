@@ -68,6 +68,14 @@ FEEDBACK_REASON_MAX_CHARS = 2000
 #: ``CHECK``. Giá trị 200 là con số hai schema ấy đã có từ T-1.2.
 CONVERSATION_TITLE_MAX_CHARS = 200
 
+#: Hai trần frontmatter của spec agentskills.io (`name` ≤ 64, `description`
+#: ≤ 1024 ký tự) — loader T-7.5 bỏ qua skill vượt trần. Hằng module: đây là
+#: hợp đồng của một spec ngoài, không phải nút vặn vận hành. Trần **tầng 1**
+#: (cắt `description` trong prompt) là chuyện khác — `SKILL_DESCRIPTION_MAX_CHARS`
+#: của T-7.6 (Q-P7-3).
+SKILL_SPEC_NAME_MAX_CHARS = 64
+SKILL_SPEC_DESCRIPTION_MAX_CHARS = 1024
+
 _HTTP_URL = TypeAdapter(AnyHttpUrl)
 
 

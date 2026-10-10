@@ -57,6 +57,7 @@ from app.api.v1 import (
     health,
     messages,
     models,
+    skills,
     stream,
 )
 from app.api.v1 import settings as settings_router
@@ -108,6 +109,7 @@ router.include_router(messages.router, dependencies=_AUTHENTICATED)
 router.include_router(settings_router.router, dependencies=_AUTHENTICATED)
 router.include_router(attachments.router, dependencies=_AUTHENTICATED)
 router.include_router(artifacts.router, dependencies=_AUTHENTICATED)
+router.include_router(skills.router, dependencies=_AUTHENTICATED)
 router.include_router(auth.router)
 
 # §18.6 — `/_debug/*` CHỈ tồn tại khi DEBUG=true. Gắn router có điều kiện thay

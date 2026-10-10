@@ -46,7 +46,8 @@ from app.core.log_redact import install_log_redaction
 from app.core.origin import OriginCheckMiddleware
 from app.core.queue import dispose_arq_pool
 from app.core.redis import dispose_redis
-from app.db.session import dispose_engine
+from app.db.session import dispose_engine, session_scope
+from app.skills.loader import sync_skills
 
 # C20 (T-2.14) — phải chạy TRƯỚC khi có dòng log đầu tiên của tiến trình, nên
 # nó ở mức module chứ không trong `lifespan`: uvicorn import file này rồi mới
@@ -57,6 +58,10 @@ install_log_redaction()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # T-7.5: so skill doc tu `skills/` moi lan khoi dong — them/sua skill = restart api.
+    async with session_scope() as session:
+        await sync_skills(session)
+        await session.commit()
     async with provider_health.background():
         yield
     await dispose_redis()
