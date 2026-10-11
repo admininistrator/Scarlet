@@ -82,7 +82,8 @@ services:
     # model_meta den tu /config/model_catalog.json).
     # T-7.2 — socket cua `sandbox` (Phu luc C cach a). `:ro`: worker chi
     # `connect`, khong thay duoc tep socket.
-    volumes: ["./config:/config:ro", "sandbox_socket:/run/sandbox:ro"]
+    # T-7.6 (B-404 ①) — `load_skill` doc /skills/<name>/SKILL.md o worker.
+    volumes: ["./config:/config:ro", "sandbox_socket:/run/sandbox:ro", "./skills:/skills:ro"]
     healthcheck:
       # Worker khong mo cong nao nen khong co gi de curl/wget — `arq --check`
       # doc khoa `arq:queue:health-check` ma chinh worker ghi vao Redis moi

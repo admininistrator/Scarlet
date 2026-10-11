@@ -534,6 +534,9 @@ class Settings(BaseSettings):
     #: token ⇒ cắt còn ~5.2k token. Cộng dồn trong lượt còn cắt mềm theo
     #: `token_budget()` (B-208 ⑤).
     TOOL_RESULT_MAX_CHARS: int = Field(default=24000, gt=0)
+    #: T-7.6 (§13.2 tầng 1, Q-P7-3) — trần KÝ TỰ của `description` mỗi skill trong
+    #: system prompt; dài hơn ⇒ cắt + "…". Đọc LÚC GỌI. Giá trị: xem `.env.example`.
+    SKILL_DESCRIPTION_MAX_CHARS: int = Field(default=200, gt=1)
 
     # ═══ Sandbox (§13) ═══
     #: Socket trên volume chung `sandbox_socket` (`docker-compose.yml`, T-7.2).

@@ -4,8 +4,10 @@ KH tham chiếu: §13.5, §12, §20 · NQ-144 (Q-P6-1, Q-P6-3).
 
 `ToolProvider` là điểm cắm §13.5 viết sẵn cho MCP: thêm một nguồn tool là thêm
 một provider vào `registry`, không sửa dòng nào ở `workers/generate.py`. Hôm nay
-một nguồn — `BuiltinTools` — và hai tool: `fetch_url` (client T-6.5) và
-`web_search` (`SearchProvider` T-6.1, T-6.7b), cùng một công tắc (Q-P6-3).
+một nguồn — `BuiltinTools` — và ba tool: `fetch_url` (client T-6.5) và
+`web_search` (`SearchProvider` T-6.1, T-6.7b), cùng công tắc "Tìm web" (Q-P6-3);
+`load_skill` (T-7.6, §13.2 tầng 2) khi user bật ≥ 1 skill. Công tắc nằm ở
+`list_tools(ctx)` — tool không có trong danh sách thì gọi cũng là `unknown_tool`.
 
 **Không bao giờ ném.** Tool lạ, tham số hỏng, tool nổ ⇒ `ToolResult(ok=False,
 reason=<mã cố định>)` cho model đọc; lượt sinh đi tiếp tới `done`. Mã không
@@ -25,6 +27,7 @@ from typing import Any, Protocol
 
 from app.quota.tiers import get_effective_limits
 from app.quota.web_searches import take_search
+from app.skills.loader import SKILL_FILE, SKILLS_DIR
 from app.tools.fetch_url import fetch_url
 from app.tools.web_search import SearchHit, SearchProvider, TavilySearch
 
@@ -38,6 +41,8 @@ REASON_TOOL_ERROR = "tool_error"
 REASON_TOO_MANY_CALLS = "too_many_calls"
 #: Hết `web_searches_per_day` trong 24 h trượt (T-6.8) — không gọi Tavily.
 REASON_WEB_QUOTA = "web_quota"
+#: `load_skill` với tên không thuộc skill user đã bật (T-7.6).
+REASON_UNKNOWN_SKILL = "unknown_skill"
 
 #: `web_search` hỏng (UC-08 dòng 5): câu CỦA MÌNH cho model, đi sau dòng lỗi có
 #: mã — để model trả lời bằng kiến thức sẵn có thay vì im hay bịa nguồn.
@@ -53,12 +58,19 @@ WEB_QUOTA_TEXT = (
 )
 WEB_QUOTA_REFILL = "; có lại một lượt lúc {at} (UTC)"
 
+#: `load_skill` tên lạ: liệt skill CỦA user này để model tự sửa (không lộ của người khác).
+UNKNOWN_SKILL_TEXT = "Skill đang bật: {names}."
+
 
 @dataclass(frozen=True, slots=True)
 class UserContext:
     """Ai đang gọi tool — §13.5. Quyền đọc lúc gọi qua `get_effective_limits` (T-6.8)."""
 
     user_id: uuid.UUID
+    #: Công tắc "Tìm web" của lượt (`messages.web_tools`, Q-P6-3).
+    web_tools: bool = False
+    #: Tên skill user đã bật lúc lượt bắt đầu (T-7.6) — rỗng ⇒ không `load_skill`.
+    skills: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +100,8 @@ class ToolResult:
     #: `[{url, title}]` — lên chip nguồn (§7.4 `tool_result`); không mang chữ trang.
     sources: list[dict[str, str]] = field(default_factory=list)
     reason: str | None = None
+    #: Nội dung CỦA TA (`SKILL.md`, T-7.6) ⇒ worker không bọc `untrusted_block` (§20).
+    trusted: bool = False
 
 
 class ToolProvider(Protocol):
@@ -125,6 +139,19 @@ WEB_SEARCH = ToolSpec(
     },
 )
 
+LOAD_SKILL = ToolSpec(
+    name="load_skill",
+    description=(
+        "Đọc hướng dẫn đầy đủ của một skill đang bật (danh sách ở system prompt). "
+        "Gọi trước khi làm việc mà skill đó mô tả."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "Tên skill"}},
+        "required": ["name"],
+    },
+)
+
 #: Nguồn tìm của `web_search` — biến module để test thay (lối `fetch_url`).
 search_provider: SearchProvider = TavilySearch()
 
@@ -136,9 +163,12 @@ def _hits_text(hits: tuple[SearchHit, ...]) -> str:
 
 class BuiltinTools:
     def list_tools(self, ctx: UserContext) -> list[ToolSpec]:
-        return [FETCH_URL, WEB_SEARCH]
+        web = [FETCH_URL, WEB_SEARCH] if ctx.web_tools else []
+        return [*web, LOAD_SKILL] if ctx.skills else web
 
     async def call(self, name: str, args: dict[str, Any], ctx: UserContext) -> ToolResult:
+        if name == LOAD_SKILL.name:
+            return _load_skill(args, ctx)
         if name == WEB_SEARCH.name:
             return await _web_search(args, ctx)
         if name != FETCH_URL.name:
@@ -154,6 +184,26 @@ class BuiltinTools:
             content=page.text,
             sources=[{"url": page.final_url or url, "title": page.title or ""}],
         )
+
+
+def _load_skill(args: dict[str, Any], ctx: UserContext) -> ToolResult:
+    """Tầng 2 (§13.2): nguyên `SKILL.md` — worker cắt ở `TOOL_RESULT_MAX_CHARS`.
+
+    Chỉ skill trong `ctx.skills` (đã bật, tên đã qua `_NAME_RE` của loader ⇒
+    không `..`). Đọc từ `SKILLS_DIR` của tiến trình này (mount `:ro` ở cả
+    `api` lẫn `worker`, B-404 ①); file mất ⇒ `OSError` ⇒ registry trả `tool_error`.
+    """
+    name = args.get("name")
+    if not isinstance(name, str) or not name:
+        return ToolResult(ok=False, reason=REASON_INVALID_ARGUMENTS)
+    if name not in ctx.skills:
+        return ToolResult(
+            ok=False,
+            content=UNKNOWN_SKILL_TEXT.format(names=", ".join(sorted(ctx.skills))),
+            reason=REASON_UNKNOWN_SKILL,
+        )
+    text = (SKILLS_DIR / name / SKILL_FILE).read_text(encoding="utf-8")
+    return ToolResult(ok=True, content=text, trusted=True)
 
 
 async def _web_search(args: dict[str, Any], ctx: UserContext) -> ToolResult:

@@ -79,8 +79,9 @@ API đã giải mức (body › đã nhớ › mặc định) và ghi nó lên h
 tên model gửi LiteLLM, `omit_temperature` bỏ hẳn khoá `temperature`. Code không
 biết tên tham số nào của provider nào (A3) — nó chỉ chép khối của catalog.
 
-**Vòng lặp tool (T-6.7a, §7.2 ③ "lặp lại", §13.5).** Hàng có `web_tools` và
-model có capability `tools` ⇒ gửi schema của `tools/registry.py`; model gọi
+**Vòng lặp tool (T-6.7a, §7.2 ③ "lặp lại", §13.5).** Hàng có `web_tools` (hoặc
+user bật ≥ 1 skill — `load_skill`, T-7.6) và model có capability `tools` ⇒ gửi
+schema của `tools/registry.py`; model gọi
 tool ⇒ `tool_call` → chạy → `tool_result` → gọi lại, tới `MAX_TOOL_ROUNDS`.
 Cả lượt vẫn là MỘT message (Q-P6-1): chữ mọi vòng nối vào `content`, các vòng
 vào cột `tool_rounds`, MỘT dòng `usage_events` (B-160). Xem `_run`.
@@ -108,7 +109,7 @@ from app.config.catalog import TOOLS_CAPABILITY, ModelEntry, ReasoningOption, re
 from app.config.settings import settings
 from app.core import storage
 from app.db.models import KeySource, MessageRole, MessageStatus
-from app.db.repositories import ArtifactRepository, MessageRepository
+from app.db.repositories import ArtifactRepository, MessageRepository, SkillRepository
 from app.db.session import session_scope
 from app.llm import byok_endpoints, context
 from app.llm.adapters.byok import ByokAdapter
@@ -430,15 +431,15 @@ async def _run(
     — B-96). Mọi ngả vẫn ra `_close_ledger` (C19): vòng lặp không mở đường thoát
     nào mới.
     """
-    model_meta, wire, user_id, credential, level, web_tools = await _prepare(mid)
+    model_meta, wire, user_id, credential, level, tool_ctx = await _prepare(mid)
     result.model = model_meta
     result.user_id = user_id
     result.key_source = credential.key_source
-    tool_ctx = UserContext(user_id=user_id)
-    # C18 / Q-P6-3: công tắc VÀ capability — thiếu một ⇒ `tools=None` như cũ.
+    # C18: capability ở đây; công tắc ("Tìm web" Q-P6-3, skill đã bật T-7.6) ở
+    # `list_tools(tool_ctx)` của registry (§13.5). Rỗng ⇒ `tools=None` như cũ.
     schema = (
         [spec.to_wire() for spec in registry.specs(tool_ctx)]
-        if web_tools and TOOLS_CAPABILITY in model_meta.capabilities
+        if TOOLS_CAPABILITY in model_meta.capabilities
         else []
     )
 
@@ -651,13 +652,14 @@ def _tool_message(
             "content": f"{error} {out.content}" if out.content else error,
         }
     # Một nguồn (`fetch_url`) ⇒ khối mang tên URL; nhiều nguồn (`web_search`) ⇒ tên tool.
+    # Nội dung của ta (`load_skill`, T-7.6) ⇒ thẳng, không khối (§20 chỉ cho chữ ngoài).
     name = out.sources[0]["url"] if len(out.sources) == 1 else tc.name
     text = out.content[: settings.TOOL_RESULT_MAX_CHARS]
     while True:
         message = {
             "role": MessageRole.TOOL.value,
             "tool_call_id": tc.call_id,
-            "content": context.untrusted_block(name, text),
+            "content": text if out.trusted else context.untrusted_block(name, text),
         }
         cost = count_message(message, model_id=model_id)
         if cost <= room or not text:
@@ -750,7 +752,9 @@ async def _turn_client(ctx: dict[str, Any], credential: Credential) -> AsyncIter
 
 async def _prepare(
     mid: uuid.UUID,
-) -> tuple[ModelEntry, list[dict[str, Any]], uuid.UUID, Credential, ReasoningOption | None, bool]:
+) -> tuple[
+    ModelEntry, list[dict[str, Any]], uuid.UUID, Credential, ReasoningOption | None, UserContext
+]:
     """Bước ① → ③ (+ ①.5): đọc message, chọn credential, dựng ngữ cảnh, `streaming`.
 
     Cả bốn trong **một** session rồi đóng ngay: một lượt sinh có thể kéo mười
@@ -817,6 +821,8 @@ async def _prepare(
                 sent_level,
             )
 
+        skills = await SkillRepository(session).enabled_for_user(owned.user_id)
+
         if not await repo.mark_streaming(mid, model_id=model_meta.id, reasoning_effort=sent_level):
             # Không còn `queued`: một worker khác đã nhận, hoặc message đã
             # `failed`/`cancelled` trong lúc chờ hàng đợi. Bỏ lượt là đúng —
@@ -830,8 +836,14 @@ async def _prepare(
     # `user_id` đi ra cùng các thứ kia vì đây là chỗ DUY NHẤT đọc được nó:
     # `messages` không có cột `user_id` (Phụ lục A), nó nằm ở hội thoại chứa
     # message. Bước ghi sổ ⑥.5 cần nó cho `usage_events.user_id`.
-    # `web_tools` đi từ hàng `queued` như mức suy luận (Q-P6-3, lối T-S.6).
-    return model_meta, wire_messages, owned.user_id, credential, level, owned.message.web_tools
+    # `web_tools` đi từ hàng `queued` như mức suy luận (Q-P6-3, lối T-S.6); skill
+    # đã bật chụp lúc này, cùng lúc tầng 1 vào `build()` (T-7.6).
+    tool_ctx = UserContext(
+        user_id=owned.user_id,
+        web_tools=owned.message.web_tools,
+        skills=frozenset(row.name for row in skills),
+    )
+    return model_meta, wire_messages, owned.user_id, credential, level, tool_ctx
 
 
 async def _emit(producer: StreamProducer, result: _Result, call: _Call, chunk: Chunk) -> None:

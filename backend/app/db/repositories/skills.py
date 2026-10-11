@@ -77,6 +77,20 @@ class SkillRepository:
         )
         return (await self._session.execute(stmt)).all()
 
+    async def enabled_for_user(self, user_id: uuid.UUID) -> Sequence[Row[str, str]]:
+        """`(name, description)` của skill `user_id` đã bật và đang dùng được (T-7.6, tầng 1)."""
+        stmt = (
+            select(Skill.name, Skill.description)
+            .join(UserSkill, UserSkill.skill_name == Skill.name)
+            .where(
+                UserSkill.user_id == user_id,
+                UserSkill.enabled.is_(True),
+                Skill.enabled.is_(True),
+            )
+            .order_by(Skill.name)
+        )
+        return (await self._session.execute(stmt)).all()
+
     async def set_user_enabled(self, user_id: uuid.UUID, name: str, enabled: bool) -> bool:
         """Ghi công tắc của `user_id` cho skill `name`. `False` ⇒ skill không tồn tại/đã tắt."""
         exists = select(Skill.name).where(Skill.name == name, Skill.enabled.is_(True))

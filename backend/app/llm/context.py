@@ -32,10 +32,13 @@ nghĩ cũ của chính mình, và `deepseek-flash` sinh tới 333 chunk reasonin
 một lượt (đo ở T-1.3) — gửi lại là nhân đôi hoá đơn để đổi lấy số không. Đây
 chính là phần "trừ hao `reasoning_tokens`" mà §9.6 đòi: trừ bằng cách không gửi.
 
-**Skill descriptions chưa có.** §9.6 xếp chúng ở ưu tiên thứ hai, giữa system
-prompt và message mới nhất. Phase 7 mới sinh ra chúng (`app/skills/`), nên hôm
-nay chúng vắng mặt chứ không phải bị bỏ; chỗ chèn là ngay sau `_system_message`
-trong `build()`.
+**Skill descriptions (T-7.6, §13.2 tầng 1).** Skill user đã bật ⇒ `name` +
+`description` (cắt `SKILL_DESCRIPTION_MAX_CHARS`) nối vào CUỐI system prompt
+(`system.jinja`, biến `skills`) — một message system, không thêm message thứ
+hai. §9.6 xếp chúng ở ưu tiên thứ hai: tính vào ngân sách trước mọi message;
+không chứa nổi cùng khối mới nhất ⇒ bỏ khối skill chứ không bỏ câu hỏi. Model
+không có capability `tools` ⇒ không khối skill (không gọi được `load_skill`).
+Không skill nào bật ⇒ system prompt y như cũ (0 thuế, C30).
 """
 
 from __future__ import annotations
@@ -53,7 +56,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, Template
 from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config.catalog import VISION_CAPABILITY, ModelEntry
+from app.config.catalog import TOOLS_CAPABILITY, VISION_CAPABILITY, ModelEntry
 from app.config.settings import settings
 from app.db.models import (
     Attachment,
@@ -63,9 +66,10 @@ from app.db.models import (
     MessageRole,
     MessageStatus,
 )
-from app.db.repositories import ArtifactRepository, MessageRepository
+from app.db.repositories import ArtifactRepository, MessageRepository, SkillRepository
 from app.db.repositories.attachments import AttachmentRepository
 from app.llm.tokens import IMAGE_PART_TYPE, count_message, count_messages
+from app.tools.registry import LOAD_SKILL
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +210,9 @@ def _system_template() -> Template:
     return _cached_template.template
 
 
-def render_system_prompt(*, model_display_name: str) -> str:
+def render_system_prompt(
+    *, model_display_name: str, skills: Sequence[Mapping[str, str]] = ()
+) -> str:
     """Render `config/prompts/system.jinja`.
 
     Tham số là **tường minh**, không phải `**kwargs`: `StrictUndefined` biến
@@ -214,7 +220,13 @@ def render_system_prompt(*, model_display_name: str) -> str:
     `.jinja` và code phải đọc được ở một chỗ. Thêm biến mới = thêm tham số ở
     đây và một dòng chú thích ở đầu file `.jinja`.
     """
-    return _system_template().render(model_display_name=model_display_name).strip()
+    return _system_template().render(model_display_name=model_display_name, skills=skills).strip()
+
+
+def skill_description(description: str) -> str:
+    """`description` của tầng 1, cắt ở `SKILL_DESCRIPTION_MAX_CHARS` (đọc LÚC GỌI)."""
+    cap = settings.SKILL_DESCRIPTION_MAX_CHARS
+    return description if len(description) <= cap else description[: cap - 1].rstrip() + "…"
 
 
 def render_title_prompt(*, question: str) -> str:
@@ -255,8 +267,15 @@ async def build(
     repo = MessageRepository(session)
     path = [node.message for node in await repo.get_path(leaf_id, user_id=user_id)]
 
-    system_message = _system_message(model_meta)
-    # Ưu tiên thứ hai của §9.6 — skill descriptions — chèn vào đây ở Phase 7.
+    skills = (
+        [
+            {"name": row.name, "description": skill_description(row.description)}
+            for row in await SkillRepository(session).enabled_for_user(user_id)
+        ]
+        if TOOLS_CAPABILITY in model_meta.capabilities
+        else []
+    )
+    system_message = _system_message(model_meta, skills)
 
     attachments = await _attachments(session, path, user_id=user_id)
     edits: dict[uuid.UUID, list[Row[*tuple[Any, ...]]]] = {}
@@ -264,9 +283,11 @@ async def build(
         edits.setdefault(edit.message_id, []).append(edit)
     # T-6.7a — một câu, chỉ số nguồn; chữ trang không rời Postgres (C33).
     summaries = await repo.tool_summaries([m.id for m in path], user_id=user_id)
+    # `load_skill` không phải web — lượt chỉ đọc skill không mang dòng "đã dùng web".
     web = {
         mid: sum(len(t.get("sources") or ()) for t in tools if t.get("ok"))
         for mid, tools in summaries.items()
+        if any(t.get("name") != LOAD_SKILL.name for t in tools)
     }
     blocks = _atomic_blocks(
         path,
@@ -280,12 +301,25 @@ async def build(
         raise EmptyPathError(leaf_id)
 
     budget = token_budget(model_meta)
-    kept = _fit(
-        blocks,
-        budget=budget,
-        already_used=count_messages([system_message], model_id=model_meta.id),
-        model_id=model_meta.id,
-    )
+    try:
+        kept = _fit(
+            blocks,
+            budget=budget,
+            already_used=count_messages([system_message], model_id=model_meta.id),
+            model_id=model_meta.id,
+        )
+    except BudgetTooSmallError:
+        if not skills:
+            raise
+        # §9.6: skill descriptions đứng sau system prompt — bỏ chúng trước câu hỏi.
+        logger.info("cắt ngữ cảnh theo §9.6: bỏ khối %d skill để giữ khối mới nhất", len(skills))
+        system_message = _system_message(model_meta)
+        kept = _fit(
+            blocks,
+            budget=budget,
+            already_used=count_messages([system_message], model_id=model_meta.id),
+            model_id=model_meta.id,
+        )
 
     return [system_message, *(message for block in kept for message in block)]
 
@@ -308,10 +342,12 @@ def token_budget(model_meta: ModelEntry) -> int:
     )
 
 
-def _system_message(model_meta: ModelEntry) -> dict[str, Any]:
+def _system_message(
+    model_meta: ModelEntry, skills: Sequence[Mapping[str, str]] = ()
+) -> dict[str, Any]:
     return {
         "role": MessageRole.SYSTEM.value,
-        "content": render_system_prompt(model_display_name=model_meta.display_name),
+        "content": render_system_prompt(model_display_name=model_meta.display_name, skills=skills),
     }
 
 

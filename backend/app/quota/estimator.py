@@ -101,6 +101,7 @@ from app.config.catalog import TOKENS_PER_PRICE_UNIT
 from app.config.settings import settings
 from app.core.errors import ApiError, ApiErrorCode
 from app.core.redis import get_redis
+from app.db.repositories import SkillRepository
 from app.llm import context
 from app.llm.tokens import count_messages
 from app.quota.rebuild import refill_if_empty
@@ -292,7 +293,12 @@ async def _estimate(
     Nhưng "không ước tính được" thì không được đọc thành "không tốn gì": rơi
     về **trần ngân sách** (§9.6) là con số lớn nhất mà một lượt sinh có thể
     gửi lên, tức đúng chiều an toàn mà §10.2 đã chọn cho cả cửa này.
+
+    Lượt có skill bật trên model `tools` cũng là lượt tool (`load_skill`, T-7.6)
+    ⇒ cùng hệ số `MAX_TOOL_ROUNDS + 1` như lượt bật web.
     """
+    if not web_tools and catalog.TOOLS_CAPABILITY in model.capabilities:
+        web_tools = bool(await SkillRepository(session).enabled_for_user(user_id))
     try:
         messages = await context.build(session, leaf_id, model, user_id=user_id)
     except context.ContextError:

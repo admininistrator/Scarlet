@@ -668,7 +668,7 @@ async def test_web_search_blank_query_is_invalid_arguments_no_search(
 ) -> None:
     search = SearchRecorder(SearchResult(results=HITS))
     monkeypatch.setattr(registry_mod, "search_provider", search)
-    ctx = registry_mod.UserContext(user_id=uuid.uuid4())
+    ctx = registry_mod.UserContext(user_id=uuid.uuid4(), web_tools=True)
 
     out = await registry_mod.registry.call("web_search", '{"query": "  "}', ctx)
 
