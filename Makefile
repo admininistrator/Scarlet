@@ -21,7 +21,7 @@ test:
 	cd backend && .venv/bin/pytest
 	$(COMPOSE) exec -T web pnpm test
 	$(COMPOSE) run --rm --no-deps -T fetcher python -m pytest -q -p no:cacheprovider
-	$(COMPOSE) run --rm --no-deps -T -e TMPDIR=/work -e SANDBOX_TIMEOUT_S=$(SANDBOX_TIMEOUT_S) sandbox python -m pytest -q -p no:cacheprovider
+	$(COMPOSE) run --rm --no-deps -T -e TMPDIR=/work -e SANDBOX_TIMEOUT_S=$(SANDBOX_TIMEOUT_S) -v ./skills:/skills:ro sandbox python -m pytest -q -p no:cacheprovider
 
 # T-6.5 — dong cuoi cua `test`: test cua `fetcher` chay TRONG image `fetcher`
 # (khong co `app`, khong co `.env` — dung moi truong ma `ssrf.py` phai song duoc),

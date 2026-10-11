@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r /tmp/requirements.tx
 
 # `--chmod`: Edit qua `\\wsl.localhost` làm mất bit thực thi của tệp nguồn.
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY server.py test_server.py test_isolation.py /srv/
+COPY server.py test_server.py test_isolation.py test_skills.py /srv/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
