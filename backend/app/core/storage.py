@@ -27,7 +27,7 @@ import mimetypes
 import uuid
 from datetime import UTC, datetime, timedelta
 from functools import cache
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from minio import Minio
 
@@ -106,8 +106,29 @@ async def get(key: str) -> bytes:
     return await asyncio.to_thread(_read, key)
 
 
-def presign_get(key: str) -> str:
-    """URL GET đã ký cho origin công khai. TTL đọc LÚC GỌI, không lúc import."""
+def content_type_for(name: str) -> str:
+    """MIME theo đuôi tên file — chỉ loại trong allowlist §15.2, còn lại `octet-stream`.
+
+    File `run_code` (T-7.7a) mang tên do model đặt và được phục vụ từ origin
+    chính: `.html` / `.svg` / `.js` không bao giờ lên MinIO với loại chạy được.
+    """
+    guessed = _mime_types.guess_type(name)[0]
+    return guessed if guessed in settings.allowed_upload_mime else "application/octet-stream"
+
+
+def presign_get(key: str, *, download_name: str | None = None) -> str:
+    """URL GET đã ký cho origin công khai. TTL đọc LÚC GỌI, không lúc import.
+
+    `download_name` ⇒ `Content-Disposition: attachment` (MinIO ghi đè header theo
+    tham số đã ký): trình duyệt tải về, không bao giờ hiển thị tại chỗ (B-372).
+    """
+    headers: dict[str, str | list[str] | tuple[str]] | None = None
+    if download_name is not None:
+        disposition = f"attachment; filename*=UTF-8''{quote(download_name, safe='')}"
+        headers = {"response-content-disposition": disposition}
     return _signer().presigned_get_object(
-        settings.MINIO_BUCKET, key, expires=timedelta(seconds=settings.PRESIGN_TTL_S)
+        settings.MINIO_BUCKET,
+        key,
+        expires=timedelta(seconds=settings.PRESIGN_TTL_S),
+        response_headers=headers,
     )

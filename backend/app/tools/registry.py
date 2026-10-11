@@ -6,8 +6,9 @@ KH tham chiếu: §13.5, §12, §20 · NQ-144 (Q-P6-1, Q-P6-3).
 một provider vào `registry`, không sửa dòng nào ở `workers/generate.py`. Hôm nay
 một nguồn — `BuiltinTools` — và ba tool: `fetch_url` (client T-6.5) và
 `web_search` (`SearchProvider` T-6.1, T-6.7b), cùng công tắc "Tìm web" (Q-P6-3);
-`load_skill` (T-7.6, §13.2 tầng 2) khi user bật ≥ 1 skill. Công tắc nằm ở
-`list_tools(ctx)` — tool không có trong danh sách thì gọi cũng là `unknown_tool`.
+`load_skill` (T-7.6, §13.2 tầng 2) khi user bật ≥ 1 skill; `run_code` (T-7.7a,
+§13.1 mức b) khi user có `can_execute_skills`. Công tắc nằm ở `list_tools(ctx)`
+— tool không có trong danh sách thì gọi cũng là `unknown_tool`.
 
 **Không bao giờ ném.** Tool lạ, tham số hỏng, tool nổ ⇒ `ToolResult(ok=False,
 reason=<mã cố định>)` cho model đọc; lượt sinh đi tiếp tới `done`. Mã không
@@ -16,6 +17,7 @@ mang host / IP (lối `ssrf.py` `_MESSAGES`).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -25,9 +27,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from app.config.settings import settings
+from app.core import storage
+from app.llm.artifact_blocks import FILE_KIND, ArtifactBlock, clean_title
 from app.quota.tiers import get_effective_limits
 from app.quota.web_searches import take_search
-from app.skills.loader import SKILL_FILE, SKILLS_DIR
+from app.skills.loader import SCRIPTS_DIR, SKILL_FILE, SKILLS_DIR
+from app.tools import sandbox_client
 from app.tools.fetch_url import fetch_url
 from app.tools.web_search import SearchHit, SearchProvider, TavilySearch
 
@@ -43,6 +49,11 @@ REASON_TOO_MANY_CALLS = "too_many_calls"
 REASON_WEB_QUOTA = "web_quota"
 #: `load_skill` với tên không thuộc skill user đã bật (T-7.6).
 REASON_UNKNOWN_SKILL = "unknown_skill"
+#: `run_code` (T-7.7a): code chạy xong nhưng thoát ≠ 0 / hết `SANDBOX_TIMEOUT_S`.
+REASON_EXIT_NONZERO = "exit_nonzero"
+REASON_TIMEOUT = "timeout"
+#: Sinh nhiều file hơn `MAX_SKILL_OUTPUT_FILES` — không đẩy file nào.
+REASON_TOO_MANY_FILES = "too_many_files"
 
 #: `web_search` hỏng (UC-08 dòng 5): câu CỦA MÌNH cho model, đi sau dòng lỗi có
 #: mã — để model trả lời bằng kiến thức sẵn có thay vì im hay bịa nguồn.
@@ -61,6 +72,15 @@ WEB_QUOTA_REFILL = "; có lại một lượt lúc {at} (UTC)"
 #: `load_skill` tên lạ: liệt skill CỦA user này để model tự sửa (không lộ của người khác).
 UNKNOWN_SKILL_TEXT = "Skill đang bật: {names}."
 
+#: `sandbox` không trả lời (UC-09 nhánh lỗi, lối `SEARCH_UNAVAILABLE`).
+SANDBOX_UNAVAILABLE_TEXT = (
+    "Không chạy được code lúc này. Hãy trả lời không cần chạy code và nói rõ là chưa chạy được."
+)
+#: Báo cáo một lượt `run_code` cho model — stdout đầu, stderr đuôi (traceback ở cuối).
+RUN_REPORT = "exit_code: {exit_code}\nstdout:\n{stdout}\nstderr:\n{stderr}\nfiles: {files}"
+#: Tên file chứa code model gửi, trong thư mục lượt của sandbox.
+RUN_CODE_ENTRY = "main.py"
+
 
 @dataclass(frozen=True, slots=True)
 class UserContext:
@@ -71,6 +91,9 @@ class UserContext:
     web_tools: bool = False
     #: Tên skill user đã bật lúc lượt bắt đầu (T-7.6) — rỗng ⇒ không `load_skill`.
     skills: frozenset[str] = frozenset()
+    #: `EffectiveLimits.can_execute_skills` lúc lượt bắt đầu (T-7.7a chỗ cắm; câu
+    #: báo khi bị chặn + kiểm đủ ở T-7.8) — `False` ⇒ không có `run_code`.
+    can_execute_skills: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +125,8 @@ class ToolResult:
     reason: str | None = None
     #: Nội dung CỦA TA (`SKILL.md`, T-7.6) ⇒ worker không bọc `untrusted_block` (§20).
     trusted: bool = False
+    #: File đã lên MinIO (`run_code`, C29) — worker tạo artifact `kind=file` ở ⑥.2.
+    artifacts: tuple[ArtifactBlock, ...] = ()
 
 
 class ToolProvider(Protocol):
@@ -152,6 +177,32 @@ LOAD_SKILL = ToolSpec(
     },
 )
 
+RUN_CODE = ToolSpec(
+    name="run_code",
+    description=(
+        "Chạy code Python 3 trong sandbox không mạng, có sẵn python-docx, openpyxl, "
+        "python-pptx, pypdf, pillow, pandas, matplotlib. Trả stdout/stderr. File ghi vào "
+        "thư mục hiện tại (đường tương đối) được gửi cho người dùng tải về. Đặt `skill` "
+        "để có sẵn các script của skill đó cạnh code."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "description": "Mã Python cần chạy"},
+            "skill": {
+                "type": "string",
+                "description": "Tên skill đang bật có script cần dùng (tuỳ chọn)",
+            },
+        },
+        "required": ["code"],
+    },
+)
+
+#: Server `sandbox` chạy tuần tự (T-7.3): xếp hàng Ở ĐÂY để thời gian chờ không
+#: ăn vào trần client (B-403 ①). ponytail: khoá trong tiến trình — đủ cho một
+#: `worker` (compose); nhân bản `worker` thì đổi sang khoá Redis.
+_sandbox_turn = asyncio.Lock()
+
 #: Nguồn tìm của `web_search` — biến module để test thay (lối `fetch_url`).
 search_provider: SearchProvider = TavilySearch()
 
@@ -164,11 +215,15 @@ def _hits_text(hits: tuple[SearchHit, ...]) -> str:
 class BuiltinTools:
     def list_tools(self, ctx: UserContext) -> list[ToolSpec]:
         web = [FETCH_URL, WEB_SEARCH] if ctx.web_tools else []
-        return [*web, LOAD_SKILL] if ctx.skills else web
+        skill = [LOAD_SKILL] if ctx.skills else []
+        code = [RUN_CODE] if ctx.can_execute_skills else []
+        return [*web, *skill, *code]
 
     async def call(self, name: str, args: dict[str, Any], ctx: UserContext) -> ToolResult:
         if name == LOAD_SKILL.name:
             return _load_skill(args, ctx)
+        if name == RUN_CODE.name:
+            return await _run_code(args, ctx)
         if name == WEB_SEARCH.name:
             return await _web_search(args, ctx)
         if name != FETCH_URL.name:
@@ -204,6 +259,80 @@ def _load_skill(args: dict[str, Any], ctx: UserContext) -> ToolResult:
         )
     text = (SKILLS_DIR / name / SKILL_FILE).read_text(encoding="utf-8")
     return ToolResult(ok=True, content=text, trusted=True)
+
+
+async def _run_code(args: dict[str, Any], ctx: UserContext) -> ToolResult:
+    """§13.1 mức (b): code của model (+ script của MỘT skill đã bật) → `sandbox` (A6).
+
+    Không nhánh nào chạy code ở đây — chỉ `sandbox_client.execute` (Cạm bẫy ①).
+    Tệp đính kèm của user KHÔNG vào (Q-P7-6, B-401). `timeout_s` luôn từ
+    `Settings`, không từ tham số model (B-403 ⑦ — client tự gửi). `files_out`
+    lên MinIO ngay (C29) rồi thành `ArtifactBlock` cho worker; chữ cho model
+    chỉ có tên file, không byte (C33).
+    """
+    code = args.get("code")
+    if not isinstance(code, str) or not code.strip():
+        return ToolResult(ok=False, reason=REASON_INVALID_ARGUMENTS)
+    skill = args.get("skill")
+    files: dict[str, str] = {}
+    if skill is not None:
+        if not isinstance(skill, str) or skill not in ctx.skills:
+            return ToolResult(
+                ok=False,
+                content=UNKNOWN_SKILL_TEXT.format(names=", ".join(sorted(ctx.skills))),
+                reason=REASON_UNKNOWN_SKILL,
+            )
+        # Tên phẳng (B-403 ④): chỉ tệp ngay dưới `scripts/`; code của model thắng trùng tên.
+        scripts = SKILLS_DIR / skill / SCRIPTS_DIR
+        if scripts.is_dir():
+            files = {
+                p.name: p.read_text(encoding="utf-8") for p in scripts.iterdir() if p.is_file()
+            }
+    files[RUN_CODE_ENTRY] = code
+
+    async with _sandbox_turn:
+        run = await sandbox_client.execute(files, ["python", RUN_CODE_ENTRY])
+    if run.reason == sandbox_client.REASON_UNAVAILABLE:
+        return ToolResult(ok=False, content=SANDBOX_UNAVAILABLE_TEXT, reason=run.reason)
+
+    half = settings.TOOL_RESULT_MAX_CHARS // 2
+    report = RUN_REPORT.format(
+        exit_code=run.exit_code,
+        stdout=run.stdout[:half],
+        stderr=run.stderr[-half:],
+        files=", ".join(sorted(run.files_out)) or "-",
+    )
+    failed = (
+        run.reason  # mã của server, vd. `output_too_large`
+        or (REASON_TIMEOUT if run.timeout else None)
+        or (REASON_TOO_MANY_FILES if len(run.files_out) > settings.MAX_SKILL_OUTPUT_FILES else None)
+    )
+    if failed is not None:
+        return ToolResult(ok=False, content=report, reason=failed, trusted=True)
+
+    artifacts = []
+    for name, data in sorted(run.files_out.items()):
+        content_type = storage.content_type_for(name)
+        key = storage.object_key(ctx.user_id, content_type)
+        await storage.put(key, data, content_type)
+        artifacts.append(
+            ArtifactBlock(
+                kind=FILE_KIND,
+                language=None,
+                title=clean_title(name),
+                content=None,
+                storage_key=key,
+            )
+        )
+    # ponytail: `trusted` vì P7 không đưa chữ ngoài vào sandbox (không mạng — ADR-09,
+    # không tệp user — Q-P7-6); mở B-401 thì bọc `untrusted_block` như `fetch_url`.
+    return ToolResult(
+        ok=run.exit_code == 0,
+        content=report,
+        reason=None if run.exit_code == 0 else REASON_EXIT_NONZERO,
+        trusted=True,
+        artifacts=tuple(artifacts),
+    )
 
 
 async def _web_search(args: dict[str, Any], ctx: UserContext) -> ToolResult:

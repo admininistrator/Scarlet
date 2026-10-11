@@ -263,6 +263,7 @@ def _insert_statement(message_id: uuid.UUID, user_id: uuid.UUID, block: Artifact
             language=block.language,
             title=block.title,
             content=block.content,
+            storage_key=block.storage_key,
             parent_artifact_id=lineage,
             version=version,
         )

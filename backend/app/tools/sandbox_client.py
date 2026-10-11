@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 # Host bất kỳ: transport `uds` bỏ qua nó, chỉ đường dẫn có nghĩa.
 _EXEC_URL = "http://sandbox/exec"
 _BYTES_PER_MB = 1024 * 1024
+#: `sandbox` chết / trả rác — mã `reason` duy nhất do client đặt.
+REASON_UNAVAILABLE = "sandbox_unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,4 +95,4 @@ async def execute(files: dict[str, str], cmd: list[str]) -> ExecResult:
     except (httpx.HTTPError, ValueError) as exc:
         # Không ghi code — thứ model sinh.
         logger.warning("sandbox hong: reason=sandbox_unavailable ly_do=%s", type(exc).__name__)
-        return ExecResult(ok=False, reason="sandbox_unavailable")
+        return ExecResult(ok=False, reason=REASON_UNAVAILABLE)

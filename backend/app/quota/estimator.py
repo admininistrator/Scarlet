@@ -295,10 +295,14 @@ async def _estimate(
     gửi lên, tức đúng chiều an toàn mà §10.2 đã chọn cho cả cửa này.
 
     Lượt có skill bật trên model `tools` cũng là lượt tool (`load_skill`, T-7.6)
-    ⇒ cùng hệ số `MAX_TOOL_ROUNDS + 1` như lượt bật web.
+    ⇒ cùng hệ số `MAX_TOOL_ROUNDS + 1` như lượt bật web. Cùng thế: user có
+    `can_execute_skills` (`run_code`, T-7.7a) — cùng điều kiện worker mời tool.
     """
     if not web_tools and catalog.TOOLS_CAPABILITY in model.capabilities:
-        web_tools = bool(await SkillRepository(session).enabled_for_user(user_id))
+        web_tools = (
+            bool(await SkillRepository(session).enabled_for_user(user_id))
+            or (await get_effective_limits(user_id)).can_execute_skills
+        )
     try:
         messages = await context.build(session, leaf_id, model, user_id=user_id)
     except context.ContextError:

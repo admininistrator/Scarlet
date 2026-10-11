@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
 from app.config.settings import settings
+from app.core import storage
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.ratelimit import upload_limit
@@ -56,6 +58,9 @@ class ArtifactOut(BaseModel):
     language: str | None
     title: str
     content: str | None
+    #: `kind=file` (T-7.7a): URL ký của MinIO cho nút Tải — byte ở `storage_key`,
+    #: `content` NULL (B-372). Khác `None` ⇔ có `storage_key`.
+    download_url: str | None = None
     message_id: uuid.UUID
     conversation_id: uuid.UUID
     created_at: datetime
@@ -128,6 +133,11 @@ async def get_artifact(
         language=row.language,
         title=row.title,
         content=row.content,
+        download_url=(
+            None
+            if row.storage_key is None
+            else storage.presign_get(row.storage_key, download_name=PurePosixPath(row.title).name)
+        ),
         message_id=row.message_id,
         conversation_id=conversation_id,
         created_at=row.created_at,

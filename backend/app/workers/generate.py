@@ -80,7 +80,8 @@ tên model gửi LiteLLM, `omit_temperature` bỏ hẳn khoá `temperature`. Cod
 biết tên tham số nào của provider nào (A3) — nó chỉ chép khối của catalog.
 
 **Vòng lặp tool (T-6.7a, §7.2 ③ "lặp lại", §13.5).** Hàng có `web_tools` (hoặc
-user bật ≥ 1 skill — `load_skill`, T-7.6) và model có capability `tools` ⇒ gửi
+user bật ≥ 1 skill — `load_skill`, T-7.6; hoặc có `can_execute_skills` —
+`run_code`, T-7.7a) và model có capability `tools` ⇒ gửi
 schema của `tools/registry.py`; model gọi
 tool ⇒ `tool_call` → chạy → `tool_result` → gọi lại, tới `MAX_TOOL_ROUNDS`.
 Cả lượt vẫn là MỘT message (Q-P6-1): chữ mọi vòng nối vào `content`, các vòng
@@ -113,12 +114,13 @@ from app.db.repositories import ArtifactRepository, MessageRepository, SkillRepo
 from app.db.session import session_scope
 from app.llm import byok_endpoints, context
 from app.llm.adapters.byok import ByokAdapter
-from app.llm.artifact_blocks import artifact_blocks
+from app.llm.artifact_blocks import ArtifactBlock, artifact_blocks
 from app.llm.client import Chunk, LLMClient, ToolCall, Usage
 from app.llm.credentials import Credential, CredentialUnavailable, resolve_credential
 from app.llm.tokens import IMAGE_PART_TYPE, count_message, count_messages, count_text
 from app.llm.vision import prepare_image
 from app.quota import meter
+from app.quota.tiers import get_effective_limits
 from app.streaming.cancel import FINISH_REASON_CANCELLED, is_cancel_requested
 from app.streaming.events import (
     ArtifactEvent,
@@ -249,6 +251,8 @@ class _Result:
     rounds: list[dict[str, Any]] = field(default_factory=list)
     #: Số lời gọi tool đã CHẠY trong lượt — so với `MAX_TOOL_CALLS_PER_TURN`.
     tools_run: int = 0
+    #: File tool đã đẩy MinIO (`run_code`, T-7.7a) — thành artifact `kind=file` ở ⑥.2.
+    files: list[ArtifactBlock] = field(default_factory=list)
     #: Thời điểm **gọi model**, dùng để tra bảng giá theo khung giờ (A7, B-35).
     #: KHÁC thời điểm ghi sổ: một lượt sinh mười phút có thể bắt đầu lúc 16:58
     #: giờ cao điểm và kết thúc lúc 17:08 giờ thường — giá phải là giá 16:58.
@@ -615,6 +619,7 @@ async def _run_tools(
         else:
             result.tools_run += 1
             out = await registry.call(tc.name, tc.arguments, tool_ctx)
+        result.files.extend(out.artifacts)
         text, message = _tool_message(tc, out, room=room, model_id=model.id)
         room -= count_message(message, model_id=model.id)
         wire.append(message)
@@ -642,28 +647,25 @@ async def _run_tools(
 def _tool_message(
     tc: ToolCall, out: ToolResult, *, room: int, model_id: str
 ) -> tuple[str, dict[str, Any]]:
-    """Message `role=tool` cho một kết quả: (chữ đã cắt, message trên dây)."""
-    if not out.ok:
-        # `out.content` của ca hỏng là câu của registry (UC-08 dòng 5), không chữ ngoài.
-        error = TOOL_ERROR_TEXT.format(name=tc.name, reason=out.reason)
-        return "", {
-            "role": MessageRole.TOOL.value,
-            "tool_call_id": tc.call_id,
-            "content": f"{error} {out.content}" if out.content else error,
-        }
+    """Message `role=tool` cho một kết quả: (chữ đã cắt, message trên dây).
+
+    Ca hỏng: `out.content` là câu của registry (UC-08 dòng 5) hoặc báo cáo `run_code`
+    (stderr — T-7.7a), đi sau dòng lỗi có mã; chữ đã cắt trả về là `""`.
+    """
+    error = None if out.ok else TOOL_ERROR_TEXT.format(name=tc.name, reason=out.reason)
     # Một nguồn (`fetch_url`) ⇒ khối mang tên URL; nhiều nguồn (`web_search`) ⇒ tên tool.
     # Nội dung của ta (`load_skill`, T-7.6) ⇒ thẳng, không khối (§20 chỉ cho chữ ngoài).
     name = out.sources[0]["url"] if len(out.sources) == 1 else tc.name
     text = out.content[: settings.TOOL_RESULT_MAX_CHARS]
     while True:
-        message = {
-            "role": MessageRole.TOOL.value,
-            "tool_call_id": tc.call_id,
-            "content": text if out.trusted else context.untrusted_block(name, text),
-        }
+        if error is not None:
+            body = f"{error} {text}" if text else error
+        else:
+            body = text if out.trusted else context.untrusted_block(name, text)
+        message = {"role": MessageRole.TOOL.value, "tool_call_id": tc.call_id, "content": body}
         cost = count_message(message, model_id=model_id)
         if cost <= room or not text:
-            return text, message
+            return ("" if error else text), message
         # Cắt mềm theo tỉ lệ rồi đo lại — tokenizer không tuyến tính tuyệt đối.
         text = text[: max(0, len(text) * max(room, 0) // cost - 1)]
 
@@ -838,10 +840,17 @@ async def _prepare(
     # message. Bước ghi sổ ⑥.5 cần nó cho `usage_events.user_id`.
     # `web_tools` đi từ hàng `queued` như mức suy luận (Q-P6-3, lối T-S.6); skill
     # đã bật chụp lúc này, cùng lúc tầng 1 vào `build()` (T-7.6).
+    # Quyền chạy code (§13.4) đọc lúc gọi, gộp `limit_override` (B-153) — chỉ khi
+    # model gọi được tool. T-7.7a đặt chỗ cắm; T-7.8 kiểm đủ + câu báo khi bị chặn.
+    can_execute = (
+        TOOLS_CAPABILITY in model_meta.capabilities
+        and (await get_effective_limits(owned.user_id)).can_execute_skills
+    )
     tool_ctx = UserContext(
         user_id=owned.user_id,
         web_tools=owned.message.web_tools,
         skills=frozenset(row.name for row in skills),
+        can_execute_skills=can_execute,
     )
     return model_meta, wire_messages, owned.user_id, credential, level, tool_ctx
 
@@ -1024,7 +1033,8 @@ async def _publish_artifacts(mid: uuid.UUID, producer: StreamProducer, result: _
     lô trong một transaction rồi mới XADD — không phát event cho hàng chưa commit.
     """
     try:
-        blocks = artifact_blocks(result.content)
+        # File của `run_code` (đã ở MinIO, T-7.7a) trước khối code của chữ.
+        blocks = [*result.files, *artifact_blocks(result.content)]
         if not blocks or result.user_id is None:
             return
         async with session_scope() as session:

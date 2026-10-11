@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import pytest_asyncio
@@ -256,6 +257,7 @@ async def test_get_artifact_and_versions_shape(
         "language",
         "title",
         "content",
+        "download_url",
         "message_id",
         "conversation_id",
         "created_at",
@@ -266,12 +268,46 @@ async def test_get_artifact_and_versions_shape(
         str(a2.id),
     )
     assert (body["conversation_id"], body["content"]) == (str(t.conversation_id), "<p>a</p>")
+    assert body["download_url"] is None  # không `storage_key` ⇒ không nút Tải MinIO
 
     resp = await client.get(f"{API}/artifacts/{v1.id}/versions", headers=_auth(user_a))
     assert resp.status_code == 200
     items = resp.json()["items"]
     assert [(i["id"], i["version"]) for i in items] == [(str(v1.id), 1), (str(v2.id), 2)]
     assert all("content" not in i for i in items), "versions KHONG keo content (Cam bay 5)"
+
+
+async def test_file_artifact_download_url_is_presigned_storage_key_as_attachment(
+    client: AsyncClient, session: AsyncSession, user_a: uuid.UUID
+) -> None:
+    """T-7.7a / B-372: `kind=file` có `content` NULL — Tải là URL ký của `storage_key`,
+    `Content-Disposition: attachment` (không hiển thị tại chỗ trên origin chính)."""
+    t = await _tree(session, user_a)
+    _, answer, _ = await t.turn(None)
+    key = f"{user_a}/2026/10/abc.png"
+    [row] = await ArtifactRepository(session).create_for_message(
+        message_id=answer.id,
+        user_id=user_a,
+        blocks=[
+            ArtifactBlock(
+                kind="file", language=None, title="biểu đồ.png", content=None, storage_key=key
+            )
+        ],
+    )
+    await session.commit()
+
+    resp = await client.get(f"{API}/artifacts/{row.id}", headers=_auth(user_a))
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert (body["kind"], body["content"]) == ("file", None)
+    url = urlsplit(body["download_url"])
+    assert url.path == f"/{settings.MINIO_BUCKET}/{key}"
+    query = parse_qs(url.query)
+    assert query["response-content-disposition"] == [
+        "attachment; filename*=UTF-8''bi%E1%BB%83u%20%C4%91%E1%BB%93.png"
+    ]
+    assert "X-Amz-Signature" in query
 
 
 async def test_path_and_siblings_carry_artifacts_with_content(

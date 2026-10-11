@@ -551,6 +551,9 @@ class Settings(BaseSettings):
     #: Phải DƯỚI `pids_limit: 128` của service `sandbox`: fork bomb chạm trần
     #: này trước, server root còn chỗ `fork` tiến trình phụ để giết nó.
     SANDBOX_PID_LIMIT: int = Field(default=64, gt=0)
+    #: T-7.7a — số file tối đa một lượt `run_code` được đưa lên MinIO (mỗi file một
+    #: object + một artifact + một event). Vượt ⇒ `ok=False`, không đẩy file nào.
+    MAX_SKILL_OUTPUT_FILES: int = Field(default=10, gt=0)
 
     # ═══ Upload (§15.2) ═══
     ALLOWED_UPLOAD_MIME: str = (

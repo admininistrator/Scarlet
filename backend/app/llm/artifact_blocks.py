@@ -42,6 +42,8 @@ KIND_BY_LANGUAGE = {
     "tsx": "react",
 }
 DEFAULT_KIND = "code"
+#: File do `run_code` sinh (T-7.7a, §14.1 hàng 3): `content` NULL, byte ở `storage_key`.
+FILE_KIND = "file"
 
 _LINE_BREAK = re.compile(r"(\r\n|\r|\n)")
 # Info của rào backtick không được chứa backtick (CommonMark) — nếu có thì dòng
@@ -69,7 +71,9 @@ class ArtifactBlock:
     language: str | None
     #: `""` = không có tiêu đề (FE hiện nhãn suy ra; T-5.2a không đưa vào dòng phiên bản).
     title: str
-    content: str
+    #: `None` ⇔ `kind=file` — Tải lấy từ `storage_key` (B-372), không từ đây.
+    content: str | None
+    storage_key: str | None = None
 
 
 def fenced_blocks(content: str) -> list[FencedBlock]:
@@ -102,9 +106,12 @@ def fenced_blocks(content: str) -> list[FencedBlock]:
 
 def _clean_title(meta: str) -> str:
     found = _TITLE.search(meta)
-    if found is None:
-        return ""
-    title = "".join(ch for ch in found[1] if unicodedata.category(ch) != "Cc").strip()
+    return "" if found is None else clean_title(found[1])
+
+
+def clean_title(raw: str) -> str:
+    """Bỏ ký tự điều khiển, cắt `ARTIFACT_TITLE_MAX_CHARS` — chung cho tên file `run_code`."""
+    title = "".join(ch for ch in raw if unicodedata.category(ch) != "Cc").strip()
     return title[: settings.ARTIFACT_TITLE_MAX_CHARS].strip()
 
 
