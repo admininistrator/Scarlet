@@ -491,3 +491,24 @@ async def test_me_returns_three_web_fields(
         3,
         1,
     )
+
+
+async def test_me_can_execute_skills_follows_limit_override(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    quota_redis: Any,
+) -> None:
+    """T-7.8 (B-404 ②): quyền chạy code đã gộp ghi đè — `free` tắt, override bật."""
+    before = (await client.get(f"{API}/auth/me", headers=_auth(user_a))).json()
+    async with session_factory() as session:
+        await session.execute(
+            update(User)
+            .where(User.id == user_a)
+            .values(limit_override_json={"can_execute_skills": True})
+        )
+        await session.commit()
+    del quota_redis.store[tier_cache_key(user_a)]
+    after = (await client.get(f"{API}/auth/me", headers=_auth(user_a))).json()
+
+    assert (before["can_execute_skills"], after["can_execute_skills"]) == (False, True)

@@ -8,7 +8,8 @@ một nguồn — `BuiltinTools` — và ba tool: `fetch_url` (client T-6.5) và
 `web_search` (`SearchProvider` T-6.1, T-6.7b), cùng công tắc "Tìm web" (Q-P6-3);
 `load_skill` (T-7.6, §13.2 tầng 2) khi user bật ≥ 1 skill; `run_code` (T-7.7a,
 §13.1 mức b) khi user có `can_execute_skills`. Công tắc nằm ở `list_tools(ctx)`
-— tool không có trong danh sách thì gọi cũng là `unknown_tool`.
+— tool không có trong danh sách thì gọi cũng là `unknown_tool`, trừ `run_code`
+bị chặn: câu báo rõ `no_exec_permission` (§13.4, UC-09 dòng 4 — T-7.8).
 
 **Không bao giờ ném.** Tool lạ, tham số hỏng, tool nổ ⇒ `ToolResult(ok=False,
 reason=<mã cố định>)` cho model đọc; lượt sinh đi tiếp tới `done`. Mã không
@@ -54,6 +55,8 @@ REASON_EXIT_NONZERO = "exit_nonzero"
 REASON_TIMEOUT = "timeout"
 #: Sinh nhiều file hơn `MAX_SKILL_OUTPUT_FILES` — không đẩy file nào.
 REASON_TOO_MANY_FILES = "too_many_files"
+#: Model gọi `run_code` khi user không có `can_execute_skills` (T-7.8).
+REASON_NO_EXEC_PERMISSION = "no_exec_permission"
 
 #: `web_search` hỏng (UC-08 dòng 5): câu CỦA MÌNH cho model, đi sau dòng lỗi có
 #: mã — để model trả lời bằng kiến thức sẵn có thay vì im hay bịa nguồn.
@@ -76,6 +79,12 @@ UNKNOWN_SKILL_TEXT = "Skill đang bật: {names}."
 SANDBOX_UNAVAILABLE_TEXT = (
     "Không chạy được code lúc này. Hãy trả lời không cần chạy code và nói rõ là chưa chạy được."
 )
+#: `run_code` bị chặn (§13.4): báo rõ để model tự chuyển hướng, không im lặng.
+NO_EXEC_PERMISSION_TEXT = (
+    "Tài khoản người dùng này chưa được bật quyền chạy code (quản trị viên bật được cho "
+    "từng người). Hãy trả lời không cần chạy code và nói rõ với người dùng là tài khoản "
+    "của họ chưa được bật quyền chạy code."
+)
 #: Báo cáo một lượt `run_code` cho model — stdout đầu, stderr đuôi (traceback ở cuối).
 RUN_REPORT = "exit_code: {exit_code}\nstdout:\n{stdout}\nstderr:\n{stderr}\nfiles: {files}"
 #: Tên file chứa code model gửi, trong thư mục lượt của sandbox.
@@ -91,8 +100,8 @@ class UserContext:
     web_tools: bool = False
     #: Tên skill user đã bật lúc lượt bắt đầu (T-7.6) — rỗng ⇒ không `load_skill`.
     skills: frozenset[str] = frozenset()
-    #: `EffectiveLimits.can_execute_skills` lúc lượt bắt đầu (T-7.7a chỗ cắm; câu
-    #: báo khi bị chặn + kiểm đủ ở T-7.8) — `False` ⇒ không có `run_code`.
+    #: `EffectiveLimits.can_execute_skills` lúc lượt bắt đầu (gộp override, B-153) —
+    #: `False` ⇒ không có `run_code`; model vẫn gọi ⇒ `no_exec_permission`.
     can_execute_skills: bool = False
 
 
@@ -378,6 +387,10 @@ class Registry:
             (p for p in self._providers if any(s.name == name for s in p.list_tools(ctx))), None
         )
         if owner is None:
+            if name == RUN_CODE.name:  # bị chặn ≠ không tồn tại (§13.4)
+                return ToolResult(
+                    ok=False, content=NO_EXEC_PERMISSION_TEXT, reason=REASON_NO_EXEC_PERMISSION
+                )
             return ToolResult(ok=False, reason=REASON_UNKNOWN_TOOL)
         try:
             args = json.loads(arguments or "{}")

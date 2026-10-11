@@ -841,7 +841,9 @@ async def _prepare(
     # `web_tools` đi từ hàng `queued` như mức suy luận (Q-P6-3, lối T-S.6); skill
     # đã bật chụp lúc này, cùng lúc tầng 1 vào `build()` (T-7.6).
     # Quyền chạy code (§13.4) đọc lúc gọi, gộp `limit_override` (B-153) — chỉ khi
-    # model gọi được tool. T-7.7a đặt chỗ cắm; T-7.8 kiểm đủ + câu báo khi bị chặn.
+    # model gọi được tool. Không quyền ⇒ không `run_code` (C18); model vẫn gọi ⇒
+    # registry báo rõ `no_exec_permission` (T-7.8). Lượt đã enqueue đọc lúc này,
+    # không lúc `202` (lối B-395).
     can_execute = (
         TOOLS_CAPABILITY in model_meta.capabilities
         and (await get_effective_limits(owned.user_id)).can_execute_skills

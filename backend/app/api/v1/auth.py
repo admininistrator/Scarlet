@@ -591,6 +591,9 @@ class ProfileOut(UserOut):
     can_use_web: bool
     web_searches_per_day: int
     web_searches_used: int | None
+    #: Quyền chạy code (§13.4, T-7.8) đã gộp ghi đè — panel skill T-7.9 làm mờ
+    #: skill `requires_execution` khi `false` (B-404 ②).
+    can_execute_skills: bool
 
 
 def _set_session_cookie(response: Response, user: UserOut) -> None:
@@ -1145,6 +1148,7 @@ async def me(user_id: Annotated[UUID, Depends(get_current_user_id)]) -> ProfileO
         can_use_web=limits.can_use_web,
         web_searches_per_day=limits.web_searches_per_day,
         web_searches_used=await _web_searches_used(user_id),
+        can_execute_skills=limits.can_execute_skills,
     )
 
 

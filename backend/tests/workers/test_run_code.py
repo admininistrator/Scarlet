@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from test_generate import FakeRedis, _ctx, _read_ledger, _reload
 from test_tool_loop import (  # noqa: F401 — fixture autouse của khung tool-loop
@@ -37,6 +37,7 @@ from app.core import storage
 from app.db.models import Artifact, MessageStatus, User
 from app.db.repositories import SkillRepository
 from app.llm.client import ToolCall
+from app.quota.tiers import tier_cache_key
 from app.tools import registry as registry_mod
 from app.tools import sandbox_client
 from app.workers.generate import generate
@@ -364,3 +365,81 @@ async def test_exit_nonzero_is_ok_false_with_stderr_tail_for_model(
     sent = client.calls[1]["messages"][-1]["content"]
     assert sent.startswith("[run_code lỗi: exit_nonzero] exit_code: 1")
     assert "No module named 'x'" in sent  # model đọc được lỗi để sửa code
+
+
+# ═══════════════ T-7.8: `can_execute_skills` đọc lúc gọi; bị chặn ⇒ báo rõ ═══════════════
+
+
+async def _enable_demo_skill(
+    session: AsyncSession, user_id: uuid.UUID, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skill cần chạy code đã bật — `SKILL.md` gợi ý `run_code` (đường model hay thử)."""
+    monkeypatch.setattr(registry_mod, "SKILLS_DIR", root)
+    (root / "demo").mkdir()
+    (root / "demo" / "SKILL.md").write_text("Chạy code bằng run_code.\n", encoding="utf-8")
+    await SkillRepository(session).upsert(
+        name="demo", display_name="demo", description="d", path="x", requires_execution=True
+    )
+    assert await SkillRepository(session).set_user_enabled(user_id, "demo", True)
+
+
+async def test_no_permission_load_skill_still_runs_without_run_code(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    sandbox: Sandbox,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§13.1 mức (a) không cần quyền: `load_skill` có, `run_code` không (C18)."""
+    await _enable_demo_skill(session, user_a, tmp_path, monkeypatch)
+    load = ToolCall(call_id="c1", name="load_skill", arguments=json.dumps({"name": "demo"}))
+    client = await _turn(session, user_a, fake_redis, load)
+
+    assert _names(client.calls[0]) == ["load_skill"]
+    result = _tool_result(fake_redis)
+    assert (result["ok"], result["name"]) == (True, "load_skill")
+    assert client.calls[1]["messages"][-1]["content"] == "Chạy code bằng run_code.\n"
+
+
+async def test_run_code_without_permission_is_ok_false_clear_text_turn_done(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    sandbox: Sandbox,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """UC-09 dòng 4: model cố gọi `run_code` (skill gợi ý) ⇒ báo rõ, không sandbox."""
+    await _enable_demo_skill(session, user_a, tmp_path, monkeypatch)
+    client = await _turn(session, user_a, fake_redis, _run("c1", "print(1)", skill="demo"))
+
+    result = _tool_result(fake_redis)
+    assert (result["ok"], result["result"]["reason"]) == (False, "no_exec_permission")
+    assert sandbox.bodies == []
+    sent = client.calls[1]["messages"][-1]["content"]
+    assert sent == f"[run_code lỗi: no_exec_permission] {registry_mod.NO_EXEC_PERMISSION_TEXT}"
+    assert "chưa được bật quyền chạy code" in sent
+    assert fake_redis.kind[-1] == "done"
+    mid = client.message_id  # type: ignore[attr-defined]
+    assert (await _reload(session_factory, mid)).status == MessageStatus.COMPLETED
+
+
+async def test_tier_change_applies_once_tier_cache_expires(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    fake_redis: FakeRedis,
+    sandbox: Sandbox,
+    quota_redis_fake: Any,
+) -> None:
+    """NQ-51: bật `tiers.free.can_execute_skills` ⇒ có `run_code` khi khoá cache hết TTL."""
+    warm = await _turn(session, user_a, fake_redis)
+    await session.execute(text("UPDATE tiers SET can_execute_skills = true WHERE name = 'free'"))
+    await session.commit()
+    cached = await _turn(session, user_a, FakeRedis())
+    del quota_redis_fake.store[tier_cache_key(user_a)]  # TTL `TIER_CACHE_TTL_S` trôi qua
+    expired = await _turn(session, user_a, FakeRedis())
+
+    assert (warm.calls[0]["tools"], cached.calls[0]["tools"]) == (None, None)
+    assert _names(expired.calls[0]) == ["run_code"]
