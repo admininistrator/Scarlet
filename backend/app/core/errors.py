@@ -361,6 +361,15 @@ class ApiErrorCode(StrEnum):
     #: model. `details` mang `{max_pages}`. Không âm thầm cắt trang.
     PDF_TOO_MANY_PAGES = "PDF_TOO_MANY_PAGES"
 
+    # ── chia sẻ (§16.1, T-8.1) ──
+    #: `404` — `GET /s/{token}`: token không có HOẶC đã thu hồi — một câu trả lời.
+    SHARE_NOT_FOUND = "SHARE_NOT_FOUND"
+    #: `422` — `POST …/share` trên hội thoại chưa có message nào trên đường đi.
+    CONVERSATION_EMPTY = "CONVERSATION_EMPTY"
+    #: `503` — chép ảnh / tệp sang `share/<token>/` hỏng (MinIO treo, B-349).
+    #: Không hàng `shared_conversations` nào được ghi; thử lại an toàn.
+    SHARE_STORAGE_UNAVAILABLE = "SHARE_STORAGE_UNAVAILABLE"
+
 
 #: `HTTPException` trần (của mình hoặc của Starlette) ánh xạ sang mã nào. Chỉ
 #: là lưới đỡ: mọi chỗ raise trong `app/` nên dùng `ApiError` với một mã nói

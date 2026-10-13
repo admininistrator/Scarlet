@@ -76,6 +76,11 @@ CONVERSATION_TITLE_MAX_CHARS = 200
 SKILL_SPEC_NAME_MAX_CHARS = 64
 SKILL_SPEC_DESCRIPTION_MAX_CHARS = 1024
 
+#: Số lần THỬ LẠI của client MinIO (B-349, T-8.1) — tổng chờ tối đa một lời
+#: gọi ≈ `MINIO_TIMEOUT_S × (MINIO_RETRIES + 1)`. Hằng module: một lần thử lại
+#: đỡ chớp mạng, nhiều hơn chỉ nhân thời gian treo; nút vặn là `MINIO_TIMEOUT_S`.
+MINIO_RETRIES = 1
+
 _HTTP_URL = TypeAdapter(AnyHttpUrl)
 
 
@@ -131,6 +136,10 @@ class Settings(BaseSettings):
     # của server MinIO (mặc định của nó là `us-east-1`). Không có biến này thì
     # SDK hỏi region qua mạng trước MỖI lần ký URL (Cạm bẫy ② của T-4.1).
     MINIO_REGION: str = Field(default="us-east-1", min_length=1)
+    # T-8.1 (B-349) — trần connect + read của MỖI lần thử tới MinIO. Mặc định
+    # của SDK là 300 s × 6 lần thử: MinIO treo giữ request share (N lần chép)
+    # tới khi Nginx `504`. Số lần thử lại là `MINIO_RETRIES` bên dưới.
+    MINIO_TIMEOUT_S: float = Field(default=5, gt=0)
 
     # ═══ Provider keys — CỐ Ý KHÔNG CÓ Ở ĐÂY (NQ-15, B-26, T-0.12) ═══
     # `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, `NINEROUTER_*`, `OLLAMA_*`… sống

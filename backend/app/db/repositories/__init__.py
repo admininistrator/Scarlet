@@ -23,6 +23,7 @@ from app.db.repositories.messages import (
     path_statement,
 )
 from app.db.repositories.provider_keys import ProviderKeyRepository
+from app.db.repositories.shared_conversations import SharedConversationRepository
 from app.db.repositories.skills import SkillRepository
 from app.db.repositories.usage_events import (
     CostSplit,
@@ -50,6 +51,7 @@ __all__ = [
     "PathNode",
     "ProviderKeyRepository",
     "RepositoryError",
+    "SharedConversationRepository",
     "SkillRepository",
     "UsageBucket",
     "UsageEventRepository",

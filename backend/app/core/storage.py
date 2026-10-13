@@ -15,8 +15,13 @@ T-4.1). Có `region` thì ký là phép tính thuần, nên `presign_get` là h�
 bộ; `put`/`get` có lượt mạng thật nên đi qua `asyncio.to_thread` (SDK `minio`
 chỉ có API đồng bộ — cùng lối `_check_minio` của T-0.11).
 
-**`make test` không chạm MinIO.** Test thay `put`/`get` ở module này; riêng
-`presign_get` không cần giả — không có lượt mạng nào để giả.
+**`make test` không chạm MinIO.** Test thay `put`/`get`/`copy` ở module này;
+riêng `presign_get` không cần giả — không có lượt mạng nào để giả.
+
+**Trần thời gian (B-349, T-8.1).** Client mặc định của SDK chờ 300 s mỗi lần
+thử, 6 lần thử — MinIO treo là một request HTTP treo tới khi Nginx `504`.
+`_minio()` đặt `MINIO_TIMEOUT_S` cho connect + read và `MINIO_RETRIES` lần
+thử lại: hỏng thì ném `urllib3` `MaxRetryError` trong ~`T × (R + 1)`.
 """
 
 from __future__ import annotations
@@ -29,9 +34,11 @@ from datetime import UTC, datetime, timedelta
 from functools import cache
 from urllib.parse import quote, urlsplit
 
+import urllib3
 from minio import Minio
+from minio.commonconfig import CopySource
 
-from app.config.settings import settings
+from app.config.settings import MINIO_RETRIES, settings
 
 #: Đuôi tệp theo MIME **đã nhận dạng** — không bao giờ theo tên gốc (§15.2).
 #: Bảng mặc định của stdlib, KHÔNG đọc `/etc/mime.types`: tệp ấy có ở WSL mà
@@ -52,6 +59,15 @@ def _minio(base_url: str) -> Minio:
         secret_key=settings.MINIO_SECRET_KEY.get_secret_value(),
         secure=parsed.scheme == "https",
         region=settings.MINIO_REGION,
+        http_client=urllib3.PoolManager(
+            timeout=urllib3.Timeout(
+                connect=settings.MINIO_TIMEOUT_S, read=settings.MINIO_TIMEOUT_S
+            ),
+            # Như mặc định của SDK, trừ `total` (B-349).
+            retries=urllib3.Retry(
+                total=MINIO_RETRIES, backoff_factor=0.2, status_forcelist=[500, 502, 503, 504]
+            ),
+        ),
     )
 
 
@@ -104,6 +120,20 @@ def _read(key: str) -> bytes:
 async def get(key: str) -> bytes:
     """Object mất ⇒ `minio.error.S3Error` (`code == "NoSuchKey"`) bay ra."""
     return await asyncio.to_thread(_read, key)
+
+
+async def copy(source_key: str, target_key: str) -> None:
+    """Chép phía MinIO (`CopyObject`) — byte không đi qua tiến trình gọi (T-8.1)."""
+    await asyncio.to_thread(
+        _client().copy_object,
+        settings.MINIO_BUCKET,
+        target_key,
+        CopySource(settings.MINIO_BUCKET, source_key),
+    )
+
+
+async def remove(key: str) -> None:
+    await asyncio.to_thread(_client().remove_object, settings.MINIO_BUCKET, key)
 
 
 def content_type_for(name: str) -> str:

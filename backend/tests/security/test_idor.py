@@ -523,6 +523,17 @@ MATRIX: tuple[CaIDOR, ...] = (
         body=lambda target: {"content": "gan tep cua B", "attachment_ids": [str(target)]},
         error_code=ApiErrorCode.ATTACHMENT_NOT_FOUND,
     ),
+    # T-8.1 — chia sẻ: chỉ chủ tạo được snapshot; của B ⇒ 404, không hàng nào.
+    CaIDOR(
+        name="POST /conversations/{cua-B}/share",
+        resource="conversation",
+        route=f"{API}/conversations/{{conversation_id}}/share",
+        method="POST",
+        target="conversation",
+        path=lambda target, _of_a: f"{API}/conversations/{target}/share",
+        body=None,
+        error_code=ApiErrorCode.CONVERSATION_NOT_FOUND,
+    ),
     # ── message: id của B nằm thẳng trong đường dẫn ──
     CaIDOR(
         name="GET /messages/{cua-B}/stream",

@@ -57,6 +57,7 @@ from app.api.v1 import (
     health,
     messages,
     models,
+    share,
     skills,
     stream,
 )
@@ -83,6 +84,8 @@ IDEMPOTENCY_REQUIRED_ROUTES = frozenset(
         messages.RETRY_ROUTE_NAME,
         # T-S.19b: tạo một endpoint BYOK là tạo tài nguyên (A8).
         settings_router.CREATE_BYOK_ENDPOINT_ROUTE_NAME,
+        # T-8.1: tạo một snapshot + token (A8, luật ③ của P8).
+        share.SHARE_ROUTE_NAME,
     }
 )
 
@@ -110,6 +113,10 @@ router.include_router(settings_router.router, dependencies=_AUTHENTICATED)
 router.include_router(attachments.router, dependencies=_AUTHENTICATED)
 router.include_router(artifacts.router, dependencies=_AUTHENTICATED)
 router.include_router(skills.router, dependencies=_AUTHENTICATED)
+router.include_router(share.router, dependencies=_AUTHENTICATED)
+# T-8.1 — route công khai đầu tiên ngoài `auth`: `GET /s/{token}`, token là
+# toàn bộ quyền (§16.1). KHÔNG `_AUTHENTICATED` (Cạm bẫy ⑦).
+router.include_router(share.public_router)
 router.include_router(auth.router)
 
 # §18.6 — `/_debug/*` CHỈ tồn tại khi DEBUG=true. Gắn router có điều kiện thay

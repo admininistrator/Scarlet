@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api.v1 import IDEMPOTENCY_REQUIRED_ROUTES
 from app.api.v1.messages import CREATE_MESSAGE_ROUTE_NAME, RETRY_ROUTE_NAME
 from app.api.v1.settings import CREATE_BYOK_ENDPOINT_ROUTE_NAME
+from app.api.v1.share import SHARE_ROUTE_NAME
 from app.config import catalog
 from app.config.settings import settings
 from app.core.access_token import encode_access_token
@@ -909,7 +910,12 @@ def test_route_name_matches_function() -> None:
     `IDEMPOTENCY_REQUIRED_ROUTES` mà không có route nào mang nó cũng đỏ ở đây,
     không đợi tới lúc người dùng bấm nút.
     """
-    expected = {CREATE_MESSAGE_ROUTE_NAME, RETRY_ROUTE_NAME, CREATE_BYOK_ENDPOINT_ROUTE_NAME}
+    expected = {
+        CREATE_MESSAGE_ROUTE_NAME,
+        RETRY_ROUTE_NAME,
+        CREATE_BYOK_ENDPOINT_ROUTE_NAME,
+        SHARE_ROUTE_NAME,
+    }
     assert frozenset(expected) == IDEMPOTENCY_REQUIRED_ROUTES
     # `url_path_for` ném `NoMatchFound` nếu không route nào mang tên ấy — đó
     # chính là phép kiểm. Đi đường này chứ không duyệt `app.routes` vì từ
@@ -919,10 +925,13 @@ def test_route_name_matches_function() -> None:
     retry_path = app.url_path_for(RETRY_ROUTE_NAME, message_id=str(uuid.uuid4()))
     # T-S.19b: tạo endpoint BYOK cũng bắt buộc khoá (A8).
     byok_path = app.url_path_for(CREATE_BYOK_ENDPOINT_ROUTE_NAME)
+    # T-8.1: tạo snapshot chia sẻ (A8).
+    share_path = app.url_path_for(SHARE_ROUTE_NAME, conversation_id=str(uuid.uuid4()))
 
     assert str(path).endswith("/messages")
     assert str(retry_path).endswith("/retry")
     assert str(byok_path).endswith("/settings/byok-endpoints")
+    assert str(share_path).endswith("/share")
 
 
 # ═══════════════ A1 dạng kiểm được bằng grep (§5.3, DoD) ══════════════════
