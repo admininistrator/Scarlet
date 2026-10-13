@@ -240,6 +240,8 @@ export const SPRINGS = {
   sidebarToggle: SPRING_SNAPPY,
   /** T-5.5 (ban T-HD6) — nut panel artifact: panel-right ⇄ panel-right-close, cung nhip nut sidebar. */
   panelToggle: SPRING_SNAPPY,
+  /** T-7.9 (ban T-HD11) — "Xem them" ⇄ "Thu gon" cua mo ta skill: chevron-down ⇄ chevron-up. */
+  skillDescToggle: SPRING_SNAPPY,
   themeToggle: SPRING_SETTLE,
   submenuChevron: SPRING_GENTLE,
   accountMenuItemHover: SPRING_GENTLE,

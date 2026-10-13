@@ -386,6 +386,8 @@ export function ChatScreen() {
             noVision={noVision}
             uploadLimits={uploadLimits}
             webSearch={chat.webSearch}
+            // T-7.9 — profile chua ve ⇒ coi nhu chua duoc chay code (chi doi cau giai thich).
+            canExecuteSkills={session.profile?.can_execute_skills ?? false}
             quotaNotice={
               <QuotaNotice
                 readings={quota.readings}

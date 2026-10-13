@@ -61,6 +61,7 @@ const PROFILE: ProfileOut = {
   max_attachments: 5,
   allowed_upload_mime: ["image/png"],
   can_use_web: true,
+  can_execute_skills: false,
   web_searches_per_day: 50,
   web_searches_used: 0,
 };

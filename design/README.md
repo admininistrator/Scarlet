@@ -1,4 +1,16 @@
 # Design Progress — Scarlet
+## Phase 7
+| Design | Link Claude Design | Ngày chốt |
+| T-HD11 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+Panel+skill.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Panel skill.dc.html`
+
+Also read these files the selection imports:
+- `support.js`
+
+Implement: `Scarlet Panel skill.dc.html` | 2026-10-13 |
 ## Phase 5
 | Design | Link Claude Design | Ngày chốt |
 | T-HD6 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:

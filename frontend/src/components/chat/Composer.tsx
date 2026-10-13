@@ -1,4 +1,4 @@
-import { ArrowUp, Globe, Mic, Paperclip, Square, Zap } from "lucide";
+import { ArrowUp, Globe, Mic, Paperclip, Square } from "lucide";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import type { SendKeys, SendResult, WebBlock, WebSearchState } from "../../features/chat/useChat";
@@ -12,6 +12,7 @@ import { useDock } from "../../lib/motion";
 import { ComingSoon } from "../ui/ComingSoon";
 import { AttachButtonNoVision, AttachmentPreviews } from "./Attachments";
 import { Hint } from "./Hint";
+import { SkillPicker } from "./SkillPicker";
 import { Icon, StaticIcon } from "../ui/Icon";
 
 /**
@@ -115,6 +116,7 @@ export function Composer({
   noVision = false,
   uploadLimits = null,
   webSearch,
+  canExecuteSkills,
 }: {
   running: boolean;
   enabled: boolean;
@@ -145,6 +147,8 @@ export function Composer({
   uploadLimits?: UploadLimits | null;
   /** T-6.7c — cong tac "Tim web" (`useChat.webSearch`). Vang mat ⇒ khong ve. */
   webSearch?: WebSearchState;
+  /** T-7.9 — `can_execute_skills` cua `/auth/me` cho panel skill. Vang mat ⇒ khong ve nut ⚡. */
+  canExecuteSkills?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const [keyLocked, setKeyLocked] = useState(false);
@@ -154,6 +158,8 @@ export function Composer({
   const keysRef = useRef<SendKeys | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  //: T-7.9 — panel skill neo vao HOP nhap (ban T-HD11), khong vao nut ⚡.
+  const frameRef = useRef<HTMLDivElement>(null);
   const dock = useDock<HTMLFormElement>(docked);
   const attachments = usePendingAttachments(uploadLimits, noVision);
   //: B-355 ② — anh/PDF quet trong khay ma model dang chon khong doc anh:
@@ -266,6 +272,7 @@ export function Composer({
       <div className="mx-auto flex w-full max-w-measure flex-col">
         {quotaNotice}
         <div
+          ref={frameRef}
           className={`motion-focus-ring relative flex flex-col rounded-xl border bg-surface-panel ${
             overLimit
               ? "border-danger ring-1 ring-danger"
@@ -321,7 +328,7 @@ export function Composer({
           </label>
 
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
-            {/* §7b.2 — hai nut cho con lai cua o nhap (skill, mic); khong mot handler nao (S12). */}
+            {/* §7b.2 — nut cho con lai cua o nhap (mic); khong mot handler nao (S12). */}
             {noVision ? (
               <AttachButtonNoVision />
             ) : (
@@ -351,11 +358,9 @@ export function Composer({
               </>
             )}
             {webSearch !== undefined && <WebToggle state={webSearch} />}
-            <ComingSoon
-              planned="T-7.9"
-              label={t("composer.skill")}
-              icon={<StaticIcon icon={Zap} size={20} />}
-            />
+            {canExecuteSkills !== undefined && (
+              <SkillPicker anchorRef={frameRef} canExecuteSkills={canExecuteSkills} />
+            )}
             <span className="flex-1" />
             <ComingSoon
               planned="T-8.4"

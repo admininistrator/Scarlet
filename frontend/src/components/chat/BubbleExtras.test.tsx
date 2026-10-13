@@ -62,7 +62,7 @@ describe("chip trang thai cong cu (T-6.7, T-7.9)", () => {
     expect(spinner?.textContent).toBe("");
   });
 
-  it("5 — xong: chu 'Da…' mau muted, khong con vong quay; chay code mang `T-7.9`", () => {
+  it("5 — xong: chu 'Da…' mau muted, khong con vong quay; chay code da gan (T-7.9) — khong `data-planned`", () => {
     render(
       <ToolChips
         tools={[
@@ -77,7 +77,7 @@ describe("chip trang thai cong cu (T-6.7, T-7.9)", () => {
     expect(web).toHaveClass("text-muted");
     expect(web.querySelector(".motion-spin")).toBeNull();
     expect(code).toHaveTextContent("Đang chạy code…");
-    expect(code).toHaveAttribute("data-planned", "T-7.9");
+    expect(code).not.toHaveAttribute("data-planned");
   });
 
   it("6 — khong co cong cu nao ⇒ khong ve gi", () => {

@@ -541,6 +541,7 @@ function ArtifactView({
   const selected = useRef(artifact.id);
   const inflight = useRef(new Map<string, Promise<PathArtifact>>());
   const [announce, setAnnounce] = useState("");
+  const [downloadFailed, setDownloadFailed] = useState(false);
   const stageId = useId();
 
   if (artifact.content !== null && !cache.has(artifact.id)) {
@@ -606,7 +607,14 @@ function ArtifactView({
 
   const kind = kindOf(shown.kind);
   const content = shown.content ?? "";
-  const ext = extensionFor(shown.kind, shown.language);
+  const isFile = kind === "file";
+  // `file`: duoi tu TEN tep (tieu de = ten tep cua `sandbox`), khong tu `language`.
+  const ext = isFile ? (/\.[a-z0-9]{1,8}$/i.exec(shown.title)?.[0] ?? "") : extensionFor(shown.kind, shown.language);
+  /** T-7.9 / B-372 — byte o MinIO: `GET` LUC BAM de lay URL ky con han (B-406 ②). */
+  const fetchFile = () => {
+    setDownloadFailed(false);
+    downloadFile(shown.id).catch(() => setDownloadFailed(true));
+  };
   const previewable = PREVIEW_KINDS.has(kind);
   const editable = TEXT_KINDS.has(kind);
   const preview = previewable && view === "preview";
@@ -626,7 +634,7 @@ function ArtifactView({
         actions={
           <button
             type="button"
-            onClick={() => download(shown, content)}
+            onClick={isFile ? fetchFile : () => download(shown, content)}
             aria-label={`${t("artifact.panel.download")} ${ext}`}
             className={`${TEXT_BUTTON} px-2.5 font-normal`}
           >
@@ -664,7 +672,10 @@ function ArtifactView({
             {preview && FRAME_KINDS.has(kind) && <FrameStage key={content} kind={kind} content={content} />}
             {preview && kind === "svg" && <SvgStage content={content} alt={title !== "" ? title : t(KIND_LABEL.svg)} />}
             {!preview && kind === "markdown" && <MarkdownStage content={content} />}
-            {!preview && kind !== "markdown" && <SourceStage content={content} language={shown.language ?? ""} />}
+            {isFile && <FileStage ext={ext} failed={downloadFailed} onDownload={fetchFile} />}
+            {!preview && kind !== "markdown" && !isFile && (
+              <SourceStage content={content} language={shown.language ?? ""} />
+            )}
           </div>
         </>
       )}
@@ -1069,6 +1080,37 @@ function download(artifact: PathArtifact, content: string): void {
   link.download = downloadName(artifact);
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/** Tep cua skill (B-372): `download_url` ky san `attachment` ⇒ trinh duyet tai, khong mo tai cho. */
+async function downloadFile(id: string): Promise<void> {
+  const { download_url: url } = await api.getArtifact(id);
+  if (url === null) {
+    throw new Error("artifact khong co storage_key");
+  }
+  const link = document.createElement("a");
+  link.href = url;
+  link.click();
+}
+
+/** Man `kind=file` cua ban T-HD6: khong xem truoc, mot nut Tai chinh. KHONG Sua / So sanh (B-406 ④). */
+function FileStage({ ext, failed, onDownload }: { ext: string; failed: boolean; onDownload: () => void }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+      <StaticIcon icon={File} size={28} className="text-muted" />
+      <p className="max-w-64 text-sm text-pretty text-muted">{t("artifact.panel.noPreview")}</p>
+      <button type="button" onClick={onDownload} className={PRIMARY_BUTTON}>
+        <StaticIcon icon={Download} size={16} />
+        {t("artifact.panel.download")}
+        <span className="font-mono text-xs">{ext}</span>
+      </button>
+      {failed && (
+        <p role="alert" className="text-sm text-danger-text">
+          {t("artifact.panel.downloadError")}
+        </p>
+      )}
+    </div>
+  );
 }
 
 const VIEWS: readonly [View, TextKey][] = [

@@ -78,6 +78,7 @@ const fakeFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Pr
     const out: ArtifactOut = {
       ...meta(row),
       lineage_id: LINEAGE,
+      download_url: null,
       content: row.content,
       conversation_id: "c1",
     };

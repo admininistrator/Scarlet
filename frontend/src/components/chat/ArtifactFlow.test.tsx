@@ -66,6 +66,7 @@ const PROFILE: ProfileOut = {
   max_attachments: 5,
   allowed_upload_mime: ["text/plain"],
   can_use_web: true,
+  can_execute_skills: false,
   web_searches_per_day: 50,
   web_searches_used: 0,
 };
@@ -136,6 +137,7 @@ const fakeFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Pr
       const out: ArtifactOut = {
         ...ARTIFACT,
         lineage_id: ARTIFACT_ID,
+        download_url: null,
         message_id: ANSWER_ID,
         conversation_id: CONVERSATION_ID,
         created_at: "2026-10-07T08:00:01Z",

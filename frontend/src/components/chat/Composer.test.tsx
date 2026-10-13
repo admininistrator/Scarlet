@@ -373,13 +373,14 @@ describe("Composer", () => {
    ══════════════════════════════════════════════════════════════════════════ */
 
 describe("Composer — nut cho va bo cuc (T-S.10)", () => {
-  it("14. hai nut cho cua o nhap theo §7b.2 (dinh kem gan o T-4.7, Tim web o T-6.7c): aria-disabled, dung data-planned, bam khong gui", async () => {
+  it("14. nut cho con lai cua o nhap theo §7b.2 (dinh kem T-4.7, Tim web T-6.7c, skill T-7.9 da gan): aria-disabled, dung data-planned, bam khong gui", async () => {
     const sendMock = vi.fn(async (_content: string, _keys: SendKeys) => "da-gui" as SendResult);
     renderComposer(sendMock);
     await userEvent.type(textbox(), "cau hoi");
 
+    // T-7.9 — khong `canExecuteSkills` ⇒ khong nut ⚡ (panel that: SkillPicker.test.tsx).
+    expect(screen.queryByRole("button", { name: /Chọn skill/ })).toBeNull();
     const pending = [
-      ["Chọn skill", "T-7.9"],
       ["Nhập bằng giọng nói", "T-8.4"],
     ] as const;
     for (const [name, planned] of pending) {

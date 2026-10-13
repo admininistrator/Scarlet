@@ -15,7 +15,7 @@ import { safeUrl } from "./markdownPolicy";
  * | `data-planned` | Thanh phan                               | Ai se gan |
  * |----------------|------------------------------------------|-----------|
  * | —              | Chip "Dang tim web…" + chip nguon        | GAN o T-6.7c |
- * | `T-7.9`        | Chip "Dang chay code…"                   | P7        |
+ * | —              | Chip "Dang chay code…"                   | GAN o T-7.9 |
  * | —              | The artifact                             | GAN o T-5.3 |
  * | —              | Anh / tep trong bong bong nguoi dung     | GAN o T-4.7 |
  *
@@ -104,16 +104,24 @@ const TOOL_TEXT: Record<ToolKind, { running: TextKey; done: TextKey }> = {
 };
 
 /**
- * Cot `data-planned` cua §7b.2 cho chip CHUA gan. Tim web da gan (T-6.7c) —
- * con chay code (`T-7.9`). Gan dong: hai lenh grep cua DoD P6 khong thay no.
+ * Ten tool cua registry (§13.5) ⇒ loai chip. Ten la ⇒ chip tim web.
+ *
+ * `load_skill` ⇒ `null`, KHONG chip (B-405 ④, T-7.9): no chi nap huong dan
+ * vao context — khong co gi cho nguoi dung xem, va model goi lai no moi luot
+ * can skill (C30) ⇒ mot chip "Da doc skill" o gan nhu moi cau tra loi P7 la
+ * nhieu. Viec that (chay code, ra tep) da co chip `codeRun` + the tep.
  */
-const TOOL_PLANNED: Partial<Record<ToolKind, "T-7.9">> = {
-  codeRun: "T-7.9",
-};
-
-/** Ten tool cua registry (§13.5) ⇒ loai chip. Ten la ⇒ chip tim web. */
-export function toolKind(name: string): ToolKind {
-  return name === "fetch_url" ? "fetchUrl" : "webSearch";
+export function toolKind(name: string): ToolKind | null {
+  switch (name) {
+    case "load_skill":
+      return null;
+    case "run_code":
+      return "codeRun";
+    case "fetch_url":
+      return "fetchUrl";
+    default:
+      return "webSearch";
+  }
 }
 
 /**
@@ -136,6 +144,12 @@ const TOOL_ERROR_TEXT: Readonly<Record<string, TextKey>> = {
   upstream: "chat.tool.error.searchUnavailable",
   too_large: "chat.tool.error.tooLarge",
   unsupported_type: "chat.tool.error.unsupportedType",
+  // `run_code` (registry T-7.7a / T-7.8, `sandbox`). `timeout` dung chung o tren.
+  exit_nonzero: "chat.tool.error.codeFailed",
+  no_exec_permission: "chat.tool.error.noExec",
+  sandbox_unavailable: "chat.tool.error.sandboxUnavailable",
+  too_many_files: "chat.tool.error.outputRejected",
+  output_too_large: "chat.tool.error.outputRejected",
 };
 
 export function toolErrorText(reason: string | null): string {
@@ -165,7 +179,6 @@ export function ToolChips({ tools }: { tools: readonly ToolStatus[] }) {
         <span
           key={tool.id ?? tool.kind}
           role="status"
-          data-planned={TOOL_PLANNED[tool.kind]}
           className={`inline-flex min-h-chip max-w-full items-center gap-2 rounded-full border border-border bg-background pr-3 pl-2.5 text-sm ${
             tool.running ? "text-foreground" : tool.error === undefined ? "text-muted" : "text-danger-text"
           }`}

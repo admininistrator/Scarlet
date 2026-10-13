@@ -335,6 +335,20 @@
   --duration-artifact-hang: 8000ms;  /* khung im lặng chừng này (chưa “ready”, hoặc mất nhịp tim) ⇒ treo. JS đọc. KHÔNG về 0 khi reduced-motion: đây là hẹn giờ, không phải chuyển động */
   --color-surface-artifact: #ffffff; /* nền dưới iframe và <img> của artifact — xem [data-theme="dark"] */
   /* ◂ ARTIFACT */
+
+  /* SKILL ▸ PANEL SKILL (T-HD11 · v1) -----------------------------------------
+   * Màu: KHÔNG thêm. Công tắc = đúng công tắc của Admin (accent · border-strong · accent-foreground).
+   * Nhãn “Chạy code” = border + muted · chưa có quyền = warning-subtle + warning-text ·
+   * lỗi lưu = danger-text · nút ⚡ đang bật = viền accent + accent-subtle + accent-text (lối Tìm web bật).
+   * Chuyển động: popover = .motion-menu-up (mọc từ góc dưới trái — chỗ nút ⚡; Popover không có biến
+   * transform-origin của dropdown nên rơi đúng về giá trị dự phòng bottom left) · sheet = .motion-sheet +
+   * .motion-scrim · đang lưu = .motion-spin · đang nạp = .motion-pulse · câu lỗi = .motion-enter ·
+   * chevron Xem thêm ⇄ Thu gọn = morphicons, springs.ts · skillDescToggle.
+   * Thêm 3 utility (cuối file): .motion-switch · .motion-count · .scroll-fade-y. */
+  --spacing-skill-panel: 25rem;        /* 400px — popover desktop; lòng chữ 400 − 16 − 8 − 12 − 44 = 320 */
+  --spacing-skill-panel-max: 40rem;    /* 640px — trần cao popover: đủ 4 mục (bộ T-7.7b) kể cả khi có câu lỗi, không cuộn; từ mục 5 trở đi cuộn. Thấp hơn khi Radix báo ít chỗ hơn */
+  --spacing-skill-sheet-max: min(var(--spacing-sheet-max), calc(100dvh - var(--keyboard-inset) - var(--spacing-header))); /* sheet < 640: bàn phím mở ⇒ co theo phần màn còn thấy, chừa 56 ở đỉnh */
+  /* ◂ SKILL */
 }
 
 [data-theme="dark"] {
@@ -436,6 +450,8 @@
    * nên một nền tối phía sau chỉ lộ ra trong khung hình đầu rồi bị che. */
   --color-surface-artifact: #ffffff;
   /* ◂ ARTIFACT */
+
+  /* SKILL ▸ theme tối — không có biến mới: ba biến của panel skill là kích thước, không phải màu. ◂ SKILL */
 
   /* Shadow phải đậm hơn trên nền tối mới nhìn thấy tầng nổi. */
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
@@ -985,6 +1001,37 @@
   to   { transform: translateX(calc(100% + var(--spacing-panel-gap))); }
 }
 /* ◂ ARTIFACT */
+
+/* SKILL ▸ Công tắc bật / tắt skill (role="switch").
+ * Rãnh đổi màu: fast · move. Núm (con trực tiếp) trượt + đổi cỡ: normal · move — cùng nhịp viên Xem trước / Mã.
+ * Lỗi lưu ⇒ aria-checked về giá trị cũ và núm trượt về bằng chính transition này; không có hoạt ảnh “lỗi” riêng.
+ * Reduced motion: khối * ở trên tắt transition ⇒ núm nhảy thẳng tới chỗ. */
+@utility motion-switch {
+  transition: background-color var(--duration-fast) var(--ease-move), border-color var(--duration-fast) var(--ease-move);
+  & > * {
+    transition: translate var(--duration-normal) var(--ease-move), scale var(--duration-normal) var(--ease-move),
+      background-color var(--duration-fast) var(--ease-move);
+  }
+}
+/* Số skill đang bật trên nút ⚡. Component đặt key={count} ⇒ mỗi lần đổi số, số mới nhô lên (fast · enter).
+ * Reduced motion: animation = none, số hiện ngay ở trạng thái cuối. */
+@utility motion-count {
+  animation: scarlet-rise-in var(--duration-fast) var(--ease-enter) both;
+}
+/* Danh sách skill cuộn dọc: bóng mép trên / dưới — cùng kỹ thuật .scroll-fade-x (lớp local che, lớp scroll
+ * đổ bóng, không JS). Đầu panel nằm NGOÀI khung này nên đứng yên khi cuộn. */
+@utility scroll-fade-y {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  background:
+    linear-gradient(to bottom, var(--color-surface-panel) 40%, transparent) center top / 100% calc(var(--spacing-scroll-shadow) * 3) no-repeat local,
+    linear-gradient(to top, var(--color-surface-panel) 40%, transparent) center bottom / 100% calc(var(--spacing-scroll-shadow) * 3) no-repeat local,
+    linear-gradient(to bottom, var(--color-scroll-shadow), transparent) center top / 100% var(--spacing-scroll-shadow) no-repeat scroll,
+    linear-gradient(to top, var(--color-scroll-shadow), transparent) center bottom / 100% var(--spacing-scroll-shadow) no-repeat scroll,
+    var(--color-surface-panel);
+}
+/* ◂ SKILL */
 
 @utility tabular {
   font-variant-numeric: tabular-nums;

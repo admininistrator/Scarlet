@@ -122,6 +122,9 @@ _ALLOWED: dict[str, str] = {
         "khoá giả lập trong `details.changed` của một dòng audit (dữ liệu trên dây); "
         "test so với chuỗi `\"truong_moi\"`"
     ),
+    "frontend/src/components/chat/SkillPicker.tsx::lang": (
+        "thuộc tính HTML `lang` của chuẩn (mô tả skill tiếng Anh, bản T-HD11) — không phải tên tự đặt"
+    ),
 }
 
 _WORD_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")

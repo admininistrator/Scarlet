@@ -225,10 +225,25 @@ export interface PathArtifact {
 
 /** `GET /artifacts/{id}` (T-5.2a). */
 export interface ArtifactOut extends PathArtifact {
+  /**
+   * T-7.7a — `kind=file`: URL ky cua MinIO (`attachment`), song `PRESIGN_TTL_S`
+   * ⇒ goi `GET` LUC BAM Tai, khong giu (B-406 ②). `null` ⇔ khong `storage_key`.
+   */
+  download_url: string | null;
   lineage_id: string;
   message_id: string;
   conversation_id: string;
   created_at: string;
+}
+
+/** Mot skill cua `GET /skills` (T-7.5); `enabled` la cong tac CUA NGUOI GOI (mac dinh T-7.8b). */
+export interface Skill {
+  name: string;
+  display_name: string;
+  /** Du lieu server, tieng Anh — hien nguyen van. */
+  description: string;
+  requires_execution: boolean;
+  enabled: boolean;
 }
 
 /** Mot phan tu cua `GET /artifacts/{id}/versions` va `201` cua `POST` (T-5.2b) — KHONG `content`. */
@@ -574,6 +589,8 @@ export interface ProfileOut extends UserOut {
   allowed_upload_mime: string[];
   /** T-6.8 — `false` ⇒ cong tac "Tim web" mo (T-6.7c); server van chan `422 WEB_DISABLED`. */
   can_use_web: boolean;
+  /** T-7.8 — da gop ghi de; `false` ⇒ panel skill (T-7.9) bao skill can chay code chi dung phan huong dan. */
+  can_execute_skills: boolean;
   web_searches_per_day: number;
   /** Luot `web_search` trong 24 h truot; `null` = Redis khong tra loi. */
   web_searches_used: number | null;
@@ -1330,6 +1347,16 @@ export const api = {
     request<ProviderKey>(`/settings/keys/${encodeURIComponent(provider)}`, {
       method: "PUT",
       body: JSON.stringify({ key }),
+    }),
+
+  /** T-7.9 — skill + cong tac cua chinh minh. */
+  listSkills: () => request<{ items: Skill[] }>("/skills"),
+
+  /** `{"enabled": bool}` — dat, KHONG lat (PUT idempotent); `404 SKILL_NOT_FOUND` khi skill bi go. */
+  toggleSkill: (name: string, enabled: boolean) =>
+    request<Skill>(`/skills/${encodeURIComponent(name)}/toggle`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
     }),
 
   deleteProviderKey: (provider: string) =>

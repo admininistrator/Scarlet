@@ -163,12 +163,19 @@ export function MessageItem({
       </h3>
 
       <ToolChips
-        tools={tools.map((run, index) => ({
-          id: String(index),
-          kind: toolKind(run.name),
-          running: run.ok === null,
-          ...(run.ok === false ? { error: toolErrorText(run.reason) } : {}),
-        }))}
+        tools={tools.flatMap((run, index) => {
+          const kind = toolKind(run.name);
+          return kind === null
+            ? []
+            : [
+                {
+                  id: String(index),
+                  kind,
+                  running: run.ok === null,
+                  ...(run.ok === false ? { error: toolErrorText(run.reason) } : {}),
+                },
+              ];
+        })}
       />
       <SourceList sources={tools.flatMap((run) => (run.ok === true ? run.sources : []))} />
 
