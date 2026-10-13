@@ -3,6 +3,7 @@ name: pdf
 description: Create PDF files — text documents (Vietnamese OK), chart pages, merging PDFs. Use when the user asks for a PDF or a downloadable .pdf file.
 license: Same as the Scarlet repository
 metadata:
+  default_enabled: "true"
   display_name: PDF
 ---
 

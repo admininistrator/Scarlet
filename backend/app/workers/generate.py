@@ -439,13 +439,10 @@ async def _run(
     result.model = model_meta
     result.user_id = user_id
     result.key_source = credential.key_source
-    # C18: capability ở đây; công tắc ("Tìm web" Q-P6-3, skill đã bật T-7.6) ở
-    # `list_tools(tool_ctx)` của registry (§13.5). Rỗng ⇒ `tools=None` như cũ.
-    schema = (
-        [spec.to_wire() for spec in registry.specs(tool_ctx)]
-        if TOOLS_CAPABILITY in model_meta.capabilities
-        else []
-    )
+    # C18 capability + công tắc ("Tìm web" Q-P6-3, skill đã bật T-7.6) ở
+    # `registry.offered` (§13.5) — cùng điều kiện estimator đếm (T-7.8b). Rỗng
+    # ⇒ `tools=None` như cũ.
+    schema = [spec.to_wire() for spec in registry.offered(model_meta, tool_ctx)]
 
     # Nhịp tim mở NGAY sau `_prepare` (nơi `mark_streaming` chạy) chứ không
     # đợi chunk đầu, và sống suốt mọi vòng + mọi tool (B-122).

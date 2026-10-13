@@ -9,11 +9,13 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from ooxml_bytes import xlsx
 from sqlalchemy import event, func, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
@@ -40,8 +42,10 @@ from app.db.repositories import (
 )
 from app.llm.artifact_blocks import ArtifactBlock
 from app.main import app
+from app.workers.extract import TRUNCATED_ROWS, extract_pdf, extract_xlsx
 
 API = "/api/v1"
+FIXTURE_PDF = (Path(__file__).parents[1] / "workers" / "fixtures" / "vietnamese.pdf").read_bytes()
 NOT_USABLE = "ATTACHMENT_NOT_FOUND"
 _T0 = datetime(2026, 10, 3, tzinfo=UTC)
 
@@ -513,6 +517,45 @@ async def test_file_text_at_cap_is_202(
     resp = await _send(client, user_a, conv, ids)
 
     assert resp.status_code == 202, resp.text
+
+
+async def test_long_xlsx_cut_with_notice_is_202(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**DoD** NQ-148 ③: bảng tính dài một mình ⇒ job cắt + dòng báo ⇒ `202`, không `422`."""
+    monkeypatch.setattr(settings, "ATTACHMENT_TEXT_MAX_CHARS", 400)
+    rows = "".join(f'<row r="{i}"><c r="A{i}"><v>{i}</v></c></row>' for i in range(1, 501))
+    status, text, _ = extract_xlsx(xlsx([("S", rows)]))
+    assert status is ExtractStatus.DONE and text is not None
+    conv = await _conversation(session_factory, user_a)
+    att = await _file_row(session_factory, user_a, status=status, text=text)
+
+    resp = await _send(client, user_a, conv, [att])
+
+    assert resp.status_code == 202, resp.text
+    assert text.endswith(TRUNCATED_ROWS.format(n=500 - (text.count("\n") - 1)))
+
+
+async def test_long_pdf_still_422(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    user_a: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**DoD**: PDF/DOCX giữ `422 ATTACHMENT_TEXT_TOO_LONG` (T-4.6a) — không cắt."""
+    monkeypatch.setattr(settings, "ATTACHMENT_TEXT_MAX_CHARS", 50)
+    status, text, _ = extract_pdf(FIXTURE_PDF)
+    assert status is ExtractStatus.DONE and text is not None and len(text) > 50
+    conv = await _conversation(session_factory, user_a)
+    att = await _file_row(session_factory, user_a, status=status, text=text)
+
+    resp = await _send(client, user_a, conv, [att])
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["error"]["code"] == "ATTACHMENT_TEXT_TOO_LONG"
 
 
 # ─────────── trần chung: chữ tệp + bản sửa artifact (T-5.2b, B-208 / B-353) ───────────

@@ -28,13 +28,22 @@ PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 #: Mục của zip làm nên một DOCX (NQ-138 ②) — cũng là mục duy nhất job đọc.
 DOCX_PART = "word/document.xml"
+#: T-7.8b (NQ-148 ①) — XLSX / PPTX đi cùng đường DOCX.
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+XLSX_PART = "xl/workbook.xml"
+PPTX_PART = "ppt/presentation.xml"
+#: Mục danh mục zip → loại OOXML (`sniff_mime`, Cạm bẫy ② T-7.8b).
+OOXML_PARTS = {DOCX_PART: DOCX_MIME, XLSX_PART: XLSX_MIME, PPTX_PART: PPTX_MIME}
+#: Loại tệp ra đời `pending` và đi qua job `extract`.
+EXTRACTED_MIMES = frozenset({PDF_MIME, *OOXML_PARTS.values()})
 
 
 class ExtractStatus(StrEnum):
     """`attachments.extract_status` — tập cố định (T-4.6a, lối `ErrorCode` của T-1.6).
 
     `none` = ảnh, không có gì để trích. TXT giải mã ngay ở `api` ⇒ `done` luôn;
-    PDF/DOCX ra đời `pending`, job `extract` khép thành một trong bốn trạng thái
+    PDF/DOCX/XLSX/PPTX ra đời `pending`, job `extract` khép thành một trong bốn trạng thái
     còn lại. `needs_vision` / `too_many_pages`: PDF không lớp chữ — trang render
     thành ảnh, đi luật ảnh (T-4.6b).
     """

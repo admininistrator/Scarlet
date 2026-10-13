@@ -399,7 +399,10 @@ async def test_no_permission_load_skill_still_runs_without_run_code(
     assert _names(client.calls[0]) == ["load_skill"]
     result = _tool_result(fake_redis)
     assert (result["ok"], result["name"]) == (True, "load_skill")
-    assert client.calls[1]["messages"][-1]["content"] == "Chạy code bằng run_code.\n"
+    # Không quyền ⇒ dòng nối T-7.8b (B-408 ①) ở cuối `SKILL.md`.
+    assert client.calls[1]["messages"][-1]["content"] == (
+        "Chạy code bằng run_code.\n" + registry_mod.NO_RUN_CODE_NOTE
+    )
 
 
 async def test_run_code_without_permission_is_ok_false_clear_text_turn_done(

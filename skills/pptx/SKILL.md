@@ -3,6 +3,7 @@ name: pptx
 description: Create PowerPoint decks (.pptx) — title slides, bullet slides, charts and images, speaker notes. Use when the user asks for slides, a presentation or a .pptx file.
 license: Same as the Scarlet repository
 metadata:
+  default_enabled: "true"
   display_name: PowerPoint (.pptx)
 ---
 

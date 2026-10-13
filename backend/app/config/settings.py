@@ -537,6 +537,11 @@ class Settings(BaseSettings):
     #: T-7.6 (§13.2 tầng 1, Q-P7-3) — trần KÝ TỰ của `description` mỗi skill trong
     #: system prompt; dài hơn ⇒ cắt + "…". Đọc LÚC GỌI. Giá trị: xem `.env.example`.
     SKILL_DESCRIPTION_MAX_CHARS: int = Field(default=200, gt=1)
+    #: T-7.8b (NQ-148 ⑤) — số lần gọi model §10.2 giữ chỗ cho lượt mà tool DUY
+    #: NHẤT là `load_skill` (nạp skill rồi trả lời), thay `MAX_TOOL_ROUNDS + 1`.
+    #: Bắt buộc (A4): bốn skill dựng sẵn bật cho mọi user ⇒ hệ số của gần như
+    #: mọi lượt trên model `tools`. Đọc LÚC GỌI.
+    SKILL_ESTIMATE_CALLS: int = Field(gt=0)
 
     # ═══ Sandbox (§13) ═══
     #: Socket trên volume chung `sandbox_socket` (`docker-compose.yml`, T-7.2).
@@ -560,7 +565,9 @@ class Settings(BaseSettings):
         "image/png,image/jpeg,image/webp,image/gif,application/pdf,"
         # Không `text/markdown`: libmagic trả `text/plain` cho `.md` (NQ-138 ②).
         "text/plain,"
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     )
     PRESIGN_TTL_S: int = Field(default=300, gt=0)
 

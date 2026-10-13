@@ -3,6 +3,7 @@ name: xlsx
 description: Create Excel spreadsheets (.xlsx) — tables, formulas, number formats, several sheets, charts. Use when the user asks for an Excel file or a downloadable spreadsheet.
 license: Same as the Scarlet repository
 metadata:
+  default_enabled: "true"
   display_name: Excel (.xlsx)
 ---
 

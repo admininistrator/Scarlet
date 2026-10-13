@@ -107,6 +107,7 @@ from app.llm.tokens import count_messages
 from app.quota.rebuild import refill_if_empty
 from app.quota.tiers import EffectiveLimits, get_effective_limits
 from app.quota.windows import LimitType, WindowState, read_window, windows
+from app.tools.registry import LOAD_SKILL, ToolSpec, UserContext, registry
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ class QuotaWarning(BaseModel):
 
 
 def estimate(
-    model: catalog.ModelEntry, messages: list[dict[str, Any]], *, web_tools: bool = False
+    model: catalog.ModelEntry, messages: list[dict[str, Any]], *, calls: int = 1
 ) -> Estimate:
     """`est_max` của §10.2 cho một ngữ cảnh đã dựng.
 
@@ -162,13 +163,25 @@ def estimate(
     không Postgres, không `ApiError`. Nhờ vậy phép nhân tiền — thứ A7 đòi đúng
     tới 1e-6 — kiểm được mà không phải dựng một request giả.
     """
-    return estimate_from_tokens(
-        model, count_messages(messages, model_id=model.id), web_tools=web_tools
-    )
+    return estimate_from_tokens(model, count_messages(messages, model_id=model.id), calls=calls)
+
+
+def model_calls(offered: list[ToolSpec]) -> int:
+    """Số lần gọi model §10.2 giữ chỗ cho một lượt mời `offered` (Q-P6-6, NQ-148 ⑤).
+
+    Không tool ⇒ 1. Tool DUY NHẤT là `load_skill` ⇒ `SKILL_ESTIMATE_CALLS` (nạp
+    skill rồi trả lời). Có web / `run_code` ⇒ `MAX_TOOL_ROUNDS + 1` — mỗi vòng
+    tool là một lần gọi nữa, gửi lại cả ngữ cảnh. Trần đọc LÚC GỌI.
+    """
+    if not offered:
+        return 1
+    if all(spec.name == LOAD_SKILL.name for spec in offered):
+        return settings.SKILL_ESTIMATE_CALLS
+    return settings.MAX_TOOL_ROUNDS + 1
 
 
 def estimate_from_tokens(
-    model: catalog.ModelEntry, context_tokens: int, *, web_tools: bool = False
+    model: catalog.ModelEntry, context_tokens: int, *, calls: int = 1
 ) -> Estimate:
     """`est_max` khi đã có sẵn số token của ngữ cảnh.
 
@@ -181,8 +194,7 @@ def estimate_from_tokens(
     toán cho **bây giờ**, và giờ này là giờ model sẽ chạy. Giá chốt vào lịch
     sử là việc của T-2.12, với `at` của chính lượt sinh ấy.
 
-    **Lượt bật web (Q-P6-6, T-6.7a):** `est_max × (MAX_TOOL_ROUNDS + 1)` — mỗi
-    vòng tool là một lần gọi nữa, gửi lại cả ngữ cảnh. Trần đọc LÚC GỌI.
+    **Lượt có tool:** `est_max × calls` — xem `model_calls`.
     """
     cat = catalog.get_catalog()
     est_in = context_tokens + cat.prompt_overhead_tokens(model.id)
@@ -201,8 +213,7 @@ def estimate_from_tokens(
         Decimal(est_in) * Decimal(str(pricing.input_per_1m))
         + Decimal(model.max_output) * Decimal(str(pricing.output_per_1m))
     ) / TOKENS_PER_PRICE_UNIT
-    if web_tools:
-        est_max *= settings.MAX_TOOL_ROUNDS + 1
+    est_max *= calls
 
     return Estimate(
         model_id=model.id,
@@ -294,15 +305,19 @@ async def _estimate(
     về **trần ngân sách** (§9.6) là con số lớn nhất mà một lượt sinh có thể
     gửi lên, tức đúng chiều an toàn mà §10.2 đã chọn cho cả cửa này.
 
-    Lượt có skill bật trên model `tools` cũng là lượt tool (`load_skill`, T-7.6)
-    ⇒ cùng hệ số `MAX_TOOL_ROUNDS + 1` như lượt bật web. Cùng thế: user có
-    `can_execute_skills` (`run_code`, T-7.7a) — cùng điều kiện worker mời tool.
+    Hệ số lần gọi đếm từ `registry.offered` — đúng danh sách tool worker sẽ
+    mời (skill đã bật T-7.6, `run_code` T-7.7a, web) — rồi `model_calls` (T-7.8b).
     """
-    if not web_tools and catalog.TOOLS_CAPABILITY in model.capabilities:
-        web_tools = (
-            bool(await SkillRepository(session).enabled_for_user(user_id))
-            or (await get_effective_limits(user_id)).can_execute_skills
+    calls = 1
+    if catalog.TOOLS_CAPABILITY in model.capabilities:
+        skills = await SkillRepository(session).enabled_for_user(user_id)
+        ctx = UserContext(
+            user_id=user_id,
+            web_tools=web_tools,
+            skills=frozenset(row.name for row in skills),
+            can_execute_skills=(await get_effective_limits(user_id)).can_execute_skills,
         )
+        calls = model_calls(registry.offered(model, ctx))
     try:
         messages = await context.build(session, leaf_id, model, user_id=user_id)
     except context.ContextError:
@@ -313,8 +328,8 @@ async def _estimate(
             leaf_id,
             cap,
         )
-        return estimate_from_tokens(model, cap, web_tools=web_tools)
-    return estimate(model, messages, web_tools=web_tools)
+        return estimate_from_tokens(model, cap, calls=calls)
+    return estimate(model, messages, calls=calls)
 
 
 def _over_limit(

@@ -5,7 +5,11 @@ Hai người gọi: loader (`app/skills/loader.py`) ghi sổ đăng ký lúc `ap
 
 **`user_id` lọc trong câu SQL** (§20, CLAUDE.md) — kể cả ở `LEFT JOIN`: điều
 kiện `user_id` nằm trong `ON` chứ không trong `WHERE`, để skill user chưa bật
-vẫn ra một hàng (`enabled=false`) thay vì biến mất.
+vẫn ra một hàng thay vì biến mất.
+
+**Công tắc hiệu lực = `COALESCE(user_skills.enabled, skills.default_enabled)`**
+(T-7.8b, NQ-148 ②): hàng của user luôn thắng, không hàng thì theo mặc định của
+skill. Một biểu thức (`_EFFECTIVE`) cho cả danh sách lẫn tầng 1.
 """
 
 from __future__ import annotations
@@ -13,11 +17,18 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import Row, and_, func, select, update
+from sqlalchemy import ColumnElement, Row, and_, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Skill, UserSkill
+
+_EFFECTIVE = func.coalesce(UserSkill.enabled, Skill.default_enabled)
+
+
+def _with_switch(user_id: uuid.UUID) -> ColumnElement[bool]:
+    """`LEFT JOIN user_skills` của đúng `user_id` — điều kiện trong `ON`."""
+    return and_(UserSkill.skill_name == Skill.name, UserSkill.user_id == user_id)
 
 
 class SkillRepository:
@@ -32,6 +43,7 @@ class SkillRepository:
         description: str,
         path: str,
         requires_execution: bool,
+        default_enabled: bool = False,
     ) -> None:
         """Ghi một skill loader vừa đọc được; `enabled` về `true` (thấy trên đĩa)."""
         values = {
@@ -39,6 +51,7 @@ class SkillRepository:
             "description": description,
             "path": path,
             "requires_execution": requires_execution,
+            "default_enabled": default_enabled,
             "enabled": True,
         }
         stmt = (
@@ -59,34 +72,27 @@ class SkillRepository:
         await self._session.execute(stmt)
 
     async def list_for_user(self, user_id: uuid.UUID) -> Sequence[Row[str, str, str, bool, bool]]:
-        """Mọi skill đang dùng được + công tắc của `user_id` (không hàng ⇒ `false`)."""
+        """Mọi skill đang dùng được + công tắc hiệu lực của `user_id` (không hàng ⇒ mặc định)."""
         stmt = (
             select(
                 Skill.name,
                 Skill.display_name,
                 Skill.description,
                 Skill.requires_execution,
-                func.coalesce(UserSkill.enabled, False).label("enabled"),
+                _EFFECTIVE.label("enabled"),
             )
-            .outerjoin(
-                UserSkill,
-                and_(UserSkill.skill_name == Skill.name, UserSkill.user_id == user_id),
-            )
+            .outerjoin(UserSkill, _with_switch(user_id))
             .where(Skill.enabled.is_(True))
             .order_by(Skill.name)
         )
         return (await self._session.execute(stmt)).all()
 
     async def enabled_for_user(self, user_id: uuid.UUID) -> Sequence[Row[str, str]]:
-        """`(name, description)` của skill `user_id` đã bật và đang dùng được (T-7.6, tầng 1)."""
+        """`(name, description)` của skill đang bật với `user_id` (T-7.6 tầng 1, T-7.8b)."""
         stmt = (
             select(Skill.name, Skill.description)
-            .join(UserSkill, UserSkill.skill_name == Skill.name)
-            .where(
-                UserSkill.user_id == user_id,
-                UserSkill.enabled.is_(True),
-                Skill.enabled.is_(True),
-            )
+            .outerjoin(UserSkill, _with_switch(user_id))
+            .where(_EFFECTIVE.is_(True), Skill.enabled.is_(True))
             .order_by(Skill.name)
         )
         return (await self._session.execute(stmt)).all()

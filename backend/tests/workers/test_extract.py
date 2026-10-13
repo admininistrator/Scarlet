@@ -11,10 +11,12 @@ import io
 import logging
 import uuid
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
+from ooxml_bytes import pptx, xlsx, xlsx_parts, zip_parts
 from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -23,9 +25,18 @@ import app.db.session as db_session
 from app.config.settings import settings
 from app.core import storage
 from app.db.models import Attachment, AttachmentKind, ExtractStatus
-from app.db.models.attachment import DOCX_MIME, DOCX_PART, PDF_MIME
+from app.db.models.attachment import DOCX_MIME, DOCX_PART, PDF_MIME, PPTX_MIME, XLSX_MIME
 from app.db.repositories import AttachmentRepository
-from app.workers.extract import extract, extract_docx, extract_pdf, render_pdf_page
+from app.workers.extract import (
+    TRUNCATED_ROWS,
+    _is_date_format,
+    extract,
+    extract_docx,
+    extract_pdf,
+    extract_pptx,
+    extract_xlsx,
+    render_pdf_page,
+)
 
 FIXTURE_PDF = (Path(__file__).parent / "fixtures" / "vietnamese.pdf").read_bytes()
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -217,8 +228,13 @@ async def test_job_records_page_count_of_scanned_pdf(
 
 @pytest.mark.parametrize(
     ("data", "mime"),
-    [(b"%PDF-1.4\nrac rac rac\n", PDF_MIME), (b"PK\x03\x04hong", DOCX_MIME)],
-    ids=["pdf-hong", "docx-hong"],
+    [
+        (b"%PDF-1.4\nrac rac rac\n", PDF_MIME),
+        (b"PK\x03\x04hong", DOCX_MIME),
+        (zip_parts({"xl/workbook.xml": "<workbook><khong-dong"}), XLSX_MIME),
+        (zip_parts({"[Content_Types].xml": "<Types/>"}), PPTX_MIME),
+    ],
+    ids=["pdf-hong", "docx-hong", "xlsx-xml-hong", "pptx-thieu-presentation"],
 )
 async def test_broken_file_is_failed_without_raising(
     session: AsyncSession, user_a: uuid.UUID, bucket: dict[str, bytes], data: bytes, mime: str
@@ -255,3 +271,181 @@ async def test_done_row_is_not_extracted_again(
     await extract({}, str(aid))
 
     assert (await _row(session, aid)).extract_status == ExtractStatus.DONE
+
+
+# ─────────────────────────── XLSX / PPTX (T-7.8b) ───────────────────────────
+
+#: cellXfs: 0 General · 1 ngày dựng sẵn (14) · 2 ngày tự đặt · 3 thời lượng `[h]:mm`
+#: · 4 số có chữ "dmy" trong ngoặc kép — chỉ 1 và 2 là ngày (Cạm bẫy ③).
+_NUMBER_FORMATS = {164: "dd/mm/yyyy", 165: "[h]:mm", 166: '0.00" dmy"'}
+_XFS = (0, 14, 164, 165, 166)
+
+
+def test_xlsx_shared_number_formula_date_hidden_sheet() -> None:
+    """**DoD**: shared string + số + ô công thức (giá trị ĐÃ LƯU) + ô ngày ⇒ `YYYY-MM-DD`."""
+    sheet1 = (
+        '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>'
+        '<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>12.5</v></c>'
+        '<c r="C2"><f>B2*2</f><v>25</v></c><c r="D2" s="1"><v>45210</v></c>'
+        '<c r="E2" s="2"><v>45211.75</v></c><c r="F2" s="3"><v>1.5</v></c>'
+        '<c r="G2" s="4"><v>3</v></c><c r="I2" t="inlineStr"><is><t>cách cột</t></is></c></row>'
+        '<row r="3"><c r="A3" t="b"><v>1</v></c><c r="B3"><f>SUM(B2:B2)</f></c></row>'
+    )
+    sheet2 = '<row r="1"><c r="B1"><v>7</v></c></row>'
+    data = xlsx(
+        [("Doanh thu", sheet1), ("Nháp", sheet2)],
+        shared=["Tên", "Số", "Cà phê"],
+        number_formats=_NUMBER_FORMATS,
+        xfs=_XFS,
+        hidden=["Nháp"],
+    )
+
+    status, text, pages = extract_xlsx(data)
+
+    assert (status, pages) == (ExtractStatus.DONE, None)
+    assert text is not None
+    assert text.split("\n") == [
+        "## Doanh thu",
+        "Tên\tSố",
+        "Cà phê\t12.5\t25\t2023-10-11\t2023-10-12\t1.5\t3\t\tcách cột",
+        "TRUE",  # công thức không có `<v>` ⇒ ô rỗng, không phải "SUM(B2:B2)"
+        "## Nháp (ẩn)",
+        "\t7",
+    ]
+    assert "B2*2" not in text and "SUM" not in text
+
+
+@pytest.mark.parametrize(
+    ("code", "is_date"),
+    [
+        ("dd/mm/yyyy", True),
+        ("mmm-yy", True),
+        ("[$-409]mmmm d, yyyy", True),
+        ("dd/mm/yyyy hh:mm", True),
+        ("[h]:mm", False),
+        ("h:mm AM/PM", False),
+        ("mm:ss.0", False),
+        ('0.00" dmy"', False),
+        ("#,##0;[Red]-#,##0", False),
+        ("General", False),
+    ],
+)
+def test_custom_date_format_detection(code: str, is_date: bool) -> None:
+    """Cạm bẫy ③: d/m/y ngoài ngoặc kép và `[…]`; phút cạnh giờ/giây không phải tháng."""
+    assert _is_date_format(code) is is_date
+
+
+def test_pptx_order_follows_sldidlst_not_file_names_with_notes() -> None:
+    """**DoD**: thứ tự theo `sldIdLst` — `slide10.xml` đứng trước `slide2.xml` trong zip."""
+    data = pptx(
+        [
+            ("slide2.xml", ["Mở đầu", "Mục tiêu quý"], ["Nhắc số liệu tháng 9"]),
+            ("slide10.xml", ["Kết quả"], []),
+            ("slide3.xml", ["Kế hoạch"], ["Hỏi ý kiến"]),
+        ],
+        zip_order=["slide10.xml", "slide2.xml", "slide3.xml"],
+    )
+
+    status, text, _ = extract_pptx(data)
+
+    assert status is ExtractStatus.DONE
+    assert text == (
+        "## Slide 1\nMở đầu\nMục tiêu quý\nGhi chú:\nNhắc số liệu tháng 9\n"
+        "## Slide 2\nKết quả\n"
+        "## Slide 3\nKế hoạch\nGhi chú:\nHỏi ý kiến"
+    )
+    assert "99" not in text  # số trang của trang ghi chú không lọt ra
+
+
+_ROWS = '<row r="1"><c r="A1"><v>1</v></c></row>' * 30
+
+
+@pytest.mark.parametrize(
+    ("data", "extractor"),
+    [
+        (xlsx([(f"S{i}", _ROWS) for i in range(6)]), extract_xlsx),
+        (pptx([(f"slide{i}.xml", ["chữ " * 100], []) for i in range(6)]), extract_pptx),
+    ],
+    ids=["xlsx", "pptx"],
+)
+def test_ooxml_parts_over_total_cap_fail(
+    data: bytes, extractor: Callable[[bytes], Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**DoD**: trần `DOCX_XML_MAX_BYTES` là TỔNG các phần — từng phần vừa, cộng lại vượt."""
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        sizes = [info.file_size for info in archive.infolist()]
+    half = sum(sizes) // 2
+    assert max(sizes) < half  # không phần nào một mình vượt
+    monkeypatch.setattr(settings, "DOCX_XML_MAX_BYTES", half)
+
+    assert extractor(data) == (ExtractStatus.FAILED, None, None)
+
+    monkeypatch.setattr(settings, "DOCX_XML_MAX_BYTES", sum(sizes))
+    assert extractor(data)[0] is ExtractStatus.DONE
+
+
+def test_xlsx_bomb_reads_at_most_cap_plus_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cạm bẫy ①: một sheet giải nén 50 MB ⇒ `failed`, không đọc quá trần + 1."""
+    parts = xlsx_parts([("S", "")])
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, body in parts.items():
+            if name != "xl/worksheets/sheet1.xml":
+                archive.writestr(name, body)
+        with archive.open("xl/worksheets/sheet1.xml", "w") as part:
+            for _ in range(50):
+                part.write(b" " * _MB)
+    monkeypatch.setattr(settings, "DOCX_XML_MAX_BYTES", 4 * _MB)
+
+    assert extract_xlsx(buf.getvalue()) == (ExtractStatus.FAILED, None, None)
+
+
+def test_long_xlsx_cut_at_row_boundary_with_notice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """**DoD** NQ-148 ③: vượt `ATTACHMENT_TEXT_MAX_CHARS` ⇒ phần đầu, cắt ở ranh giới hàng
+    + dòng báo đếm đúng số hàng còn lại; kết quả ≤ trần."""
+    monkeypatch.setattr(settings, "ATTACHMENT_TEXT_MAX_CHARS", 400)
+    rows = "".join(
+        f'<row r="{i}"><c r="A{i}" t="inlineStr"><is><t>hàng {i:03d}</t></is></c>'
+        f'<c r="B{i}"><v>{i}</v></c></row>'
+        for i in range(1, 101)
+    )
+
+    status, text, _ = extract_xlsx(xlsx([("Dài", rows)]))
+
+    assert status is ExtractStatus.DONE and text is not None
+    assert len(text) <= 400
+    *kept, notice = text.split("\n")
+    assert kept[0] == "## Dài"
+    assert kept[1:] == [f"hàng {i:03d}\t{i}" for i in range(1, len(kept))]
+    assert notice == TRUNCATED_ROWS.format(n=100 - (len(kept) - 1))
+
+
+def test_short_pptx_is_not_cut(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Đối chứng: vừa trần ⇒ không dòng báo."""
+    monkeypatch.setattr(settings, "ATTACHMENT_TEXT_MAX_CHARS", 400)
+    _, text, _ = extract_pptx(pptx([("slide1.xml", ["Một"], [])]))
+    assert text == "## Slide 1\nMột"
+
+
+@pytest.mark.parametrize(
+    ("make", "mime"),
+    [
+        (lambda: xlsx([("S", '<row r="1"><c r="A1"><v>5</v></c></row>')]), XLSX_MIME),
+        (lambda: pptx([("slide1.xml", ["Xin chào"], [])]), PPTX_MIME),
+    ],
+    ids=["xlsx", "pptx"],
+)
+async def test_job_closes_pending_xlsx_pptx_as_done(
+    session: AsyncSession,
+    user_a: uuid.UUID,
+    bucket: dict[str, bytes],
+    make: Callable[[], bytes],
+    mime: str,
+) -> None:
+    aid = await _pending_row(session, user_a, bucket, make(), mime)
+
+    await extract({}, str(aid))
+
+    row = await _row(session, aid)
+    assert row.extract_status == ExtractStatus.DONE
+    assert row.extracted_text in ("## S\n5", "## Slide 1\nXin chào")

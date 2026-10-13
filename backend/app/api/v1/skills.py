@@ -1,8 +1,8 @@
 """`GET /skills` · `PUT /skills/{name}/toggle` (KH §18.3, §13.2) — T-7.5.
 
 Danh sách = mọi skill loader đang bật + công tắc của CHÍNH người gọi
-(`user_skills`; không hàng ⇒ `enabled=false`). Lọc `user_id` trong SQL (§20) —
-xem `SkillRepository`.
+(`user_skills`; không hàng ⇒ `skills.default_enabled`, T-7.8b). Lọc `user_id`
+trong SQL (§20) — xem `SkillRepository`.
 
 **`PUT …/toggle` nhận `{"enabled": bool}`, không lật trạng thái.** `PUT` phải
 idempotent: hai lần bấm (hai tab, mạng chập chờn gửi lại) ra cùng một trạng

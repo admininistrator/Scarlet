@@ -1092,6 +1092,8 @@ Progressive disclosure ba tầng — điều này không phải để "cho giố
 | 2 | Model gọi `load_skill(name)` | Toàn bộ `SKILL.md`, ~1–5k token |
 | 3 | Model đọc file cụ thể hoặc chạy script | Theo nhu cầu |
 
+**Skill dựng sẵn bật mặc định (NQ-148).** Skill có `metadata.default_enabled: "true"` trong frontmatter (bốn skill tạo tệp `docx`/`xlsx`/`pptx`/`pdf`) được bật cho mọi user chưa đặt công tắc; công tắc của user (`user_skills`) luôn thắng. Đây là đánh đổi có ý thức: tầng 1 + thuế tool-use trả ở mọi lượt, đổi lại user không phải chọn skill. **Đọc tệp đính kèm không đi qua skill** — PDF/DOCX/XLSX/PPTX/TXT do job trích chữ của §15.1 lo, không sandbox, không cần quyền.
+
 ### 13.3 Sandbox — cấu hình cụ thể
 
 ```yaml
@@ -1116,7 +1118,7 @@ Nhưng `network_mode: none` có một hệ quả: **skill không thể `pip inst
 
 ### 13.4 Phân quyền
 
-`tiers.can_execute_skills` mặc định `false`. Admin bật cho từng user (UC-12). Model được cho biết rõ khả năng này qua system prompt để nó không cố dùng tool không có — nếu bị chặn, model nhận `tool_result` báo lỗi rõ ràng và tự chuyển hướng, chứ không im lặng thất bại (AC của UC-09).
+`tiers.can_execute_skills` mặc định `false`. Admin bật cho từng user (UC-12). Model được cho biết rõ khả năng này qua system prompt để nó không cố dùng tool không có — nếu bị chặn, model nhận `tool_result` báo lỗi rõ ràng và tự chuyển hướng, chứ không im lặng thất bại (AC của UC-09). User không quyền mà nạp skill (`load_skill`) thì cuối `SKILL.md` có thêm một dòng nói `run_code` không khả dụng, để model không thử rồi mới bị chặn (NQ-148).
 
 ### 13.5 Điểm cắm cho MCP sau này
 
@@ -1197,7 +1199,8 @@ FE chọn file
   → api: kiểm size, kiểm MIME bằng MAGIC BYTES (không tin phần mở rộng, không tin Content-Type)
   → lưu MinIO: {user_id}/{yyyy}/{mm}/{uuid}{ext}
   → INSERT attachments(status='uploaded')
-  → nếu là pdf/docx/xlsx → enqueue job trích text
+  → nếu là pdf/docx/xlsx/pptx → enqueue job trích text
+    (xlsx/pptx vượt trần chữ ⇒ cắt kèm dòng báo cho model; pdf/docx ⇒ 422 — NQ-148)
   → trả {attachment_id, kind, preview_url}
 ```
 

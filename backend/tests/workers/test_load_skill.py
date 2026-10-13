@@ -48,7 +48,12 @@ LONG_DESC = "Tạo và sửa tài liệu Word (.docx): " + "đoạn, bảng, ti�
 
 
 async def _skill(
-    session: AsyncSession, root: Path, name: str, *, description: str = LONG_DESC
+    session: AsyncSession,
+    root: Path,
+    name: str,
+    *,
+    description: str = LONG_DESC,
+    default_enabled: bool = False,
 ) -> None:
     (root / name).mkdir()
     (root / name / "SKILL.md").write_text(
@@ -60,6 +65,7 @@ async def _skill(
         description=description,
         path=str(root / name),
         requires_execution=False,
+        default_enabled=default_enabled,
     )
 
 
@@ -179,7 +185,9 @@ async def test_load_skill_tool_result_is_skill_md_body_not_untrusted_block(
     assert (result["ok"], result["name"]) == (True, "load_skill")
     sent = client.calls[1]["messages"][-1]
     assert sent["role"] == "tool" and sent["tool_call_id"] == "c_l1"
-    assert sent["content"] == (skills_dir / SKILL / "SKILL.md").read_text(encoding="utf-8")
+    # user_a không `can_execute_skills` ⇒ dòng nối của T-7.8b ở cuối.
+    body = (skills_dir / SKILL / "SKILL.md").read_text(encoding="utf-8")
+    assert sent["content"] == body + registry_mod.NO_RUN_CODE_NOTE
     assert "<untrusted_content" not in sent["content"]  # Cạm bẫy ⑤: nội dung của ta
 
 
@@ -255,10 +263,10 @@ async def test_next_turn_after_load_skill_has_no_web_line_no_skill_body(
     assert "đã dùng web" not in dumped and "Bước 1: gọi python-docx" not in dumped
 
 
-async def test_quota_estimate_of_skill_turn_counts_tool_rounds(
+async def test_quota_estimate_of_skill_only_turn_is_skill_estimate_calls(
     session: AsyncSession, user_a: uuid.UUID, skills_dir: Path
 ) -> None:
-    """Lượt có skill mời `load_skill` ⇒ tới `MAX_TOOL_ROUNDS + 1` lần gọi (Q-P6-6)."""
+    """Lượt chỉ mời `load_skill` ⇒ `SKILL_ESTIMATE_CALLS` lần gọi (NQ-148 ⑤), không ×4."""
     await _skill(session, skills_dir, SKILL)
     await _enable(session, user_a, SKILL)
     message = await _tree(session, user_a, model_id=PRICED_TOOLS_MODEL, web_tools=False)
@@ -270,7 +278,9 @@ async def test_quota_estimate_of_skill_turn_counts_tool_rounds(
     )
 
     built = await llm_context.build(session, message.id, model, user_id=user_a)
-    assert estimated.est_max_usd == estimator.estimate(model, built, web_tools=True).est_max_usd > 0
+    expected = estimator.estimate(model, built, calls=settings.SKILL_ESTIMATE_CALLS)
+    assert estimated.est_max_usd == expected.est_max_usd > 0
+    assert settings.SKILL_ESTIMATE_CALLS < settings.MAX_TOOL_ROUNDS + 1
 
 
 async def test_budget_too_small_for_skill_block_drops_it_keeps_question(
@@ -300,3 +310,107 @@ async def test_budget_too_small_for_skill_block_drops_it_keeps_question(
 
     assert f"- {SKILL}:" not in built[0]["content"]
     assert built[-1]["role"] == "user"
+
+
+# ───────────────── skill dựng sẵn bật mặc định (T-7.8b, NQ-148) ─────────────────
+
+DEFAULTS = ("docx", "pdf", "pptx", "xlsx")
+
+
+async def _defaults(session: AsyncSession, root: Path) -> None:
+    for name in DEFAULTS:
+        await _skill(session, root, name, description=f"Tạo tệp {name}.", default_enabled=True)
+    await _skill(session, root, OTHER, description="Không mặc định.")
+    await session.commit()
+
+
+def _tier1(call: dict[str, object]) -> list[str]:
+    messages = call["messages"]
+    assert isinstance(messages, list)
+    names = (*DEFAULTS, OTHER)
+    return [
+        x
+        for x in messages[0]["content"].splitlines()
+        if x.startswith(tuple(f"- {n}: " for n in names))
+    ]
+
+
+async def test_fresh_user_default_skills_tier1_four_lines_tools_load_skill(
+    session: AsyncSession, user_a: uuid.UUID, fake_redis: FakeRedis, skills_dir: Path
+) -> None:
+    """**DoD**: user mới, KHÔNG hàng `user_skills` ⇒ tầng 1 bốn dòng, `tools` có `load_skill`."""
+    await _defaults(session, skills_dir)
+    message = await _tree(session, user_a, web_tools=False)
+    client = SeqClient(ROUND2)
+
+    await generate(_ctx(fake_redis, client), str(message.id))  # type: ignore[arg-type]
+
+    assert _tool_names(client.calls[0]) == ["load_skill"]
+    assert _tier1(client.calls[0]) == [f"- {n}: Tạo tệp {n}." for n in DEFAULTS]
+
+
+async def test_toggle_false_drops_default_skill_from_tier1(
+    session: AsyncSession, user_a: uuid.UUID, fake_redis: FakeRedis, skills_dir: Path
+) -> None:
+    """**DoD**: công tắc của user thắng mặc định — `docx` tắt ⇒ khỏi tầng 1 và khỏi `load_skill`."""
+    await _defaults(session, skills_dir)
+    assert await SkillRepository(session).set_user_enabled(user_a, "docx", False)
+    await session.commit()
+    message = await _tree(session, user_a, web_tools=False)
+    client = SeqClient(_calls_turn(_load("c_d", "docx")), ROUND2)
+
+    await generate(_ctx(fake_redis, client), str(message.id))  # type: ignore[arg-type]
+
+    assert _tier1(client.calls[0]) == [f"- {n}: Tạo tệp {n}." for n in DEFAULTS[1:]]
+    assert client.calls[1]["messages"][-1]["content"].endswith("Skill đang bật: pdf, pptx, xlsx.")
+
+
+@pytest.mark.parametrize("can_execute", [False, True], ids=["khong-quyen", "co-quyen"])
+async def test_load_skill_appends_no_run_code_note_only_without_permission(
+    skills_dir: Path, can_execute: bool
+) -> None:
+    """**DoD** B-408 ①: không `can_execute_skills` ⇒ cuối `SKILL.md` có dòng nối; có ⇒ không."""
+    (skills_dir / SKILL).mkdir()
+    (skills_dir / SKILL / "SKILL.md").write_text(BODY, encoding="utf-8")
+    ctx = registry_mod.UserContext(
+        user_id=uuid.uuid4(), skills=frozenset({SKILL}), can_execute_skills=can_execute
+    )
+
+    out = await registry_mod.registry.call("load_skill", json.dumps({"name": SKILL}), ctx)
+
+    assert out.ok
+    expected = BODY if can_execute else BODY + registry_mod.NO_RUN_CODE_NOTE
+    assert out.content == expected
+
+
+@pytest.mark.parametrize(
+    ("web", "skills", "can_execute", "calls"),
+    [
+        (False, False, False, 1),
+        (False, True, False, "skill"),
+        (True, True, False, "rounds"),
+        (False, True, True, "rounds"),
+        (True, False, False, "rounds"),
+    ],
+    ids=["khong-tool", "chi-skill-x2", "co-web-x4", "co-quyen-x4", "chi-web-x4"],
+)
+def test_estimator_calls_follow_offered_tools(
+    web: bool, skills: bool, can_execute: bool, calls: int | str
+) -> None:
+    """**DoD** NQ-148 ⑤: chỉ skill ×`SKILL_ESTIMATE_CALLS`, có web / quyền ×(`MAX_TOOL_ROUNDS`+1)
+    — đếm từ `registry.offered`, cùng danh sách worker gửi. Model không `tools` ⇒ ×1."""
+    expected = {
+        "skill": settings.SKILL_ESTIMATE_CALLS,
+        "rounds": settings.MAX_TOOL_ROUNDS + 1,
+    }.get(calls, calls)
+    ctx = registry_mod.UserContext(
+        user_id=uuid.uuid4(),
+        web_tools=web,
+        skills=frozenset({SKILL}) if skills else frozenset(),
+        can_execute_skills=can_execute,
+    )
+    tools_model, plain_model = get_model(TOOLS_MODEL), get_model(NO_TOOLS_MODEL)
+    assert tools_model is not None and plain_model is not None
+
+    assert estimator.model_calls(registry_mod.registry.offered(tools_model, ctx)) == expected
+    assert estimator.model_calls(registry_mod.registry.offered(plain_model, ctx)) == 1

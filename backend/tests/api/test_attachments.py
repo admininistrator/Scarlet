@@ -21,11 +21,12 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from ooxml_bytes import pptx, xlsx
 from PIL import Image
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.v1.attachments import DOCX_MIME, decode_text
+from app.api.v1.attachments import decode_text
 from app.config.settings import settings
 from app.core import storage
 from app.core.access_token import encode_access_token
@@ -33,6 +34,7 @@ from app.core.deps import SESSION_COOKIE_NAME
 from app.core.errors import ApiError
 from app.core.idempotency import HEADER_IDEMPOTENCY
 from app.db.models import Attachment, User, UserRole, UserStatus
+from app.db.models.attachment import DOCX_MIME, PPTX_MIME, XLSX_MIME
 from app.main import app
 
 URL = "/api/v1/attachments"
@@ -225,6 +227,27 @@ async def test_docx_by_zip_listing(client: AsyncClient, user_a: uuid.UUID, first
     assert resp.json()["extract_status"] == "pending"
 
 
+@pytest.mark.parametrize(
+    ("data", "mime"),
+    [
+        (xlsx([("S", '<row r="1"><c r="A1"><v>1</v></c></row>')]), XLSX_MIME),
+        (pptx([("slide1.xml", ["Một"], [])]), PPTX_MIME),
+        (_zip({"xl/workbook.xml": "<workbook/>"}), XLSX_MIME),
+        (_zip({"ppt/presentation.xml": "<p/>"}), PPTX_MIME),
+    ],
+    ids=["xlsx", "pptx", "xlsx-chi-workbook", "pptx-chi-presentation"],
+)
+async def test_xlsx_pptx_by_zip_listing_pending(
+    client: AsyncClient, user_a: uuid.UUID, arq: _FakeArq, data: bytes, mime: str
+) -> None:
+    """**DoD** T-7.8b: loại OOXML quyết bằng danh mục zip (Cạm bẫy ②), không đuôi tệp."""
+    resp = await _upload(client, user_a, data, "bang.docx")
+
+    assert resp.status_code == 201, resp.text
+    assert (resp.json()["mime_type"], resp.json()["extract_status"]) == (mime, "pending")
+    assert len(arq.pushed) == 1
+
+
 # ─────────────────────── TXT giải mã ngay ở `api` (T-4.6a) ───────────────────────
 
 _VI = "Tiếng Việt có dấu: Đường phố Hà Nội, nữ hoàng, chuyện ấy."
@@ -306,6 +329,7 @@ async def test_enqueue_failure_marks_failed_and_503(
         b"<!DOCTYPE html><html><body><script>alert(1)</script></body></html>",
         b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00" + b"\x00" * 200,
         _zip({"a.txt": "khong phai docx"}),
+        _zip({"[Content_Types].xml": "<Types/>", "xl/worksheets/sheet1.xml": "<x/>"}),
         b"\x00\x01\x02\x03" * 64,
         b"",
     ],
@@ -317,6 +341,7 @@ async def test_enqueue_failure_marks_failed_and_503(
         "html",
         "exe",
         "zip-khong-docx",
+        "zip-khong-phan-ooxml",
         "rac",
         "rong",
     ],

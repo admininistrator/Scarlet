@@ -81,6 +81,7 @@ MINIMAL_ENV = {
     "MINIO_ACCESS_KEY": "minio-test-access",
     "MINIO_SECRET_KEY": "minio-test-secret",
     "MINIO_BUCKET": "scarlet",
+    "SKILL_ESTIMATE_CALLS": "2",
 }
 
 for _name, _value in MINIMAL_ENV.items():

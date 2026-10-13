@@ -11,6 +11,8 @@ provider, trình duyệt đều đọc lại đúng những byte này, nên mọ
    * DOCX: libmagic trả `zip`, `octet-stream` hoặc MIME DOCX tuỳ bản (545 vs
      546) và tuỳ thứ tự mục trong zip (Cạm bẫy ①) ⇒ cửa nhận là **danh mục**
      zip có `word/document.xml`, không phải chuỗi libmagic trả về (NQ-138 ②).
+     XLSX / PPTX cùng lối, mục `xl/workbook.xml` / `ppt/presentation.xml`
+     (T-7.8b, NQ-148 ①).
    * `text/plain`: SVG có khoảng trắng / BOM ở đầu ⇒ libmagic `text/plain` ở
      cả hai bản (đo 2026-10-03). Bỏ phần ấy rồi hỏi lại; ra loại khác ⇒ `415`.
 3. **Ảnh** — magic bytes chỉ đọc đầu tệp (Cạm bẫy ②), nên ảnh phải qua Pillow:
@@ -46,7 +48,7 @@ from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.core.queue import EXTRACT_JOB_ID_PREFIX, EXTRACT_JOB_NAME, get_arq_pool
 from app.core.ratelimit import upload_limit
 from app.db.models import Attachment, AttachmentKind, ExtractStatus
-from app.db.models.attachment import DOCX_MIME, DOCX_PART, PDF_MIME
+from app.db.models.attachment import EXTRACTED_MIMES, OOXML_PARTS
 from app.db.repositories import AttachmentRepository
 from app.db.session import session_scope
 from app.quota.tiers import get_effective_limits
@@ -55,8 +57,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
-#: Ba câu trả lời libmagic có thể cho một DOCX (Cạm bẫy ①).
-_ZIP_ANSWERS = frozenset({"application/zip", "application/octet-stream", DOCX_MIME})
+#: Câu trả lời libmagic có thể cho một tệp OOXML (Cạm bẫy ① T-4.6a, ② T-7.8b).
+_ZIP_ANSWERS = frozenset({"application/zip", "application/octet-stream", *OOXML_PARTS.values()})
 _TEXT = "text/plain"
 _BYTES_PER_MB = 1024 * 1024
 
@@ -98,22 +100,27 @@ def _unsupported(mime: str) -> ApiError:
     )
 
 
-def _is_docx(data: bytes) -> bool:
-    """Chỉ đọc danh mục — giải nén là việc của job `extract` (T-4.6a), có trần."""
+def _ooxml_mime(data: bytes) -> str | None:
+    """Loại OOXML theo danh mục zip; không khớp ⇒ `None`.
+
+    Chỉ đọc danh mục — giải nén là việc của job `extract` (T-4.6a), có trần.
+    """
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            return DOCX_PART in archive.namelist()
+            names = set(archive.namelist())
     except Exception:  # byte của người dùng: không phải zip đọc được là "không"
-        return False
+        return None
+    return next((mime for part, mime in OOXML_PARTS.items() if part in names), None)
 
 
 def sniff_mime(data: bytes) -> str:
     """MIME từ byte, đã qua allowlist. Raise `415`."""
     mime = magic.from_buffer(data, mime=True)
     if mime in _ZIP_ANSWERS:
-        if not _is_docx(data):
+        found = _ooxml_mime(data)
+        if found is None:
             raise _unsupported(mime)
-        mime = DOCX_MIME
+        mime = found
     elif mime == _TEXT:
         bare = magic.from_buffer(data.removeprefix(codecs.BOM_UTF8).lstrip(), mime=True)
         if bare != _TEXT:
@@ -242,11 +249,11 @@ async def upload_attachment(
 
     # libmagic + Pillow là việc CPU trên tới vài MB — không giữ event loop.
     mime, width, height = await asyncio.to_thread(_inspect, data)
-    # TXT giải mã ngay, không job (NQ-138 ⑦); PDF/DOCX chờ job `extract`.
+    # TXT giải mã ngay, không job (NQ-138 ⑦); PDF/DOCX/XLSX/PPTX chờ job `extract`.
     text = decode_text(data) if mime == _TEXT else None
     if text is not None:
         extract_status = ExtractStatus.DONE
-    elif mime in (PDF_MIME, DOCX_MIME):
+    elif mime in EXTRACTED_MIMES:
         extract_status = ExtractStatus.PENDING
     else:
         extract_status = ExtractStatus.NONE

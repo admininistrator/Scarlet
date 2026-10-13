@@ -511,7 +511,7 @@ def test_estimate_for_web_turn_is_est_max_times_rounds_plus_one(
     question = [{"role": "user", "content": "xin chào"}]
 
     plain = estimate(model, question).est_max_usd
-    web = estimate(model, question, web_tools=True).est_max_usd
+    web = estimate(model, question, calls=settings.MAX_TOOL_ROUNDS + 1).est_max_usd
 
     assert plain > Decimal(0)
     assert web == plain * 4

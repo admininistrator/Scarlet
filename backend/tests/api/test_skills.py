@@ -22,6 +22,7 @@ from app.config.settings import SKILL_SPEC_DESCRIPTION_MAX_CHARS
 from app.core.access_token import encode_access_token
 from app.core.deps import SESSION_COOKIE_NAME
 from app.db.models import Skill, UserRole, UserSkill, UserStatus
+from app.db.repositories import SkillRepository
 from app.main import app
 from app.skills.loader import sync_skills
 
@@ -251,6 +252,78 @@ async def test_toggle_unknown_or_disabled_skill_is_404(
     assert resp.status_code == 404
     listed = (await client.get(SKILLS, headers=_session(user_a))).json()["items"]
     assert [s["name"] for s in listed] == ["beta"]
+
+
+# ═══════ Skill dựng sẵn bật mặc định (T-7.8b, NQ-148 ②) ═══════
+
+_DEFAULTS = ("docx", "pdf", "pptx", "xlsx")
+
+
+@pytest_asyncio.fixture
+async def default_skills(
+    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+) -> list[str]:
+    for name in _DEFAULTS:
+        _write_skill(
+            tmp_path,
+            name,
+            f'name: {name}\ndescription: Tạo tệp {name}.\nmetadata:\n  default_enabled: "true"',
+        )
+    _write_skill(tmp_path, "plain", "name: plain\ndescription: Không khai.")
+    # Cạm bẫy ⑥: `metadata` là map CHUỖI — bool YAML / chuỗi lạ ⇒ tắt.
+    _write_skill(
+        tmp_path, "bool-true", "name: bool-true\ndescription: x\nmetadata:\n  default_enabled: true"
+    )
+    _write_skill(
+        tmp_path, "yes-str", 'name: yes-str\ndescription: x\nmetadata:\n  default_enabled: "yes"'
+    )
+    return await _sync(session_factory, tmp_path)
+
+
+async def _effective(client: AsyncClient, user_id: uuid.UUID) -> dict[str, bool]:
+    listed = (await client.get(SKILLS, headers=_session(user_id))).json()["items"]
+    return {s["name"]: s["enabled"] for s in listed}
+
+
+async def test_fresh_user_sees_default_skills_enabled_others_off(
+    client: AsyncClient, default_skills: list[str], user_a: uuid.UUID
+) -> None:
+    """**DoD**: user chưa có hàng `user_skills` ⇒ bốn skill dựng sẵn `enabled=true`;
+    skill không khai `default_enabled: "true"` ⇒ tắt."""
+    assert await _effective(client, user_a) == {
+        **dict.fromkeys(_DEFAULTS, True),
+        "plain": False,
+        "bool-true": False,
+        "yes-str": False,
+    }
+
+
+async def test_user_switch_beats_default_both_ways(
+    client: AsyncClient,
+    default_skills: list[str],
+    user_a: uuid.UUID,
+    user_b: uuid.UUID,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """**DoD**: `PUT toggle false` tắt được skill mặc định — khỏi danh sách lẫn tầng 1;
+    bật skill không mặc định vẫn được. Chỉ của user ấy."""
+    for name, enabled in (("docx", False), ("plain", True)):
+        resp = await client.put(
+            TOGGLE.format(name), headers=_session(user_a), json={"enabled": enabled}
+        )
+        assert resp.json()["enabled"] is enabled
+
+    assert {k: v for k, v in (await _effective(client, user_a)).items() if v} == {
+        "pdf": True,
+        "plain": True,
+        "pptx": True,
+        "xlsx": True,
+    }
+    async with session_factory() as session:
+        tier1 = [r.name for r in await SkillRepository(session).enabled_for_user(user_a)]
+        other = [r.name for r in await SkillRepository(session).enabled_for_user(user_b)]
+    assert tier1 == ["pdf", "plain", "pptx", "xlsx"]
+    assert other == list(_DEFAULTS)
 
 
 async def test_skills_require_session(client: AsyncClient) -> None:

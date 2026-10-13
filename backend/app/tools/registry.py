@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from app.config.catalog import TOOLS_CAPABILITY, ModelEntry
 from app.config.settings import settings
 from app.core import storage
 from app.llm.artifact_blocks import FILE_KIND, ArtifactBlock, clean_title
@@ -74,6 +75,14 @@ WEB_QUOTA_REFILL = "; có lại một lượt lúc {at} (UTC)"
 
 #: `load_skill` tên lạ: liệt skill CỦA user này để model tự sửa (không lộ của người khác).
 UNKNOWN_SKILL_TEXT = "Skill đang bật: {names}."
+#: Nối cuối `SKILL.md` khi user không có `can_execute_skills` (§13.4, B-408 ①,
+#: NQ-148 ④): skill dặn "Call `run_code`" — câu này để model khỏi thử rồi mới bị
+#: chặn. Câu `NO_EXEC_PERMISSION_TEXT` vẫn là lưới cuối.
+NO_RUN_CODE_NOTE = (
+    "\n\n---\n`run_code` KHÔNG khả dụng với tài khoản này — đừng gọi nó. Hãy đưa code / "
+    "hướng dẫn để người dùng tự làm, và nói rõ với họ là tài khoản chưa được bật quyền "
+    "chạy code."
+)
 
 #: `sandbox` không trả lời (UC-09 nhánh lỗi, lối `SEARCH_UNAVAILABLE`).
 SANDBOX_UNAVAILABLE_TEXT = (
@@ -256,6 +265,7 @@ def _load_skill(args: dict[str, Any], ctx: UserContext) -> ToolResult:
     Chỉ skill trong `ctx.skills` (đã bật, tên đã qua `_NAME_RE` của loader ⇒
     không `..`). Đọc từ `SKILLS_DIR` của tiến trình này (mount `:ro` ở cả
     `api` lẫn `worker`, B-404 ①); file mất ⇒ `OSError` ⇒ registry trả `tool_error`.
+    Không `can_execute_skills` ⇒ nối `NO_RUN_CODE_NOTE` (T-7.8b).
     """
     name = args.get("name")
     if not isinstance(name, str) or not name:
@@ -267,6 +277,8 @@ def _load_skill(args: dict[str, Any], ctx: UserContext) -> ToolResult:
             reason=REASON_UNKNOWN_SKILL,
         )
     text = (SKILLS_DIR / name / SKILL_FILE).read_text(encoding="utf-8")
+    if not ctx.can_execute_skills:
+        text += NO_RUN_CODE_NOTE
     return ToolResult(ok=True, content=text, trusted=True)
 
 
@@ -380,6 +392,14 @@ class Registry:
 
     def specs(self, ctx: UserContext) -> list[ToolSpec]:
         return [spec for p in self._providers for spec in p.list_tools(ctx)]
+
+    def offered(self, model: ModelEntry, ctx: UserContext) -> list[ToolSpec]:
+        """Tool mời model ở lượt này: capability `tools` (C18) + công tắc của `ctx`.
+
+        Worker gửi đúng danh sách này; estimator (§10.2) đếm lần gọi từ nó —
+        MỘT điều kiện "lượt có tool" cho cả hai (T-7.8b).
+        """
+        return self.specs(ctx) if TOOLS_CAPABILITY in model.capabilities else []
 
     async def call(self, name: str, arguments: str, ctx: UserContext) -> ToolResult:
         """`arguments` là chuỗi JSON thô của model (NQ-22) — parse ở đây, một lần."""

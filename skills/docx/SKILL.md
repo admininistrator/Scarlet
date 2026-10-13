@@ -3,6 +3,7 @@ name: docx
 description: Create Word documents (.docx) — reports, letters, headings, lists, tables, images. Use when the user asks for a Word file or a downloadable .docx.
 license: Same as the Scarlet repository
 metadata:
+  default_enabled: "true"
   display_name: Word (.docx)
 ---
 

@@ -17,6 +17,10 @@ tiết kiệm prompt là việc của tầng 1 (T-7.6, `SKILL_DESCRIPTION_MAX_CH
 `requires_execution` = skill có thư mục `scripts/` (§13.2) — mức (b) cần
 `run_code`; không có thì skill là hướng dẫn thuần, mức (a).
 
+`default_enabled` (T-7.8b, NQ-148 ②) = `metadata.default_enabled` đúng **chuỗi**
+`"true"` (spec: `metadata` là map chuỗi — Cạm bẫy ⑥). Thiếu khoá, `true` không
+ngoặc (YAML bool), giá trị lạ ⇒ `false`: skill ngoài bộ dựng sẵn không đổi hành vi.
+
 A3: thư mục gốc suy từ vị trí file như `CATALOG_PATH` (`/skills` trong
 container, mount ở `docker-compose.yml`); không tên skill nào nằm trong `.py`.
 """
@@ -41,6 +45,8 @@ SKILLS_DIR = Path(__file__).resolve().parents[3] / "skills"
 SKILL_FILE = "SKILL.md"
 SCRIPTS_DIR = "scripts"
 FRONTMATTER_FENCE = "---"
+DEFAULT_ENABLED_KEY = "default_enabled"
+DEFAULT_ENABLED_ON = "true"
 
 #: Spec: chữ thường, số, gạch nối; không mở/đóng bằng gạch, không hai gạch liền.
 _NAME_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
@@ -57,6 +63,7 @@ class SkillSpec:
     description: str
     path: str
     requires_execution: bool
+    default_enabled: bool = False
 
 
 def parse_frontmatter(text: str) -> dict[str, Any]:
@@ -109,6 +116,7 @@ def read_skill(directory: Path) -> SkillSpec:
         description=description.strip(),
         path=str(directory),
         requires_execution=(directory / SCRIPTS_DIR).is_dir(),
+        default_enabled=metadata.get(DEFAULT_ENABLED_KEY) == DEFAULT_ENABLED_ON,
     )
 
 
@@ -137,6 +145,7 @@ async def sync_skills(session: AsyncSession, root: Path = SKILLS_DIR) -> list[Sk
             description=spec.description,
             path=spec.path,
             requires_execution=spec.requires_execution,
+            default_enabled=spec.default_enabled,
         )
     await repo.disable_missing([s.name for s in specs])
     logger.info("nap %d skill: %s", len(specs), ", ".join(s.name for s in specs))
