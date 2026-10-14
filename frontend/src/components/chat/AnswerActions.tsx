@@ -1,13 +1,15 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Check, Copy, Ellipsis, RotateCcw, ThumbsDown, ThumbsUp, Volume2 } from "lucide";
-import { useCallback, useState } from "react";
+import { Check, Copy, Ellipsis, RotateCcw, Square, ThumbsDown, ThumbsUp, Volume2 } from "lucide";
+import { useCallback, useState, type RefObject } from "react";
 
 import type { Feedback } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 import { t } from "../../lib/i18n";
-import { ComingSoon } from "../ui/ComingSoon";
-import { StaticIcon } from "../ui/Icon";
+import { useHasChanged } from "../../lib/motion";
+import { useReadAloud, type ReadAloudState } from "../../lib/voice";
+import { Icon, StaticIcon } from "../ui/Icon";
 import { MENU_ITEM_CLASS, MenuDismissContext } from "../ui/menu";
+import { Hint } from "./Hint";
 import { IconButton } from "./IconButton";
 
 /**
@@ -17,7 +19,7 @@ import { IconButton } from "./IconButton";
  * KH tham chieu: UC-02, UC-04, §18.2, §8.2, §24.2b·S4, S12 · tasks.md T-3.7,
  * T-3.7a, T-S.15, B-231, B-244 · NQ-118, NQ-121 · CLAUDE.md A8.
  *
- *     Sao chep · Thich · Khong thich · Thu lai · Doc to (cho)
+ *     Sao chep · Thich · Khong thich · Thu lai · Doc to (T-8.4)
  *
  * ╔════════════════════════════════════════════════════════════════════════╗
  * ║  MOT NUT THU LAI (T-S.15, §24.2b·S4)                                   ║
@@ -74,6 +76,7 @@ import { IconButton } from "./IconButton";
  */
 export function AnswerActions({
   text,
+  contentRef,
   feedback,
   collapse,
   onFeedback,
@@ -81,6 +84,8 @@ export function AnswerActions({
 }: {
   /** Chu se vao clipboard — noi dung cau tra loi, khong kem chip hay nhan. */
   text: string;
+  /** T-8.4 — khoi chu DA RENDER cua cau tra loi; Doc to doc tu day (`speakableText`). */
+  contentRef: RefObject<HTMLElement | null>;
   /** `MessageOut.feedback`, tuc tu server. `null` = chua ai bam gi. */
   feedback: Feedback | null;
   /** Hang co `‹ n/m ›` — duoi `sm` gap Thich, Khong thich, Doc to vao "…". */
@@ -92,6 +97,10 @@ export function AnswerActions({
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+  // MOT hook cho ca nut hang lan muc menu: muc menu unmount khi menu dong.
+  const read = useReadAloud(
+    useCallback(() => (contentRef.current === null ? "" : speakableText(contentRef.current)), [contentRef]),
+  );
 
   const handleCopy = useCallback(() => {
     void copyText(text).then((done) => {
@@ -126,9 +135,12 @@ export function AnswerActions({
         />
       </div>
       <IconButton label={t("chat.retry")} hint={t("chat.retryHint")} icon={RotateCcw} onClick={onRetry} />
-      <div className={collapse ? "hidden sm:block" : "block"}>
-        <ComingSoon planned="T-8.4" label={t("chat.readAloud")} icon={<StaticIcon icon={Volume2} size={18} />} />
-      </div>
+      {/* ADR-13 / §16.2 — khong `speechSynthesis` ⇒ khong render. */}
+      {read.supported && (
+        <div className={collapse ? "hidden sm:block" : "block"}>
+          <ReadAloudButton read={read} />
+        </div>
+      )}
 
       {collapse && (
         <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
@@ -164,18 +176,67 @@ export function AnswerActions({
                     <StaticIcon icon={Check} size={16} className="text-accent-text" />
                   </DropdownMenu.ItemIndicator>
                 </DropdownMenu.CheckboxItem>
-                <DropdownMenu.Separator className="my-1 h-px bg-divider" />
-                <ComingSoon
-                  menuItem
-                  planned="T-8.4"
-                  label={t("chat.readAloud")}
-                  icon={<StaticIcon icon={Volume2} size={18} className="text-muted" />}
-                />
+                {read.supported && (
+                  <>
+                    <DropdownMenu.Separator className="my-1 h-px bg-divider" />
+                    <DropdownMenu.Item onSelect={read.toggle} className={MENU_ITEM_CLASS}>
+                      <Icon
+                        icon={read.speaking ? Square : Volume2}
+                        spring="readAloudToggle"
+                        size={18}
+                        className={read.speaking ? "text-accent-text" : "text-muted"}
+                      />
+                      <span className="flex-1">{read.speaking ? t("readAloud.stop") : t("chat.readAloud")}</span>
+                    </DropdownMenu.Item>
+                  </>
+                )}
               </MenuDismissContext.Provider>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       )}
+
+      {read.failed && (
+        <p role="alert" className="motion-enter m-0 mt-1 basis-full text-sm text-danger-text">
+          {t("readAloud.error")}
+        </p>
+      )}
     </>
+  );
+}
+
+/**
+ * Chu se doc to — T-8.4: chu DA RENDER (khong ky hieu markdown), BO khoi ma
+ * (`figure` cua `CodeBlock`), the artifact va chu cua nut. Moi khoi cach mot
+ * dau cach: `textContent` dan "<p>A</p><p>B</p>" thanh "AB".
+ */
+export function speakableText(root: HTMLElement): string {
+  const copy = root.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll("figure, button, [data-artifact-card]").forEach((el) => el.remove());
+  copy.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6, th, td, br").forEach((el) => el.after(" "));
+  return (copy.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** Ban T-HD12 (`ReadAloudButton.tsx`): dang doc = loi "Tim web" bat, icon dung. */
+function ReadAloudButton({ read }: { read: ReadAloudState }) {
+  const changed = useHasChanged(read.speaking);
+  const label = read.speaking ? t("readAloud.stop") : t("chat.readAloud");
+  return (
+    <Hint label={read.speaking ? label : t("readAloud.hint")}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={read.speaking}
+        onClick={read.toggle}
+        data-toggle={changed ? (read.speaking ? "on" : "off") : undefined}
+        className={`motion-toggle grid size-touch shrink-0 place-items-center rounded-md border ${
+          read.speaking
+            ? "border-accent bg-accent-subtle text-accent-text"
+            : "border-transparent text-muted hover:bg-surface-hover hover:text-foreground"
+        }`}
+      >
+        <Icon icon={read.speaking ? Square : Volume2} spring="readAloudToggle" size={18} />
+      </button>
+    </Hint>
   );
 }

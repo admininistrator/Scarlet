@@ -244,6 +244,10 @@ export const SPRINGS = {
   skillDescToggle: SPRING_SNAPPY,
   /** T-8.2 (ban T-HD12) — Sao chep ⇄ Da chep cua hop thoai Chia se: copy ⇄ check. */
   shareCopy: SPRING_SNAPPY,
+  /** T-8.4 (ban T-HD12) — nut mic: mic ⇄ square (dang nghe ⇒ nut thanh nut dung). */
+  voiceToggle: SPRING_SNAPPY,
+  /** T-8.4 (ban T-HD12) — Doc to: volume-2 ⇄ square. */
+  readAloudToggle: SPRING_SNAPPY,
   themeToggle: SPRING_SETTLE,
   submenuChevron: SPRING_GENTLE,
   accountMenuItemHover: SPRING_GENTLE,
@@ -292,3 +296,17 @@ export const ISLAND_THROW_LOOKAHEAD = 0.14;
 export const ISLAND_DRAG_THRESHOLD_PX = 6;
 /** < 640 px (= `sm`): chi neo tren, khong keo. Neo trai / phai da luu duoc giu cho man rong. */
 export const ISLAND_COMPACT_QUERY = "(max-width: 39.99rem)";
+
+/**
+ * T-8.4 (ban T-HD12) — `true` tu lan dau `value` khac gia tri luc mount: nut
+ * `.motion-toggle` khong nay luc mount, moi lan doi sau do thi nay
+ * (`data-toggle`).
+ */
+export function useHasChanged(value: unknown): boolean {
+  const first = useRef(value);
+  const changed = useRef(false);
+  if (value !== first.current) {
+    changed.current = true;
+  }
+  return changed.current;
+}

@@ -373,6 +373,7 @@ export function ChatScreen() {
 
           <Composer
             running={chat.running !== null}
+            conversationId={tree.conversationId}
             // Man nhap gui duoc: cau dau TAO hoi thoai (§24.2b·S7).
             enabled={!chat.busy}
             maxChars={maxChars}

@@ -1,4 +1,4 @@
-.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme check-identifiers test-artifact-origin check-networks
+.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme check-identifiers test-artifact-origin test-voice check-networks
 
 COMPOSE := docker compose --profile core --profile tools
 SANDBOX_TIMEOUT_S := $(shell sed -n 's/^SANDBOX_TIMEOUT_S=//p' .env)
@@ -68,6 +68,13 @@ audit:
 test-artifact-origin:
 	$(COMPOSE) exec -T api python - < scripts/artifact_origin_session.py \
 	  | docker compose --profile core --profile dev run --rm -T --no-deps artifact-origin
+
+# T-8.4 — mic + Doc to tren Chromium VA Firefox ESR that, qua Nginx (https).
+# Cung image + netns voi `test-artifact-origin` (service `artifact-origin`),
+# cung loi token qua stdin. Ma thoat = so dong hong. Xem `scripts/test_voice.mjs`.
+test-voice:
+	$(COMPOSE) exec -T api python - < scripts/voice_session.py \
+	  | docker compose --profile core --profile dev run --rm -T --no-deps artifact-origin node scripts/test_voice.mjs
 
 lint: check-theme check-identifiers check-networks
 	cd backend && .venv/bin/ruff check .

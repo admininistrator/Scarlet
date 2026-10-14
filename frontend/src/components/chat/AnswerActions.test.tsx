@@ -21,9 +21,12 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type Feedback } from "../../lib/api";
+import { installSynthesis } from "../../test/speech";
 import { AnswerActions } from "./AnswerActions";
 
 const ID = "msg-1";
+/** Chu doc to — ca Doc to that o `Voice.test.tsx`. */
+const NO_CONTENT = { current: null };
 
 const writeClipboard = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
 
@@ -31,11 +34,14 @@ beforeEach(() => {
   // `navigator.clipboard` khong ton tai trong jsdom (cung ly do no khong ton
   // tai ngoai secure context — xem `lib/clipboard.ts`).
   vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: writeClipboard } });
+  // T-8.4 — trinh duyet CO `speechSynthesis` (Chromium, Firefox): Doc to hien.
+  installSynthesis();
 });
 
 function renderView(overrides: Partial<Parameters<typeof AnswerActions>[0]> = {}) {
   const props = {
     text: "noi dung cau tra loi",
+    contentRef: NO_CONTENT,
     feedback: null,
     collapse: false,
     onFeedback: vi.fn(),
@@ -95,6 +101,7 @@ describe("hang nut", () => {
       return (
         <AnswerActions
           text="x"
+          contentRef={NO_CONTENT}
           feedback={value}
           collapse={false}
           onFeedback={(next) => {
@@ -125,7 +132,7 @@ describe("hang nut", () => {
     const { rerender } = renderView({ feedback: null });
     expect(screen.getByRole("button", { name: "Thích" })).toHaveAttribute("aria-pressed", "false");
 
-    rerender(<AnswerActions text="x" feedback="like" collapse={false} onFeedback={vi.fn()} onRetry={vi.fn()} />);
+    rerender(<AnswerActions text="x" contentRef={NO_CONTENT} feedback="like" collapse={false} onFeedback={vi.fn()} onRetry={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Đã thích" })).toHaveAttribute("aria-pressed", "true");
   });
@@ -158,14 +165,13 @@ describe("hang nut", () => {
     expect(retry).toHaveAttribute("aria-describedby", tip.id);
   });
 
-  it("Doc to la nut cho T-8.4: `aria-disabled`, khong `disabled`, khong handler", () => {
+  it("Doc to la nut that (T-8.4): khong `aria-disabled`, khong `data-planned`", () => {
     renderView();
     const readAloud = screen.getByRole("button", { name: "Đọc to" });
 
-    expect(readAloud).toHaveAttribute("aria-disabled", "true");
-    expect(readAloud).toHaveAttribute("data-planned", "T-8.4");
-    expect(readAloud).not.toBeDisabled();
-    fireEvent.click(readAloud);
+    expect(readAloud).not.toHaveAttribute("aria-disabled");
+    expect(readAloud).not.toHaveAttribute("data-planned");
+    expect(readAloud).toHaveAttribute("aria-pressed", "false");
   });
 });
 
@@ -178,7 +184,7 @@ describe("375 px — gap vao '…' khi co nhanh (ban T-HD3-v2 3f)", () => {
     expect(screen.getByRole("button", { name: "Đọc to" }).parentElement).not.toHaveClass("hidden");
   });
 
-  it("co nhanh ⇒ ba nut an duoi `sm`, '…' chi hien duoi `sm`; menu co Thich/Khong thich (loai tru) + Doc to cho", async () => {
+  it("co nhanh ⇒ ba nut an duoi `sm`, '…' chi hien duoi `sm`; menu co Thich/Khong thich (loai tru) + Doc to", async () => {
     const { props } = renderView({ collapse: true, feedback: "like" });
 
     expect(screen.getByRole("button", { name: "Đã thích" }).parentElement).toHaveClass("hidden", "sm:flex");
@@ -196,21 +202,20 @@ describe("375 px — gap vao '…' khi co nhanh (ban T-HD3-v2 3f)", () => {
       "aria-checked",
       "false",
     );
-    const pending = within(menu).getByRole("menuitem", { name: "Đọc to" });
-    expect(pending).toHaveAttribute("aria-disabled", "true");
-    expect(pending).toHaveAttribute("data-planned", "T-8.4");
+    const readAloud = within(menu).getByRole("menuitem", { name: "Đọc to" });
+    expect(readAloud).not.toHaveAttribute("aria-disabled");
+    expect(readAloud).not.toHaveAttribute("data-planned");
 
     await userEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "Không thích" }));
     expect(props.onFeedback).toHaveBeenCalledWith("dislike");
   });
 
-  it("bam Doc to trong menu KHONG lam gi va KHONG dong menu", async () => {
+  it("bam Doc to trong menu KHONG cham Thich / Thu lai (Doc to that: `Voice.test.tsx`)", async () => {
     const { props } = renderView({ collapse: true });
 
     const menu = await openMore();
     await userEvent.click(within(menu).getByRole("menuitem", { name: "Đọc to" }));
 
-    expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(props.onFeedback).not.toHaveBeenCalled();
     expect(props.onRetry).not.toHaveBeenCalled();
   });
@@ -246,6 +251,7 @@ describe("duong ra HTTP", () => {
     return render(
       <AnswerActions
         text="x"
+        contentRef={NO_CONTENT}
         feedback={feedback}
         collapse={false}
         onFeedback={(value) => void api.sendFeedback(ID, value)}

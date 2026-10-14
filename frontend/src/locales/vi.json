@@ -705,5 +705,16 @@
   "publicShare.continuePendingApproval": "Tài khoản của bạn đang chờ quản trị viên duyệt. Chat tiếp được sau khi được duyệt.",
   "publicShare.continueEmailNotVerified": "Bạn cần xác thực email trước khi chat tiếp. Mở thư xác thực trong hộp thư của bạn.",
   "code.region": "Khối mã, cuộn để xem hết",
-  "markdown.tableRegion": "Bảng, cuộn ngang để xem hết cột"
+  "markdown.tableRegion": "Bảng, cuộn ngang để xem hết cột",
+  "voice.locale": "vi-VN",
+  "voice.hint": "Nhập bằng giọng nói — dùng nhận dạng giọng nói của trình duyệt",
+  "voice.stop": "Dừng nghe",
+  "voice.listening": "Đang nghe…",
+  "voice.denied": "Chưa có quyền dùng micro. Cấp quyền trong cài đặt trình duyệt rồi thử lại.",
+  "voice.noSpeech": "Không nghe thấy gì. Hãy thử lại.",
+  "voice.network": "Mất kết nối tới dịch vụ nhận giọng nói. Hãy thử lại.",
+  "voice.error": "Nhận giọng nói bị lỗi. Hãy thử lại.",
+  "readAloud.hint": "Đọc to bằng giọng đọc của trình duyệt",
+  "readAloud.stop": "Dừng đọc",
+  "readAloud.error": "Không đọc được. Hãy thử lại."
 }

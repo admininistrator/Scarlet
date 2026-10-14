@@ -346,7 +346,11 @@ export function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactSummary; 
   const kind = cardKind(artifact.kind);
   const label = artifactLabel(artifact);
   return (
-    <div className="mt-3 flex max-w-artifact items-center gap-3 rounded-lg border border-border bg-background py-2 pr-2 pl-2.5">
+    // `data-artifact-card`: Doc to bo the nay (`speakableText`, T-8.4).
+    <div
+      data-artifact-card
+      className="mt-3 flex max-w-artifact items-center gap-3 rounded-lg border border-border bg-background py-2 pr-2 pl-2.5"
+    >
       <span
         aria-hidden="true"
         className="grid size-artifact-icon shrink-0 place-items-center rounded-md bg-accent-subtle text-accent-text"

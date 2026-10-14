@@ -122,6 +122,18 @@ _ALLOWED: dict[str, str] = {
         "khoá giả lập trong `details.changed` của một dòng audit (dữ liệu trên dây); "
         "test so với chuỗi `\"truong_moi\"`"
     ),
+    "frontend/src/lib/voice.ts::lang": (
+        "thuộc tính `lang` chuẩn của Web Speech API (`SpeechRecognition`, `SpeechSynthesisUtterance`, `SpeechSynthesisVoice`, T-8.4) — không phải tên tự đặt"
+    ),
+    "frontend/src/test/speech.ts::lang": (
+        "thuộc tính `lang` chuẩn của Web Speech API (`SpeechRecognition`, `SpeechSynthesisUtterance`, `SpeechSynthesisVoice`, T-8.4) — không phải tên tự đặt"
+    ),
+    "frontend/src/components/chat/Voice.test.tsx::lang": (
+        "thuộc tính `lang` chuẩn của Web Speech API (`SpeechRecognition`, `SpeechSynthesisUtterance`, `SpeechSynthesisVoice`, T-8.4) — không phải tên tự đặt"
+    ),
+    "scripts/test_voice.mjs::lang": (
+        "thuộc tính `lang` chuẩn của Web Speech API (`SpeechRecognition`, `SpeechSynthesisUtterance`, `SpeechSynthesisVoice`, T-8.4) — không phải tên tự đặt"
+    ),
     "frontend/src/components/chat/SkillPicker.tsx::lang": (
         "thuộc tính HTML `lang` của chuẩn (mô tả skill tiếng Anh, bản T-HD11) — không phải tên tự đặt"
     ),

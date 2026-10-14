@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Pencil, RotateCcw } from "lucide";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { effortLabel } from "../../features/models/reasoning";
 import type { Feedback, MessageOut, ModelOut, PathArtifact } from "../../lib/api";
@@ -127,6 +127,8 @@ export function MessageItem({
 }) {
   const text = content(tree, node);
   const reasoning = reasoningOf(tree, node);
+  // T-8.4 — Doc to doc chu DA RENDER cua khoi nay. Hook truoc nhanh `user`.
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   if (node.role === "user") {
     return (
@@ -222,7 +224,7 @@ export function MessageItem({
       )}
 
       {done && (
-        <div className="motion-none mt-1 min-h-6 text-body text-foreground">
+        <div ref={bodyRef} className="motion-none mt-1 min-h-6 text-body text-foreground">
           <Markdown text={text} streaming={false} artifacts={artifacts} onOpenArtifact={onOpenArtifact} />
         </div>
       )}
@@ -243,7 +245,8 @@ export function MessageItem({
             )}
           </ul>
 
-          <div className="mt-2 flex items-center gap-1">
+          {/* `flex-wrap`: cau loi Doc to (`basis-full`) xuong dong rieng duoi hang nut. */}
+          <div className="mt-2 flex flex-wrap items-center gap-1">
             {hasSiblings(node) && (
               <>
                 <BranchNav
@@ -256,6 +259,7 @@ export function MessageItem({
             )}
             <AnswerActions
               text={text}
+              contentRef={bodyRef}
               feedback={node.feedback}
               collapse={hasSiblings(node)}
               onFeedback={(value) => onFeedback(node.id, value)}

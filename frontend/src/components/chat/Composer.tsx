@@ -1,4 +1,4 @@
-import { ArrowUp, Globe, Mic, Paperclip, Square } from "lucide";
+import { ArrowUp, Globe, Mic, MicOff, Paperclip, Square } from "lucide";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import type { SendKeys, SendResult, WebBlock, WebSearchState } from "../../features/chat/useChat";
@@ -8,8 +8,8 @@ import { DISPLAY_LOCALE, t, type TextKey } from "../../lib/i18n";
 // khoa, va mot ban chep thu hai cua duong lui "khong co secure context" la
 // mot ban chep se chi duoc sua mot nua. Xem `lib/idempotency.ts`.
 import { newKey } from "../../lib/idempotency";
-import { useDock } from "../../lib/motion";
-import { ComingSoon } from "../ui/ComingSoon";
+import { useDock, useHasChanged } from "../../lib/motion";
+import { useDictation, type DictationError, type DictationState } from "../../lib/voice";
 import { AttachButtonNoVision, AttachmentPreviews } from "./Attachments";
 import { Hint } from "./Hint";
 import { SkillPicker } from "./SkillPicker";
@@ -117,6 +117,7 @@ export function Composer({
   uploadLimits = null,
   webSearch,
   canExecuteSkills,
+  conversationId = null,
 }: {
   running: boolean;
   enabled: boolean;
@@ -149,6 +150,8 @@ export function Composer({
   webSearch?: WebSearchState;
   /** T-7.9 — `can_execute_skills` cua `/auth/me` cho panel skill. Vang mat ⇒ khong ve nut ⚡. */
   canExecuteSkills?: boolean;
+  /** T-8.4 — doi hoi thoai ⇒ mic dang nghe bi `abort()`. */
+  conversationId?: string | null;
 }) {
   const [draft, setDraft] = useState("");
   const [keyLocked, setKeyLocked] = useState(false);
@@ -165,6 +168,11 @@ export function Composer({
   //: B-355 ② — anh/PDF quet trong khay ma model dang chon khong doc anh:
   //: server se tra `422 MODEL_NO_VISION`, nen chan o day kem ly do.
   const visionBlocked = noVision && attachments.needsVision;
+  //: T-8.4 — chu chot NOI vao o nhap (khong tu gui); co chu la co lan soan thao (C22 luat 1).
+  const speech = useDictation(conversationId, (text) => {
+    keysRef.current ??= freshKeys();
+    setDraft((current) => (current.trim() === "" ? text : `${current.trimEnd()} ${text}`));
+  });
 
   const charCount = [...draft].length;
   const overLimit = maxChars !== null && charCount > maxChars;
@@ -229,6 +237,8 @@ export function Composer({
     if (!canSend) {
       return;
     }
+    // T-8.4 — gui khi dang nghe: chu tam chua chot khong di theo cau nay.
+    speech.abort();
     // `??=` chu khong gan thang: `changeDraft` gan nhu luon da sinh khoa roi, va
     // ghi de o day chinh la cai bay C22 ta. Dong nay chi do ca dan chu vao o
     // nhap bang mot duong khong sinh ra `change` nao.
@@ -271,12 +281,15 @@ export function Composer({
     >
       <div className="mx-auto flex w-full max-w-measure flex-col">
         {quotaNotice}
+        <VoiceError error={speech.error} />
         <div
           ref={frameRef}
           className={`motion-focus-ring relative flex flex-col rounded-xl border bg-surface-panel ${
             overLimit
               ? "border-danger ring-1 ring-danger"
-              : "border-border-strong focus-within:border-ring focus-within:shadow-focus"
+              : speech.listening
+                ? "border-accent"
+                : "border-border-strong focus-within:border-ring focus-within:shadow-focus"
           }`}
           // T-4.7 — keo-tha len hop nhap. `dragover` phai `preventDefault` thi
           // `drop` moi ban; chi khi keo TEP, de keo chu van roi vao textarea.
@@ -292,6 +305,9 @@ export function Composer({
             }
           }}
         >
+          {speech.listening && (
+            <span aria-hidden="true" className="motion-breathe pointer-events-none absolute -inset-px rounded-xl" />
+          )}
           <AttachmentPreviews items={attachments.items} onRemove={removeFile} />
           <label className="min-w-0">
             <span className="sr-only">{t("chat.oNhap")}</span>
@@ -326,9 +342,19 @@ export function Composer({
               className="block max-h-composer-max w-full resize-none overflow-y-auto rounded-t-xl bg-transparent px-4 pt-3.5 pb-1.5 text-input text-foreground placeholder:text-muted focus-visible:outline-none disabled:opacity-50"
             />
           </label>
+          {speech.listening && (
+            <p className="m-0 px-4 pb-1 text-input break-words text-muted">
+              {speech.interim !== "" ? (
+                <span aria-hidden="true" className="underline decoration-dotted decoration-1 underline-offset-4">
+                  {speech.interim}
+                </span>
+              ) : (
+                <span role="status">{t("voice.listening")}</span>
+              )}
+            </p>
+          )}
 
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
-            {/* §7b.2 — nut cho con lai cua o nhap (mic); khong mot handler nao (S12). */}
             {noVision ? (
               <AttachButtonNoVision />
             ) : (
@@ -362,11 +388,8 @@ export function Composer({
               <SkillPicker anchorRef={frameRef} canExecuteSkills={canExecuteSkills} />
             )}
             <span className="flex-1" />
-            <ComingSoon
-              planned="T-8.4"
-              label={t("composer.voice")}
-              icon={<StaticIcon icon={Mic} size={20} />}
-            />
+            {/* ADR-13: trinh duyet khong nhan dang duoc (Firefox) ⇒ KHONG render, khong nut chet. */}
+            {speech.supported && <VoiceButton speech={speech} />}
             {/*
               Gui ⇄ Dung: MOT phan tu, de icon bien hinh thay vi mot nut bi
               thay bang nut khac. Dang chay thi nut la `type="button"` — bam
@@ -427,6 +450,53 @@ export function Composer({
         </div>
       </div>
     </form>
+  );
+}
+
+const DICTATION_ERROR_TEXT: Record<DictationError, TextKey> = {
+  denied: "voice.denied",
+  noSpeech: "voice.noSpeech",
+  network: "voice.network",
+  other: "voice.error",
+};
+
+/**
+ * Mic — ban T-HD12 (`VoiceInputButton.tsx`). Tooltip noi day la nhan dang
+ * cua TRINH DUYET (§16.2: chat luong tieng Viet phu thuoc trinh duyet; Chrome
+ * gui am thanh toi may chu cua no). Dang nghe = nen accent + icon dung.
+ */
+function VoiceButton({ speech }: { speech: DictationState }) {
+  const label = speech.listening ? t("voice.stop") : t("composer.voice");
+  const changed = useHasChanged(speech.listening);
+  return (
+    <Hint label={speech.listening ? label : t("voice.hint")}>
+      <button
+        type="button"
+        aria-label={label}
+        onClick={speech.toggle}
+        // Mount khong nay; moi lan doi sau do thi nay (`.motion-toggle`).
+        data-toggle={changed ? (speech.listening ? "on" : "off") : undefined}
+        className={`motion-toggle grid size-touch shrink-0 place-items-center rounded-md ${
+          speech.listening
+            ? "bg-accent text-accent-foreground hover:bg-accent-hover"
+            : "text-muted hover:bg-surface-hover hover:text-foreground"
+        }`}
+      >
+        <Icon icon={speech.listening ? Square : Mic} spring="voiceToggle" size={20} />
+      </button>
+    </Hint>
+  );
+}
+
+function VoiceError({ error }: { error: DictationError | null }) {
+  if (error === null) {
+    return null;
+  }
+  return (
+    <p role="alert" className="motion-enter m-0 mb-2 inline-flex items-start gap-2 px-1 text-sm leading-relaxed text-danger-text">
+      <StaticIcon icon={MicOff} size={16} className="mt-0.5 shrink-0" />
+      {t(DICTATION_ERROR_TEXT[error])}
+    </p>
   );
 }
 

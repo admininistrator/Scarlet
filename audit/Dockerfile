@@ -43,3 +43,12 @@ WORKDIR /scarlet
 # DUNG ban dang chay voi Chromium cua image (do 2026-10-07), cai cuc bo o
 # /scarlet de `import "puppeteer-core"` tu `scripts/` tim thay.
 RUN npm install --no-save --no-package-lock puppeteer-core@24.43.1 && npm cache clean --force
+
+# T-8.4 (NQ-149 ⑦) — DoD "Firefox khong hien nut voice" (ADR-13, §24.3 P8) can
+# MOT Firefox that: `scripts/test_voice.mjs` lai no qua `puppeteer-core`
+# `browser: "firefox"` (WebDriver BiDi, khong can geckodriver). `firefox-esr`
+# cua Debian bookworm (do 2026-10-13: 153.4.0esr, ~+318 MB). Lop RIENG sau
+# lop Chromium: doi Firefox khong keo lai Chromium.
+RUN apt-get update && apt-get install -y --no-install-recommends firefox-esr \
+ && rm -rf /var/lib/apt/lists/*
+ENV FIREFOX_PATH=/usr/bin/firefox-esr
