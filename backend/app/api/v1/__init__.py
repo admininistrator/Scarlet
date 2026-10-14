@@ -54,6 +54,7 @@ from app.api.v1 import (
     attachments,
     auth,
     conversations,
+    export,
     health,
     messages,
     models,
@@ -116,6 +117,7 @@ router.include_router(attachments.router, dependencies=_AUTHENTICATED)
 router.include_router(artifacts.router, dependencies=_AUTHENTICATED)
 router.include_router(skills.router, dependencies=_AUTHENTICATED)
 router.include_router(share.router, dependencies=_AUTHENTICATED)
+router.include_router(export.router, dependencies=_AUTHENTICATED)
 # T-8.1 — route công khai đầu tiên ngoài `auth`: `GET /s/{token}`, token là
 # toàn bộ quyền (§16.1). KHÔNG `_AUTHENTICATED` (Cạm bẫy ⑦).
 router.include_router(share.public_router)

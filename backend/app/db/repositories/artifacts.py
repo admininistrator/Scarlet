@@ -29,6 +29,7 @@ from sqlalchemy import (
     select,
     true,
 )
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -128,7 +129,7 @@ class ArtifactRepository:
                 Artifact.message_id.in_(select(path.c.id)),
                 Artifact.created_at < turns.c.created_at,
             )
-            .distinct(_lineage(Artifact))
+            .ext(distinct_on(_lineage(Artifact)))
             .order_by(_lineage(Artifact), Artifact.version.desc())
             .lateral("latest")
         )
@@ -199,6 +200,32 @@ class ArtifactRepository:
         stmt = (
             _owned(select(Artifact), Artifact, user_id)
             .where(Artifact.message_id.in_(message_ids))
+            .order_by(Artifact.created_at, Artifact.id)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def latest_ids_for_messages(
+        self, *, user_id: uuid.UUID, message_ids: Sequence[uuid.UUID]
+    ) -> list[uuid.UUID]:
+        """Id bản mới nhất (`version`) mỗi dòng trong số artifact của `message_ids`,
+        thứ tự khối — chỉ id, không `content` (T-8.5: phụ lục export đọc theo lô).
+        """
+        latest = (
+            _owned(select(Artifact.id, Artifact.created_at), Artifact, user_id)
+            .where(Artifact.message_id.in_(message_ids))
+            .ext(distinct_on(_lineage(Artifact)))
+            .order_by(_lineage(Artifact), Artifact.version.desc())
+            .subquery()
+        )
+        stmt = select(latest.c.id).order_by(latest.c.created_at, latest.c.id)
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def list_by_ids(
+        self, *, user_id: uuid.UUID, artifact_ids: Sequence[uuid.UUID]
+    ) -> Sequence[Artifact]:
+        stmt = (
+            _owned(select(Artifact), Artifact, user_id)
+            .where(Artifact.id.in_(artifact_ids))
             .order_by(Artifact.created_at, Artifact.id)
         )
         return (await self._session.execute(stmt)).scalars().all()

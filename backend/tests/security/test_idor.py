@@ -534,6 +534,17 @@ MATRIX: tuple[CaIDOR, ...] = (
         body=None,
         error_code=ApiErrorCode.CONVERSATION_NOT_FOUND,
     ),
+    # T-8.5 — xuất: thủng ⇒ `200 text/markdown` mang nguyên đường đi của B.
+    CaIDOR(
+        name="GET /conversations/{cua-B}/export",
+        resource="conversation",
+        route=f"{API}/conversations/{{conversation_id}}/export",
+        method="GET",
+        target="conversation",
+        path=lambda target, _of_a: f"{API}/conversations/{target}/export?format=md",
+        body=None,
+        error_code=ApiErrorCode.CONVERSATION_NOT_FOUND,
+    ),
     # ── message: id của B nằm thẳng trong đường dẫn ──
     CaIDOR(
         name="GET /messages/{cua-B}/stream",

@@ -248,6 +248,11 @@ class Settings(BaseSettings):
     #: phải hiện đủ, còn trang là lát cắt của một danh sách vô hạn — hai con số
     #: trả lời hai câu hỏi khác nhau.
     CONVERSATION_PINNED_MAX: int = Field(default=100, gt=0)
+    #: Số message (và số artifact phụ lục) một lô đọc của
+    #: `GET /conversations/{id}/export` (T-8.5, §18.2 "không dựng cả file trong
+    #: RAM"): mỗi lô một `session_scope()` ngắn trong generator — RAM của `api`
+    #: tỉ lệ với lô, không với độ dài hội thoại.
+    EXPORT_BATCH_SIZE: int = Field(default=50, gt=0)
     #: Số dòng tối đa một trang của `GET /admin/audit-logs` (§16.3, T-2.20) —
     #: vừa là mặc định, vừa là trần cho `?limit=`, cùng lối
     #: `CONVERSATION_PAGE_SIZE` ngay trên. Một biến **riêng** chứ không dùng

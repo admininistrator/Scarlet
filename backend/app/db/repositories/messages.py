@@ -26,6 +26,7 @@ from typing import Any
 from sqlalchemy import (
     CTE,
     Integer,
+    Row,
     Select,
     and_,
     bindparam,
@@ -37,12 +38,19 @@ from sqlalchemy import (
     true,
     update,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID, aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.selectable import LateralFromClause
 
-from app.db.models import Conversation, Message, MessageFeedback, MessageRole, MessageStatus
+from app.db.models import (
+    Attachment,
+    Conversation,
+    Message,
+    MessageFeedback,
+    MessageRole,
+    MessageStatus,
+)
 from app.db.repositories.errors import (
     ConversationNotFoundError,
     MessageNotInConversationError,
@@ -615,6 +623,49 @@ class MessageRepository:
             PathNode(message=message, sibling_index=index, sibling_count=count)
             for message, index, count in rows.all()
         ]
+
+    async def path_ids(self, leaf_id: uuid.UUID, *, user_id: uuid.UUID) -> list[uuid.UUID]:
+        """Chỉ id của đường đi, gốc trước lá sau — CTE của `get_path` không JOIN lại
+        `content` (T-8.5: export đọc chữ theo lô sau). Rỗng ⇔ lá không thấy được.
+        """
+        path = _path_cte(leaf_id, user_id=user_id)
+        stmt = select(path.c.id).order_by(path.c.depth.desc())
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def export_rows(
+        self, message_ids: Sequence[uuid.UUID], *, user_id: uuid.UUID
+    ) -> dict[uuid.UUID, Row[Any]]:
+        """Một lô của export (T-8.5): cột cho người đọc + tên tệp đính kèm, MỘT câu.
+
+        Không `reasoning`, không chi phí. Tên tệp gom trong SQL (`array_agg`) —
+        không kéo `extracted_text` của tài liệu ra khỏi DB. `user_id` lọc trong
+        SQL (§20); message đã xoá mềm vắng khỏi dict (C12).
+        """
+        order = aggregate_order_by(Attachment.original_name, Attachment.created_at, Attachment.id)
+        names = (
+            select(func.array_agg(order))
+            .where(Attachment.message_id == Message.id, Attachment.user_id == user_id)
+            .scalar_subquery()
+        )
+        stmt = (
+            select(
+                Message.id,
+                Message.role,
+                Message.status,
+                Message.content,
+                Message.model_id,
+                Message.created_at,
+                names.label("attachment_names"),
+            )
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Message.id.in_(message_ids),
+                Message.deleted_at.is_(None),
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+            )
+        )
+        return {row.id: row for row in (await self._session.execute(stmt)).all()}
 
     async def get_siblings(
         self,
