@@ -1,14 +1,19 @@
-"""Xuất hội thoại — `GET /api/v1/conversations/{id}/export?format=md` (§18.2) — T-8.5.
+"""Xuất hội thoại — `GET /api/v1/conversations/{id}/export?format=md|json[&full=true]`
+(§18.2) — T-8.5 (`md`), T-8.6 (`json`).
 
-KH tham chiếu: §18.2, §8.3, §20, §24.3 dòng P8 · NQ-02, NQ-149 ⑤ · A2, A3.
+KH tham chiếu: §18.2, §8.2–8.3, §20, §24.3 dòng P8 · NQ-02, NQ-149 ⑤ · A2, A3.
 
 `.md` cho NGƯỜI đọc (NQ-149 ⑤): đường đi hiện tại (`active_leaf_id` → gốc, A2 /
 C11), `content` nguyên văn, tệp đính kèm chỉ tên, phụ lục artifact bản mới nhất
 mỗi dòng. Không reasoning, không chi phí, không URL ký (B-406 ②: tệp sống mãi,
-URL thì hết hạn sau `PRESIGN_TTL_S`). `format` là `Literal` — T-8.6 thêm `json`.
+URL thì hết hạn sau `PRESIGN_TTL_S`).
 
-**Stream thật, lối `stream.py`.** Handler đọc MỘT lần (hội thoại + id đường đi,
-CTE không mang `content`) rồi đóng session — 404 phải ra trước byte đầu. Chữ
+`.json` cho MÁY (nạp lại được — `scripts/check_export.py`, import B-13): đường đi,
+hoặc `full=true` cả cây (`MessageRepository.tree_ids` — cha trước con, nhánh liền
+khối). Mọi vai, mọi phiên bản artifact.
+
+**Stream thật, lối `stream.py`.** Handler đọc MỘT lần (hội thoại + id đường đi /
+cây, CTE không mang `content`) rồi đóng session — 404 phải ra trước byte đầu. Chữ
 đọc theo lô `EXPORT_BATCH_SIZE` trong generator, mỗi lô một `session_scope()`
 ngắn: không `Depends(get_session)` (giữ kết nối pool tới hết stream — Cạm bẫy ①),
 không giữ kết nối trong lúc client chậm đọc.
@@ -19,12 +24,13 @@ tiếng Việt chỉ đi trong `filename*=UTF-8''…`; `filename=` là bản ASC
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, status
@@ -47,6 +53,8 @@ ASSISTANT_LABEL = "Trợ lý"
 _TIME_FORMAT = "%Y-%m-%d %H:%M UTC"
 _BACKTICK_RUN = re.compile(r"`+")
 _MIN_FENCE = 3
+JSON_FORMAT = "scarlet-conversation"
+JSON_VERSION = 1
 
 router = APIRouter(tags=["export"])
 
@@ -55,15 +63,21 @@ router = APIRouter(tags=["export"])
     "/conversations/{conversation_id}/export",
     response_class=StreamingResponse,
     responses={
-        200: {"content": {"text/markdown": {}}, "description": "Duong di hien tai, markdown"},
+        200: {
+            "content": {"text/markdown": {}, "application/json": {}},
+            "description": "md: duong di hien tai; json: duong di hoac ca cay (full=true)",
+        },
         404: {"model": ErrorEnvelope, "description": "Khong thay (§20 gop ba ca)"},
     },
 )
 async def export_conversation(
     conversation_id: uuid.UUID,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
-    export_format: Annotated[Literal["md"], Query(alias="format")],
+    export_format: Annotated[Literal["md", "json"], Query(alias="format")],
+    full: bool = False,
 ) -> StreamingResponse:
+    """`full` chỉ áp cho `json` — `.md` là bản đọc của người, luôn là đường đi."""
+    tree = full and export_format == "json"
     async with session_scope() as session:
         conversation = await ConversationRepository(session).get_conversation(
             conversation_id, user_id=user_id
@@ -74,26 +88,110 @@ async def export_conversation(
                 ApiErrorCode.CONVERSATION_NOT_FOUND,
                 "khong tim thay hoi thoai",
             )
-        ids = (
-            []
-            if conversation.active_leaf_id is None
-            else await MessageRepository(session).path_ids(
-                conversation.active_leaf_id, user_id=user_id
-            )
-        )
+        messages = MessageRepository(session)
+        if tree:
+            ids = await messages.tree_ids(conversation_id, user_id=user_id)
+        elif conversation.active_leaf_id is None:
+            ids = []
+        else:
+            ids = await messages.path_ids(conversation.active_leaf_id, user_id=user_id)
         title = conversation.title or DEFAULT_TITLE
+        head = {
+            "id": str(conversation.id),
+            "title": conversation.title,
+            "created_at": conversation.created_at.isoformat(),
+            "default_model": conversation.default_model,
+            "active_leaf_id": _str(conversation.active_leaf_id),
+        }
 
     now = datetime.now(UTC)
-    name = f"{_slug(title)}-{now:%Y-%m-%d}.md"
+    name = f"{_slug(title)}-{now:%Y-%m-%d}.{export_format}"
     disposition = (
-        f'attachment; filename="{_ascii(_slug(title))}-{now:%Y-%m-%d}.md"; '
+        f'attachment; filename="{_ascii(_slug(title))}-{now:%Y-%m-%d}.{export_format}"; '
         f"filename*=UTF-8''{quote(name, safe='')}"
     )
+    if export_format == "json":
+        body = _json(user_id, head, ids, now, "tree" if tree else "path")
+        media_type = "application/json"
+    else:
+        body = _markdown(user_id, title, ids, now)
+        media_type = "text/markdown; charset=utf-8"
     return StreamingResponse(
-        _markdown(user_id, title, ids, now),
-        media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": disposition},
+        body, media_type=media_type, headers={"Content-Disposition": disposition}
     )
+
+
+async def _json(
+    user_id: uuid.UUID, head: dict[str, Any], ids: list[uuid.UUID], now: datetime, scope: str
+) -> AsyncIterator[str]:
+    """Hợp đồng `scarlet-conversation` v1 (cũng là hợp đồng import B-13 — đổi hình
+    ⇒ tăng `version`). Viết TỪNG MẢNH: một `json.dumps` mỗi message, nối dấu phẩy —
+    không bao giờ có cả cây trong RAM (§18.2). Dữ liệu của chính chủ nên có
+    `model_id`, `reasoning`; không chi phí, không `storage_key`.
+    """
+    envelope = {
+        "format": JSON_FORMAT,
+        "version": JSON_VERSION,
+        "exported_at": now.isoformat(),
+        "scope": scope,
+        "conversation": head,
+    }
+    yield json.dumps(envelope, ensure_ascii=False)[:-1] + ', "messages": ['
+    display_names = {m.id: m.display_name for m in get_catalog().models}
+    batch = settings.EXPORT_BATCH_SIZE
+    separator = ""
+    for start in range(0, len(ids), batch):
+        chunk = ids[start : start + batch]
+        async with session_scope() as session:
+            rows = await MessageRepository(session).export_rows(chunk, user_id=user_id)
+            artifacts: dict[uuid.UUID, list[dict[str, Any]]] = {}
+            for a in await ArtifactRepository(session).list_for_messages(
+                user_id=user_id, message_ids=chunk
+            ):
+                artifacts.setdefault(a.message_id, []).append(_artifact_json(a))
+        parts: list[str] = []
+        for message_id in chunk:
+            row = rows.get(message_id)
+            if row is None:
+                continue
+            message = {
+                "id": str(row.id),
+                "parent_id": _str(row.parent_id),
+                "role": row.role.value,
+                "status": row.status.value,
+                "content": row.content,
+                "reasoning": row.reasoning,
+                "model_id": row.model_id,
+                "model_display_name": display_names.get(row.model_id or ""),
+                "created_at": row.created_at.isoformat(),
+                "finish_reason": row.finish_reason,
+                "attachments": row.attachments,
+                "artifacts": artifacts.get(row.id, []),
+            }
+            parts.append(separator + json.dumps(message, ensure_ascii=False))
+            separator = ","
+        if parts:
+            yield "".join(parts)
+    yield "]}\n"
+
+
+def _artifact_json(row: Artifact) -> dict[str, Any]:
+    """Mọi phiên bản (dựng lại được từ `parent_artifact_id` + `version`);
+    `kind=file` ⇒ `content: null` (B-372), không `storage_key`."""
+    return {
+        "id": str(row.id),
+        "parent_artifact_id": _str(row.parent_artifact_id),
+        "version": row.version,
+        "kind": row.kind,
+        "language": row.language,
+        "title": row.title,
+        "content": row.content,
+        "origin": row.origin,
+    }
+
+
+def _str(value: uuid.UUID | None) -> str | None:
+    return None if value is None else str(value)
 
 
 async def _markdown(
@@ -120,8 +218,9 @@ async def _markdown(
             )
             parts.append(f"\n## {label} · {row.created_at.astimezone(UTC):{_TIME_FORMAT}}\n\n")
             parts.append(_block(row.content or ""))
-            if row.attachment_names:
-                parts.append(f"\nTệp đính kèm: {', '.join(row.attachment_names)}\n")
+            if row.attachments:
+                names = ", ".join(a["name"] for a in row.attachments)
+                parts.append(f"\nTệp đính kèm: {names}\n")
         if parts:
             yield "".join(parts)
 

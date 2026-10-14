@@ -38,7 +38,7 @@ from sqlalchemy import (
     true,
     update,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID, aggregate_order_by
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID, aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.selectable import LateralFromClause
@@ -632,30 +632,84 @@ class MessageRepository:
         stmt = select(path.c.id).order_by(path.c.depth.desc())
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def tree_ids(self, conversation_id: uuid.UUID, *, user_id: uuid.UUID) -> list[uuid.UUID]:
+        """Id mọi message KHÔNG xoá mềm của hội thoại, cha trước con, mỗi nhánh
+        liền khối — chỉ cho export `full=true` (T-8.6). `context.build` không gọi
+        hàm này (A2 / C11: đọc cả cây là đúng ở đây và sai ở mọi chỗ khác).
+
+        CTE đệ quy từ các gốc (`parent_id IS NULL`) chọn node đến được — xoá mềm
+        ở cả hai nhánh cắt cả nhánh con (C12), không con nào trỏ cha vắng mặt;
+        ownership ở nhánh neo, trong SQL (§20). CTE chỉ mang 3 cột khoá.
+
+        Thứ tự duyệt sâu trước (anh em `(created_at, id)`, NQ-18 ②) dựng ở Python,
+        KHÔNG bằng `SEARCH DEPTH FIRST`: mệnh đề ấy mang mảng đường đi dài bằng độ
+        sâu ở mỗi hàng ⇒ bậc hai (đo T-8.6: chuỗi 2 000 message ⇒ sort 93 MB ra
+        đĩa, 1.3 s; bản này 1.4 ms). `uuid.UUID` so như `uuid` của Postgres.
+        """
+        stmt = text(
+            """
+            WITH RECURSIVE tree AS (
+                SELECT m.id, m.parent_id, m.created_at FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id = :conversation_id AND m.parent_id IS NULL
+                  AND m.deleted_at IS NULL AND c.user_id = :user_id AND c.deleted_at IS NULL
+              UNION ALL
+                SELECT m.id, m.parent_id, m.created_at FROM messages m
+                JOIN tree t ON m.parent_id = t.id
+                WHERE m.deleted_at IS NULL AND m.conversation_id = :conversation_id
+            )
+            SELECT id, parent_id, created_at FROM tree
+            """
+        ).bindparams(
+            bindparam("conversation_id", conversation_id, type_=UUID(as_uuid=True)),
+            bindparam("user_id", user_id, type_=UUID(as_uuid=True)),
+        )
+        rows = sorted((await self._session.execute(stmt)).all(), key=lambda r: (r[2], r[0]))
+        children: dict[uuid.UUID | None, list[uuid.UUID]] = {}
+        for message_id, parent_id, _ in rows:
+            children.setdefault(parent_id, []).append(message_id)
+        order: list[uuid.UUID] = []
+        stack = children.get(None, [])[::-1]
+        while stack:
+            node = stack.pop()
+            order.append(node)
+            stack.extend(children.get(node, [])[::-1])
+        return order
+
     async def export_rows(
         self, message_ids: Sequence[uuid.UUID], *, user_id: uuid.UUID
     ) -> dict[uuid.UUID, Row[Any]]:
-        """Một lô của export (T-8.5): cột cho người đọc + tên tệp đính kèm, MỘT câu.
+        """Một lô của export (T-8.5 `.md`, T-8.6 `.json`): mọi cột hai bản cần, MỘT câu.
 
-        Không `reasoning`, không chi phí. Tên tệp gom trong SQL (`array_agg`) —
-        không kéo `extracted_text` của tài liệu ra khỏi DB. `user_id` lọc trong
-        SQL (§20); message đã xoá mềm vắng khỏi dict (C12).
+        Không chi phí, không `storage_key`. Tệp đính kèm gom trong SQL
+        (`jsonb_agg` tên / mime / cỡ) — không kéo `extracted_text` ra khỏi DB.
+        `user_id` lọc trong SQL (§20); message đã xoá mềm vắng khỏi dict (C12).
         """
-        order = aggregate_order_by(Attachment.original_name, Attachment.created_at, Attachment.id)
-        names = (
-            select(func.array_agg(order))
+        attachment = func.jsonb_build_object(
+            "name", Attachment.original_name,
+            "mime_type", Attachment.mime_type,
+            "size_bytes", Attachment.size_bytes,
+        )  # fmt: skip
+        order = aggregate_order_by(
+            attachment, Attachment.original_name, Attachment.created_at, Attachment.id
+        )
+        attachments = (
+            select(func.coalesce(func.jsonb_agg(order), text("'[]'::jsonb"), type_=JSONB))
             .where(Attachment.message_id == Message.id, Attachment.user_id == user_id)
             .scalar_subquery()
         )
         stmt = (
             select(
                 Message.id,
+                Message.parent_id,
                 Message.role,
                 Message.status,
                 Message.content,
+                Message.reasoning,
                 Message.model_id,
+                Message.finish_reason,
                 Message.created_at,
-                names.label("attachment_names"),
+                attachments.label("attachments"),
             )
             .join(Conversation, Conversation.id == Message.conversation_id)
             .where(
