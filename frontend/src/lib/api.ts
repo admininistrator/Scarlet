@@ -289,6 +289,49 @@ export interface ConversationDetail extends ConversationOut {
   path: MessageOut[];
 }
 
+/** T-8.1 — `201` cua `POST /conversations/{id}/share`. */
+export interface ShareLink {
+  token: string;
+  url: string;
+}
+
+/**
+ * T-8.2 — `GET /s/{token}` (cong khai): `snapshot_json` nguyen van (danh sach
+ * trang cua T-8.1) + `url` ky MOI cho moi `key` o moi lan goi (B-406 ②) — nap
+ * lai trang la ky lai, khong giu URL lau.
+ */
+export type PublicAttachment =
+  | { kind: "image"; name: string; key: string; width: number | null; height: number | null; url: string }
+  /** Chi TEN: tep goc khong theo sang ban chia se (Q-P8-4). */
+  | { kind: "document"; name: string; mime_type: string };
+
+export type PublicArtifact =
+  | { kind: "file"; title: string; key: string; url: string }
+  /** Ma TINH — khong chay, khong iframe (Q-P8-6). */
+  | {
+      kind: "html" | "react" | "svg" | "mermaid" | "code" | "markdown";
+      title: string | null;
+      language: string | null;
+      content: string;
+    };
+
+export interface PublicMessage {
+  role: "user" | "assistant";
+  content: string;
+  /** Ten hien thi tu catalog, KHONG phai id model; `null` ⇒ khong chip. */
+  model_display_name: string | null;
+  created_at: string;
+  attachments: PublicAttachment[];
+  artifacts: PublicArtifact[];
+}
+
+export interface PublicShare {
+  version: number;
+  title: string | null;
+  shared_at: string;
+  messages: PublicMessage[];
+}
+
 export interface ConversationList {
   items: ConversationOut[];
   next_cursor: string | null;
@@ -1400,4 +1443,18 @@ export const api = {
   /** Model cua endpoint DA LUU, server hoi bang khoa da luu (NQ-137 ①). */
   listByokEndpointModels: (id: string) =>
     request<ByokProbe>(`/settings/byok-endpoints/${encodeURIComponent(id)}/models`),
+
+  /**
+   * T-8.1/T-8.2 — anh chup nhanh dang xem (`active_leaf_id`) LUC GOI, link moi
+   * moi lan (ADR-14). Khoa bat buoc (A8): hop thoai sinh MOT khoa moi lan mo,
+   * Thu lai giu khoa — server nha khoa khi response loi.
+   */
+  createShare: (conversationId: string, idempotencyKey: string) =>
+    request<ShareLink>(`/conversations/${encodeURIComponent(conversationId)}/share`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
+
+  /** T-8.2 — trang cong khai; khong can phien. `404 SHARE_NOT_FOUND` cho ca link sai lan da go. */
+  getShare: (token: string) => request<PublicShare>(`/s/${encodeURIComponent(token)}`),
 };

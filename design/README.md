@@ -1,4 +1,23 @@
 # Design Progress — Scarlet
+## Phase 8
+| Design | Link Claude Design | Ngày chốt |
+| T-HD12 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/367a3a52-8862-45dd-af4e-cfbce7ae3b56?file=Scarlet+Chia+s%E1%BA%BB.dc.html
+
+Focus on these files (the whole project is readable):
+- `Scarlet Chia sẻ.dc.html`
+- `theme.css`
+
+Also read these files the selection imports:
+- `public/favicon-dark.svg`
+- `public/favicon.svg`
+- `public/icons/apple-touch-icon.png`
+- `public/icons/icon-192.png`
+- `public/icons/icon-512.png`
+- `public/icons/icon-maskable-512.png`
+- `support.js`
+
+Implement: the selected files | 2026-10-14 |
 ## Phase 7
 | Design | Link Claude Design | Ngày chốt |
 | T-HD11 | Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:

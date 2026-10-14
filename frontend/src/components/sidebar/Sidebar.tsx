@@ -30,6 +30,7 @@ import {
   MenuDismissContext,
 } from "../ui/menu";
 import { groupByDay, useToday } from "./dayGroups";
+import { ShareDialog, useShareLink } from "./ShareDialog";
 import { useTitleStreams, type TitleView } from "./useTitleStreams";
 
 /**
@@ -702,6 +703,7 @@ function ConversationRow({
         )}
 
         <RowMenu
+          conversationId={item.id}
           label={label}
           pinned={item.pinned}
           active={active}
@@ -764,10 +766,12 @@ function RowTitle({
 }
 
 /**
- * Menu "⋯" cua hang — ban T-HD2-v2 H6: Doi ten · Ghim · Chia se* · Xuat* · ── · Xoa.
+ * Menu "⋯" cua hang — ban T-HD2-v2 H6: Doi ten · Ghim · Chia se · Xuat* · ── · Xoa.
  *
- * `*` = nut cho (bang §7b.2): `T-8.1` Chia se, `T-8.7` Xuat — `ComingSoon`
- * hinh dang `menuItem`, toi duoc bang mui ten de tooltip "Sap co" mo.
+ * `*` = nut cho (bang §7b.2): `T-8.7` Xuat — `ComingSoon` hinh dang
+ * `menuItem`, toi duoc bang mui ten de tooltip "Sap co" mo. Chia se (T-8.2,
+ * ban T-HD12) mo `ShareDialog`; POST chay ngay trong `onSelect` (mot lan mo =
+ * mot khoa), va menu khong tra tieu diem ve nut "⋯" vi hop thoai giu no.
  *
  * `DropdownMenu` cua Radix (cung primitive menu tai khoan, T-S.12) lo ban
  * phim, Esc, bam ra ngoai. `open` co kiem soat de dua ham dong xuong muc cho
@@ -778,6 +782,7 @@ function RowTitle({
  * diem (`keepFocusRef`) — o nhap ten co `autoFocus`.
  */
 function RowMenu({
+  conversationId,
   label,
   pinned,
   active,
@@ -786,6 +791,7 @@ function RowMenu({
   onTogglePin,
   onAskDelete,
 }: {
+  conversationId: string;
   label: string;
   pinned: boolean;
   active: boolean;
@@ -797,76 +803,86 @@ function RowMenu({
   const [open, setOpen] = useState(false);
   const closeMenu = useCallback(() => setOpen(false), []);
   const keepFocusRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const name = `${t("sidebar.rowMenu")} — ${label}`;
+  const share = useShareLink(conversationId);
 
   return (
-    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
-      <DropdownMenu.Trigger
-        disabled={busy}
-        aria-label={name}
-        className={`motion-press control-disabled grid h-full w-touch shrink-0 place-items-center rounded-md hover:bg-surface-hover data-[state=open]:bg-surface-panel data-[state=open]:shadow-sm ${
-          active ? "text-accent-text" : "text-muted"
-        }`}
-      >
-        <StaticIcon icon={Ellipsis} size={18} />
-      </DropdownMenu.Trigger>
-
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          sideOffset={ROW_MENU_OFFSET}
-          // Radix mac dinh dat ten menu = ten nut (`aria-labelledby`); dat thang.
-          aria-labelledby={undefined}
+    <>
+      <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+        <DropdownMenu.Trigger
+          ref={triggerRef}
+          disabled={busy}
           aria-label={name}
-          onCloseAutoFocus={(event) => {
-            if (keepFocusRef.current) {
-              keepFocusRef.current = false;
-              event.preventDefault();
-            }
-          }}
-          className="motion-popover z-50 flex w-50 flex-col rounded-lg border border-border bg-surface-panel p-1.5 shadow-popover"
+          className={`motion-press control-disabled grid h-full w-touch shrink-0 place-items-center rounded-md hover:bg-surface-hover data-[state=open]:bg-surface-panel data-[state=open]:shadow-sm ${
+            active ? "text-accent-text" : "text-muted"
+          }`}
         >
-          <MenuDismissContext.Provider value={closeMenu}>
-            <DropdownMenu.Item
-              onSelect={() => {
-                keepFocusRef.current = true;
-                onStartRename();
-              }}
-              className={MENU_ITEM_CLASS}
-            >
-              <StaticIcon icon={Pencil} size={18} />
-              {t("sidebar.rename")}
-            </DropdownMenu.Item>
-            <DropdownMenu.Item onSelect={onTogglePin} className={MENU_ITEM_CLASS}>
-              <StaticIcon icon={Pin} size={18} />
-              {pinned ? t("sidebar.unpin") : t("sidebar.pin")}
-            </DropdownMenu.Item>
-            <ComingSoon
-              menuItem
-              planned="T-8.1"
-              label={t("sidebar.share")}
-              icon={<StaticIcon icon={Share2} size={18} />}
-            />
-            <ComingSoon
-              menuItem
-              planned="T-8.7"
-              label={t("sidebar.export")}
-              icon={<StaticIcon icon={Download} size={18} />}
-            />
-            <DropdownMenu.Separator className={MENU_SEPARATOR_CLASS} />
-            <DropdownMenu.Item
-              onSelect={() => {
-                keepFocusRef.current = true;
-                onAskDelete();
-              }}
-              className={MENU_ITEM_DANGER_CLASS}
-            >
-              <StaticIcon icon={Trash2} size={18} />
-              {t("sidebar.delete")}
-            </DropdownMenu.Item>
-          </MenuDismissContext.Provider>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+          <StaticIcon icon={Ellipsis} size={18} />
+        </DropdownMenu.Trigger>
+
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            align="end"
+            sideOffset={ROW_MENU_OFFSET}
+            // Radix mac dinh dat ten menu = ten nut (`aria-labelledby`); dat thang.
+            aria-labelledby={undefined}
+            aria-label={name}
+            onCloseAutoFocus={(event) => {
+              if (keepFocusRef.current) {
+                keepFocusRef.current = false;
+                event.preventDefault();
+              }
+            }}
+            className="motion-popover z-50 flex w-50 flex-col rounded-lg border border-border bg-surface-panel p-1.5 shadow-popover"
+          >
+            <MenuDismissContext.Provider value={closeMenu}>
+              <DropdownMenu.Item
+                onSelect={() => {
+                  keepFocusRef.current = true;
+                  onStartRename();
+                }}
+                className={MENU_ITEM_CLASS}
+              >
+                <StaticIcon icon={Pencil} size={18} />
+                {t("sidebar.rename")}
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={onTogglePin} className={MENU_ITEM_CLASS}>
+                <StaticIcon icon={Pin} size={18} />
+                {pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                onSelect={() => {
+                  keepFocusRef.current = true;
+                  share.open();
+                }}
+                className={MENU_ITEM_CLASS}
+              >
+                <StaticIcon icon={Share2} size={18} />
+                {t("sidebar.share")}
+              </DropdownMenu.Item>
+              <ComingSoon
+                menuItem
+                planned="T-8.7"
+                label={t("sidebar.export")}
+                icon={<StaticIcon icon={Download} size={18} />}
+              />
+              <DropdownMenu.Separator className={MENU_SEPARATOR_CLASS} />
+              <DropdownMenu.Item
+                onSelect={() => {
+                  keepFocusRef.current = true;
+                  onAskDelete();
+                }}
+                className={MENU_ITEM_DANGER_CLASS}
+              >
+                <StaticIcon icon={Trash2} size={18} />
+                {t("sidebar.delete")}
+              </DropdownMenu.Item>
+            </MenuDismissContext.Provider>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <ShareDialog state={share.state} onClose={share.close} onRetry={share.retry} returnFocusRef={triggerRef} />
+    </>
   );
 }

@@ -242,6 +242,8 @@ export const SPRINGS = {
   panelToggle: SPRING_SNAPPY,
   /** T-7.9 (ban T-HD11) — "Xem them" ⇄ "Thu gon" cua mo ta skill: chevron-down ⇄ chevron-up. */
   skillDescToggle: SPRING_SNAPPY,
+  /** T-8.2 (ban T-HD12) — Sao chep ⇄ Da chep cua hop thoai Chia se: copy ⇄ check. */
+  shareCopy: SPRING_SNAPPY,
   themeToggle: SPRING_SETTLE,
   submenuChevron: SPRING_GENTLE,
   accountMenuItemHover: SPRING_GENTLE,

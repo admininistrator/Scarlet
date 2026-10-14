@@ -104,7 +104,17 @@ export function CodeBlock({
         )}
       </figcaption>
 
-      <pre className={open ? "code-lines m-0 min-h-15 py-3 text-sm leading-6" : "code-lines m-0 py-3 text-sm leading-6"}>
+      {/*
+        B-365 (T-8.2): `pre` cuon ngang ⇒ phai nhan tieu diem de nguoi dung ban
+        phim cuon duoc (axe `scrollable-region-focusable`), va vung nhan tieu
+        diem phai co ten — loi `TableScroll`.
+      */}
+      <pre
+        tabIndex={0}
+        role="region"
+        aria-label={language === "" ? t("code.region") : `${t("code.region")} — ${language}`}
+        className={open ? "code-lines m-0 min-h-15 py-3 text-sm leading-6" : "code-lines m-0 py-3 text-sm leading-6"}
+      >
         <code ref={codeRef} className="font-mono text-foreground">
           {lines.map((line, index) => (
             // Mot phan tu moi dong; chu so den tu ::before, khong phai o day.

@@ -4,6 +4,7 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
 import type { PathArtifact } from "../../lib/api";
+import { t } from "../../lib/i18n";
 import { ArtifactCard } from "./BubbleExtras";
 import { CodeBlock } from "./CodeBlock";
 import { SANITIZE_SCHEMA, safeUrl } from "./markdownPolicy";
@@ -101,8 +102,14 @@ const COMPONENTS: Components = {
     bang 8 cot lam CA TRANG cuon ngang o 375 px. v3: bang la khoi DUY NHAT co
     nen rieng (`scroll-frame` = nen panel + bong mep phai), vi cot can mep.
   */
+  // B-255 (T-8.2): vung cuon nhan tieu diem + co ten — loi `TableScroll`.
   table: (props) => (
-    <div className="scroll-frame my-3 rounded-lg border border-border">
+    <div
+      tabIndex={0}
+      role="region"
+      aria-label={t("markdown.tableRegion")}
+      className="scroll-frame my-3 rounded-lg border border-border"
+    >
       <table className="w-full border-collapse text-base">{props.children}</table>
     </div>
   ),

@@ -19,6 +19,7 @@ import {
   type SettingsTabPath,
 } from "../components/settings/SettingsLayout";
 import { UsagePanel } from "../components/settings/UsagePanel";
+import { ShareScreen } from "../components/share/ShareScreen";
 import { AdminOnly } from "./AdminOnly";
 import { Layout } from "./Layout";
 import { LoginRoute } from "./LoginRoute";
@@ -133,6 +134,8 @@ export const routes: RouteObject[] = [
       { path: PATHS.resetPassword, element: <ResetPasswordForm /> },
       { path: PATHS.verifyEmail, element: <VerifyEmailScreen /> },
       { path: PATHS.pendingApproval, element: <PendingApprovalScreen /> },
+      // T-8.2 — nguoi la mo link: KHONG boc `StatusGate`/`SignedInOnly`.
+      { path: PATHS.share, element: <ShareScreen /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

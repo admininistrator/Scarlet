@@ -349,6 +349,37 @@
   --spacing-skill-panel-max: 40rem;    /* 640px — trần cao popover: đủ 4 mục (bộ T-7.7b) kể cả khi có câu lỗi, không cuộn; từ mục 5 trở đi cuộn. Thấp hơn khi Radix báo ít chỗ hơn */
   --spacing-skill-sheet-max: min(var(--spacing-sheet-max), calc(100dvh - var(--keyboard-inset) - var(--spacing-header))); /* sheet < 640: bàn phím mở ⇒ co theo phần màn còn thấy, chừa 56 ở đỉnh */
   /* ◂ SKILL */
+
+  /* SHARE ▸ CHIA SẺ · TRANG CÔNG KHAI · MIC · ĐỌC TO · BỘ ICON (T-HD12 · v1) ---------------------------
+   * Kích thước dùng lại: hộp thoại rộng --spacing-dialog (448), < 640 là sheet đáy trần --spacing-sheet-max;
+   * trang /s/{token}: đầu trang --spacing-header (56), cột đọc --spacing-measure (736), lề --spacing-gutter / -gutter-lg,
+   * nhịp tin --spacing-turn (40) / gap-6; menu hàng w-50; menu con Xuất › --spacing-submenu.
+   * Màu: MỘT biến mới, --color-listening-ring — vầng quanh nút mic đang nghe, TRANG TRÍ (trạng thái đã đọc được qua
+   *   nút nền accent + icon dừng + chữ “Đang nghe…”). Còn lại dùng biến cũ:
+   *   mic đang nghe = bg-accent + text-accent-foreground, khung ô nhập border-accent · chữ tạm = text-muted + gạch chân
+   *   chấm (không chỉ dựa vào màu — WCAG 1.4.1) · Đọc to đang đọc = lối Tìm web bật (border-accent bg-accent-subtle
+   *   text-accent-text) · lỗi = text-danger-text · icon câu “không thu hồi được” = text-warning-text.
+   * PWA — manifest không đọc được var(), nên hex được CHÉP từ đây và pwaColors.test.ts so lại với file này:
+   *   theme_color = background_color = --color-background (sáng #f7f6f4 · tối #171514);
+   *   nền icon = --color-accent (sáng #b3261e → favicon.svg; tối #d1402f → favicon-dark.svg), chữ S = --color-accent-foreground.
+   *   Màu ghi bằng thuộc tính fill / stroke; index.html chọn file bằng <link rel="icon" media="(prefers-color-scheme: dark)">.
+   * Chuyển động: hộp thoại .motion-panel + .motion-scrim · sheet .motion-sheet + .motion-scrim · menu hàng .motion-popover ·
+   *   Xuất › .motion-submenu · đang tạo link / bản sao .motion-spin · khung xương .motion-pulse · câu lỗi .motion-enter ·
+   *   Sao chép ⇄ Đã chép, mic ⇄ dừng, loa ⇄ dừng = morphicons (lib/motion · shareCopy · voiceToggle · readAloudToggle).
+   *   Thêm 1 utility (cuối file): .motion-listening. */
+  --duration-copied: 2000ms;          /* “Đã chép” giữ chừng này rồi về “Sao chép”. JS đọc. Hẹn giờ ⇒ KHÔNG về 0 khi reduced-motion */
+  --duration-listening: 1400ms;       /* một nhịp vầng mic đang nghe, lặp. Reduced motion: 0 + animation none ⇒ không vầng */
+  --spacing-listening-ring: 0.5rem;   /* 8px — vầng nở từ mép nút 44 ra tới chừng này rồi tan */
+  --spacing-share-code: 20rem;        /* 320px — trần cao khối mã tĩnh của artifact trên trang chia sẻ; dài hơn thì cuộn trong khối */
+  --color-listening-ring: rgb(179 38 30 / 0.32);
+  /* T-HD12 · v1 · góp ý Thịnh — nhịp thở quanh KHUNG ô nhập khi mic đang nghe (.motion-breathe; nút mic không có vầng.
+   * .motion-listening + các biến của nó GIỮ NGUYÊN, không còn nơi dùng). Màu = accent của dự án, TRANG TRÍ. */
+  --duration-breathe: 2400ms;          /* một nhịp thở: sáng dần → mờ dần, lặp. Reduced motion: 0 + animation none ⇒ không sáng */
+  --ease-breathe: cubic-bezier(0.37, 0, 0.63, 1); /* sine in-out — thở đều, không giật ở đỉnh */
+  --spacing-breathe-blur: 0.875rem;    /* 14px — độ nhoè vầng sáng ở đỉnh nhịp */
+  --spacing-breathe-spread: 0.1875rem; /* 3px — vầng loang ra ngoài mép khung ô nhập ở đỉnh nhịp */
+  --color-breathe-glow: rgb(179 38 30 / 0.45);
+  /* ◂ SHARE */
 }
 
 [data-theme="dark"] {
@@ -452,6 +483,12 @@
   /* ◂ ARTIFACT */
 
   /* SKILL ▸ theme tối — không có biến mới: ba biến của panel skill là kích thước, không phải màu. ◂ SKILL */
+
+  /* SHARE ▸ theme tối — một biến màu: vầng mic theo --color-accent tối (#d1402f), đậm hơn để thấy trên nền tối. */
+  --color-listening-ring: rgb(209 64 47 / 0.42);
+  /* góp ý Thịnh — nhịp thở theo --color-accent tối, đậm hơn để thấy trên nền tối. */
+  --color-breathe-glow: rgb(209 64 47 / 0.6);
+  /* ◂ SHARE */
 
   /* Shadow phải đậm hơn trên nền tối mới nhìn thấy tầng nổi. */
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
@@ -1032,6 +1069,75 @@
     var(--color-surface-panel);
 }
 /* ◂ SKILL */
+
+/* SHARE ▸ Nút mic đang nghe: vầng accent nở từ mép nút ra --spacing-listening-ring rồi tan, lặp (enter · listening).
+ * box-shadow: không đổi layout, không đè outline của :focus-visible. Đi cùng .motion-press trên cùng nút (transition ≠ animation).
+ * Reduced motion: khối * ở trên tắt animation ⇒ không có vầng; nút nền accent + icon dừng + “Đang nghe…” vẫn đủ báo mic đang mở. */
+@utility motion-listening {
+  animation: scarlet-listening var(--duration-listening) var(--ease-enter) infinite;
+}
+@keyframes scarlet-listening {
+  from { box-shadow: 0 0 0 0 var(--color-listening-ring); }
+  to   { box-shadow: 0 0 0 var(--spacing-listening-ring) transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-theme="dark"] {
+    --duration-listening: 0ms;
+  }
+}
+
+/* SHARE · góp ý Thịnh ▸ ba utility mới.
+ * .motion-breathe  gắn lên MỘT span trống absolute -inset-px rounded-xl, con đầu tiên của KHUNG ô nhập (relative) khi mic
+ *   đang nghe (ListeningGlow): vầng accent sáng dần rồi mờ dần quanh cả khung, lặp (Breathing Glow). Nút mic không có vầng.
+ * .motion-toggle   nút đổi trạng thái (mic ⇄ dừng, Đọc to ⇄ Dừng đọc, Sao chép → Đã chép): nền / viền / chữ chuyển normal · move,
+ *   nhấn lún 0.97, và mỗi lần đổi trạng thái thì “nảy” một nhịp (lún 0.9 → vọt 1.06 → đứng, slow · enter).
+ *   Component đặt data-toggle="on" | "off" CHỈ sau lần đổi đầu tiên (mount không nảy). Hai keyframe giống nhau, khác tên ⇒
+ *   đổi on ⇄ off là đổi animation-name ⇒ trình duyệt chạy lại. Không dùng data-state: Radix Tooltip.Trigger đã chiếm.
+ *   Thay .motion-press trên các nút này (cùng đặt `transition`, không gắn cả hai).
+ * .motion-label-in chữ trên nút đổi (Sao chép → Đã chép): chữ mới nhô lên (fast · enter). Component đổi key để chạy lại.
+ * Reduced motion: khối * ở trên tắt hết; icon đổi tức thì (wrapper Icon khoá reducedMotion="user"). */
+@utility motion-breathe {
+  animation: scarlet-breathe var(--duration-breathe) var(--ease-breathe) infinite;
+}
+@keyframes scarlet-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 var(--color-breathe-glow); }
+  50%      { box-shadow: 0 0 var(--spacing-breathe-blur) var(--spacing-breathe-spread) var(--color-breathe-glow); }
+}
+@utility motion-toggle {
+  transition: background-color var(--duration-normal) var(--ease-move),
+    border-color var(--duration-normal) var(--ease-move),
+    color var(--duration-normal) var(--ease-move),
+    transform var(--duration-fast) var(--ease-move);
+  &:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: scale(0.97);
+    transition-duration: var(--duration-instant);
+  }
+  &[data-toggle="on"]  { animation: scarlet-toggle-on var(--duration-slow) var(--ease-enter); }
+  &[data-toggle="off"] { animation: scarlet-toggle-off var(--duration-slow) var(--ease-enter); }
+}
+@keyframes scarlet-toggle-on {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(0.9); }
+  65%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+@keyframes scarlet-toggle-off {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(0.9); }
+  65%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+@utility motion-label-in {
+  animation: scarlet-rise-in var(--duration-fast) var(--ease-enter) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-theme="dark"] {
+    --duration-breathe: 0ms;
+  }
+}
+/* ◂ SHARE */
 
 @utility tabular {
   font-variant-numeric: tabular-nums;

@@ -61,6 +61,11 @@ export const PATHS = {
   resetPassword: "/dat-lai-mat-khau",
   verifyEmail: "/verify-email",
   pendingApproval: "/cho-duyet",
+  /**
+   * T-8.2 — trang chia se cong khai, NGOAI cua dang nhap. Server dung link nay
+   * (`PUBLIC_BASE_URL` + `/s/{token}`, T-8.1) — doi o day la gay link da gui.
+   */
+  share: "/s/:token",
 } as const;
 
 export type Path = (typeof PATHS)[keyof typeof PATHS];

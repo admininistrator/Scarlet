@@ -30,9 +30,10 @@
  *  17. `truncated` ⇒ mot dong bao duoi Da ghim (NQ-129)
  *  18. `sidebar.pinScopeNote` bien khoi man hinh lan `vi.json`
  *  19. Cam bay ③ — bo ghim ⇒ doi muc NGAY, khong nap lai
- *  20. Menu hang: thu tu cua ban H6, hai muc cho `T-8.1`/`T-8.7`
+ *  20. Menu hang: thu tu cua ban H6, Chia se la muc THAT (T-8.2), Xuat con cho `T-8.7`
  *  21. Esc tu muc cho ⇒ menu dong, tieu diem ve nut "⋯" (B-308 ②)
  *  22–27. Tieu de chay (`useTitleStreams`) — xem khoi `describe` cuoi file
+ *  28–32. Hop thoai Chia se (T-8.2, ban T-HD12) — khoi `describe` cuoi file
  *
  * ── Vi sao mock `../../lib/api` chu khong mock `fetch` ────────────────────
  *
@@ -83,9 +84,12 @@ vi.mock("../../lib/api", async (importOriginal) => {
       listConversations: vi.fn(),
       updateConversation: vi.fn(),
       deleteConversation: vi.fn(),
+      createShare: vi.fn(),
     },
   };
 });
+
+vi.mock("../../lib/clipboard", () => ({ copyText: vi.fn() }));
 
 vi.mock("../../lib/sse", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/sse")>();
@@ -111,12 +115,14 @@ vi.mock("../../lib/sse", async (importOriginal) => {
 });
 
 import {
+  ApiError,
   api,
   type ConversationDetail,
   type ConversationList,
   type ConversationListQuery,
   type ConversationOut,
 } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 import type { TitleStreamEvent } from "../../lib/sse";
 import locale from "../../locales/vi.json";
 import { Sidebar, sortConversations } from "./Sidebar";
@@ -616,7 +622,7 @@ describe("T-S.13 — muc Da ghim day du", () => {
 });
 
 describe("T-S.13 — menu hang (ban T-HD2-v2 H6)", () => {
-  it("20. thu tu Doi ten · Ghim · Chia se · Xuat · ── · Xoa; hai muc cho `aria-disabled`, bam khong lam gi", async () => {
+  it("20. thu tu Doi ten · Ghim · Chia se · Xuat · ── · Xoa; Chia se KHONG con `aria-disabled`, Xuat cho, bam khong lam gi", async () => {
     serve({ pages: [page([conversation({ id: "a", title: "Một" })])] });
 
     mount();
@@ -630,14 +636,14 @@ describe("T-S.13 — menu hang (ban T-HD2-v2 H6)", () => {
 
     const share = within(menu).getByRole("menuitem", { name: "Chia sẻ" });
     const exportItem = within(menu).getByRole("menuitem", { name: "Xuất" });
-    expect(share).toHaveAttribute("aria-disabled", "true");
-    expect(share).toHaveAttribute("data-planned", "T-8.1");
+    // T-8.2 — DoD dong 1: menu hang khong con muc `aria-disabled` "Chia se".
+    expect(share).not.toHaveAttribute("aria-disabled");
+    expect(share).not.toHaveAttribute("data-planned");
     expect(exportItem).toHaveAttribute("aria-disabled", "true");
     expect(exportItem).toHaveAttribute("data-planned", "T-8.7");
     // Khong dung `disabled` cua Radix (mui ten se bo qua muc ay).
-    expect(share).not.toHaveAttribute("data-disabled");
+    expect(exportItem).not.toHaveAttribute("data-disabled");
 
-    await userEvent.click(share);
     await userEvent.click(exportItem);
     expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(api.updateConversation).not.toHaveBeenCalled();
@@ -656,8 +662,8 @@ describe("T-S.13 — menu hang (ban T-HD2-v2 H6)", () => {
     await user.keyboard("{Enter}");
     const menu = await screen.findByRole("menu");
     await waitFor(() => expect(within(menu).getByRole("menuitem", { name: "Đổi tên" })).toHaveFocus());
-    await user.keyboard("{ArrowDown}{ArrowDown}");
-    expect(within(menu).getByRole("menuitem", { name: "Chia sẻ" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
+    expect(within(menu).getByRole("menuitem", { name: "Xuất" })).toHaveFocus();
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Sắp có");
 
     await user.keyboard("{Escape}");
@@ -848,5 +854,92 @@ describe("T-S.13 — tieu de chay (useTitleStreams)", () => {
     expect(await screen.findByRole("button", { name: "Tên tay" })).toBeInTheDocument();
     expect(streams[0].close).toHaveBeenCalled();
     expect(document.querySelector('.motion-title[data-state="streaming"]')).toBeNull();
+  });
+});
+
+describe("T-8.2 — hop thoai Chia se (ban T-HD12)", () => {
+  const LINK = { token: "tok", url: "https://localhost/s/tok" };
+  const shareMock = () => vi.mocked(api.createShare);
+  const keysSent = () => shareMock().mock.calls.map(([, key]) => key);
+
+  beforeEach(() => {
+    serve({ pages: [page([conversation({ id: "a", title: "Một" })])] });
+    shareMock().mockReset();
+    vi.mocked(copyText).mockReset();
+  });
+
+  async function openShare(): Promise<HTMLElement> {
+    await screen.findByText("Một");
+    await throughMenu("Một", "Chia sẻ");
+    return screen.findByRole("dialog", { name: "Chia sẻ hội thoại" });
+  }
+
+  it("28. mo hop thoai ⇒ dung MOT POST co Idempotency-Key, hien link + hai cau ADR-14 / R15", async () => {
+    shareMock().mockResolvedValue(LINK);
+    mount();
+
+    const dialog = await openShare();
+
+    expect(await within(dialog).findByDisplayValue(LINK.url)).toBeInTheDocument();
+    expect(shareMock()).toHaveBeenCalledTimes(1);
+    expect(shareMock().mock.calls[0][0]).toBe("a");
+    expect(keysSent()[0]).toMatch(/.{8,}/);
+    expect(dialog).toHaveTextContent(locale["share.snapshotNote"]);
+    expect(dialog).toHaveTextContent(locale["share.irrevocable"]);
+  });
+
+  it("29. dong roi mo lai ⇒ POST thu hai mang khoa KHAC (moi lan mo mot anh chup)", async () => {
+    shareMock().mockResolvedValue(LINK);
+    mount();
+
+    const dialog = await openShare();
+    await within(dialog).findByDisplayValue(LINK.url);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Đóng hộp thoại" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // Muc menu da bien mat ⇒ tieu diem ve nut "⋯", khong roi vao body.
+    expect(rowMenuButton("Một")).toHaveFocus();
+
+    await openShare();
+
+    await waitFor(() => expect(shareMock()).toHaveBeenCalledTimes(2));
+    const [first, second] = keysSent();
+    expect(second).not.toBe(first);
+  });
+
+  it("30. Sao chep ⇒ copyText(url)", async () => {
+    shareMock().mockResolvedValue(LINK);
+    vi.mocked(copyText).mockResolvedValue(true);
+    mount();
+
+    const dialog = await openShare();
+    await within(dialog).findByDisplayValue(LINK.url);
+    await userEvent.click(within(dialog).getByRole("button", { name: /Sao chép/ }));
+
+    expect(copyText).toHaveBeenCalledWith(LINK.url);
+  });
+
+  it("31. POST 500 ⇒ cau loi chung + Thu lai; Thu lai gui CUNG khoa", async () => {
+    shareMock()
+      .mockRejectedValueOnce(new ApiError(500, "INTERNAL", "loi"))
+      .mockResolvedValueOnce(LINK);
+    mount();
+
+    const dialog = await openShare();
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(locale["share.error.generic"]);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Thử lại" }));
+
+    expect(await within(dialog).findByDisplayValue(LINK.url)).toBeInTheDocument();
+    const [first, second] = keysSent();
+    expect(second).toBe(first);
+  });
+
+  it("32. 409 GENERATION_IN_PROGRESS ⇒ cau theo ma, khong phai cau chung", async () => {
+    shareMock().mockRejectedValue(new ApiError(409, "GENERATION_IN_PROGRESS", "dang chay"));
+    mount();
+
+    const dialog = await openShare();
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(locale["share.error.generating"]);
   });
 });
