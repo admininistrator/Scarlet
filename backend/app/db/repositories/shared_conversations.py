@@ -1,6 +1,7 @@
 """Repository của `shared_conversations` (ADR-14, §16.1) — T-8.1.
 
-Hai câu: chủ ghi một snapshot; người lạ đọc nó. Đọc **không** có `user_id` —
+Ba câu: chủ ghi một snapshot; người lạ đọc nó; người fork đọc nó (T-8.3).
+Đọc **không** có `user_id` —
 token (128 bit, Phụ lục A) là toàn bộ quyền. Tăng `view_count` và đọc trong
 MỘT câu `UPDATE … RETURNING`: không đọc rồi ghi (hai người xem cùng lúc mất
 một lượt đếm).
@@ -11,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import SharedConversation
@@ -46,5 +47,12 @@ class SharedConversationRepository:
             .where(SharedConversation.token == token, SharedConversation.revoked_at.is_(None))
             .values(view_count=SharedConversation.view_count + 1)
             .returning(SharedConversation.snapshot_json)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def read_snapshot(self, token: str) -> dict[str, Any] | None:
+        """Snapshot cho fork (T-8.3) — KHÔNG tăng `view_count` (fork không phải lượt xem)."""
+        stmt = select(SharedConversation.snapshot_json).where(
+            SharedConversation.token == token, SharedConversation.revoked_at.is_(None)
         )
         return (await self._session.execute(stmt)).scalar_one_or_none()

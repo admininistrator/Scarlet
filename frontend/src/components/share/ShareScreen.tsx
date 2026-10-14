@@ -1,10 +1,24 @@
-import { CircleAlert, CodeXml, Download, File, FileText, Link2Off, RotateCcw, type IconNode } from "lucide";
+import {
+  CircleAlert,
+  CodeXml,
+  Download,
+  File,
+  FileText,
+  Link2Off,
+  LoaderCircle,
+  MessageSquarePlus,
+  RotateCcw,
+  type IconNode,
+} from "lucide";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link, generatePath, useNavigate, useParams, useSearchParams } from "react-router";
 
+import { useSession } from "../../app/Layout";
 import { PATHS } from "../../app/paths";
+import { conversationHref } from "../../features/chat/useChat";
 import {
   ApiError,
+  ERROR_CODES,
   api,
   type PublicArtifact,
   type PublicAttachment,
@@ -12,6 +26,7 @@ import {
   type PublicShare,
 } from "../../lib/api";
 import { DISPLAY_LOCALE, t } from "../../lib/i18n";
+import { newKey } from "../../lib/idempotency";
 import { Markdown } from "../chat/Markdown";
 import { StaticIcon } from "../ui/Icon";
 
@@ -37,7 +52,8 @@ import { StaticIcon } from "../ui/Icon";
  * Noindex hai lop (Q-P8-5): Nginx gan `X-Robots-Tag` cho `/s/`, trang gan them
  * `<meta name="robots">` khi vao route va go khi roi.
  *
- * Nut "Chat tiep" cua ban ve la viec cua T-8.3.
+ * "Chat tiep" (T-8.3): co phien ⇒ `POST /s/{token}/fork` roi mo hoi thoai moi;
+ * khong phien ⇒ `/dang-nhap?next=/s/<token>?fork=1`, ve lai thi tu fork MOT lan.
  */
 
 type ShareState =
@@ -47,6 +63,25 @@ type ShareState =
   | { status: "error" };
 
 const SHARE_NOT_FOUND = "SHARE_NOT_FOUND";
+
+/** Co `?fork=1` tren duong ve tu dang nhap (T-8.3). */
+const FORK_PARAM = "fork";
+/** Khoa Idempotency cua lan fork dang do, theo token (B-260). */
+const forkKeyName = (token: string) => `scarlet.fork.${token}`;
+
+/** `/dang-nhap?next=/s/<token>?fork=1` — `LoginRoute` loc `next` qua `safeNext`. */
+export function loginHrefFor(token: string): string {
+  const next = `${generatePath(PATHS.share, { token })}?${FORK_PARAM}=1`;
+  return `${PATHS.login}?${new URLSearchParams({ next }).toString()}`;
+}
+
+/** `403` cua `require_status` ⇒ cau theo ma; con lai ⇒ cau chung. */
+const CONTINUE_ERROR: Partial<Record<string, "publicShare.continuePendingApproval" | "publicShare.continueEmailNotVerified">> = {
+  PENDING_APPROVAL: "publicShare.continuePendingApproval",
+  EMAIL_NOT_VERIFIED: "publicShare.continueEmailNotVerified",
+};
+
+type ContinueState = { status: "idle" } | { status: "copying" } | { status: "error"; code: string | null };
 
 const dateFormat = new Intl.DateTimeFormat(DISPLAY_LOCALE, { dateStyle: "long" });
 
@@ -89,9 +124,77 @@ function usePublicShare(token: string) {
   return { state, retry };
 }
 
+/**
+ * "Chat tiep" — T-8.3. Khoa Idempotency vao `sessionStorage` theo token TRUOC
+ * `await` dau tien: StrictMode chay effect `fork=1` hai lan, lan hai thay khoa
+ * ⇒ khong POST nua (B-260). Server da tra loi (ke ca loi) ⇒ khoa da nha ⇒ bo;
+ * mat mang ⇒ giu, bam lai di cung khoa.
+ */
+function useContinueFromShare(token: string) {
+  const session = useSession();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const [state, setState] = useState<ContinueState>({ status: "idle" });
+  const signedIn = session.user !== null;
+
+  const fork = useCallback(async () => {
+    const storageKey = forkKeyName(token);
+    const key = sessionStorage.getItem(storageKey) ?? newKey();
+    sessionStorage.setItem(storageKey, key);
+    setState({ status: "copying" });
+    try {
+      const { conversation_id } = await api.forkShare(token, key);
+      sessionStorage.removeItem(storageKey);
+      void navigate(conversationHref(conversation_id));
+    } catch (e: unknown) {
+      if (!(e instanceof ApiError)) {
+        setState({ status: "error", code: null });
+        return;
+      }
+      sessionStorage.removeItem(storageKey);
+      if (e.code === ERROR_CODES.UNAUTHENTICATED) {
+        void navigate(loginHrefFor(token));
+        return;
+      }
+      setState({ status: "error", code: e.code });
+    }
+  }, [token, navigate]);
+
+  const start = useCallback(() => {
+    if (session.loading) {
+      return;
+    }
+    if (signedIn) {
+      void fork();
+    } else {
+      void navigate(loginHrefFor(token));
+    }
+  }, [session.loading, signedIn, fork, navigate, token]);
+
+  const wantsFork = params.get(FORK_PARAM) === "1";
+  useEffect(() => {
+    if (session.loading || !wantsFork) {
+      return;
+    }
+    setParams(
+      (current) => {
+        current.delete(FORK_PARAM);
+        return current;
+      },
+      { replace: true },
+    );
+    if (signedIn && sessionStorage.getItem(forkKeyName(token)) === null) {
+      void fork();
+    }
+  }, [session.loading, wantsFork, signedIn, token, fork, setParams]);
+
+  return { state, start };
+}
+
 export function ShareScreen() {
   const { token = "" } = useParams();
   const { state, retry } = usePublicShare(token);
+  const cont = useContinueFromShare(token);
   useNoindex();
 
   useEffect(() => {
@@ -116,12 +219,22 @@ export function ShareScreen() {
           <Link to={PATHS.home} className="inline-flex min-h-touch items-center rounded-md text-xl font-bold text-foreground">
             {t("publicShare.brand")}
           </Link>
+          <span className="min-w-0 flex-1" />
+          {state.status === "ready" ? <ContinueButton state={cont.state} onStart={cont.start} /> : null}
         </div>
       </header>
+      {cont.state.status === "error" ? (
+        <p
+          role="alert"
+          className="motion-enter m-0 border-b border-border bg-danger-subtle px-gutter py-2.5 text-center text-sm text-danger-text sm:px-gutter-lg"
+        >
+          {t((cont.state.code && CONTINUE_ERROR[cont.state.code]) || "publicShare.continueError")}
+        </p>
+      ) : null}
 
       <main id="share-main" tabIndex={-1} className="px-gutter pt-8 pb-16 outline-none sm:px-gutter-lg sm:pt-12">
         {state.status === "ready" ? (
-          <ShareBody share={state.share} />
+          <ShareBody share={state.share} continueSlot={<ContinueButton state={cont.state} onStart={cont.start} />} />
         ) : state.status === "loading" ? (
           <LoadingBody />
         ) : state.status === "notFound" ? (
@@ -143,9 +256,24 @@ export function ShareScreen() {
   );
 }
 
+/* ---------------- Chat tiep ---------------- */
+
+const primaryButton =
+  "motion-press control-disabled inline-flex min-h-touch shrink-0 items-center justify-center gap-2 rounded-md bg-accent px-4 text-base font-semibold text-accent-foreground hover:bg-accent-hover";
+
+function ContinueButton({ state, onStart }: { state: ContinueState; onStart: () => void }) {
+  const copying = state.status === "copying";
+  return (
+    <button type="button" onClick={copying ? undefined : onStart} aria-busy={copying} className={primaryButton}>
+      <StaticIcon icon={copying ? LoaderCircle : MessageSquarePlus} size={18} className={copying ? "motion-spin" : undefined} />
+      {copying ? t("publicShare.copying") : t("publicShare.continue")}
+    </button>
+  );
+}
+
 /* ---------------- noi dung ---------------- */
 
-function ShareBody({ share }: { share: PublicShare }) {
+function ShareBody({ share, continueSlot }: { share: PublicShare; continueSlot: ReactNode }) {
   return (
     <div className={`${column} flex flex-col`}>
       <h1 className="m-0 text-2xl font-bold text-pretty">{share.title ?? t("sidebar.untitled")}</h1>
@@ -164,6 +292,11 @@ function ShareBody({ share }: { share: PublicShare }) {
           </li>
         ))}
       </ol>
+
+      <div className="mt-16 flex flex-col items-start gap-4 border-t border-border pt-8 sm:flex-row sm:items-center">
+        <p className="m-0 flex-1 text-base leading-relaxed text-muted text-pretty">{t("publicShare.continueHint")}</p>
+        {continueSlot}
+      </div>
     </div>
   );
 }

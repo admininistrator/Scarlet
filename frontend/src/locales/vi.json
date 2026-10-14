@@ -698,6 +698,12 @@
   "publicShare.errorHint": "Kiểm tra kết nối rồi thử lại.",
   "publicShare.retry": "Thử lại",
   "publicShare.goHome": "Về Scarlet",
+  "publicShare.continue": "Chat tiếp",
+  "publicShare.continueHint": "Chat tiếp tạo một bản sao trong tài khoản của bạn để hỏi tiếp. Bản chia sẻ không đổi.",
+  "publicShare.copying": "Đang tạo bản sao…",
+  "publicShare.continueError": "Chưa tạo được bản sao. Hãy thử lại.",
+  "publicShare.continuePendingApproval": "Tài khoản của bạn đang chờ quản trị viên duyệt. Chat tiếp được sau khi được duyệt.",
+  "publicShare.continueEmailNotVerified": "Bạn cần xác thực email trước khi chat tiếp. Mở thư xác thực trong hộp thư của bạn.",
   "code.region": "Khối mã, cuộn để xem hết",
   "markdown.tableRegion": "Bảng, cuộn ngang để xem hết cột"
 }

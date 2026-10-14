@@ -2,8 +2,13 @@
 
     POST /api/v1/conversations/{id}/share   chủ ⇒ 201 {token, url}   (`router`)
     GET  /api/v1/s/{token}                  CÔNG KHAI, không cookie    (`public_router`)
+    POST /api/v1/s/{token}/fork             người gọi ⇒ 201 {conversation_id} (`router`, T-8.3)
 
 KH tham chiếu: ADR-14, §16.1, §17.2, §18.5, §20, Phụ lục A · NQ-149 (Q-P8-4, Q-P8-5).
+
+**Fork là đường DUY NHẤT dữ liệu của A thành của B (T-8.3)** — nên nó CHÉP:
+mọi hàng mới mang id mới, mọi object chép từ `share/<token>/` sang khoá của
+người gọi. Chỉ đọc `snapshot_json` (hội thoại gốc có thể đã xoá / đổi).
 
 **Hai router, cố ý (Cạm bẫy ⑦).** `router` gắn ở `include_router` cùng
 `_AUTHENTICATED` (danh tính + §11.4); `public_router` gắn trần. POST nằm ở
@@ -33,19 +38,23 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.catalog import get_catalog
 from app.config.settings import settings
 from app.core import storage
-from app.core.deps import get_current_user_id
+from app.core.deps import STATUSES_CAN_CHAT_SYSTEM_KEY, get_current_user_id, require_status
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
 from app.db.models import (
     Artifact,
+    ArtifactOrigin,
     Attachment,
     AttachmentKind,
     Message,
     MessageRole,
     MessageStatus,
+    User,
 )
 from app.db.repositories import (
     ArtifactRepository,
@@ -65,6 +74,8 @@ SHARE_TOKEN_BYTES = 16
 SNAPSHOT_VERSION = 1
 #: Tên route cho `IDEMPOTENCY_REQUIRED_ROUTES` (A8) — tên hàm handler.
 SHARE_ROUTE_NAME = "share_conversation"
+#: T-8.3 — fork tạo hội thoại ⇒ khoá bắt buộc (A8).
+FORK_ROUTE_NAME = "fork_share"
 
 #: MỌI khoá được phép xuất hiện trong `snapshot_json`, ở mọi tầng. Thêm khoá
 #: ở `build_snapshot` mà không thêm ở đây ⇒ test danh sách trắng đỏ.
@@ -105,6 +116,18 @@ class ShareOut(BaseModel):
 
     token: str
     url: str
+
+
+class ForkOut(BaseModel):
+    """Chỉ id — không đưa cả hội thoại vào khoá `idem:` (B-145, Cạm bẫy ⑦ T-8.3)."""
+
+    conversation_id: uuid.UUID
+
+
+#: Fork đòi tài khoản `active`. `require_app_access` của router cho cả
+#: `pending_*` qua (cột "Xem UI" §11.1) ⇒ thêm cột "Chat bằng system key" ở
+#: route: bản fork chỉ để chat tiếp, mà `pending_*` chưa chat được.
+_require_active = require_status(STATUSES_CAN_CHAT_SYSTEM_KEY)
 
 
 def build_snapshot(
@@ -269,12 +292,16 @@ async def _copy_all(copies: dict[str, str]) -> None:
         except Exception as exc:
             logger.warning("share: chep %s that bai (%s)", target, type(exc).__name__)
             await _remove_best_effort(done)
-            raise ApiError(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                ApiErrorCode.SHARE_STORAGE_UNAVAILABLE,
-                "khong chep duoc anh/tep sang ban chia se, thu lai sau",
-            ) from exc
+            raise _storage_unavailable() from exc
         done.append(target)
+
+
+def _storage_unavailable() -> ApiError:
+    return ApiError(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        ApiErrorCode.SHARE_STORAGE_UNAVAILABLE,
+        "khong chep duoc anh/tep, thu lai sau",
+    )
 
 
 async def _remove_best_effort(keys: Iterable[str]) -> None:
@@ -283,6 +310,125 @@ async def _remove_best_effort(keys: Iterable[str]) -> None:
             await storage.remove(key)
         except Exception as exc:
             logger.warning("share: khong go duoc ban chep do %s (%s)", key, type(exc).__name__)
+
+
+@router.post(
+    "/s/{token}/fork",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ForkOut,
+    dependencies=[Depends(_require_active)],
+    responses={
+        403: {"model": ErrorEnvelope, "description": "EMAIL_NOT_VERIFIED / PENDING_APPROVAL"},
+        404: {"model": ErrorEnvelope, "description": "SHARE_NOT_FOUND"},
+        503: {"model": ErrorEnvelope, "description": "SHARE_STORAGE_UNAVAILABLE"},
+    },
+)
+async def fork_share(
+    token: str, user_id: Annotated[uuid.UUID, Depends(get_current_user_id)]
+) -> ForkOut:
+    """Snapshot ⇒ hội thoại MỚI của người gọi (§16.1 "Fork", UC-11 dòng 3).
+
+    Cùng lối ba bước của `share_conversation`: đọc · chép object ngoài session ·
+    ghi một transaction. Ghi hỏng ⇒ gỡ các bản chép, không để object mồ côi.
+    """
+    async with session_scope() as session:
+        snapshot = await SharedConversationRepository(session).read_snapshot(token)
+        default_model = await session.scalar(select(User.default_model).where(User.id == user_id))
+    if snapshot is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND, ApiErrorCode.SHARE_NOT_FOUND, "link chia se khong ton tai"
+        )
+
+    # Khoá của người gọi (§15.1), GIỮ đuôi của bản chép: đoán MIME từ đuôi là
+    # mất mát (`.xlsx` không có trong bảng của stdlib ⇒ `.bin`).
+    copies = {
+        item["key"]: storage.object_key(user_id, "") + PurePosixPath(item["key"]).suffix
+        for message in snapshot["messages"]
+        for item in (*message["attachments"], *message["artifacts"])
+        if "key" in item
+    }
+    await _copy_all(copies)
+    try:
+        try:
+            sizes = {target: await storage.size(target) for target in copies.values()}
+        except Exception as exc:
+            raise _storage_unavailable() from exc
+        async with session_scope() as session:
+            conversation_id = await _write_fork(
+                session, user_id, snapshot, copies, sizes, default_model
+            )
+            await session.commit()
+    except Exception:
+        await _remove_best_effort(copies.values())
+        raise
+    return ForkOut(conversation_id=conversation_id)
+
+
+async def _write_fork(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    snapshot: dict[str, Any],
+    copies: dict[str, str],
+    sizes: dict[str, int],
+    default_model: str | None,
+) -> uuid.UUID:
+    """Một chuỗi `parent_id`, MỖI HÀNG MỘT `INSERT` (NQ-18 ③, B-57).
+
+    `INSERT … SELECT` một câu ra `created_at` trùng ⇒ `sibling_index` sai (C13).
+    Assistant `model_id NULL` (snapshot không có), `feedback NULL` (T-3.7a ③ —
+    cột không mang `user_id`). Tài liệu chỉ có tên mà `attachments.storage_key`
+    NOT NULL ⇒ không hàng. Message không chữ, không tệp, không artifact — trang
+    công khai không vẽ (B-416 ③) — cũng không chép.
+    """
+    conversations = ConversationRepository(session)
+    conversation = await conversations.create_conversation(
+        user_id=user_id, title=snapshot["title"], default_model=default_model
+    )
+    messages = MessageRepository(session)
+    attachments = AttachmentRepository(session)
+    parent: uuid.UUID | None = None
+    for entry in snapshot["messages"]:
+        if not (entry["content"] or entry["attachments"] or entry["artifacts"]):
+            continue
+        message = await messages.create_message(
+            conversation_id=conversation.id,
+            user_id=user_id,
+            role=MessageRole(entry["role"]),
+            parent_id=parent,
+            content=entry["content"],
+            status=MessageStatus.COMPLETED,
+        )
+        parent = message.id
+        for item in entry["attachments"]:
+            if item["kind"] != "image":
+                continue
+            key = copies[item["key"]]
+            await attachments.create(
+                user_id=user_id,
+                message_id=message.id,
+                kind=AttachmentKind.IMAGE,
+                mime_type=storage.content_type_for(key),
+                original_name=item["name"],
+                size_bytes=sizes[key],
+                storage_key=key,
+                width=item["width"],
+                height=item["height"],
+            )
+        for item in entry["artifacts"]:
+            session.add(
+                Artifact(
+                    message_id=message.id,
+                    kind=item["kind"],
+                    language=item.get("language"),
+                    title=item["title"],
+                    content=item.get("content"),
+                    storage_key=copies[item["key"]] if "key" in item else None,
+                    origin=ArtifactOrigin.MODEL,
+                )
+            )
+            await session.flush()
+    await conversations.set_active_leaf(conversation.id, user_id=user_id, message_id=parent)
+    return conversation.id
 
 
 @public_router.get(

@@ -132,6 +132,12 @@ async def copy(source_key: str, target_key: str) -> None:
     )
 
 
+async def size(key: str) -> int:
+    """Số byte của object (`StatObject`) — fork cần `attachments.size_bytes` (T-8.3)."""
+    stat = await asyncio.to_thread(_client().stat_object, settings.MINIO_BUCKET, key)
+    return stat.size or 0
+
+
 async def remove(key: str) -> None:
     await asyncio.to_thread(_client().remove_object, settings.MINIO_BUCKET, key)
 

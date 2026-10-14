@@ -86,6 +86,8 @@ IDEMPOTENCY_REQUIRED_ROUTES = frozenset(
         settings_router.CREATE_BYOK_ENDPOINT_ROUTE_NAME,
         # T-8.1: tạo một snapshot + token (A8, luật ③ của P8).
         share.SHARE_ROUTE_NAME,
+        # T-8.3: fork tạo một hội thoại (A8) — StrictMode / bấm hai lần là một bản.
+        share.FORK_ROUTE_NAME,
     }
 )
 

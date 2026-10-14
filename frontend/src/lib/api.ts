@@ -1457,4 +1457,15 @@ export const api = {
 
   /** T-8.2 — trang cong khai; khong can phien. `404 SHARE_NOT_FOUND` cho ca link sai lan da go. */
   getShare: (token: string) => request<PublicShare>(`/s/${encodeURIComponent(token)}`),
+
+  /**
+   * T-8.3 — "Chat tiep": snapshot ⇒ hoi thoai MOI cua nguoi bam. Khoa (A8) do
+   * nguoi goi giu theo token trong `sessionStorage` — StrictMode / quay ve tu
+   * dang nhap khong thanh hai ban (B-260). `403` ⇒ tai khoan chua `active`.
+   */
+  forkShare: (token: string, idempotencyKey: string) =>
+    request<{ conversation_id: string }>(`/s/${encodeURIComponent(token)}/fork`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
 };

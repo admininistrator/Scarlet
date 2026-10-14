@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api.v1 import IDEMPOTENCY_REQUIRED_ROUTES
 from app.api.v1.messages import CREATE_MESSAGE_ROUTE_NAME, RETRY_ROUTE_NAME
 from app.api.v1.settings import CREATE_BYOK_ENDPOINT_ROUTE_NAME
-from app.api.v1.share import SHARE_ROUTE_NAME
+from app.api.v1.share import FORK_ROUTE_NAME, SHARE_ROUTE_NAME
 from app.config import catalog
 from app.config.settings import settings
 from app.core.access_token import encode_access_token
@@ -915,6 +915,7 @@ def test_route_name_matches_function() -> None:
         RETRY_ROUTE_NAME,
         CREATE_BYOK_ENDPOINT_ROUTE_NAME,
         SHARE_ROUTE_NAME,
+        FORK_ROUTE_NAME,
     }
     assert frozenset(expected) == IDEMPOTENCY_REQUIRED_ROUTES
     # `url_path_for` ném `NoMatchFound` nếu không route nào mang tên ấy — đó
@@ -932,6 +933,8 @@ def test_route_name_matches_function() -> None:
     assert str(retry_path).endswith("/retry")
     assert str(byok_path).endswith("/settings/byok-endpoints")
     assert str(share_path).endswith("/share")
+    # T-8.3: fork tạo hội thoại mới (A8).
+    assert str(app.url_path_for(FORK_ROUTE_NAME, token="t")).endswith("/s/t/fork")
 
 
 # ═══════════════ A1 dạng kiểm được bằng grep (§5.3, DoD) ══════════════════
