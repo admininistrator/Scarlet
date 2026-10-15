@@ -15,6 +15,22 @@
       content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
     />
     <title>Scarlet</title>
+    <!--
+      T-8.8 — PWA theo T-HD12 · v1; tep o `public/` (Vite phuc vu o goc).
+      KHONG service worker (Q-P8-2): Chromium cai duoc chi voi manifest;
+      offline => B-413.
+      A3: hai mau duoi day la literal BAT BUOC — `<meta>` va manifest khong doc
+      duoc var(). Chep tu `--color-background` cua design/theme.css (sang
+      #f7f6f4 · toi #171514); `src/pwaColors.test.ts` so lai voi theme.css.
+      `media` theo he dieu hanh, khong theo nut doi theme cua app.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f6f4" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171514" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: dark)" href="/favicon-dark.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Scarlet" />
     <script>
       // Chay truoc khi React mount de tranh nhap nhay mau (FOUC) khi doi theme.
       // Doc §19.1: sang/toi doi bang data-theme tren <html>, mac dinh theo he thong.
