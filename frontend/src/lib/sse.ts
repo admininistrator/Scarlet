@@ -173,6 +173,13 @@ export interface StreamParams<E extends { event: EventType } = StreamEvent> {
   onFatal?: (reason: string) => void;
   /** Khung doc khong duoc. Mac dinh in ra console, khong nuot. */
   onWarning?: (reason: string) => void;
+  /**
+   * T-9.8 — chay khi trinh duyet bo cuoc, TRUOC lan mo lai: `EventSource` khong
+   * doc duoc ma trang thai, `401` chi la `onerror` (Cam bay ⑥). `useChat` hoi
+   * `me()` o day ⇒ `401` thi lam moi phien, lan mo lai mang cookie moi + cursor.
+   * Nem thi bo qua — lich noi lai van chay nhu cu.
+   */
+  beforeReconnect?: () => Promise<unknown>;
 }
 
 export interface StreamHandle {
@@ -286,7 +293,14 @@ export function openStream<E extends { event: EventType } = StreamEvent>(
       // Trinh duyet da bo cuoc (Offline, 404, 401...) va se KHONG thu lai.
       // MINH nhan viec — khong phai minh cung bo cuoc (diem 2, B-115).
       closeConnection();
-      scheduleReconnect();
+      if (params.beforeReconnect === undefined) {
+        scheduleReconnect();
+        return;
+      }
+      Promise.resolve()
+        .then(params.beforeReconnect)
+        .catch(() => undefined)
+        .then(() => scheduleReconnect());
       return;
     }
 

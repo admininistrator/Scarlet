@@ -714,6 +714,9 @@ export function useChat(options: ChatOptions = NO_OPTIONS): ChatState {
           setError(text);
         },
         onWarning: setError,
+        // T-9.8: phien het han giua luot ⇒ `me()` `401` ⇒ `request()` lam moi;
+        // lan mo lai sau do mang cookie moi va cursor cuoi (§7.3).
+        beforeReconnect: api.me,
         onEvent: (event) => {
           switch (event.event) {
             case "start":

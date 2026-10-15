@@ -61,6 +61,8 @@ export class ApiError extends Error {
 /** Ma loi FE co phan nhanh theo. Chuoi khop `ApiErrorCode` cua backend. */
 export const ERROR_CODES = {
   UNAUTHENTICATED: "UNAUTHENTICATED",
+  /** T-9.8 — JWT dung chu ky nhung qua `exp` (cookie con, vd. dong ho lech). */
+  TOKEN_EXPIRED: "TOKEN_EXPIRED",
   GENERATING: "GENERATION_IN_PROGRESS",
   /**
    * `409` cua §11.4 — mot request KHAC mang cung `Idempotency-Key` con dang
@@ -91,7 +93,70 @@ export const ERROR_CODES = {
   QUOTA_EXCEEDED: "QUOTA_EXCEEDED",
 } as const;
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * T-9.8 (B-415) — lam moi phien: `POST /auth/refresh` it nhat co the.
+ *
+ * Refresh XOAY VONG (T-2.3): trinh lai MOT token da xoay la server thu hoi CA
+ * family ⇒ hai loi goi refresh song song (5 request cung `401`, StrictMode ban
+ * doi effect, hai tab) la tu dang xuat nguoi dung. Hai lop chan:
+ *
+ *   • trong tab — mot `Promise` dung chung (`refreshing`);
+ *   • cheo tab  — Web Locks `navigator.locks`; trong khoa hoi `GET /auth/me`
+ *     truoc: tab khac vua lam moi thi cookie moi da co ⇒ khong refresh nua.
+ *
+ * Trinh duyet khong co `navigator.locks` ⇒ chi con lop trong tab.
+ *
+ * Hai loi goi ben trong la `fetch` THO, khong qua `request()` — qua do thi
+ * mot `401` cua chinh no lai goi `refreshSession()` va tu cho chinh minh.
+ * Tra `true` = phien song lai (thu lai request goc duoc); moi hong khac `false`.
+ */
+let refreshing: Promise<boolean> | null = null;
+
+const REFRESH_LOCK = "scarlet-refresh";
+
+export function refreshSession(): Promise<boolean> {
+  refreshing ??= (async () => {
+    try {
+      const renew = async () => {
+        const me = await fetch(`${BASE_URL}/auth/me`, { credentials: "same-origin" });
+        if (me.ok) {
+          return true;
+        }
+        const res = await fetch(`${BASE_URL}/auth/refresh`, {
+          method: "POST",
+          credentials: "same-origin",
+        });
+        return res.ok;
+      };
+      return await (typeof navigator !== "undefined" && navigator.locks
+        ? navigator.locks.request(REFRESH_LOCK, renew)
+        : renew());
+    } catch {
+      return false;
+    } finally {
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
+
+/**
+ * `401` nao dang lam moi. `UNAUTHENTICATED` co mat vi cookie phien `max_age` =
+ * TTL token: het han la trinh duyet XOA cookie, server khong bao gio thay
+ * `TOKEN_EXPIRED` (T-9.8 Cam bay ①). `TOKEN_REVOKED` thi khong — logout / doi
+ * mat khau la co y. `/auth/*` khong lam moi (login sai mat khau, chinh
+ * `/refresh`...) — tru `/auth/me`: cua vao app (`StatusGate`) va phep kiem
+ * phien truoc khi Xuat (T-8.7) di qua no.
+ */
+function shouldRefresh(path: string, err: ApiError): boolean {
+  return (
+    err.status === 401 &&
+    (err.code === ERROR_CODES.TOKEN_EXPIRED || err.code === ERROR_CODES.UNAUTHENTICATED) &&
+    (!path.startsWith("/auth/") || path === "/auth/me")
+  );
+}
+
+async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
     // Cookie danh tinh phai di kem. Same-origin la mac dinh cua fetch, nhung
@@ -107,7 +172,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    throw await parseError(res);
+    const err = await parseError(res);
+    // Thu lai DUNG MOT lan, cung `init` — cung `Idempotency-Key` (A8): server
+    // khu trung neu lan dau da toi duoc. Refresh hong ⇒ loi GOC, nhu truoc T-9.8.
+    if (!retried && shouldRefresh(path, err) && (await refreshSession())) {
+      return request<T>(path, init, true);
+    }
+    throw err;
   }
   if (res.status === 204) {
     return undefined as T;
