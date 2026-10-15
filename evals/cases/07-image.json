@@ -1,0 +1,21 @@
+{
+  "id": "07-image",
+  "check": "image",
+  "needs": [
+    "vision"
+  ],
+  "turns": [
+    {
+      "content": "Mô tả trong một câu những gì bạn thấy trong ảnh tôi gửi; nếu không có ảnh, trả lời: không có ảnh. Không dùng tool nào.",
+      "parent": "root"
+    },
+    {
+      "content": "Mô tả trong một câu những gì bạn thấy trong ảnh tôi gửi; nếu không có ảnh, trả lời: không có ảnh. Không dùng tool nào.",
+      "parent": "root",
+      "attachment": "07-image.png"
+    }
+  ],
+  "thresholds": {
+    "min_image_tokens": 100
+  }
+}

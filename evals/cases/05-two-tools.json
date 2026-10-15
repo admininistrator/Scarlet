@@ -1,0 +1,15 @@
+{
+  "id": "05-two-tools",
+  "check": "tool_rounds",
+  "needs": [
+    "tools"
+  ],
+  "turns": [
+    {
+      "content": "Làm tuần tự, KHÔNG gọi hai tool cùng lúc: bước 1 gọi tool load_skill với name \"docx\"; bước 2, chỉ sau khi đã nhận kết quả bước 1, gọi tool load_skill với name \"xlsx\". Cuối cùng so sánh hai skill trong hai câu."
+    }
+  ],
+  "thresholds": {
+    "min_rounds": 2
+  }
+}

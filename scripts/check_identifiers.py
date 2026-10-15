@@ -41,7 +41,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SCOPES = ("backend/", "frontend/src/", "scripts/", "fetcher/", "sandbox/", "skills/")
+SCOPES = ("backend/", "frontend/src/", "scripts/", "fetcher/", "sandbox/", "skills/", "evals/")
 PY_SUFFIXES = {".py"}
 TS_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mjs"}
 

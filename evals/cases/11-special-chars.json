@@ -1,0 +1,18 @@
+{
+  "id": "11-special-chars",
+  "check": "text",
+  "needs": [],
+  "turns": [
+    {
+      "content": "Repeat the text between <t> and </t> exactly, character for character, and output nothing else.\n<t>👩‍💻 nói \"xin chào\" \\ C:\\tmp\n👨‍👩‍👧 dòng hai</t>"
+    }
+  ],
+  "thresholds": {
+    "must_contain": [
+      "‍",
+      "\"",
+      "\\",
+      "\n"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "01-vi-short",
+  "check": "text",
+  "needs": [],
+  "turns": [
+    {
+      "content": "Trả lời bằng tiếng Việt có dấu, đúng hai câu: vì sao lá cây có màu xanh?"
+    }
+  ],
+  "thresholds": {
+    "require_diacritics": true
+  }
+}

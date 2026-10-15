@@ -38,6 +38,9 @@ from app.quota import estimator
 from app.tools import registry as registry_mod
 from app.workers.generate import generate
 
+# Model không `tools` có thể đang tắt (eval đỏ — T-9.1).
+pytestmark = pytest.mark.usefixtures("all_catalog_models_enabled")
+
 #: `TOOLS_MODEL` miễn phí (giá 0) — dự toán cần model có `tools` VÀ có giá.
 PRICED_TOOLS_MODEL = "claude-haiku"
 SKILL = "demo"

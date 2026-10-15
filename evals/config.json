@@ -1,0 +1,6 @@
+{
+  "_note": "T-9.1 — cấu hình của make eval (A3). max_cost_usd_per_run: trần tiền MỘT lần chạy một model, vượt ⇒ dừng, ca còn lại ghi aborted. tier: tier của user tạm (fetch_url cần can_use_web; ca 10 của claude-haiku ~0.12 USD — Cạm bẫy ⑦). timeout_factor: trần chờ một lượt = GENERATE_TIMEOUT_S × hệ số (B-278).",
+  "max_cost_usd_per_run": 0.25,
+  "tier": "trusted",
+  "timeout_factor": 1.1
+}

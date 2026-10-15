@@ -1,0 +1,15 @@
+{
+  "id": "10-context-full",
+  "check": "context_full",
+  "needs": [],
+  "seed_history_ratio": 1.2,
+  "turns": [
+    {
+      "content": "Without using any tool, reply with exactly one short sentence: what is two plus two?"
+    }
+  ],
+  "thresholds": {
+    "min_budget_fill": 0.8,
+    "max_budget_fill": 1.1
+  }
+}

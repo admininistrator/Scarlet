@@ -216,6 +216,13 @@ services:
     restart: unless-stopped
     networks: [internal]
     image: ollama/ollama:latest
+    environment:
+      # T-9.1 — `num_ctx` mac dinh cua Ollama la 4096 (do: `ollama ps` CONTEXT
+      # 4096) trong khi catalog khai `ol-qwen-small` context_window 32768 =>
+      # Ollama CAT DAU prompt trong im lang, ngan sach §9.6 vo nghia (Cam bay
+      # ③, ca 10 cua `make eval`). Phai bang context_window cua model Ollama
+      # trong config/model_catalog.json.
+      OLLAMA_CONTEXT_LENGTH: "32768"
     volumes: ["ollamadata:/root/.ollama"]
     healthcheck:
       # Image ollama khong co curl/wget; CLI `ollama` co san va `list` goi

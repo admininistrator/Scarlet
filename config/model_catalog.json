@@ -174,7 +174,7 @@
       "max_output": 4096,
       "pricing": null,
       "pricing_mode": "unmetered",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "order": 40,
       "badge": "Self-host"
@@ -190,7 +190,7 @@
       "max_output": 4096,
       "pricing": null,
       "pricing_mode": "unmetered",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "order": 50,
       "badge": null

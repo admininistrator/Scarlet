@@ -1,0 +1,14 @@
+{
+  "id": "12-two-turns",
+  "check": "history",
+  "needs": [],
+  "turns": [
+    {
+      "content": "Kể tên năm thành phố lớn của Việt Nam, mỗi thành phố kèm một câu giới thiệu. Không dùng tool nào."
+    },
+    {
+      "content": "Bây giờ hãy nhìn lại câu trả lời trước của bạn. Trong danh sách năm thành phố bạn vừa kể, thành phố đứng ở vị trí thứ ba là thành phố nào? Chỉ trả lời đúng tên thành phố đó: không giải thích, không nhắc lại câu hỏi, không thêm lời chào, không liệt kê lại các thành phố khác, không dùng chữ in đậm hay gạch đầu dòng. Nếu không chắc chắn, vẫn chỉ trả lời một tên thành phố mà bạn cho là đúng nhất."
+    }
+  ],
+  "thresholds": {}
+}

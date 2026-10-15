@@ -1,0 +1,15 @@
+{
+  "id": "04-one-tool",
+  "check": "one_tool",
+  "needs": [
+    "tools"
+  ],
+  "turns": [
+    {
+      "content": "Gọi tool load_skill với name là \"docx\" đúng một lần, rồi tóm tắt skill đó trong một câu."
+    }
+  ],
+  "thresholds": {
+    "tool": "load_skill"
+  }
+}

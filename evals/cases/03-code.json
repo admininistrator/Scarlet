@@ -1,0 +1,13 @@
+{
+  "id": "03-code",
+  "check": "code",
+  "needs": [],
+  "turns": [
+    {
+      "content": "Viết một hàm Python dài ít nhất 30 dòng (có docstring và chú thích từng bước) kiểm tra một chuỗi có phải số điện thoại di động Việt Nam hợp lệ không. Đặt toàn bộ code trong đúng một khối ```python."
+    }
+  ],
+  "thresholds": {
+    "language": "python"
+  }
+}

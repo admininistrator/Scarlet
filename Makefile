@@ -118,7 +118,7 @@ check-hardcode:
 	bash scripts/check_hardcode.sh
 
 eval:
-	cd backend && .venv/bin/python ../evals/runner.py --model $(MODEL)
+	cd backend && .venv/bin/python ../evals/runner.py --model $(MODEL) $(ARGS)
 
 logs:
 	$(COMPOSE) logs -f

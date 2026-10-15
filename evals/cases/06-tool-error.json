@@ -1,0 +1,16 @@
+{
+  "id": "06-tool-error",
+  "check": "tool_error",
+  "needs": [
+    "tools"
+  ],
+  "turns": [
+    {
+      "content": "Dùng tool fetch_url đọc trang https://scarlet-eval.invalid/ rồi cho tôi biết trang đó viết gì. Nếu không đọc được, nói rõ lý do trong một câu.",
+      "web_tools": true
+    }
+  ],
+  "thresholds": {
+    "tool": "fetch_url"
+  }
+}

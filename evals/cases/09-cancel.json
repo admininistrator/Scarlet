@@ -1,0 +1,12 @@
+{
+  "id": "09-cancel",
+  "check": "cancel",
+  "needs": [],
+  "turns": [
+    {
+      "content": "Viết một bài văn dài khoảng 1500 chữ về lịch sử Hà Nội.",
+      "cancel_after_first_delta": true
+    }
+  ],
+  "thresholds": {}
+}

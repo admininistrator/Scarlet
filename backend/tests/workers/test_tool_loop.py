@@ -49,6 +49,8 @@ FIXTURES = Path(__file__).parents[1] / "llm" / "fixtures"
 TOOLS_MODEL = "nr-gemini-flash"
 #: Model KHÔNG có `tools` (catalog thật).
 NO_TOOLS_MODEL = "ol-qwen-small"
+# Model không `tools` có thể đang tắt (eval đỏ — T-9.1).
+pytestmark = pytest.mark.usefixtures("all_catalog_models_enabled")
 PAGE_URL = "https://httpbin.org/html"
 PAGE_TEXT = "Herman Melville - Moby-Dick. Avast, me hearties..."
 

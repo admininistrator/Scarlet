@@ -1,0 +1,15 @@
+{
+  "id": "08-reasoning",
+  "check": "reasoning",
+  "needs": [
+    "reasoning"
+  ],
+  "turns": [
+    {
+      "content": "Một nhóm có 5 người, mỗi người bắt tay mỗi người khác đúng một lần. Có tất cả bao nhiêu cái bắt tay? Trả lời bằng một số."
+    }
+  ],
+  "thresholds": {
+    "leak_probe_chars": 200
+  }
+}

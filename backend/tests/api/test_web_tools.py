@@ -28,6 +28,9 @@ from app.db.repositories import ConversationRepository, MessageRepository
 from app.main import app
 from app.quota.tiers import tier_cache_key
 
+# Model không `tools` có thể đang tắt (eval đỏ — T-9.1).
+pytestmark = pytest.mark.usefixtures("all_catalog_models_enabled")
+
 API = "/api/v1"
 NO_TOOLS = "MODEL_NO_TOOLS"
 PAGE_TEXT = "chữ trang web rất dài KHÔNG được ra khỏi Postgres"

@@ -638,3 +638,19 @@ def _no_provider_probe_loop(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.core import provider_health
 
     monkeypatch.setattr(provider_health, "background", _no_background)
+
+
+@pytest.fixture
+def all_catalog_models_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bản sao catalog thật với MỌI model bật (lối `test_settings_personal` thay `_catalog`).
+
+    Test về capability (model không `tools`, không khối `reasoning`) hỏi về
+    HÌNH DẠNG của model, không hỏi hôm nay model nào đang bật — T-9.1: eval đỏ
+    ⇒ `enabled: false` (§21.3), và tắt một model không được làm đỏ `make test`.
+    """
+    from app.config import catalog
+
+    patched = catalog.get_catalog().model_copy(deep=True)
+    for model in patched.models:
+        model.enabled = True
+    monkeypatch.setattr(catalog, "_catalog", patched)

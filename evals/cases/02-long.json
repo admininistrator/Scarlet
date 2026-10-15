@@ -1,0 +1,13 @@
+{
+  "id": "02-long",
+  "check": "long",
+  "needs": [],
+  "turns": [
+    {
+      "content": "Write the integers from 1 to 1200 in increasing order, one per line, directly in your reply — do not use any tool. Output only the numbers, nothing else."
+    }
+  ],
+  "thresholds": {
+    "min_completion_tokens": 2000
+  }
+}

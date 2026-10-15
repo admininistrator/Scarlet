@@ -468,6 +468,8 @@ async def test_misspelled_new_field_is_422_not_a_silent_wipe(
 # ═════ 7. Mức suy luận: kiểm lúc GHI, bỏ qua lúc ĐỌC (T-S.5 Việc 1, 4) ═══════
 
 
+# Model không khối reasoning có thể đang tắt (eval đỏ — T-9.1).
+@pytest.mark.usefixtures("all_catalog_models_enabled")
 async def test_level_on_model_without_reasoning_is_400_reasoning_unsupported(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
