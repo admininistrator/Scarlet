@@ -30,10 +30,11 @@
  *  17. `truncated` ⇒ mot dong bao duoi Da ghim (NQ-129)
  *  18. `sidebar.pinScopeNote` bien khoi man hinh lan `vi.json`
  *  19. Cam bay ③ — bo ghim ⇒ doi muc NGAY, khong nap lai
- *  20. Menu hang: thu tu cua ban H6, Chia se la muc THAT (T-8.2), Xuat con cho `T-8.7`
- *  21. Esc tu muc cho ⇒ menu dong, tieu diem ve nut "⋯" (B-308 ②)
+ *  20. Menu hang: thu tu cua ban H6, Chia se (T-8.2) va Xuat (T-8.7) la muc THAT
+ *  21. Ban phim: `→` tren Xuat mo menu con, Esc dong CA menu, tieu diem ve "⋯"
  *  22–27. Tieu de chay (`useTitleStreams`) — xem khoi `describe` cuoi file
  *  28–32. Hop thoai Chia se (T-8.2, ban T-HD12) — khoi `describe` cuoi file
+ *  33–38. Menu con Xuat › (T-8.7) — khoi `describe` cuoi file
  *
  * ── Vi sao mock `../../lib/api` chu khong mock `fetch` ────────────────────
  *
@@ -85,6 +86,7 @@ vi.mock("../../lib/api", async (importOriginal) => {
       updateConversation: vi.fn(),
       deleteConversation: vi.fn(),
       createShare: vi.fn(),
+      me: vi.fn(),
     },
   };
 });
@@ -622,7 +624,7 @@ describe("T-S.13 — muc Da ghim day du", () => {
 });
 
 describe("T-S.13 — menu hang (ban T-HD2-v2 H6)", () => {
-  it("20. thu tu Doi ten · Ghim · Chia se · Xuat · ── · Xoa; Chia se KHONG con `aria-disabled`, Xuat cho, bam khong lam gi", async () => {
+  it("20. thu tu Doi ten · Ghim · Chia se · Xuat · ── · Xoa; khong con muc `aria-disabled` / `data-planned` nao", async () => {
     serve({ pages: [page([conversation({ id: "a", title: "Một" })])] });
 
     mount();
@@ -634,23 +636,11 @@ describe("T-S.13 — menu hang (ban T-HD2-v2 H6)", () => {
     );
     expect(entries).toEqual(["Đổi tên", "Ghim", "Chia sẻ", "Xuất", "──", "Xoá"]);
 
-    const share = within(menu).getByRole("menuitem", { name: "Chia sẻ" });
-    const exportItem = within(menu).getByRole("menuitem", { name: "Xuất" });
-    // T-8.2 — DoD dong 1: menu hang khong con muc `aria-disabled` "Chia se".
-    expect(share).not.toHaveAttribute("aria-disabled");
-    expect(share).not.toHaveAttribute("data-planned");
-    expect(exportItem).toHaveAttribute("aria-disabled", "true");
-    expect(exportItem).toHaveAttribute("data-planned", "T-8.7");
-    // Khong dung `disabled` cua Radix (mui ten se bo qua muc ay).
-    expect(exportItem).not.toHaveAttribute("data-disabled");
-
-    await userEvent.click(exportItem);
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(api.updateConversation).not.toHaveBeenCalled();
-    expect(api.deleteConversation).not.toHaveBeenCalled();
+    // T-8.2 / T-8.7 — DoD: menu hang khong con muc cho "Chia se" / "Xuat".
+    expect(menu.querySelectorAll('[aria-disabled="true"], [data-planned]')).toHaveLength(0);
   });
 
-  it("21. Esc khi tieu diem o muc cho (tooltip mo) ⇒ menu dong NGAY, tieu diem ve nut ⋯ (B-308 ②)", async () => {
+  it("21. ban phim: `→` tren Xuat mo menu con (tieu diem vao muc dau), Esc dong CA menu, tieu diem ve nut ⋯", async () => {
     serve({ pages: [page([conversation({ id: "a", title: "Một" })])] });
     const user = userEvent.setup();
 
@@ -664,13 +654,19 @@ describe("T-S.13 — menu hang (ban T-HD2-v2 H6)", () => {
     await waitFor(() => expect(within(menu).getByRole("menuitem", { name: "Đổi tên" })).toHaveFocus());
     await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
     expect(within(menu).getByRole("menuitem", { name: "Xuất" })).toHaveFocus();
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Sắp có");
+
+    await user.keyboard("{ArrowRight}");
+    const sub = await screen.findByRole("menu", { name: "Xuất" });
+    await waitFor(() =>
+      expect(within(sub).getByRole("menuitem", { name: locale["export.markdown"] })).toHaveFocus(),
+    );
 
     await user.keyboard("{Escape}");
 
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
     expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(api.me).not.toHaveBeenCalled();
   });
 });
 
@@ -941,5 +937,90 @@ describe("T-8.2 — hop thoai Chia se (ban T-HD12)", () => {
     const dialog = await openShare();
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(locale["share.error.generating"]);
+  });
+});
+
+describe("T-8.7 — menu con Xuat › (NQ-149 ⑥)", () => {
+  const meMock = () => vi.mocked(api.me);
+  /** Moi lan `<a>.click()` — href + co `download` — thay vi de jsdom dieu huong. */
+  let downloads: { href: string; download: boolean }[];
+
+  beforeEach(() => {
+    serve({ pages: [page([conversation({ id: "a", title: "Một" })])] });
+    meMock().mockReset().mockResolvedValue({} as Awaited<ReturnType<typeof api.me>>);
+    downloads = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push({ href: this.getAttribute("href") ?? "", download: this.hasAttribute("download") });
+    });
+  });
+
+  async function openExport(): Promise<HTMLElement> {
+    await screen.findByText("Một");
+    const menu = await openRowMenu("Một");
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Xuất" }));
+    return screen.findByRole("menu", { name: "Xuất" });
+  }
+
+  it("33. Xuat la muc THAT (`aria-haspopup`, khong cho) va mo menu con ba muc dung thu tu", async () => {
+    mount();
+
+    const sub = await openExport();
+
+    const trigger = screen.getByRole("menuitem", { name: "Xuất" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).not.toHaveAttribute("aria-disabled");
+    expect(trigger).not.toHaveAttribute("data-planned");
+    expect(within(sub).getAllByRole("menuitem").map((el) => el.textContent)).toEqual([
+      locale["export.markdown"],
+      locale["export.jsonPath"],
+      locale["export.jsonTree"],
+    ]);
+  });
+
+  it.each([
+    ["34", "export.markdown", "/api/v1/conversations/a/export?format=md"],
+    ["35", "export.jsonPath", "/api/v1/conversations/a/export?format=json"],
+    ["36", "export.jsonTree", "/api/v1/conversations/a/export?format=json&full=true"],
+  ] as const)("%s. %s ⇒ kiem phien TRUOC roi MOT <a download> toi %s", async (_n, key, href) => {
+    mount();
+    const sub = await openExport();
+
+    await userEvent.click(within(sub).getByRole("menuitem", { name: locale[key] }));
+
+    await waitFor(() => expect(downloads).toEqual([{ href, download: true }]));
+    expect(meMock()).toHaveBeenCalledTimes(1);
+    const click = vi.mocked(HTMLAnchorElement.prototype.click);
+    expect(meMock().mock.invocationCallOrder[0]).toBeLessThan(click.mock.invocationCallOrder[0]);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("37. `me()` 401 ⇒ KHONG tai + cau phien het han + link dang nhap quay ve dung cho (B-415)", async () => {
+    window.history.pushState({}, "", "/?c=a");
+    meMock().mockRejectedValue(new ApiError(401, "TOKEN_EXPIRED", "het han"));
+    mount();
+    const sub = await openExport();
+
+    await userEvent.click(within(sub).getByRole("menuitem", { name: locale["export.jsonTree"] }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(locale["export.sessionExpired"]);
+    expect(within(alert).getByRole("link", { name: locale["export.signInAgain"] })).toHaveAttribute(
+      "href",
+      "/dang-nhap?next=%2F%3Fc%3Da",
+    );
+    expect(downloads).toEqual([]);
+    window.history.pushState({}, "", "/");
+  });
+
+  it("38. `me()` loi khac (mang / 500) ⇒ cung KHONG tai, dong loi chung", async () => {
+    meMock().mockRejectedValue(new ApiError(500, "INTERNAL", "loi"));
+    mount();
+    const sub = await openExport();
+
+    await userEvent.click(within(sub).getByRole("menuitem", { name: locale["export.markdown"] }));
+
+    expect(await screen.findByText("INTERNAL: loi")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(downloads).toEqual([]);
   });
 });

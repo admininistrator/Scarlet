@@ -1007,6 +1007,19 @@ export const api = {
     `${BASE_URL}/conversations/${conversationId}/title/stream`,
 
   /**
+   * T-8.7 — URL ban xuat (§18.2, T-8.5 / T-8.6) cho mot `<a download>`: trinh
+   * duyet stream thang xuong dia, ten tep do `Content-Disposition` quyet.
+   * `full` chi co nghia voi `json` (backend bo qua voi `md`).
+   */
+  exportUrl: (conversationId: string, format: "md" | "json", full = false) => {
+    const params = new URLSearchParams({ format });
+    if (full) {
+      params.set("full", "true");
+    }
+    return `${BASE_URL}/conversations/${encodeURIComponent(conversationId)}/export?${params.toString()}`;
+  },
+
+  /**
    * §18.2 — tao hoi thoai RONG (`201`). Tu T-S.10 chi goi o cau DAU cua man
    * nhap (§24.2b·S7, NQ-111): mo app hay bam "Hoi thoai moi" khong tao gi.
    *

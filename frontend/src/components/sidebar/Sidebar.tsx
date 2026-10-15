@@ -1,7 +1,10 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
+  ChevronRight,
   Download,
   Ellipsis,
+  FileBraces,
+  FileText,
   Pencil,
   Pin,
   Search,
@@ -19,16 +22,11 @@ import {
   type ReactNode,
 } from "react";
 
+import { PATHS } from "../../app/paths";
 import { ApiError, api, type ConversationOut } from "../../lib/api";
 import { t } from "../../lib/i18n";
-import { ComingSoon } from "../ui/ComingSoon";
 import { StaticIcon } from "../ui/Icon";
-import {
-  MENU_ITEM_CLASS,
-  MENU_ITEM_DANGER_CLASS,
-  MENU_SEPARATOR_CLASS,
-  MenuDismissContext,
-} from "../ui/menu";
+import { MENU_ITEM_CLASS, MENU_ITEM_DANGER_CLASS, MENU_SEPARATOR_CLASS } from "../ui/menu";
 import { groupByDay, useToday } from "./dayGroups";
 import { ShareDialog, useShareLink } from "./ShareDialog";
 import { useTitleStreams, type TitleView } from "./useTitleStreams";
@@ -105,6 +103,21 @@ const DIACRITIC = /\p{Diacritic}/gu;
  * + 4. Nut "⋯" nam TRONG vien 1 px cua hang, nen tinh tu day nut la 5.
  */
 const ROW_MENU_OFFSET = 5;
+
+/** T-8.7 — ba muc cua menu con "Xuat ›" (NQ-149 ⑥): dinh dang + `full` cua §18.2. */
+const EXPORTS = [
+  { label: "export.markdown", icon: FileText, format: "md", full: false },
+  { label: "export.jsonPath", icon: FileBraces, format: "json", full: false },
+  { label: "export.jsonTree", icon: FileBraces, format: "json", full: true },
+] as const;
+
+type ExportChoice = (typeof EXPORTS)[number];
+
+/** `/dang-nhap?next=<duong dang mo>` — `LoginRoute` loc `next` qua `safeNext` (T-8.3). */
+function loginHref(): string {
+  const next = `${window.location.pathname}${window.location.search}`;
+  return `${PATHS.login}?${new URLSearchParams({ next }).toString()}`;
+}
 
 export interface SidebarProps {
   /** Hoi thoai dang mo o man chat, hoac `null` khi chua mo cai nao. */
@@ -251,6 +264,7 @@ export function Sidebar({
   const [pinnedTruncated, setPinnedTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [query, setQuery] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -410,6 +424,32 @@ export function Sidebar({
     [applyItems, onOpenConversationDeleted, openConversationId],
   );
 
+  /**
+   * T-8.7 — kiem phien LUC BAM roi moi dieu huong toi URL xuat (B-415: FE
+   * khong goi `/auth/refresh`, qua `ACCESS_TOKEN_TTL_MIN` mot `<a href>` se
+   * luu than `401` thanh tep). `401` ⇒ cau phien het han + link dang nhap
+   * (NQ-150 ①), khong tai. `<a download>` chu khong `fetch` + Blob: trinh
+   * duyet stream thang xuong dia, ten tep do `Content-Disposition` quyet.
+   */
+  const exportConversation = useCallback(async (id: string, choice: ExportChoice) => {
+    setError(null);
+    setSessionExpired(false);
+    try {
+      await api.me();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setSessionExpired(true);
+      } else {
+        setError(errorText(e));
+      }
+      return;
+    }
+    const link = document.createElement("a");
+    link.href = api.exportUrl(id, choice.format, choice.full);
+    link.download = "";
+    link.click();
+  }, []);
+
   const visible = useMemo(
     () => items.filter((item) => matchesQuery(item, query)),
     [items, query],
@@ -440,6 +480,7 @@ export function Sidebar({
     onAskDelete: () => setConfirming(item.id),
     onCancelDelete: () => setConfirming(null),
     onConfirmDelete: () => void remove(item.id),
+    onExport: (choice: ExportChoice) => void exportConversation(item.id, choice),
   });
 
   return (
@@ -474,6 +515,14 @@ export function Sidebar({
 
         {error !== null && (
           <p className="mt-2 shrink-0 text-xs text-danger-text">{error}</p>
+        )}
+        {sessionExpired && (
+          <p role="alert" className="mt-2 shrink-0 text-xs text-danger-text">
+            {t("export.sessionExpired")}{" "}
+            <a href={loginHref()} className="font-semibold underline">
+              {t("export.signInAgain")}
+            </a>
+          </p>
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -569,6 +618,7 @@ interface ConversationRowProps {
   onAskDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
+  onExport: (choice: ExportChoice) => void;
 }
 
 /**
@@ -598,6 +648,7 @@ function ConversationRow({
   onAskDelete,
   onCancelDelete,
   onConfirmDelete,
+  onExport,
 }: ConversationRowProps) {
   const label = conversationLabel(item);
 
@@ -711,6 +762,7 @@ function ConversationRow({
           onStartRename={onStartRename}
           onTogglePin={onTogglePin}
           onAskDelete={onAskDelete}
+          onExport={onExport}
         />
       </div>
     </li>
@@ -766,16 +818,16 @@ function RowTitle({
 }
 
 /**
- * Menu "⋯" cua hang — ban T-HD2-v2 H6: Doi ten · Ghim · Chia se · Xuat* · ── · Xoa.
+ * Menu "⋯" cua hang — ban T-HD2-v2 H6: Doi ten · Ghim · Chia se · Xuat › · ── · Xoa.
  *
- * `*` = nut cho (bang §7b.2): `T-8.7` Xuat — `ComingSoon` hinh dang
- * `menuItem`, toi duoc bang mui ten de tooltip "Sap co" mo. Chia se (T-8.2,
- * ban T-HD12) mo `ShareDialog`; POST chay ngay trong `onSelect` (mot lan mo =
- * mot khoa), va menu khong tra tieu diem ve nut "⋯" vi hop thoai giu no.
+ * Chia se (T-8.2, ban T-HD12) mo `ShareDialog`; POST chay ngay trong
+ * `onSelect` (mot lan mo = mot khoa), va menu khong tra tieu diem ve nut "⋯"
+ * vi hop thoai giu no. Xuat › (T-8.7, NQ-149 ⑥) la `DropdownMenu.Sub` ba muc
+ * — `→` mo, `←` ve, Esc dong ca menu; viec kiem phien la cua `Sidebar`.
  *
  * `DropdownMenu` cua Radix (cung primitive menu tai khoan, T-S.12) lo ban
- * phim, Esc, bam ra ngoai. `open` co kiem soat de dua ham dong xuong muc cho
- * qua `MenuDismissContext` — thieu no thi Esc dau chi dong tooltip (B-308 ②).
+ * phim, Esc, bam ra ngoai. Menu khong con muc cho nao nen khong can `open` co
+ * kiem soat / `MenuDismissContext` (B-308 ② chi ap cho menu chua muc cho).
  *
  * Doi ten / Xoa thay CA HANG bang mot form tai cho, tuc nut "⋯" bi go: Radix
  * se tra tieu diem ve mot nut khong con nua, nen lan dong ay bo buoc tra tieu
@@ -790,6 +842,7 @@ function RowMenu({
   onStartRename,
   onTogglePin,
   onAskDelete,
+  onExport,
 }: {
   conversationId: string;
   label: string;
@@ -799,9 +852,8 @@ function RowMenu({
   onStartRename: () => void;
   onTogglePin: () => void;
   onAskDelete: () => void;
+  onExport: (choice: ExportChoice) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const closeMenu = useCallback(() => setOpen(false), []);
   const keepFocusRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const name = `${t("sidebar.rowMenu")} — ${label}`;
@@ -809,7 +861,7 @@ function RowMenu({
 
   return (
     <>
-      <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+      <DropdownMenu.Root>
         <DropdownMenu.Trigger
           ref={triggerRef}
           disabled={busy}
@@ -836,49 +888,64 @@ function RowMenu({
             }}
             className="motion-popover z-50 flex w-50 flex-col rounded-lg border border-border bg-surface-panel p-1.5 shadow-popover"
           >
-            <MenuDismissContext.Provider value={closeMenu}>
-              <DropdownMenu.Item
-                onSelect={() => {
-                  keepFocusRef.current = true;
-                  onStartRename();
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <StaticIcon icon={Pencil} size={18} />
-                {t("sidebar.rename")}
-              </DropdownMenu.Item>
-              <DropdownMenu.Item onSelect={onTogglePin} className={MENU_ITEM_CLASS}>
-                <StaticIcon icon={Pin} size={18} />
-                {pinned ? t("sidebar.unpin") : t("sidebar.pin")}
-              </DropdownMenu.Item>
-              <DropdownMenu.Item
-                onSelect={() => {
-                  keepFocusRef.current = true;
-                  share.open();
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <StaticIcon icon={Share2} size={18} />
-                {t("sidebar.share")}
-              </DropdownMenu.Item>
-              <ComingSoon
-                menuItem
-                planned="T-8.7"
-                label={t("sidebar.export")}
-                icon={<StaticIcon icon={Download} size={18} />}
-              />
-              <DropdownMenu.Separator className={MENU_SEPARATOR_CLASS} />
-              <DropdownMenu.Item
-                onSelect={() => {
-                  keepFocusRef.current = true;
-                  onAskDelete();
-                }}
-                className={MENU_ITEM_DANGER_CLASS}
-              >
-                <StaticIcon icon={Trash2} size={18} />
-                {t("sidebar.delete")}
-              </DropdownMenu.Item>
-            </MenuDismissContext.Provider>
+            <DropdownMenu.Item
+              onSelect={() => {
+                keepFocusRef.current = true;
+                onStartRename();
+              }}
+              className={MENU_ITEM_CLASS}
+            >
+              <StaticIcon icon={Pencil} size={18} />
+              {t("sidebar.rename")}
+            </DropdownMenu.Item>
+            <DropdownMenu.Item onSelect={onTogglePin} className={MENU_ITEM_CLASS}>
+              <StaticIcon icon={Pin} size={18} />
+              {pinned ? t("sidebar.unpin") : t("sidebar.pin")}
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              onSelect={() => {
+                keepFocusRef.current = true;
+                share.open();
+              }}
+              className={MENU_ITEM_CLASS}
+            >
+              <StaticIcon icon={Share2} size={18} />
+              {t("sidebar.share")}
+            </DropdownMenu.Item>
+            <DropdownMenu.Sub>
+              {/* Mo menu con thi focus sang muc con — giu nen de biet dang o nhanh nao (ban T-HD12). */}
+              <DropdownMenu.SubTrigger className={`${MENU_ITEM_CLASS} data-[state=open]:bg-surface-hover`}>
+                <StaticIcon icon={Download} size={18} />
+                <span className="flex-1">{t("sidebar.export")}</span>
+                <StaticIcon icon={ChevronRight} size={16} className="text-muted" />
+              </DropdownMenu.SubTrigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.SubContent
+                  sideOffset={6}
+                  alignOffset={-6}
+                  collisionPadding={8}
+                  className="motion-submenu z-50 flex w-submenu flex-col rounded-lg border border-border bg-surface-panel p-1.5 shadow-popover"
+                >
+                  {EXPORTS.map((choice) => (
+                    <DropdownMenu.Item key={choice.label} onSelect={() => onExport(choice)} className={MENU_ITEM_CLASS}>
+                      <StaticIcon icon={choice.icon} size={18} />
+                      {t(choice.label)}
+                    </DropdownMenu.Item>
+                  ))}
+                </DropdownMenu.SubContent>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Sub>
+            <DropdownMenu.Separator className={MENU_SEPARATOR_CLASS} />
+            <DropdownMenu.Item
+              onSelect={() => {
+                keepFocusRef.current = true;
+                onAskDelete();
+              }}
+              className={MENU_ITEM_DANGER_CLASS}
+            >
+              <StaticIcon icon={Trash2} size={18} />
+              {t("sidebar.delete")}
+            </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
