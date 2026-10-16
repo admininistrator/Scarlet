@@ -17,6 +17,11 @@
 # source, đúng như `web` đã làm với `/app/node_modules`.
 services:
   web:
+    # T-9.4a — `frontend/Dockerfile` co stage `prod` SAU `dev`; thieu dong nay
+    # thi stage cuoi (nginx tinh) duoc build ⇒ Vite khong chay, `make test` FE hong.
+    build:
+      context: ./frontend
+      target: dev
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -135,6 +140,8 @@ services:
       - ./scripts:/scarlet/scripts:ro
       - ./certs/localhost+3.pem:/scarlet/certs/nginx.pem:ro
       - ./frontend/src/components/artifacts/ArtifactFrame.tsx:/scarlet/frontend/ArtifactFrame.tsx:ro
+      # T-9.4a — `make s8` doc duong + nguong tu khoi `s8` (A3).
+      - ./config/audit.json:/scarlet/config/audit.json:ro
     environment:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL chưa đặt trong .env}
       ARTIFACTS_BASE_URL: ${ARTIFACTS_BASE_URL:?ARTIFACTS_BASE_URL chưa đặt trong .env}

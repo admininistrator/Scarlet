@@ -1,0 +1,141 @@
+# Scarlet — Nginx PRODUCTION (T-9.4a). Ban dev: `config/nginx/nginx.conf`.
+#
+# Template `envsubst` cua chinh image `nginx` (`/docker-entrypoint.d/20-envsubst-
+# on-templates.sh`): luc khoi dong, moi `${BIEN}` co trong moi truong cua
+# container duoc thay; `NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx` (overlay prod) ⇒
+# tep nay thanh `/etc/nginx/nginx.conf`. Bien Nginx (`$host`, `$uri`, …) viet
+# thuong, khong co trong moi truong ⇒ giu nguyen. Bien vao tu
+# `docker-compose.prod.yml`: APP_DOMAIN, ARTIFACTS_DOMAIN, TLS_CERT_FILE,
+# TLS_KEY_FILE (duong trong `TLS_CERT_DIR`, mount o /etc/nginx/tls).
+#
+# Khac ban dev: ten mien + chung chi theo bien; `/` va `/s/` toi nginx tinh cua
+# `web` (khong WebSocket HMR); nen gzip; `X-Content-Type-Options` o origin
+# chinh. GIU NGUYEN: bon dong SSE (C1, C2), `/scarlet/` (T-4.1), `^~ /s/`
+# (T-8.2), origin phu + CSP (T-5.6), log khong query (T-9.5a). Sua mot trong
+# nhung khoi do o ban dev thi sua ca o day.
+
+worker_processes auto;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    # Moi tep tinh do nginx cua `web` phuc vu, `Content-Type` (ca webmanifest —
+    # B-424 ④) do no dat — `frontend/nginx.conf`. Bien chi proxy.
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    sendfile      on;
+    tcp_nopush    on;
+    server_tokens off;
+
+    map $uri $scarlet_log_uri {
+        "~^(?<log_share_prefix>/(?:api/v1/)?s/)[^/]+(?<log_share_rest>.*)$" "${log_share_prefix}[REDACTED]${log_share_rest}";
+        default $uri;
+    }
+    log_format scarlet '$remote_addr $request_id "$request_method $scarlet_log_uri $server_protocol" '
+                       '$status $body_bytes_sent ${request_time}s';
+    access_log /var/log/nginx/access.log scarlet;
+    error_log  /var/log/nginx/error.log warn;
+
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1h;
+
+    # T-3.10 Cam bay ②. `text/html` luon nen khi `gzip on`. KHONG
+    # `text/event-stream`: nen stream SSE la gom chu lai (C1).
+    # `gzip_comp_level` mac dinh 1: bundle 1 MB ra 358.7 kB thay vi ~312 kB
+    # (do T-9.4a) — `/s/` cua S8 cham dung 80. Muc 6 = CPU it, 15–20 nguoi.
+    gzip            on;
+    gzip_comp_level 6;
+    gzip_vary       on;
+    gzip_min_length 1024;
+    gzip_types      text/plain text/css application/javascript application/json
+                    image/svg+xml application/manifest+json;
+
+    limit_req_zone $binary_remote_addr zone=general:10m rate=30r/s;
+
+    server {
+        listen      80 default_server;
+        listen [::]:80 default_server;
+        server_name _;
+
+        location = /_nginx_health { access_log off; return 200 "ok"; }
+        location / { return 301 https://$host$request_uri; }
+    }
+
+    # ══════════════ ORIGIN CHÍNH ══════════════
+    server {
+        listen      443 ssl default_server;
+        listen [::]:443 ssl default_server;
+        http2 on;
+        server_name ${APP_DOMAIN};
+
+        ssl_certificate     /etc/nginx/tls/${TLS_CERT_FILE};
+        ssl_certificate_key /etc/nginx/tls/${TLS_KEY_FILE};
+
+        client_max_body_size 25m;
+
+        # `add_header` khong ke thua xuong location co `add_header` rieng
+        # (`/s/`) — lap lai o do.
+        add_header X-Content-Type-Options nosniff always;
+
+        # ─── SSE: bốn dòng dưới đây là sống còn (C1, C2) ───
+        location ~ ^/api/v1/(messages/[^/]+/stream|conversations/[^/]+/title/stream|_debug/sse)$ {
+            proxy_pass http://api:8000;
+            proxy_http_version 1.1;
+            proxy_set_header Connection '';
+            proxy_buffering off;           # C1
+            proxy_cache off;
+            proxy_read_timeout 3600s;      # C2
+            chunked_transfer_encoding on;
+            proxy_set_header X-Request-Id $request_id;
+        }
+
+        # Presigned URL của MinIO (T-4.1). `/scarlet/` = MINIO_BUCKET.
+        location /scarlet/ {
+            limit_except GET { deny all; }
+            access_log off;
+            proxy_pass http://minio:9000;
+            proxy_set_header Host $host;
+        }
+
+        location /api/ {
+            limit_req zone=general burst=60 nodelay;
+            proxy_pass http://api:8000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Request-Id $request_id;
+        }
+
+        # Trang chia sẻ công khai (T-8.2) — noindex lớp 1.
+        location ^~ /s/ {
+            add_header X-Robots-Tag "noindex, nofollow" always;
+            add_header X-Content-Type-Options nosniff always;
+            proxy_pass http://web:5173;
+        }
+
+        # `web` la nginx tinh (`frontend/nginx.conf`): Cache-Control do no dat.
+        location / {
+            proxy_pass http://web:5173;
+        }
+    }
+
+    # ══════════════ ORIGIN PHỤ cho artifact (ADR-10, §14.3) ══════════════
+    server {
+        listen      443 ssl;
+        listen [::]:443 ssl;
+        http2 on;
+        server_name ${ARTIFACTS_DOMAIN};
+
+        ssl_certificate     /etc/nginx/tls/${TLS_CERT_FILE};
+        ssl_certificate_key /etc/nginx/tls/${TLS_KEY_FILE};
+
+        add_header Content-Security-Policy
+          "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src data: https:; font-src data: https:; connect-src 'none'; frame-ancestors https://${APP_DOMAIN}" always;
+        add_header X-Content-Type-Options nosniff always;
+
+        location / { proxy_pass http://api:8000/artifacts-render/; }
+    }
+}

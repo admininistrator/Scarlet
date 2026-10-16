@@ -1,0 +1,103 @@
+# Overlay PRODUCTION — T-9.4a (Q-P9-1, NQ-151). Goi TUONG MINH, khong bao gio
+# kem override dev:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     --profile core --profile tools …            (make prod-up / prod-down)
+#
+# `docker compose up` tran tu nap `docker-compose.override.yml` = bind-mount
+# source + `--reload` (Cam bay ①). File nay khong them gi cua dev; no chi:
+#   - `web` = nginx tinh phuc vu `dist/` (stage `prod`);
+#   - Nginx bien tu template theo ten mien + chung chi;
+#   - go cong `4000` cua LiteLLM, ep `DEBUG=false`, Ollama sang profile rieng;
+#   - MinIO + `mc` build tu source (Docker Hub `denied`);
+#   - cau hinh theo may (`config/` cua prod) tu thu muc `SCARLET_CONFIG_DIR`;
+#   - xoay vong log moi service (Docker mac dinh khong gioi han — B-428).
+# Service nao doc `.env` thi `env_file` cua base van con (api, worker, migrate);
+# overlay KHONG them `env_file` cho ai (C27, Cam bay ⑤) — ha tang con bo bot.
+#
+# Can compose ≥ 2.24.4 (`!reset`, `!override`).
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  nginx:
+    <<: *logging
+    env_file: !reset []
+    environment:
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      APP_DOMAIN: ${APP_DOMAIN:?APP_DOMAIN chưa đặt trong .env}
+      ARTIFACTS_DOMAIN: ${ARTIFACTS_DOMAIN:?ARTIFACTS_DOMAIN chưa đặt trong .env}
+      TLS_CERT_FILE: ${TLS_CERT_FILE:?TLS_CERT_FILE chưa đặt trong .env}
+      TLS_KEY_FILE: ${TLS_KEY_FILE:?TLS_KEY_FILE chưa đặt trong .env}
+    volumes: !override
+      - ./config/nginx/templates:/etc/nginx/templates:ro
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR chưa đặt trong .env}:/etc/nginx/tls:ro
+
+  api:
+    <<: *logging
+    environment: { DEBUG: "false" }
+    volumes: !override
+      - ${SCARLET_CONFIG_DIR:?SCARLET_CONFIG_DIR chưa đặt trong .env}:/config:ro
+      - ./skills:/skills:ro
+
+  worker:
+    <<: *logging
+    environment: { DEBUG: "false" }
+    volumes: !override
+      - ${SCARLET_CONFIG_DIR:?SCARLET_CONFIG_DIR chưa đặt trong .env}:/config:ro
+      - sandbox_socket:/run/sandbox:ro
+      - ./skills:/skills:ro
+
+  migrate:
+    <<: *logging
+    environment: { DEBUG: "false" }
+
+  postgres:
+    <<: *logging
+    env_file: !reset []
+
+  redis:
+    <<: *logging
+    env_file: !reset []
+
+  minio:
+    <<: *logging
+    image: scarlet-minio:RELEASE.2025-10-15T17-29-55Z
+    build: ./minio
+    env_file: !reset []
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY chưa đặt trong .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY chưa đặt trong .env}
+
+  litellm:
+    <<: *logging
+    ports: !reset []
+    volumes: !override
+      - ${SCARLET_CONFIG_DIR:?SCARLET_CONFIG_DIR chưa đặt trong .env}/litellm.config.yaml:/app/config.yaml:ro
+
+  ollama:
+    <<: *logging
+    profiles: !override [local-llm]
+
+  web:
+    <<: *logging
+    # Ten rieng: `scarlet-web` (dev) va ban prod khong de len nhau — quay ve dev
+    # khong phai build lai.
+    image: scarlet-web:prod
+    build:
+      context: ./frontend
+      target: prod
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+        VITE_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+        VITE_ARTIFACTS_BASE_URL: ${ARTIFACTS_BASE_URL:?ARTIFACTS_BASE_URL chưa đặt trong .env}
+    environment: !reset {}
+
+  fetcher:
+    <<: *logging
+
+  sandbox:
+    <<: *logging

@@ -13,6 +13,7 @@ là `fetcher` / `sandbox` không có biến môi trường nào từ cấu hình
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
@@ -51,10 +52,12 @@ def main() -> int:
         for key in ("env_file", "environment", "ports"):
             if services.get(name, {}).get(key):
                 errors.append(f"{name}: co `{key}` — lop 1 khong duoc thay secret / mo cong")
+    # T-9.4a: `COMPOSE_FILE` (docker compose tu doc) = cau hinh prod da gop.
+    where = os.environ.get("COMPOSE_FILE", "dev")
     for line in errors:
-        print(f"check-networks: FAIL {line}")
+        print(f"check-networks: FAIL [{where}] {line}")
     if not errors:
-        print("check-networks: OK")
+        print(f"check-networks: OK [{where}]")
     return 1 if errors else 0
 
 

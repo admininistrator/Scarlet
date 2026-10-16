@@ -1,13 +1,28 @@
-.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme check-identifiers test-artifact-origin test-voice check-networks
+.PHONY: up down test test-resume bench audit lint fmt migrate check-hardcode eval logs sync-theme check-theme check-identifiers test-artifact-origin test-voice check-networks prod-up prod-down s8
 
 COMPOSE := docker compose --profile core --profile tools
 SANDBOX_TIMEOUT_S := $(shell sed -n 's/^SANDBOX_TIMEOUT_S=//p' .env)
+
+# T-9.4a — PROD = base + overlay prod, KHONG override dev (Cam bay ①). Hai stack
+# chung project scarlet va chung volume tren may nay: doi qua lai bang
+# make prod-up / make prod-down up — KHONG BAO GIO down -v.
+PROD_FILES := docker-compose.yml:docker-compose.prod.yml
+PROD := COMPOSE_FILE=$(PROD_FILES) docker compose --profile core --profile tools
 
 up:
 	$(COMPOSE) up -d
 
 down:
 	$(COMPOSE) down
+
+# down cua dev truoc: ollama (profile local-llm o prod) va container
+# dev khac khong o lai chay lan voi ban prod. --build: code nam TRONG image.
+prod-up:
+	$(COMPOSE) down
+	$(PROD) up -d --build --wait
+
+prod-down:
+	$(PROD) down
 
 # B-199 — HAI tang, mot lenh. Truoc no, `make test` chi chay pytest cua backend
 # va 12 task cua §7 (Phase 3) deu gia dinh co mot cho de dat test FE ma khong
@@ -76,6 +91,13 @@ test-voice:
 	$(COMPOSE) exec -T api python - < scripts/voice_session.py \
 	  | docker compose --profile core --profile dev run --rm -T --no-deps artifact-origin node scripts/test_voice.mjs
 
+# T-9.4a / S8 (NQ-77) — Lighthouse mobile Performance + Accessibility QUA NGINX
+# https, cung image + netns + loi token qua stdin voi `test-artifact-origin`.
+# Chay duoc tren stack dev lan prod (doi chung). Ma thoat = so duong truot.
+s8:
+	$(COMPOSE) exec -T api python - < scripts/s8_session.py \
+	  | docker compose --profile core --profile dev run --rm -T --no-deps artifact-origin node scripts/s8_lighthouse.mjs
+
 lint: check-theme check-identifiers check-networks
 	cd backend && .venv/bin/ruff check .
 	cd backend && .venv/bin/mypy app
@@ -105,8 +127,10 @@ check-identifiers:
 # T-6.5 / B-117 — lop 1 cua §12.2 doc tren cau hinh compose DA GOP: `fetcher`
 # chi `egress`, khong env/cong; `worker` hai mang; `api` khong `egress`;
 # T-7.2 — `sandbox` `network_mode: none`, khong mang, khong env/cong (ADR-09, C27).
+# T-9.4a — ca cau hinh prod da gop (COMPOSE_FILE cua docker compose).
 check-networks:
 	backend/.venv/bin/python scripts/check_networks.py
+	COMPOSE_FILE=$(PROD_FILES) backend/.venv/bin/python scripts/check_networks.py
 
 fmt:
 	cd backend && .venv/bin/ruff format .

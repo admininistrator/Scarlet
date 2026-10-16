@@ -24,7 +24,21 @@ _ASSIGNMENT = re.compile(r"^([A-Z][A-Z0-9_]*)=")
 #: - POSTGRES_PASSWORD: service `postgres`
 #: - VITE_API_BASE_URL: service `web` (T-0.10) — Vite đọc lúc build/dev, không
 #:   phải app Python
-COMPOSE_ONLY = frozenset({"POSTGRES_PASSWORD", "VITE_API_BASE_URL"})
+#: - APP_DOMAIN, ARTIFACTS_DOMAIN, TLS_CERT_DIR, TLS_CERT_FILE, TLS_KEY_FILE:
+#:   `nginx` của `docker-compose.prod.yml` (template, T-9.4a)
+#: - SCARLET_CONFIG_DIR: `api` / `worker` / `litellm` của `docker-compose.prod.yml`
+COMPOSE_ONLY = frozenset(
+    {
+        "POSTGRES_PASSWORD",
+        "VITE_API_BASE_URL",
+        "APP_DOMAIN",
+        "ARTIFACTS_DOMAIN",
+        "TLS_CERT_DIR",
+        "TLS_CERT_FILE",
+        "TLS_KEY_FILE",
+        "SCARLET_CONFIG_DIR",
+    }
+)
 
 #: Biến chỉ dành cho pytest — backend KHÔNG đọc, docker compose cũng không.
 #: Cùng lý do tồn tại như COMPOSE_ONLY, khác nguồn đọc, nên tách set riêng để

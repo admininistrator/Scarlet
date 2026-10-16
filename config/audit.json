@@ -26,5 +26,13 @@
     "nghi_giua_hai_lan_ms": 2000
   },
 
-  "timeout_moi_lenh_s": 180
+  "timeout_moi_lenh_s": 180,
+
+  "_s8": "`make s8` (T-9.4a, NQ-77): Lighthouse mobile qua Nginx https (khong qua web:5173) — `scripts/s8_lighthouse.mjs`. `{share}` = token snapshot do `scripts/s8_session.py` chon; `logged_in` = duong mo kem cookie phien.",
+  "s8": {
+    "routes": ["/dang-nhap", "/dang-ky", "/s/{share}", "/"],
+    "logged_in": ["/"],
+    "min_scores": { "performance": 80, "accessibility": 90 },
+    "timeout_s": 180
+  }
 }
