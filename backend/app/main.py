@@ -47,6 +47,7 @@ from app.core.log_setup import setup_logging
 from app.core.origin import OriginCheckMiddleware
 from app.core.queue import dispose_arq_pool
 from app.core.redis import dispose_redis
+from app.core.request_id import RequestIdMiddleware
 from app.db.session import dispose_engine, session_scope
 from app.skills.loader import sync_skills
 
@@ -78,6 +79,8 @@ errors.register(app)
 idempotency.register(app)
 app.add_middleware(IdempotencyMiddleware)
 app.add_middleware(OriginCheckMiddleware)
+# T-9.5b — ngoài cùng: cả `403` của Origin cũng có `request_id` + dòng log.
+app.add_middleware(RequestIdMiddleware)
 app.include_router(api_v1_router)
 app.include_router(artifacts_render_router)
 

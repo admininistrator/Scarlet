@@ -45,6 +45,7 @@ from app.config.settings import settings
 from app.core import storage
 from app.core.deps import get_current_user_id
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
+from app.core.log_setup import current_request_id
 from app.core.queue import EXTRACT_JOB_ID_PREFIX, EXTRACT_JOB_NAME, get_arq_pool
 from app.core.ratelimit import upload_limit
 from app.db.models import Attachment, AttachmentKind, ExtractStatus
@@ -191,6 +192,7 @@ async def _enqueue_extract(attachment_id: uuid.UUID) -> None:
             EXTRACT_JOB_NAME,
             str(attachment_id),
             _job_id=f"{EXTRACT_JOB_ID_PREFIX}{attachment_id}",
+            request_id=current_request_id(),
         )
     except Exception:
         logger.exception("khong day duoc job extract cho tep %s", attachment_id)

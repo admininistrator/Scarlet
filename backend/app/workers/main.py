@@ -42,15 +42,18 @@ tiến trình — xem docstring `adapters/system.py`. Cùng lý do với engine 
 
 from __future__ import annotations
 
+import functools
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from arq import cron, func
 from arq.cron import CronJob
+from arq.typing import WorkerCoroutine
 from arq.worker import Function
 
 from app.config.settings import settings
-from app.core.log_setup import setup_logging
+from app.core.log_setup import log_context, setup_logging
 from app.core.queue import EXTRACT_JOB_NAME, GENERATE_JOB_NAME, TITLE_JOB_NAME, redis_settings
 from app.db.session import dispose_engine
 from app.llm.adapters.system import SystemAdapter
@@ -74,9 +77,27 @@ GENERATE_MAX_TRIES = 1
 #: đặt tên"; thử lại là trả tiền lần hai cho thứ người dùng tự gõ được.
 TITLE_MAX_TRIES = 1
 
+
+def with_request_id(job: Callable[..., Awaitable[Any]]) -> WorkerCoroutine:
+    """Đặt lại ngữ cảnh log từ tham số `request_id` ở đầu mỗi job (§21.1, T-9.5b).
+
+    contextvar không đi qua Redis: `api` gửi id làm tham số job
+    (`enqueue_job(…, request_id=…)`), job chạy ở tiến trình khác phải tự đặt lại.
+    Dict MỚI mỗi job — không để id của job trước sót lại.
+    """
+
+    @functools.wraps(job)
+    async def run(ctx: dict[Any, Any], *args: Any, **kwargs: Any) -> Any:
+        request_id = kwargs.pop("request_id", None)
+        log_context.set({"request_id": request_id} if request_id else {})
+        return await job(ctx, *args, **kwargs)
+
+    return run
+
+
 FUNCTIONS: list[Function] = [
     func(
-        generate,
+        with_request_id(generate),
         name=GENERATE_JOB_NAME,
         timeout=settings.GENERATE_TIMEOUT_S,
         max_tries=GENERATE_MAX_TRIES,
@@ -85,7 +106,7 @@ FUNCTIONS: list[Function] = [
     # module): timeout HTTP của `SystemAdapter` phải nổ trước arq để `_close`
     # còn ghi được event kết thúc.
     func(
-        generate_title,
+        with_request_id(generate_title),
         name=TITLE_JOB_NAME,
         timeout=settings.GENERATE_TIMEOUT_S,
         max_tries=TITLE_MAX_TRIES,
@@ -93,7 +114,7 @@ FUNCTIONS: list[Function] = [
     # T-4.6a — trích chữ PDF/DOCX. KHÔNG `max_tries=1` (Cạm bẫy ⑤): luật "không
     # thử lại" của hai job trên sinh ra vì tiền, job này không gọi model. Job
     # tự nuốt lỗi của byte người dùng, nên arq chỉ thử lại khi worker chết giữa chừng.
-    func(extract, name=EXTRACT_JOB_NAME),
+    func(with_request_id(extract), name=EXTRACT_JOB_NAME),
 ]
 
 #: §7.6 — lưới cuối cho ca "worker chết giữa lúc sinh" (tiêu chí S4).

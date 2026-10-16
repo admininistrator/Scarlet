@@ -125,6 +125,7 @@ from app.core.access_token import (
 )
 from app.core.blacklist import is_blocked
 from app.core.errors import ApiError, ApiErrorCode
+from app.core.log_setup import bind_log_context
 from app.core.redis import get_redis
 from app.db.models import UserRole, UserStatus
 from app.db.repositories.users import UserRepository
@@ -249,6 +250,7 @@ async def get_access_claims(request: Request) -> AccessTokenClaims | None:
             ApiErrorCode.TOKEN_REVOKED,
             "phien dang nhap da bi thu hoi, hay dang nhap lai",
         )
+    bind_log_context(user_id=claims.user_id)  # §21.1 — dòng log của request này
     return claims
 
 

@@ -67,7 +67,9 @@ class _FakeArq:
         self.pushed: list[tuple[str, tuple[Any, ...], str | None]] = []
         self.broken = False
 
-    async def enqueue_job(self, name: str, *args: Any, _job_id: str | None = None) -> object:
+    async def enqueue_job(
+        self, name: str, *args: Any, _job_id: str | None = None, request_id: str | None = None
+    ) -> object:
         if self.broken:
             raise ConnectionError("redis:6379")
         self.pushed.append((name, args, _job_id))

@@ -138,6 +138,7 @@ from app.core.deps import (
     require_chat_access,
 )
 from app.core.errors import ApiError, ApiErrorCode, ErrorEnvelope
+from app.core.log_setup import current_request_id
 from app.core.queue import GENERATE_JOB_NAME, TITLE_JOB_NAME, get_arq_pool, title_job_id
 from app.core.ratelimit import acquire_generation_seat, chat_limit, release_generation_seat
 from app.core.redis import get_redis
@@ -839,7 +840,10 @@ async def _day_job(assistant_message_id: uuid.UUID) -> None:
     try:
         pool = await get_arq_pool()
         job = await pool.enqueue_job(
-            GENERATE_JOB_NAME, str(assistant_message_id), _job_id=str(assistant_message_id)
+            GENERATE_JOB_NAME,
+            str(assistant_message_id),
+            _job_id=str(assistant_message_id),
+            request_id=current_request_id(),
         )
     except Exception as exc:
         # KHÔNG nuốt: log kèm traceback rồi đổi thành mã FE đọc được. Không có
@@ -880,6 +884,7 @@ async def _enqueue_title(conversation_id: uuid.UUID, question_id: uuid.UUID) -> 
             str(conversation_id),
             str(question_id),
             _job_id=title_job_id(conversation_id),
+            request_id=current_request_id(),
         )
     except Exception:
         logger.exception(
