@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.config.settings import MIN_SECRET_CHARS, Settings
+from app.config.settings import MIN_SECRET_CHARS, Settings, load_settings
 
 ENV_EXAMPLE = Path(__file__).resolve().parents[2] / ".env.example"
 _ASSIGNMENT = re.compile(r"^([A-Z][A-Z0-9_]*)=")
@@ -112,6 +112,33 @@ def test_short_secret_is_rejected(monkeypatch: pytest.MonkeyPatch, name: str) ->
     message = str(exc.value)
     assert name in message
     assert str(MIN_SECRET_CHARS) in message
+
+
+def test_load_settings_missing_var_exits_with_its_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """S1 qua ``load_settings()`` — đường mà ``settings = …`` lúc import đi (B-18)."""
+    name = REQUIRED_FIELDS[0]
+    monkeypatch.delenv(name, raising=False)
+    with pytest.raises(SystemExit) as exc:
+        load_settings()
+    assert name in str(exc.value.code)
+    assert "missing" in str(exc.value.code)
+
+
+def test_load_settings_bad_secret_message_has_name_not_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B-18: ``str(ValidationError)`` mang ``input_value='…'`` — secret yếu vào log."""
+    value = "short-B18-CANARY"
+    monkeypatch.setenv("JWT_SECRET", value)
+    with pytest.raises(ValidationError) as raw:
+        Settings()
+    assert value in str(raw.value), "đối chứng: pydantic tự nó có in giá trị"
+    with pytest.raises(SystemExit) as exc:
+        load_settings()
+    message = str(exc.value.code)
+    assert "JWT_SECRET" in message and "value_error" in message
+    assert value not in message
+    assert exc.value.__cause__ is None and exc.value.__suppress_context__
 
 
 @pytest.mark.parametrize("name", ["LITELLM_MASTER_KEY", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"])

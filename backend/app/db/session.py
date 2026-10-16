@@ -43,7 +43,12 @@ def get_engine() -> AsyncEngine:
     """Engine dùng chung của tiến trình. Dựng ở lần gọi đầu tiên."""
     global _engine
     if _engine is None:
-        _engine = create_async_engine(str(settings.DATABASE_URL), pool_pre_ping=True)
+        # `hide_parameters` (T-9.5a, §20): `StatementError` in `[parameters: …]`
+        # — tức nội dung message/artifact — vào traceback của mọi
+        # `logger.exception` quanh một lần ghi Postgres hỏng.
+        _engine = create_async_engine(
+            str(settings.DATABASE_URL), pool_pre_ping=True, hide_parameters=True
+        )
     return _engine
 
 

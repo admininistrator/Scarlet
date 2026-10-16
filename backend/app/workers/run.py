@@ -78,12 +78,8 @@ from arq.worker import Worker, create_worker
 from redis.exceptions import RedisError
 
 from app.config.settings import settings
-
-# `_setup_logging` là định danh CŨ (tiếng Việt không dấu) và nó ở lại nguyên
-# trạng theo B-142 — mọi định danh MỚI của file này đều tiếng Anh. Nhập nó
-# thay vì chép thêm một bản thứ ba (`cli.py` đã có bản thứ hai): hai tiến
-# trình dùng chung một cách dựng logging thì một lần sửa là đủ cho cả hai.
-from app.workers.main import WorkerSettings, _setup_logging, on_shutdown
+from app.core.log_setup import setup_logging
+from app.workers.main import WorkerSettings, on_shutdown
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +161,7 @@ async def _run_one_lifecycle() -> None:
 
 def main() -> int:
     """Vòng nối lại. Trả mã thoát của tiến trình."""
-    _setup_logging()
+    setup_logging()
     backoff_s = settings.WORKER_RECONNECT_BACKOFF_S
     attempt = 0
 

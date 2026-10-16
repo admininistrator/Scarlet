@@ -28,9 +28,9 @@ nghiệp vụ nào ở đây — mỗi job sống trong file riêng của nó (�
 
 **Vì sao `on_startup` tự dựng logging.** `arq` CLI gọi `dictConfig` cho riêng
 logger tên `arq`; logger `app.*` của chúng ta không có handler nào nên mọi
-dòng `logger.info` của worker rơi vào hư không. Tiến trình `api` không gặp
-chuyện này vì uvicorn dựng sẵn logging. Đây là chỗ duy nhất trong backend gọi
-`addHandler`, và nó chạy sau `dictConfig` của arq nên không bị ghi đè.
+dòng `logger.info` của worker rơi vào hư không. `setup_logging()`
+(`app/core/log_setup.py` — dùng chung với `api` và `cli` từ T-9.5a) chạy sau
+`dictConfig` của arq nên không bị ghi đè.
 
 **Vì sao `LLMClient` sống trong `ctx`, không phải biến toàn cục (T-1.6).**
 `AsyncOpenAI` mang theo một connection pool **gắn với event loop**, nên một
@@ -50,7 +50,7 @@ from arq.cron import CronJob
 from arq.worker import Function
 
 from app.config.settings import settings
-from app.core.log_redact import install_log_redaction
+from app.core.log_setup import setup_logging
 from app.core.queue import EXTRACT_JOB_NAME, GENERATE_JOB_NAME, TITLE_JOB_NAME, redis_settings
 from app.db.session import dispose_engine
 from app.llm.adapters.system import SystemAdapter
@@ -122,25 +122,9 @@ CRON_JOBS: list[CronJob] = [
 ]
 
 
-def _setup_logging() -> None:
-    """Gắn handler cho cây logger `app.*`. Xem docstring module."""
-    # C20 (T-2.14) — trước cả `return` sớm: bộ che là của TIẾN TRÌNH,
-    # không của handler, nên nó phải được cài kể cả khi handler đã có.
-    install_log_redaction()
-    app_logger = logging.getLogger("app")
-    if app_logger.handlers:
-        return
-    handler = logging.StreamHandler()
-    # Cùng `datefmt` với formatter của arq để hai nguồn log đọc chung được.
-    handler.setFormatter(logging.Formatter("%(asctime)s: %(message)s", datefmt="%H:%M:%S"))
-    app_logger.addHandler(handler)
-    app_logger.setLevel(settings.LOG_LEVEL)
-    app_logger.propagate = False
-
-
 async def on_startup(ctx: dict[str, Any]) -> None:
     """`PING` Redis, dựng `LLMClient` dùng chung, rồi in log DoD của T-1.5."""
-    _setup_logging()
+    setup_logging()
     await ctx["redis"].ping()
     ctx[CTX_LLM_CLIENT] = SystemAdapter.from_settings()
     conn = redis_settings()

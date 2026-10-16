@@ -86,7 +86,7 @@ from typing import Any
 
 from app.config.settings import settings
 from app.core import storage
-from app.core.log_redact import install_log_redaction
+from app.core.log_setup import setup_logging
 from app.core.ratelimit import (
     GROUP_CHAT,
     IP_GROUPS,
@@ -116,26 +116,6 @@ GROUPS_BY_AXIS: dict[str, tuple[str, ...]] = {
     AXIS_IP: IP_GROUPS,
     AXIS_USER: (GROUP_CHAT,),
 }
-
-
-def _setup_logging() -> None:
-    """Gắn handler cho cây logger `app.*` — cùng thân với `workers/main.py`.
-
-    Không có nó thì mọi `logger.info` của `quota/rebuild.py` rơi vào
-    `lastResort` của Python (chỉ WARNING trở lên, ra stderr, không timestamp)
-    — tức một lệnh vận hành chạy xong mà không in ra nó đã làm gì.
-    """
-    # C20 (T-2.14) — trước cả `return` sớm: bộ che là của TIẾN TRÌNH,
-    # không của handler, nên nó phải được cài kể cả khi handler đã có.
-    install_log_redaction()
-    app_logger = logging.getLogger("app")
-    if app_logger.handlers:
-        return
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s: %(message)s", datefmt="%H:%M:%S"))
-    app_logger.addHandler(handler)
-    app_logger.setLevel(settings.LOG_LEVEL)
-    app_logger.propagate = False
 
 
 async def _rebuild_quota_all() -> int:
@@ -289,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = _parser()
     args = parser.parse_args(argv)
-    _setup_logging()
+    setup_logging()
     if args.lenh == REBUILD_QUOTA:
         return asyncio.run(_run(_rebuild_quota_all()))
     if args.lenh == RESET_RATE_LIMIT:

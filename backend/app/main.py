@@ -43,6 +43,7 @@ from app.api.v1 import router as api_v1_router
 from app.core import errors, idempotency, provider_health
 from app.core.idempotency import IdempotencyMiddleware
 from app.core.log_redact import install_log_redaction
+from app.core.log_setup import setup_logging
 from app.core.origin import OriginCheckMiddleware
 from app.core.queue import dispose_arq_pool
 from app.core.redis import dispose_redis
@@ -58,6 +59,9 @@ install_log_redaction()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # B-288 / T-9.5a: handler cho `app.*` — sau `dictConfig` của uvicorn. Xem
+    # `app/core/log_setup.py` vì sao không ở mức module như dòng C20 ở trên.
+    setup_logging()
     # T-7.5: so skill doc tu `skills/` moi lan khoi dong — them/sua skill = restart api.
     async with session_scope() as session:
         await sync_skills(session)

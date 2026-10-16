@@ -28,6 +28,7 @@ from pydantic import (
     RedisDsn,
     SecretStr,
     TypeAdapter,
+    ValidationError,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -667,5 +668,27 @@ class Settings(BaseSettings):
         return tuple(part.strip() for part in self.ALLOWED_UPLOAD_MIME.split(",") if part.strip())
 
 
+def load_settings() -> Settings:
+    """``Settings()``, hỏng thì thoát với tên biến + loại lỗi — KHÔNG giá trị (B-18).
+
+    ``str(ValidationError)`` in kèm ``input_value=…``: một secret yếu bị từ chối
+    (``JWT_SECRET=short``) sẽ nằm nguyên văn trong log đúng lúc app không boot.
+    ``include_input=False`` bỏ giá trị; ``msg`` của pydantic và của các
+    validator ở trên chỉ nói tên + luật. ``from None``: không in kèm bản gốc.
+    ``SystemExit`` mang chuỗi ⇒ Python in nó ra stderr, mã thoát 1 (S1).
+    """
+    try:
+        return Settings()
+    except ValidationError as exc:
+        lines = [
+            f"  {'.'.join(str(part) for part in err['loc']) or '(toàn model)'}: "
+            f"{err['type']} — {err['msg']}"
+            for err in exc.errors(include_url=False, include_input=False, include_context=False)
+        ]
+        raise SystemExit(
+            "Settings() không hợp lệ — sửa biến môi trường:\n" + "\n".join(lines)
+        ) from None
+
+
 #: Instance dùng chung. Khởi tạo ngay lúc import để app fail-fast khi boot (L2).
-settings = Settings()
+settings = load_settings()

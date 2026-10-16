@@ -118,7 +118,13 @@ def _redact_any(value: Any) -> Any:
     dòng log dùng `%d`/`%.2f`/`%r`. Ca "khoá nằm trong một dict đem đi log" vì
     vậy che ở lối vào khác: `record.msg` khi msg **là** object đó, và
     `record.exc_text` khi nó đi trong một exception.
+
+    **Trừ exception** (T-9.5a): `logger.warning("… %s", mid, error)` — chữ lỗi
+    của SDK/provider (có thể nhại lại khoá) nằm trong `str(error)`, thứ `%s`
+    dựng lúc ghi, sau mọi lớp che. Ép sang `str` chỉ đổi `%r` của nó.
     """
+    if isinstance(value, BaseException):
+        return redact(str(value))
     return redact(value) if isinstance(value, str) else value
 
 
