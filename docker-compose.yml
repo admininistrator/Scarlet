@@ -174,7 +174,7 @@ services:
     #     SMTP_PASSWORD hay MinIO key. Cung ly le voi "sandbox KHONG co env_file" (C27).
     # Dang ${VAR:?} de thieu bien thi compose dung ngay va in dung ten bien — tinh than A4.
     restart: unless-stopped
-    networks: [internal]
+    networks: [internal, dr-link]  # T-H4 (DR): DR goi LiteLLM qua mang external nay
     # T-S.2 — GHIM, khong dung main-latest nua. Cach LiteLLM dich reasoning_effort
     # doi theo version (BerriAI/litellm#27439), va khoi `reasoning` cua catalog
     # (§24.2b·S3b) chi dung voi DUNG ban da do bang scripts/probe_reasoning.py.
@@ -327,5 +327,6 @@ services:
 networks:
   internal: {}
   egress: {}
+  dr-link: { external: true }  # tao mot lan: docker network create dr-link
 
 volumes: { pgdata: {}, redisdata: {}, miniodata: {}, ollamadata: {}, sandbox_socket: {} }

@@ -24,6 +24,8 @@ EXPECTED = {
     "fetcher": {"egress"},
     "worker": {"internal", "egress"},
     "api": {"internal"},
+    # T-H4 (repo DR, C39 cua DR): DR goi LiteLLM qua mang external dr-link.
+    "litellm": {"internal", "dr-link"},
     "sandbox": set(),
 }
 # ADR-09 + T-7.2: service vắng ở đây thì KHÔNG được có `network_mode`.
