@@ -25,6 +25,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 
 from app.config import catalog
@@ -198,6 +199,38 @@ async def test_missing_health_path_still_counts_as_available(
 
     assert status[NINEROUTER].available is True
     assert status[NINEROUTER].reason is None
+
+
+# ═══════════════ probe_provider — mã HTTP nào là "sống" ═════════════════════
+
+
+def _serve_status(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    """`httpx.AsyncClient` trong `probe_provider` trả `code` cho mọi request —
+    qua `MockTransport`, không một gói tin thật nào."""
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(code))
+    monkeypatch.setattr(
+        provider_health.httpx, "AsyncClient", lambda: real_client(transport=transport)
+    )
+
+
+@pytest.mark.parametrize("code", [200, 401, 403])
+async def test_probe_counts_auth_refusal_as_alive(
+    monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    """9Router bật `REQUIRE_API_KEY` trả 401 cho `/v1/models` không khoá — server
+    vẫn đang chạy, không được làm xám model của nó."""
+    _serve_status(monkeypatch, code)
+
+    await provider_health.probe_provider(catalog.get_catalog().providers[NINEROUTER])
+
+
+@pytest.mark.parametrize("code", [404, 500, 502])
+async def test_probe_raises_on_other_errors(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    _serve_status(monkeypatch, code)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await provider_health.probe_provider(catalog.get_catalog().providers[NINEROUTER])
 
 
 # ═══════════════ T-S.4 — đọc không bao giờ đo; vòng nền với đồng hồ giả ══════

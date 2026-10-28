@@ -154,6 +154,9 @@ class ProviderSnapshot:
     statuses: dict[str, ProviderStatus] = field(default_factory=dict)
 
 
+#: Mã HTTP của một provider đang chạy nhưng đòi khoá — xem `probe_provider`.
+ALIVE_AUTH_STATUSES = frozenset({401, 403})
+
 _UNPROBED = ProviderSnapshot(checked_at=None)
 
 #: Lượt đo gần nhất. Chỉ `refresh()` ghi; mọi request chỉ đọc. Một phép gán
@@ -174,15 +177,22 @@ async def probe_provider(provider: Provider) -> None:
     lâu (`PROVIDER_PROBE_TIMEOUT_S` ở đây, `CHECK_TIMEOUT_S` ở
     `health_checks.py`), và hai trần thời gian lồng nhau là hai chỗ để lệch.
 
-    Không gắn `Authorization`: `/v1/models` của 9Router trả `200` khi không có
-    header, và một phép kiểm sống còn không có lý do gì phải cầm khoá provider
-    (C20). `base_url` + `health_path` lấy từ catalog chứ không từ biến môi
-    trường — NQ-15/B-26, A3.
+    Không gắn `Authorization`: một phép kiểm sống còn không có lý do gì phải
+    cầm khoá provider (C20). `base_url` + `health_path` lấy từ catalog chứ
+    không từ biến môi trường — NQ-15/B-26, A3.
+
+    `401`/`403` tính là **sống**: 9Router bật `REQUIRE_API_KEY` thì `/v1/models`
+    từ chối request không khoá, nhưng một server đã trả được câu từ chối là
+    một server đang chạy — câu hỏi ở đây là "có bật không", không phải "khoá
+    có đúng không" (khoá sai lộ ra ở lượt gọi thật qua LiteLLM). Trước đó mọi
+    model 9Router bị xám dù gọi được (đo 2026-10-29).
     """
     if provider.health_path is None:
         raise ValueError(f"provider '{provider.label}' thiếu health_path trong model_catalog.json")
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{provider.base_url}{provider.health_path}")
+        if resp.status_code in ALIVE_AUTH_STATUSES:
+            return
         resp.raise_for_status()
 
 
