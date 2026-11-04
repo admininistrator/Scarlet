@@ -70,8 +70,9 @@ Hai file, hai vai trò. **Đừng gộp, đừng chép nội dung của file kia
 | **P6** | Web tools *(T-6.2…6.4 đã làm ở PS — NQ-134 ①)* | 7 | 18 h | ✅ (2026-10-09) |
 | **P7** | Skills & sandbox *(T-7.7 tách a/b — NQ-147; + T-7.8b — NQ-148)* | 11 | 25 h | ✅ (2026-10-13) |
 | **P8** | Share, voice, export, PWA *(mở rộng 2026-10-13 — NQ-149)* | 8 | 20.5 h | ✅ (2026-10-15) |
-| **P9** | Hoàn thiện *(mở rộng 2026-10-15 — NQ-151; T-9.4, T-9.5 tách a/b; + T-9.8)* | 10 | 27.5 h | ☐ |
-| | **Tổng** | **137** | **364.5 h** *(chưa gồm T-S.19)* | |
+| **P9** | Hoàn thiện *(mở rộng 2026-10-15 — NQ-151; T-9.4, T-9.5 tách a/b; + T-9.8)* | 10 | 27.5 h | 🔄 5/10 ✅ — còn T-9.2 (T-H8), T-9.3, T-9.4b (T-H10, T-H14), T-9.6, T-9.7 |
+| **P10** | Mở rộng sau v1 *(lập 2026-11-04 — NQ-152; §13b)* | 28 *(22 sẵn sàng + 6 có điều kiện)* | 90 h *(59 h sẵn sàng + 31 h có điều kiện)* | ☐ — mở khi T-9.3, T-9.6 ✅ |
+| | **Tổng** | **165** | **454.5 h** *(chưa gồm T-S.19)* | |
 
 > ⚠️ **Chênh lệch với KE-HOACH §24.2 là có chủ ý.** Kế hoạch ước 180–250 h khi nhìn từ trên xuống. Sau khi bẻ nhỏ thành 104 task, con số thật là ~262 h. Đây là hiện tượng bình thường: ước lượng từ trên xuống luôn lạc quan. **Dùng con số trong bảng này, không dùng con số trong kế hoạch.** Ghi vào Nhật ký quyết định NQ-01.
 
@@ -86,6 +87,8 @@ Hai file, hai vai trò. **Đừng gộp, đừng chép nội dung của file kia
 | **M5 — Dùng như sản phẩm** | T-3.12 | Giao diện xong |
 | **M5b — Chuẩn hoá xong** | T-S.18 | Giao diện khớp bản vẽ v2; mọi nút của P4–P9 đã có chỗ và chờ được gắn |
 | **M6 — Đủ tính năng** | T-8.8 | Toàn bộ phạm vi v1 |
+| **M7 — Tìm web không phụ thuộc một nguồn** | T-10.10 | Tavily hỏng / hết quota vẫn có kết quả; thứ tự nguồn chốt bằng số đo (S16, S17) |
+| **M8 — Hỏi nhiều model** | T-10.20 | Một câu hỏi, N cột độc lập, tổng kết bằng một model (S18) |
 
 ---
 
@@ -4173,6 +4176,477 @@ Quy luật: task viết code trên bề mặt đã quen về **25–50 %** (T-8.
 
 ---
 
+## 13b. Phase 10 — Mở rộng sau v1 *(lập 2026-11-04)*
+
+**Mục tiêu:** KE-HOACH §24.2c — tìm web không phụ thuộc một nguồn và đọc được chữ trang (khối B), hỏi nhiều model trong một câu + tổng kết (khối D), những vết xước người dùng gặp mỗi ngày (khối A: lỗi đăng ký trừu tượng, không biết câu trả lời mất bao lâu, chip lỗi của trang đọc hỏng, danh sách nguồn dài, công thức toán không render), custom instructions (khối F). Có điều kiện: tool `browse` bằng jev, MCP client, trí nhớ bậc 2–3 (khối X → G). Tiêu chí nghiệm thu: KE-HOACH §24.3 dòng P10.
+
+**Lập 2026-11-04** từ `docs/phase-10-preparation.md` (NQ-152). Khác các lần mở rộng P4 → P9: **P9 chưa đóng** (5/10 ✅) và **chín câu Q-P10-1…9 chưa chốt** — bảng ở cuối phần mở đầu, mỗi câu kèm mặc định; Việc của từng task viết theo mặc định ấy, đổi khi người dùng trả lời. Người dùng cho phép viết KE-HOACH cho P10 (§24.2c và các dòng kê ở đầu mục ấy) — ngoại lệ có tên của "KH là vùng cấm" (B-412, B-425). Mức chi tiết theo META §4.4: 22 task sẵn sàng đủ 7 trường; 6 task khối G chỉ là bảng — chúng chờ một thí nghiệm hoặc một quyết định, viết chi tiết bây giờ là viết hai lần.
+
+**Điều kiện mở P10 — chưa đạt hôm nay:** T-9.3 ✅ (backup — P10 thêm migration 0016, 0017) và T-9.6 ✅ (trang quyền riêng tư — P10 thêm bên thứ ba nhận câu hỏi / URL; mỗi task như thế thêm một dòng vào trang ấy). Cả hai **không chờ người**. T-9.2 (T-H8) và T-9.4b (T-H10, T-H14) không chặn P10. T-9.7 nên xong trước để README là nền cho các mục vận hành P10 thêm (SearXNG). Đóng P9 theo HUONG-DAN §6.7 khi đủ 10/10.
+
+**Đo trước khi viết (2026-11-04).** Đọc code + cấu hình + `docker`/`lsof` trên máy dev; **không** gọi dịch vụ trả tiền nào, không sửa repo:
+
+| Đo | Kết quả | Dùng ở |
+|---|---|---|
+| Máy dev | macOS 27.0.1 **arm64**, Docker Desktop; 10 service `healthy` (`mailpit` không chạy); `pnpm` **không** có trên host (FE chạy trong `web`) | R-P10-1, mọi task FE, T-10.12, T-10.21 |
+| Máy prod | `docs/RUNBOOK-AWS.md` (commit c05229a): EC2 Ubuntu 24.04 **x86_64** | R-P10-1, T-10.12, T-10.21 |
+| 9Router | container `9router` trên máy dev, `0.0.0.0:20128`; bf2db45: 9Router bật `REQUIRE_API_KEY`, probe coi `401/403` là sống | R-P10-2 |
+| Catalog | bật: `nr-gemini-flash`, `nr-claude-opus-4.6-thinking`, `nr-claude-sonnet-4.6`, `nr-deepseek-v4-pro`, `nr-deepseek-v4.1-flash` (`vision`) — **cả năm qua 9Router**; tắt: `deepseek-flash`, `claude-haiku` (e4e8db4 "tạm tắt nhánh API Key"), `ol-qwen-small`, `grok-4.6` (B-426); `title_model` = `nr-deepseek-v4.1-flash`, `max_output` 512 | T-10.2, T-10.6, T-10.17, T-10.20 |
+| Khoá DeepSeek | `DEEPSEEK_API_KEY` chỉ ở `.env.providers` (chỉ `litellm` đọc — NQ-15); `settings.py:146` ghi rõ backend không đọc | R-P10-3, T-10.9 |
+| `tools/web_search.py` | `TavilySearch` gửi `query` + `max_results`, trần `WEB_SEARCH_TIMEOUT_S=10`; `SearchError` 5 mã (`not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream`); 432/433 ⇒ `rate_limited` | T-10.8 |
+| `tools/registry.py` | `search_provider: SearchProvider = TavilySearch()` (dòng 225); `fetch_url` hỏng ⇒ `ToolResult(ok=False, reason)` **không** `sources` (dòng 252–258); `MAX_TOOL_CALLS_PER_TURN=5`, `MAX_TOOL_ROUNDS=3`, `TOOL_RESULT_MAX_CHARS=24000` | T-10.3, T-10.8, T-10.11 |
+| Lối đo provider | `core/provider_health.py` (bf2db45) — file chuẩn bị ghi nhầm `core/health_checks.py` (đó là `/health/deep`) | T-10.8 |
+| Chuỗi lỗi tool | `vi.json:96–107` — 12 chuỗi `chat.tool.error.*`, `chat.sources` | T-10.3, T-10.4 |
+| Mật khẩu | `PASSWORD_MIN_LENGTH=12`, `PASSWORD_MIN_ZXCVBN_SCORE=2` (`settings.py:201, 234`); kiểm ở **hai** chỗ: `/auth/register` (`auth.py:382`), `/auth/reset-password` (`:1031`) — không có route đổi mật khẩu; `vi.json:220` "Mật khẩu quá ngắn. Hãy chọn một mật khẩu dài hơn." không có con số; `ApiError` có sẵn `details` | T-10.1 |
+| Markdown FE | `react-markdown` 10, `remark-gfm` 4, `rehype-sanitize` 6, `rehype-raw` 7 (dev); **không** `remark-math` / `katex`; `components/chat/streamingTail.ts` lo code fence dở dang | T-10.5 |
+| `messages` | không cột thời gian nào ngoài `created_at`, `heartbeat_at`; migration cuối `0015_skills_default_enabled` | T-10.2, T-10.17 |
+| SSE | Phụ lục F: `start`, `delta`, `reasoning`, `tool_call`, `tool_result`, `artifact`, `usage`, `done`, `error` — `reasoning` có sẵn | T-10.2 |
+| Trần đồng thời | `MAX_CONCURRENT_STREAMS=3` (`settings.py:374`, `core/ratelimit.py:548`) | T-10.17 |
+| Nginx | `http2 on` ở `config/nginx/nginx.conf:77, 157` và template prod `:72, 129` | R-P10-9, T-10.20 |
+| `prefs_json` | `core/user_prefs.py`: `avatar_color`, `reasoning`; prompt: `config/prompts/system.jinja`, `title.jinja` | T-10.6 |
+| Route nhánh | `PATCH /conversations/{id}` (đổi `active_leaf_id`), `GET /messages/{id}/siblings`, `POST /messages/{id}/cancel`, `/retry` | T-10.17, T-10.18, T-10.20 |
+| Tệp lạc | `.env.bak-20261029` ở gốc repo — `.gitignore` chỉ phủ `.env` ⇒ một `git add -A` là commit secret (B-432) | Chung cho cả phase |
+
+**Luật riêng của phase:** KE-HOACH §24.2c **P10-11** (bảy điều) — đọc trước task đầu tiên. Tóm: A1–A10 giữ nguyên; bên thứ ba mới ⇒ dòng trên trang thông tin trong cùng task; phụ thuộc mới chỉ những gì P10-13 kê (BM25 tự viết); đo trước rồi mới đổi; tiền ≤ 0.10 USD / task trừ ba task eval tìm web (trần chung Q-P10-4); thí nghiệm có điều kiện dừng; image mới đa kiến trúc.
+
+**Thứ tự:** *(điều kiện mở: T-9.3, T-9.6)* → **A** T-10.1 → T-10.3 → T-10.5 → T-10.2 → *(T-HD13)* T-10.4 → **F** T-10.6 → **B1** T-10.7 → T-10.8 → *(T-H15)* T-10.9 → T-10.10 (**M7**) → **D** T-10.17 → T-10.18 → *(T-HD14)* T-10.19 → T-10.20 (**M8**) → **B2** T-10.11 → T-10.12 → T-10.13 → *(T-H16)* T-10.14 → T-10.15 → T-10.16 → **X** T-10.21 · T-10.22 → **G** theo cổng. Lý do: KE-HOACH §24.2c **P10-3**. T-10.2 sau T-10.5 vì cả hai chạm bong bóng nhưng T-10.2 còn chạm worker + migration — làm khi phần FE thuần đã xong. T-10.9 🚧 nếu chưa có T-H15 — T-10.10 chạy với Tavily (+ nguồn có khoá) rồi bổ sung số DeepSeek sau.
+
+**Việc của NGƯỜI trong P10** *(§3 không sửa — lối P9: T-H mới chỉ sống ở mục này)*:
+- **T-H15** — DeepSeek Search: quyết có nạp số dư không (Q-P10-4); nếu có, nạp và đặt `DEEPSEEK_SEARCH_API_KEY` vào `.env` (có thể cùng giá trị khoá trong `.env.providers`; agent không in giá trị). **Chặn** T-10.9, vế DeepSeek Fetch của T-10.15. ~15 ph.
+- **T-H16** — Firecrawl gói Free: tạo tài khoản, đặt `FIRECRAWL_API_KEY` vào `.env`; xem trang billing và cho agent biết 1 000 credit là **một lần** hay **mỗi tháng**. **Chặn** T-10.14, vế Firecrawl của T-10.15. ~15 ph.
+- **T-H17** — TypeSafe + OpenRouter: hỏi TypeSafe chính sách lưu dữ liệu / giá / rate limit (docs hiện không ghi) **trước** khi mua; chỉ mua gói credit nhỏ nhất **sau khi** T-10.21 ① qua; khoá OpenRouter cho `TEXT_MODEL_API_KEY`. **Chặn** T-10.21 ④, T-10.23. ~30 ph.
+- **T-H18** — một server MCP thật muốn dùng (URL + token, ưu tiên loại chỉ đọc). **Chặn** DoD của T-10.24. ~15 ph.
+- **T-HD13** — bản vẽ "nguồn thu gọn": nút, danh sách mở (≥ 640 px popover, < 640 px sheet), dòng đếm trang bỏ qua; trên màn chat và `/s/:token`. **Chặn** T-10.4. Theo câu trả lời Q-P10-1.
+- **T-HD14** — bản vẽ "hỏi nhiều model": picker chế độ chọn nhiều, màn cột (1440 / 1024 / 375 px), đồng hồ + nút Dừng mỗi cột, "Dùng câu này", "Tổng kết bằng…", cột tổng kết, trạng thái lỗi một cột. **Chặn** T-10.19, T-10.20. Theo câu trả lời Q-P10-3.
+- **T-HD15** *(chỉ khi khối MCP mở)* — màn cài đặt MCP: danh sách server, thêm / kiểm / xoá, bật tắt từng server. **Chặn** T-10.26.
+- **Trả lời Q-P10-1…9** — bảng dưới. Không trả lời ⇒ dùng mặc định.
+- **Bắt đầu được ngay khi điều kiện mở đạt, không chờ người:** T-10.1, T-10.3, T-10.5, T-10.2, T-10.6, T-10.7, T-10.8, T-10.10 (với Tavily), T-10.17, T-10.18, T-10.11, T-10.12, T-10.13, T-10.16 (vế nguồn đang có), T-10.21 ①–③, T-10.22 — ~43.5 h.
+
+**Ước lượng: 59 h cho 22 task sẵn sàng + 31 h cho 6 task có điều kiện.** Nền là thực tế đo được của P9 (5 task đã xong) và P8:
+
+| P9 | T-9.1 | T-9.4a | T-9.5a | T-9.5b | T-9.8 | **5 task** |
+|---|---|---|---|---|---|---|
+| Ước lượng → thực tế (h) | 3.5 → ~2 | 4.5 → ~1.5 | 2 → ~1 | 2.5 → ~1 | 2.5 → ~1 | **15 → ~6.5 (43 %)** |
+
+Quy luật P7 → P9 giữ: task trên bề mặt đã quen về **25–50 %**; bề mặt ngoài **lần đầu** về **sát hoặc vượt**. P10 có nhiều bề mặt lần đầu (DeepSeek Search, SearXNG, Firecrawl, KaTeX, jev, MCP, N stream song song) ⇒ ước theo nhóm "sát" + ~0.5 h mỗi bề mặt lần đầu, **không** theo 43 % của P9. Task trên bề mặt quen (T-10.1, T-10.3, T-10.6, T-10.16) ước thấp sẵn.
+
+**Backlog vào P10 — và không vào:**
+- **Vào:** B-05 (→ T-10.22, T-10.24–26) · B-09 (→ T-10.28) · B-14 (→ T-10.17–20).
+- **Không vào:** B-06 RAG (P10-15) · B-01 browse có đăng nhập · B-413 offline · B-358 `create_artifact` · B-426 ① (worker không nạp lại catalog — họ hàng C48, nhưng không thuộc chữ P10) · B-263 `make check-docs` (§2 lần này vẫn cộng tay).
+- **Mới:** B-431 (connector OAuth — P10-2), B-432 (`.env.bak-*` không bị `.gitignore` phủ).
+
+**DoD của phase:** KE-HOACH §24.3 dòng P10. Bổ sung:
+- Mỗi bên thứ ba mới có dòng trên trang thông tin công khai (T-9.6): DeepSeek Search (T-10.9), các engine của SearXNG (T-10.12), Firecrawl (T-10.14), DeepSeek Fetch / Firecrawl scrape (T-10.15); và TypeSafe / OpenRouter, server MCP nếu khối G mở.
+- `pytest tests/tools/test_ssrf.py` (S10) xanh sau mọi task chạm mạng (T-10.11, T-10.12, T-10.15, T-10.21, T-10.22).
+- `make s8` Performance ≥ 80, Accessibility ≥ 90 trên bản prod (T-10.5 và task FE cuối của phase).
+- `make test-artifact-origin` `S12 đạt` (mọi task FE).
+- Khối G: mỗi task ✅ **hoặc** ⏭️ kèm NQ — không task nào 🔄 khi đóng phase.
+
+**Không làm ở P10:** KE-HOACH §24.2c **P10-15**.
+
+**Chọn trong phiên lập theo tiền lệ, không hỏi — đổi được khi duyệt:** ① chip đồng hồ nằm trong chip model · mức có sẵn (T-S.15) — không vị trí mới, nên T-10.2 không chờ bản vẽ; ② ô custom instructions trong tab Tài khoản bằng thành phần có sẵn (lối T-9.6 ⑧); ③ luật ẩn chip lỗi ở FE, không đổi hợp đồng SSE (P10-4 A3); ④ BM25 tự viết, không `rank_bm25` (P10-11 ③); ⑤ `WEB_SEARCH_PROVIDERS` mặc định giữ `tavily` tới khi T-10.10 chốt bằng số — trước đó hành vi không đổi; ⑥ `parallel` chỉ thêm ở T-10.13, T-10.8 chỉ nhận `fallback` (giá trị khác ⇒ không boot, in tên biến — A4); ⑦ synthesis dùng nhãn trung tính A/B/C (ADR-19); ⑧ `FANOUT_MAX_MODELS=3` và kiểm lúc boot `FANOUT_MAX_MODELS ≤ MAX_CONCURRENT_STREAMS`; ⑨ eval tìm web chỉ phép kiểm tất định, không LLM chấm (lối T-9.1); ⑩ hai thí nghiệm không để lại code trong repo — chỉ số đo + NQ (lối T-7.1, T-S.2).
+
+**Chung cho cả phase:**
+- **Đầu phiên `docker compose ps`** — mọi service `healthy` (từ T-10.12: thêm `searxng`). Task chạm Nginx xong phải `nginx -t` + `nginx` `healthy`; khởi động lại `api` / `web` thì khởi động lại `nginx` (README, B-189).
+- **`make test` không chạm DeepSeek, Tavily, Firecrawl, SearXNG thật, model thật:** giả ở một chỗ nối — `httpx.MockTransport` cho mỗi nguồn (lối `web_search.py::_client`), fixture `LLMClient`, `EventSource` giả (vitest). Hành vi thật là lệnh DoD trên stack.
+- **Đổi `Settings` ⇒ khởi động lại `worker`, không chỉ `api`** (C48); dòng log mỗi lượt tìm web ghi `providers=` thật — dán nó khi DoD so cấu hình.
+- **Chromium qua Nginx** cho mọi DoD trình duyệt (lối `artifact-origin`: netns `nginx`, ghim SPKI, phiên mint trong `api`, logout cuối).
+- **Hai tài khoản:** A = tài khoản DoD (`docs/test-account.txt` — ngoài commit, không in nội dung), B = user tạm + cookie mint; cuối phiên xoá mềm user tạm, trả tier / hạn mức về như đầu phiên.
+- **Kiểm ngược như P5 → P9:** mỗi phép canh phá một lần cho thấy nó đỏ, một dòng trong báo cáo; khôi phục xong `touch` (api / worker không nạp lại nếu mtime cũ); `git diff --stat` sạch sau cùng.
+- **Tiền:** ≤ 0.10 USD mỗi task (NQ-122); ba task eval tìm web chung trần Q-P10-4; dán `SELECT sum(cost_usd) FROM usage_events WHERE created_at > '<mốc đầu phiên>'` và — từ T-10.16 — bộ đếm `websearch:cost:*`.
+- **Đồng hồ:** mọi trần thời gian trong DoD có biên ± 10 % (B-278).
+- **Phụ thuộc FE mới** (chỉ T-10.5): theo README "Thêm/xoá một package của frontend" — `exec web pnpm add … --store-dir …`, build, `--force-recreate --renew-anon-volumes`, restart `nginx`.
+- **Ngoài commit, cố ý:** `docs/phase-10-preparation.md` (nguồn ý tưởng của người dùng), `docs/add-model.md`, `docs/test-account.txt`, `.env.bak-*`. `git add` từng file; soi `git diff --cached --stat` trước khi commit.
+
+**Chín câu hỏi của phase — CHƯA CHỐT (2026-11-04).** Cùng thứ tự với KE-HOACH §26 Q-13…Q-21. Mặc định là thứ Việc của task đang viết theo:
+
+| # | = KH | Task | Câu hỏi | Mặc định nếu không trả lời |
+|---|---|---|---|---|
+| Q-P10-1 | Q-13 | T-10.4, T-HD13 | Ý "đưa các website đã đọc vào …" bị cắt — đưa vào đâu? | Một nút "N nguồn" dưới câu trả lời, bấm mở danh sách; dòng cuối đếm trang không đọc được |
+| Q-P10-2 | Q-14 | T-10.5 | `$…$` một dấu đô la có render toán không? | Có, kèm luật thoát `$` liền trước chữ số |
+| Q-P10-3 | Q-15 | T-10.17, T-10.20, T-HD14 | Sau khi hỏi N model, câu tiếp theo nối vào đâu; "nhận cả 3 kết quả" là gì? | Nối vào cột đang chọn (mặc định cột đầu); "nhận cả 3" = giữ ba nhánh để xem lại |
+| Q-P10-4 ⚠️ | Q-16 | T-H15, T-10.7, T-10.9, T-10.10, T-10.13 | Nạp số dư DeepSeek cho DeepSeek Search? Trần tiền model cho ba task eval tìm web? | Trần 0.50 USD chung; không có số dư ⇒ T-10.9 🚧 |
+| Q-P10-5 ⚠️ | Q-17 | T-10.24 | Mạng MCP: (a) qua `fetcher` / (b) `worker` gọi thẳng có ghim IP? | (a) — sau số đo của T-10.22 |
+| Q-P10-6 | Q-18 | T-10.27 | Điều kiện mở trí nhớ bậc 2? | ≥ 2 tuần dùng T-10.6 và ≥ 1 người dùng nói custom instructions không đủ |
+| Q-P10-7 | Q-19 | T-10.27 | Chống injection bậc 2: xác nhận từng mục / cấm đề xuất sau khi đọc dữ liệu ngoài / cả hai? | Cả hai |
+| Q-P10-8 | Q-20 | T-10.17 | Fan-out: mỗi lời gọi `web_search` của từng cột trừ một lượt, hay cả lần gửi một lượt? | Mỗi lời gọi thật một lượt |
+| Q-P10-9 | Q-21 | — (§2) | Tách khối G sang Phase 11? | Giữ trong P10 dạng bảng |
+
+---
+
+### Khối A — Vết xước hằng ngày
+
+### T-10.1 — Yêu cầu tài khoản / mật khẩu nói rõ: `GET /auth/password-policy`, `details` của `422`, câu lỗi cụ thể trên `/dang-ky` và `/dat-lai-mat-khau`
+- **Trạng thái:** ☐ · **Phụ thuộc:** điều kiện mở P10 · **Ước lượng:** 2 h
+- **KH:** §24.2c P10-4 A1, §11.5, §11.6, §19 (A3)
+- **Việc:**
+  - [ ] `core/security.py`: `check_password_policy(password) -> None` ném `ApiError` — gom kiểm độ dài + zxcvbn đang lặp ở `auth.py:382` và `:1031`; `PASSWORD_TOO_SHORT` mang `details={"min_length": n, "length": len(password)}`
+  - [ ] `api/v1/auth.py`: `GET /auth/password-policy` không cần đăng nhập ⇒ `{min_length, rejects_common}` từ `Settings`
+  - [ ] FE `lib/api.ts`: `passwordPolicy()` gọi một lần khi mở `/dang-ky` hoặc `/dat-lai-mat-khau`
+  - [ ] `vi.json`: `auth.matKhauGoiY` → "Ít nhất {{min}} ký tự, không dùng mật khẩu phổ biến."; `auth.matKhauQuaNgan` → "Mật khẩu cần ít nhất {{min}} ký tự — bạn đang có {{len}}."; `auth.matKhauQuaYeu` → câu nói **vì sao** (có trong danh sách mật khẩu bị lộ, hoặc theo mẫu dễ đoán như dãy bàn phím, ngày sinh); khoá mới `auth.emailSaiDang` → "Email chưa đúng dạng, ví dụ ten@mien.com." — hiện khi `VALIDATION_ERROR` có `details` trỏ trường `email`
+  - [ ] Test: `tests/api/test_auth.py` (hai route × hai mã + route chính sách), vitest hai màn
+- **Xong khi (DoD):**
+  - [ ] `curl -sk https://localhost/api/v1/auth/password-policy` ⇒ `{"min_length":12,"rejects_common":true}`; đặt `PASSWORD_MIN_LENGTH=14` trong `.env`, `up -d api` + restart `nginx` ⇒ `14`; trả về `12` sau cùng
+  - [ ] `POST /api/v1/auth/register` mật khẩu 8 ký tự ⇒ `422`, `error.code` `PASSWORD_TOO_SHORT`, `error.details` = `{"min_length":12,"length":8}`; cùng kết quả ở `/auth/reset-password` (token hợp lệ của user tạm)
+  - [ ] Chromium qua Nginx `/dang-ky`: email `abc` + mật khẩu `abc` ⇒ hai dòng `role=alert` đúng nguyên văn "Email chưa đúng dạng…" và "…ít nhất 12 ký tự — bạn đang có 3." (dán `textContent`); `password123456` ⇒ câu "quá phổ biến" có lý do; dòng gợi ý hiện **trước khi** gõ
+  - [ ] `grep -nE '1[0-9] ký tự' frontend/src/locales/vi.json` ⇒ rỗng (con số chỉ đến từ server — A3)
+  - [ ] Response đăng ký với email đã tồn tại vẫn byte-for-byte như email mới (test cũ của T-2.1 xanh, không sửa)
+- **Cạm bẫy:** ① Rate limit `register` 3 lượt / giờ / IP — DoD trình duyệt chạm trần nhanh; gỡ bằng `python -m app.cli reset-rate-limit ip register --all` (README). ② `len()` của Python đếm code point, `.length` của JS đếm UTF-16 (emoji = 2) — FE so với `details.length` của server, không tự đếm lại.
+
+### T-10.2 — 🔒 Đồng hồ trả lời: `completed_at` + `reasoning_ms` (migration 0016), `start` / `done` mang thời gian, FE đếm sống và sống qua F5 — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-9.3 ✅ (migration sau khi có backup — R-P10-6) · **Ước lượng:** 3 h
+- **KH:** §24.2c P10-4 A2, §7.2, §7.4, Phụ lục F, C57, S20
+- **Rủi ro:** chạm worker `generate` + hợp đồng SSE — resume (S3) phải xanh nguyên
+- **Việc:**
+  - [ ] `alembic/versions/0016_messages_timing.py`: `completed_at TIMESTAMPTZ NULL`, `reasoning_ms INT NULL CHECK (reasoning_ms >= 0)`
+  - [ ] `workers/generate.py`: `reasoning_ms` = tổng các đoạn (mỗi vòng tool) từ chunk `reasoning` đầu tiên tới chunk nội dung / tool call đầu tiên, đo bằng `time.monotonic()`; `completed_at = now()` của **Postgres** trong cùng `UPDATE` khép hàng `completed`; `failed` / `cancelled` không ghi
+  - [ ] `streaming/events.py`: `start` + `created_at` (ISO 8601 UTC); `done` + `duration_ms` (từ hai cột, cùng nguồn giờ), `reasoning_ms`
+  - [ ] Schema message của đường đi + `/messages/{id}/siblings`: `completed_at`, `reasoning_ms`
+  - [ ] FE: chip model · mức (T-S.15) thêm "· 31 s" và "· suy luận 12 s" khi có; đếm sống mỗi giây khi `streaming`; bù lệch giờ máy bằng header `Date` của response đường đi; khi `done` thay bằng số của server; định dạng < 60 s "31 s", ≥ 60 s "2 ph 05 s" — chuỗi trong `vi.json`
+- **Xong khi (DoD):**
+  - [ ] Một lượt thật qua Nginx với `nr-deepseek-v4.1-flash` (luôn suy luận — e4e8db4): `SELECT completed_at - created_at, reasoning_ms FROM messages WHERE id = '<id>'` ⇒ cả hai khác NULL, `reasoning_ms` < tổng; `curl -N` stream ⇒ `done` có `duration_ms` khớp phép trừ ± 5 ms
+  - [ ] Chromium qua Nginx: gửi, F5 ở giây ~5 ⇒ đồng hồ hiện lại ≥ 5 s, lệch ≤ 1 s so với `now() - created_at` của Postgres đọc cùng lúc; lặp với `page.clock` lệch +30 s ⇒ vẫn ≤ 1 s (C57)
+  - [ ] Message trước 0016 và message `failed` / `cancelled` ⇒ không đồng hồ, 0 lỗi console
+  - [ ] `make test-resume` (S3) xanh — thêm trường vào `start` không làm lệch byte nào
+  - [ ] `alembic downgrade -1 && alembic upgrade head` sạch
+- **Cạm bẫy:** ① Trộn giờ Postgres (`created_at`) với giờ container worker ra số âm khi đồng hồ container lệch — `completed_at` lấy `now()` của Postgres, monotonic chỉ cho `reasoning_ms`. ② Nối lại bằng `XRANGE` phát lại `start` cũ — FE không được đặt mốc đồng hồ theo lúc **nhận** `start`, phải theo `created_at`.
+
+### T-10.3 — Trang đọc hỏng không lên UI: luật hiển thị chip theo phạm vi lỗi; link người dùng dán và lỗi của cả tool vẫn hiện
+- **Trạng thái:** ☐ · **Phụ thuộc:** điều kiện mở P10 · **Ước lượng:** 1.5 h
+- **KH:** §24.2c P10-4 A3, §12.2, T-6.7c
+- **Việc:**
+  - [ ] `components/chat/toolChipVisibility.ts`: hàm thuần `(toolResult, userUrls) -> "show" | "hide"` đúng bảng A3; `userUrls` trích từ message user của lượt, chuẩn hoá (host lowercase, bỏ fragment, bỏ `/` cuối)
+  - [ ] Áp ở cả bong bóng đang stream lẫn message đã lưu (`tool_rounds`); trả số chip đã ẩn cho T-10.4
+  - [ ] `toolChipVisibility.test.ts` dạng bảng
+- **Xong khi (DoD):**
+  - [ ] vitest ≥ 12 ca (7 lý do `fetch_url` × URL có / không trong câu hỏi, cộng 4 lỗi cả tool) xanh; kiểm ngược: bỏ nhánh "URL trong câu hỏi" ⇒ ca `internal` do người dùng dán đỏ
+  - [ ] Chromium qua Nginx, Tìm web bật: "Đọc giúp http://litellm:4000/ rồi tóm tắt" ⇒ chip "Link trỏ vào địa chỉ nội bộ — đã từ chối" **hiện**
+  - [ ] Message dựng sẵn (seed lối T-8.x) có `tool_rounds` gồm một `fetch_url` hỏng `http` với URL **không** có trong câu hỏi ⇒ 0 chip lỗi trong DOM; cùng message, URL **có** trong câu hỏi ⇒ chip hiện
+  - [ ] User tạm tier `web_searches_per_day = 0` ⇒ chip "Đã hết lượt tìm web trong 24 giờ" vẫn hiện
+- **Cạm bẫy:** người dùng dán `https://Example.com/a#x`, model gọi `https://example.com/a` — so **sau** chuẩn hoá, không thì link của người dùng bị ẩn oan.
+
+### T-10.4 — Nguồn thu gọn: một nút "N nguồn" + danh sách mở, khử trùng URL, dòng đếm trang bỏ qua; màn chat và `/s/:token`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.3, **T-HD13**, Q-P10-1 · **Ước lượng:** 2 h
+- **KH:** §24.2c P10-4 A4, T-6.7c (Q-P6-7), T-8.2
+- **Việc:**
+  - [ ] `components/chat/SourcesButton.tsx` theo bản vẽ T-HD13: nút chồng ô chữ cái, danh sách (popover ≥ 640 px / sheet < 640 px), mỗi dòng tiêu đề + tên miền + link `target=_blank rel=noopener noreferrer`
+  - [ ] Gộp `sources` của **mọi** vòng tool trong lượt, khử trùng theo URL đã chuẩn hoá (lối T-10.3); dòng cuối "Bỏ qua N trang không đọc được" khi N > 0
+  - [ ] Thay chip nguồn cũ trên màn chat và trang chia sẻ; `aria-expanded`, Esc đóng, focus trả về nút
+- **Xong khi (DoD):**
+  - [ ] Chromium qua Nginx: message seed có 7 nguồn trong hai vòng tool, 1 URL trùng ⇒ đúng 1 nút "6 nguồn", danh sách 6 dòng; Esc đóng, `document.activeElement` là nút
+  - [ ] 375 px: sheet không tràn ngang (`scrollWidth ≤ clientWidth`); `make audit` 0 vi phạm mới trên màn chat + `/s/:token`
+  - [ ] Seed có 2 trang ẩn (T-10.3) ⇒ dòng "Bỏ qua 2 trang không đọc được"
+- **Cạm bẫy:** chỉ đọc vòng tool cuối là mất nguồn của vòng đầu — gộp theo cả `tool_rounds`.
+
+### T-10.5 — 🔒 LaTeX: `remark-math` + `rehype-katex`, chuẩn hoá `\(…\)` / `\[…\]`, luật `$` tiền tệ, sanitize trước KaTeX, nạp lười — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** điều kiện mở P10, Q-P10-2 · **Ước lượng:** 3 h
+- **KH:** §24.2c P10-4 A5, ADR-20, §20 (XSS), S19, C55, C56
+- **Rủi ro:** thêm một renderer chạy **sau** sanitizer — đường XSS mới nếu cấu hình sai
+- **Việc:**
+  - [ ] Thêm `remark-math`, `rehype-katex`, `katex` (README "Thêm/xoá một package của frontend")
+  - [ ] `components/chat/mathPreprocess.ts`: ngoài code fence / code inline — `\(…\)` → `$…$`, `\[…\]` → `$$…$$`; `$` liền trước chữ số mà không có `$` đóng hợp lệ trên cùng dòng ⇒ thoát; trả kèm cờ "có công thức"
+  - [ ] `Markdown.tsx`: tiền xử lý → `remark-math` → `rehype-sanitize` (allowlist thêm đúng `math-inline`, `math-display`) → `rehype-katex` với `trust: false`, `strict: "ignore"`, `throwOnError: false`, `maxExpand`, `maxSize`
+  - [ ] Nạp lười KaTeX + CSS bằng `import()` chỉ khi có công thức; font từ bundle (không CDN)
+  - [ ] `streamingTail.ts`: `$$` chưa đóng ⇒ chữ thường tới khi đóng
+  - [ ] `Markdown.test.tsx`: bộ 20 biểu thức S19, ca C55, C56, code block chứa `$`
+- **Xong khi (DoD):**
+  - [ ] vitest: 20/20 có `.katex` trong DOM; "giá $5 và $10" ⇒ 0 `.katex`; `` `$x$` `` trong code inline ⇒ 0 `.katex`; `$\href{javascript:alert(1)}{x}$` ⇒ 0 thẻ `<a>`; `\def\a{\a}\a` ⇒ render < 100 ms và hiện lớp lỗi
+  - [ ] Kiểm ngược: đặt `rehype-katex` **trước** `rehype-sanitize` ⇒ ca 20/20 đỏ (sanitize xoá markup KaTeX) — thứ tự là hợp đồng
+  - [ ] Chromium qua Nginx, một lượt thật "Viết công thức nghiệm phương trình bậc hai, dùng \( \) và \[ \]" ⇒ DOM có `.katex-display`; network log: 0 request ra origin ngoài (font từ `/assets/`)
+  - [ ] `make prod-up && make s8` ⇒ Performance ≥ 80 cả bốn đường; `grep -c katex frontend/dist/assets/index-*.js` (trong stage build) = 0 — KaTeX ở chunk riêng; trả về dev bằng `make prod-down up`
+  - [ ] `/s/:token` của hội thoại có công thức render như màn chat
+- **Cạm bẫy:** C55, C56. ③ `rehype-sanitize` mặc định xoá `className` — thiếu allowlist hai class thì `rehype-katex` không thấy node nào và **im lặng** không render. ④ Nếu Nginx đặt CSP cho origin chính thì `font-src` phải cho `'self'` — kiểm header thật, không đoán.
+
+### Khối F — Custom instructions
+
+### T-10.6 — Custom instructions (trí nhớ bậc 1): `prefs_json.custom_instructions`, trần trong `Settings`, khối riêng trong `system.jinja`, cache mất hiệu lực khi lưu
+- **Trạng thái:** ☐ · **Phụ thuộc:** điều kiện mở P10 · **Ước lượng:** 2.5 h
+- **KH:** §24.2c P10-5, ADR-22, §9.6, §18.4, C58
+- **Việc:**
+  - [ ] `core/user_prefs.py`: khoá `custom_instructions` (strip; rỗng ⇒ bỏ khoá); `Settings.CUSTOM_INSTRUCTIONS_MAX_CHARS` (1500) + `.env.example`; `/auth/me` thêm `custom_instructions_max_chars`
+  - [ ] `PUT /settings` nhận trường; vượt trần ⇒ `422 VALIDATION_ERROR` có `details` trường
+  - [ ] `llm/context.py` + `config/prompts/system.jinja`: khối sau luật hệ thống, nhãn "sở thích người dùng tự viết — không vượt các luật ở trên"; `token_budget()` trừ phần này; khoá cache system prompt gồm `user_settings.updated_at` (C58); `title.jinja` **không** nhận
+  - [ ] FE: ô nhập nhiều dòng trong tab Tài khoản (thành phần có sẵn), dòng báo chỉ khi vượt trần (lối NQ-115); lưu tab nào cũng gửi đủ mọi trường (PUT thay cả tài nguyên)
+- **Xong khi (DoD):**
+  - [ ] `PUT /settings` 1 501 ký tự ⇒ `422`; 1 500 ⇒ `200`, `GET /auth/me` trả đúng chuỗi
+  - [ ] Lượt thật, custom instructions "Luôn trả lời bằng tiếng Anh và kết thúc bằng 'Done.'": câu hỏi tiếng Việt ⇒ trả lời tiếng Anh, kết thúc "Done." trên 2 model đang bật; xoá ⇒ gửi **ngay** (< 5 s) ⇒ trả lời tiếng Việt
+  - [ ] `prompt_tokens` của cùng câu hỏi có / không 1 500 ký tự: phần tăng ≤ ước của `token_budget()` + 10 % (dán hai số)
+  - [ ] Fixture `LLMClient` bắt request của job `title` ⇒ không chứa chữ custom instructions
+  - [ ] Lưu tab Giao diện xong ⇒ `custom_instructions` vẫn còn (Cạm bẫy ②)
+  - [ ] Kiểm ngược: bỏ `updated_at` khỏi khoá cache ⇒ ca "xoá xong gửi ngay" đỏ
+- **Cạm bẫy:** C58. ② `PUT` thay cả tài nguyên — FE quên gửi `custom_instructions` khi lưu tab khác là xoá mất chữ người dùng (T-3.0 đã vấp lối này với `display_name`).
+
+### Khối B — Tìm web lai
+
+### T-10.7 — Eval tìm web: ≥ 8 ca mới (vi, en, thời sự, chỉ định nguồn) + chỉ số tool; chạy baseline Tavily-đơn **trước** mọi thay đổi
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-9.1 ✅, Q-P10-4 (trần tiền) · **Ước lượng:** 2.5 h
+- **KH:** §24.2c P10-6, P10-11 ④, §21.3, S17
+- **Việc:**
+  - [ ] `evals/cases/search/`: 2 ca tiếng Việt, 2 tiếng Anh, 2 thời sự (cần `time_range`), 2 chỉ định nguồn (cần `domains`); phép kiểm tất định: `must_call: web_search`, `expect_source_domain` (ca chỉ định nguồn), `expect_any` từ khoá ổn định
+  - [ ] `evals/runner.py --suite search --config <tên>`: ghi thêm số kết quả, thời gian `web_search` p50 / p95, độ dài chữ đưa model, `providers=` thật đọc từ log worker (C48), chi phí; tệp `evals/results/search-{config}-{date}.json`, từ chối đè trừ `--overwrite` (B-106)
+  - [ ] Chạy baseline `tavily` trên model mặc định của catalog
+- **Xong khi (DoD):**
+  - [ ] `make eval MODEL=<mặc định> ARGS="--suite search --config tavily"` exit 0; tệp có 8 ca + khối chỉ số — dán bảng
+  - [ ] Kiểm ngược: `TAVILY_API_KEY=` + restart `worker` ⇒ cùng lệnh: `expect_any` / `expect_source_domain` đỏ ≥ 6/8 — chứng minh bộ ca đo được *search*, không chỉ đo kiến thức sẵn của model; trả khoá về
+  - [ ] Tiền trong trần Q-P10-4 (dán SQL)
+- **Cạm bẫy:** ① Đáp án thời sự đổi theo ngày — `expect_any` chỉ kiểm thứ ổn định (tên nguồn, năm, tên riêng), không con số trong ngày. ② Model không gọi tool cho câu nó tưởng đã biết — câu hỏi phải nêu rõ cần thông tin mới hoặc nguồn cụ thể.
+
+### T-10.8 — 🔒⭐ `HybridSearch` khung: chuỗi `fallback`, ngắt mạch Redis, trần tổng, `SearchError.PAYMENT` — chỉ Tavily phía sau, hành vi không đổi — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.7 · **Ước lượng:** 2.5 h
+- **KH:** §24.2c P10-6, ADR-17, §12.4, B-71, S16
+- **Việc:**
+  - [ ] `tools/web_search.py`: `HybridSearch(providers)` là một `SearchProvider`; đọc `WEB_SEARCH_PROVIDERS` (mặc định `tavily`), `WEB_SEARCH_MODE` (chỉ `fallback`), `WEB_SEARCH_TOTAL_TIMEOUT_S`, `WEB_SEARCH_CIRCUIT_TTL_S`; tên nguồn lạ hoặc `WEB_SEARCH_TIMEOUT_S ≥ WEB_SEARCH_TOTAL_TIMEOUT_S` ⇒ không boot, in tên biến (A4)
+  - [ ] `SearchError.PAYMENT`; ngắt mạch `SET websearch:down:{provider} EX …` cho 401 / 402 / 403 / 429 / 432 / 433; Redis lỗi khi đọc khoá ngắt mạch ⇒ coi như không ngắt, không ném
+  - [ ] Mọi nguồn hỏng: tất cả `not_configured` ⇒ `not_configured`, còn lại ⇒ mã của nguồn thử cuối (bảng trong docstring)
+  - [ ] `registry.search_provider = HybridSearch(...)`; một dòng log mỗi lượt: `providers=… used=… latency_ms=… n=…` — không câu hỏi
+- **Xong khi (DoD):**
+  - [ ] pytest hai nguồn giả: nguồn 1 trả 432 ⇒ kết quả từ nguồn 2; lượt kế trong TTL ⇒ **0** request tới nguồn 1 (đếm `MockTransport`); hết TTL ⇒ thử lại nguồn 1 (S16)
+  - [ ] pytest: nguồn 1 treo 30 s ⇒ lượt trả trong `WEB_SEARCH_TOTAL_TIMEOUT_S` ± 10 %, kết quả từ nguồn 2
+  - [ ] Stack: `make eval … --config tavily` lại ⇒ số ca đạt bằng baseline T-10.7 — dán hai bảng cạnh nhau
+  - [ ] `TAVILY_API_KEY=` + restart `worker` ⇒ lượt chat qua Nginx vẫn `done` (UC-08 dòng 5), chip "Tìm web đang không dùng được"
+  - [ ] `grep -n "TavilySearch()" backend/app/tools/registry.py` ⇒ rỗng
+- **Cạm bẫy:** ① Trần tổng bọc cả chuỗi: nguồn 1 ăn hết trần thì nguồn 2 không bao giờ được thử — vì thế kiểm lúc boot trần mỗi nguồn < trần tổng. ② Ngắt mạch là khoá **toàn cục** — test phải dọn khoá giữa các ca, không thì ca sau thấy nguồn đã "chết" từ ca trước.
+
+### T-10.9 — `DeepSeekSearch`: `/v1/tools/search`, `need_content`, 402 ⇒ `payment`, khoá riêng `DEEPSEEK_SEARCH_API_KEY`; dòng trên trang thông tin
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.8, **T-H15**, Q-P10-4 · **Ước lượng:** 2 h
+- **KH:** §24.2c P10-6, R-P10-3, R-P10-4, C46, RR-16
+- **Việc:**
+  - [ ] Class `DeepSeekSearch` (lối `TavilySearch`): `POST {DEEPSEEK_SEARCH_BASE_URL}/v1/tools/search`, khoá ở header, `count`, `need_content = WEB_SEARCH_PREFETCH_TOP_K > 0`; query > 128 ký tự ⇒ cắt ở ranh giới từ; 401 / 403 ⇒ `unauthorized`, 402 ⇒ `payment`, 429 ⇒ `rate_limited`
+  - [ ] `rerank_score < DEEPSEEK_SEARCH_MIN_RERANK` xếp sau; `content` rỗng thì dùng `summary`; mọi chữ (cả `summary`) đi qua `untrusted_block` như hôm nay
+  - [ ] `Settings` + `.env.example`: `DEEPSEEK_SEARCH_API_KEY` (rỗng ⇒ `not_configured`), `DEEPSEEK_SEARCH_BASE_URL`, `DEEPSEEK_SEARCH_MIN_RERANK`
+  - [ ] Trang thông tin (T-9.6): dòng "câu hỏi tìm web có thể được gửi tới DeepSeek"
+- **Xong khi (DoD):**
+  - [ ] pytest `MockTransport`: 200 / 401 / 402 / 429 / timeout / JSON hỏng ⇒ đúng mã; chuỗi canary trong thân 402 **không** có trong kết quả
+  - [ ] Stack, `WEB_SEARCH_PROVIDERS=deepseek,tavily` + restart `worker`: một lượt chat tìm web ⇒ log `used=deepseek`, `sources` khác rỗng, độ dài `content` > 0 khi đọc sẵn bật (C46)
+  - [ ] `DEEPSEEK_SEARCH_API_KEY=sk-sai` ⇒ log `used=tavily`; `redis-cli TTL websearch:down:deepseek` > 0
+  - [ ] `grep -rn "DEEPSEEK_API_KEY" backend/app` ⇒ không dòng nào đọc biến ấy (R-P10-3)
+  - [ ] Chromium: trang thông tin có dòng DeepSeek
+- **Cạm bẫy:** C46. ② Query model viết đã có `site:` — T-10.10 thêm `site:` từ `domains` không được nhân đôi.
+
+### T-10.10 — Tham số `time_range` / `domains` + ánh xạ theo nguồn; eval ba cấu hình, chốt thứ tự mặc định bằng số (**M7**)
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.9 (🚧 ⇒ chạy với nguồn đang có khoá, bổ sung số DeepSeek sau) · **Ước lượng:** 2.5 h
+- **KH:** §24.2c P10-6 (bảng tham số), S16, S17
+- **Việc:**
+  - [ ] Schema tool `web_search`: `time_range` enum `day|week|month|year`, `domains` mảng ≤ 5 tên miền (không scheme, không path — sai thì bỏ phần tử, không lỗi); mô tả tool nói khi nào đặt
+  - [ ] Ánh xạ cho Tavily (`time_range` + `topic: "news"`, `include_domains`) và DeepSeek (`site:`; `time_range` bỏ qua); `TAVILY_SEARCH_DEPTH` (mặc định `basic`)
+  - [ ] Eval ba cấu hình: `tavily` · `deepseek` · `deepseek,tavily` (fallback); chọn mặc định theo S17; ghi `.env.example` + NQ kèm bảng số
+- **Xong khi (DoD):**
+  - [ ] pytest: `domains=["vnexpress.net"]` ⇒ body Tavily có `include_domains`, query DeepSeek có đúng một `site:vnexpress.net`; `domains=["http://x/y"]` ⇒ phần tử bị bỏ, lượt vẫn chạy
+  - [ ] Ba tệp eval + bảng so (ca đạt, p95 tool, chi phí, độ dài chữ); cấu hình chọn đạt S17
+  - [ ] Hai ca "chỉ định nguồn": ≥ 1/2 có mọi `sources` thuộc tên miền yêu cầu (baseline T-10.7 dán cạnh)
+  - [ ] Tiền trong trần Q-P10-4
+- **Cạm bẫy:** C48 — mỗi cấu hình phải restart `worker`; dòng `providers=` trong tệp kết quả là bằng chứng, không phải tên cấu hình gõ trên lệnh.
+
+### T-10.11 — 🔒 Đọc sẵn top-k qua `fetcher` + cắt BM25 theo đoạn (tự viết) — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.10 · **Ước lượng:** 3.5 h
+- **KH:** §24.2c P10-6 (luồng ②③), §12.2, §12.3, C24, C50
+- **Việc:**
+  - [ ] `tools/bm25.py`: đoạn theo dòng trống; chuẩn hoá NFC + lowercase, **giữ dấu**, token `\w+`; k1 = 1.2, b = 0.75; `best_passages(text, query, max_chars)` giữ đoạn điểm cao theo thứ tự gốc
+  - [ ] `HybridSearch`: top-`WEB_SEARCH_PREFETCH_TOP_K` — dùng chữ nguồn đã trả (DeepSeek `content`, Tavily `include_raw_content` khi bật); còn thiếu ⇒ `fetch_url` qua `fetcher` song song (`asyncio.gather`, trần riêng, nằm trong trần tổng); trang hỏng bỏ, không lên `sources`
+  - [ ] Mỗi kết quả ≤ `TOOL_RESULT_MAX_CHARS // k`; đọc sẵn **không** tính vào `MAX_TOOL_CALLS_PER_TURN`
+  - [ ] Eval `prefetch` 0 / 2 / 3, chốt mặc định + NQ
+- **Xong khi (DoD):**
+  - [ ] pytest BM25: cặp NFC / NFD khớp; "má" và "mà" không khớp nhau; trang mẫu 30 đoạn, câu "giá vàng hôm nay" ⇒ giữ đúng đoạn chứa "giá vàng"
+  - [ ] pytest: một trang trong top-3 hỏng ⇒ lượt ok, trang ấy không trong `sources`; tổng chữ ≤ `TOOL_RESULT_MAX_CHARS`
+  - [ ] Eval 3 cấu hình + bảng; số lời gọi `fetch_url` model tự gọi (đếm trong `tool_rounds`) trước / sau
+  - [ ] C24: 20 lượt tìm có đọc sẵn liên tiếp ⇒ `docker stats --no-stream fetcher` về mức nền ± 10 %
+  - [ ] `pytest tests/tools/test_ssrf.py` xanh (S10)
+- **Cạm bẫy:** C50. ② Trang PDF ⇒ `fetcher` trả `unsupportedType` ⇒ bỏ; **không** leo thang ở đây — leo thang là T-10.15 và chỉ cho tập lý do đóng.
+
+### T-10.12 — 🔒 Service `searxng` ở `egress` + `SearxngSearch`; `check_networks` phủ nó (dev + prod); image ghim đa kiến trúc — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.8 · **Ước lượng:** 3 h
+- **KH:** §24.2c P10-6 (Hạ tầng SearXNG), §12.2, R-P10-1, C47, RR-19
+- **Việc:**
+  - [ ] `docker-compose.yml`: service `searxng` — chỉ `egress`, không `env_file`, không `ports`, `mem_limit`, healthcheck; `SEARXNG_SECRET: ${SEARXNG_SECRET:?}` (một biến, nội suy); image `searxng/searxng@sha256:…`; overlay prod nếu cần
+  - [ ] `config/searxng/settings.yml` mount `:ro`: `search.formats: [html, json]`, `server.limiter: false`, engine DuckDuckGo / Brave / Mojeek / Wikipedia
+  - [ ] `scripts/check_networks.py`: `searxng` chỉ `egress`, không env / cổng — cả cấu hình prod
+  - [ ] Class `SearxngSearch`: `GET /search?q=&format=json&time_range=&language=`; `domains` ⇒ `site:`; rỗng kèm `unresponsive_engines` ⇒ `upstream` (C47); khử trùng URL (C51)
+  - [ ] `.env.example`: `SEARXNG_BASE_URL`, `SEARXNG_SECRET`; trang thông tin: dòng các engine nhận câu hỏi
+- **Xong khi (DoD):**
+  - [ ] `docker compose ps` ⇒ `searxng` `healthy`; `make lint` ⇒ `check-networks: OK` (dev + prod); kiểm ngược: thêm `internal` cho `searxng` ⇒ `check-networks` đỏ
+  - [ ] `docker compose exec -T worker python -c "import httpx;print(httpx.get('http://searxng:8080/search',params={'q':'python','format':'json'}).status_code)"` ⇒ `200`; cùng lệnh trong `api` ⇒ lỗi kết nối
+  - [ ] `docker compose exec -T searxng env | grep -cE 'JWT|DATABASE_URL|MASTER_ENCRYPTION|SMTP'` ⇒ `0`
+  - [ ] `docker buildx imagetools inspect searxng/searxng@sha256:…` ⇒ có `linux/arm64` và `linux/amd64`
+  - [ ] pytest `SearxngSearch`: rỗng + `unresponsive_engines` ⇒ `upstream`; `403` ⇒ `upstream` + log nhắc `search.formats`
+  - [ ] `make prod-up` ⇒ `searxng` `healthy` dưới overlay prod; trả về dev bằng `make prod-down up`
+- **Cạm bẫy:** C47. ② `searxng/searxng:latest` đổi mỗi tuần — ghim digest, không ghim tag. ③ Image có thể không có `curl` / `wget` cho healthcheck — kiểm trong image trước khi viết lệnh. ④ `${SEARXNG_SECRET:?}` được nội suy cho **cả** tệp compose: thiếu biến thì **mọi** lệnh `docker compose` dừng (kể cả `ps`, `make test`), không chỉ `searxng` — đúng tinh thần A4, nhưng phải ghi rõ ở `.env.example` + README và đặt biến trong `.env` máy dev **trước** khi commit compose. ⑤ `cap_drop: [ALL]` làm entrypoint đổi user của image chết lặng (container restart vòng) — đo `docker compose logs searxng`, thêm đúng cap cần (lối `fetcher`), không bỏ `cap_drop`.
+
+### T-10.13 — Chế độ `parallel`: hai nguồn đầu cùng lúc, chuẩn hoá URL, RRF; eval `parallel` vs `fallback`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.12 (≥ 2 nguồn sống) · **Ước lượng:** 2.5 h
+- **KH:** §24.2c P10-6 (luồng ①), C51, RR-17, S17
+- **Việc:**
+  - [ ] `WEB_SEARCH_MODE=parallel`: hai nguồn đầu đồng thời trong trần tổng, hết trần trả những gì đã về; chuẩn hoá URL theo C51; RRF (k = 60); DeepSeek `rerank_score` dưới ngưỡng xếp sau
+  - [ ] Quota vẫn **một** lượt
+  - [ ] Eval `parallel` (hai cấu hình đứng đầu của T-10.10) vs `fallback`; chốt mặc định + NQ
+- **Xong khi (DoD):**
+  - [ ] pytest RRF với thứ hạng biết trước; bảng C51 (`utm_*`, `fbclid`, fragment, host hoa, `?id=1` vs `?id=2`)
+  - [ ] pytest: nguồn 2 treo ⇒ kết quả nguồn 1 trong trần tổng ± 10 %
+  - [ ] `ZCARD` bộ đếm `web_searches` của user tăng đúng 1 mỗi lượt `parallel` (dán trước / sau)
+  - [ ] Eval bảng so; tiền trong trần Q-P10-4
+- **Cạm bẫy:** C51; tiền ×2 mỗi lượt — chỉ để `parallel` làm mặc định khi bảng số cho thấy đáng (RR-17).
+
+### T-10.14 — `FirecrawlSearch`: nguồn cuối của chuỗi; ngân sách Redis toàn cục chặn **trước** khi gọi
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.8, **T-H16** · **Ước lượng:** 2.5 h
+- **KH:** §24.2c P10-6 (Ngân sách Firecrawl), RR-16, RR-17
+- **Việc:**
+  - [ ] Class `FirecrawlSearch`: `POST /v2/search`, `limit`, `tbs=qdr:…`, `includeDomains`, `scrapeOptions.formats=["markdown"]` khi đọc sẵn bật; 402 / hết credit ⇒ `payment`
+  - [ ] Ngân sách nguyên tử (Lua): `websearch:firecrawl:min:{yyyymmddHHMM}` ≤ `FIRECRAWL_MAX_PER_MIN`, `websearch:firecrawl:credits` + chi phí dự tính ≤ `FIRECRAWL_CREDIT_BUDGET`; vượt ⇒ `not_configured`, 0 request
+  - [ ] `Settings` + `.env.example`; trang thông tin: dòng Firecrawl
+- **Xong khi (DoD):**
+  - [ ] pytest: lời gọi thứ `FIRECRAWL_MAX_PER_MIN + 1` trong cùng phút ⇒ 0 request (`MockTransport`); credit vượt ngân sách ⇒ 0 request
+  - [ ] Stack: chuỗi `…,firecrawl`, các nguồn trước ngắt mạch tay (`SET websearch:down:<p> 1 EX 120`) ⇒ log `used=firecrawl`; `GET websearch:firecrawl:credits` tăng đúng (2 / 10 kết quả, +1 mỗi trang scrape)
+  - [ ] Chromium: trang thông tin có dòng Firecrawl
+- **Cạm bẫy:** ① Trần 10 req / phút là của **tài khoản** Firecrawl — dev và prod dùng chung khoá thì chia trần, không mỗi máy 10. ② Đếm credit theo `creditsUsed` của response nếu có, không thì theo bảng giá — ghi rõ đã dùng cách nào.
+
+### T-10.15 — 🔒 Dự phòng `fetch_url`: `fetcher` → DeepSeek Fetch → Firecrawl scrape, chỉ trên tập lý do đóng; **không bao giờ** sau khi `ssrf` từ chối — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.9 và / hoặc T-10.14 (vế nào có khoá làm vế ấy) · **Ước lượng:** 2.5 h
+- **KH:** §24.2c P10-6 (Dự phòng `fetch_url`), §12, A5, C49, RR-16
+- **Việc:**
+  - [ ] `tools/fetch_url.py` (phía `worker`): sau kết quả `fetcher`, chỉ leo thang khi lý do ∈ {`http_403`} hoặc chữ < `FETCH_FALLBACK_MIN_CHARS`; thứ tự DeepSeek Fetch (`/v1/tools/fetch`) → Firecrawl scrape (dùng chung ngân sách T-10.14)
+  - [ ] Lý do của `ssrf` (`internal`, `blocked`, URL sai) ⇒ trả nguyên, **không** leo thang; log `via=fetcher|deepseek|firecrawl`
+  - [ ] Trang thông tin: dòng "URL trang bị chặn có thể được gửi tới DeepSeek / Firecrawl để đọc hộ"
+- **Xong khi (DoD):**
+  - [ ] pytest kiểm ngược C49: `http://litellm:4000/`, `http://169.254.169.254/latest/meta-data/`, `http://10.0.0.1/` ⇒ **0** request tới `MockTransport` của DeepSeek và Firecrawl
+  - [ ] pytest: `fetcher` 403 ⇒ request DeepSeek; DeepSeek hỏng ⇒ Firecrawl; cả hai hỏng ⇒ lý do gốc `http`
+  - [ ] Stack: một trang thật chặn bot (chọn lúc làm, ghi URL vào báo cáo) ⇒ `fetch_url` ok, log `via=…`
+  - [ ] `pytest tests/tools/test_ssrf.py` xanh (S10)
+- **Cạm bẫy:** C49. ② "Chữ quá ngắn" đo **sau** Playwright (§12.3), không sau httpx — trang JS-heavy hôm nay đã leo thang Playwright; leo thang lần nữa trước đó là gửi URL ra ngoài oan.
+
+### T-10.16 — Chi phí theo nguồn: bộ đếm ngày, log mỗi lượt, khối `web_search` trong `/admin/usage` + bảng trong màn Chi phí
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.9 (≥ một nguồn trả tiền đang bật) · **Ước lượng:** 2 h
+- **KH:** §24.2c P10-6 (Chi phí và log), §21.2, RR-17
+- **Việc:**
+  - [ ] `INCRBYFLOAT websearch:cost:{provider}:{yyyy-mm-dd}` (USD cho DeepSeek theo `DEEPSEEK_SEARCH_USD_PER_1K` — chỉ lượt thành công; credit cho Tavily / Firecrawl), TTL 90 ngày
+  - [ ] `GET /admin/usage` thêm khối `web_search: [{provider, date, amount, unit}]`
+  - [ ] Màn Chi phí của admin: một bảng (thành phần bảng có sẵn) — nguồn · hôm nay · 7 ngày · đơn vị
+- **Xong khi (DoD):**
+  - [ ] pytest: 3 lượt DeepSeek thành công + 1 hỏng ⇒ `websearch:cost:deepseek:<ngày>` = 3 × giá / 1000; `TTL` > 0
+  - [ ] `curl` `/admin/usage` bằng phiên admin ⇒ có khối `web_search`; bằng user thường ⇒ cùng mã chặn như các route admin hiện có
+  - [ ] Chromium màn Chi phí: bảng đủ các nguồn đang bật; `make audit` 0 vi phạm mới
+- **Cạm bẫy:** giá DeepSeek là `Settings`, không literal (A3) — đổi giá không sửa số đã đếm (cùng tinh thần A7).
+
+### Khối D — Hỏi nhiều model
+
+### T-10.17 — 🔒⭐ Fan-out ở backend: `models: [...]` trong `POST …/messages`, N anh em cùng `fanout_id` (migration 0017), biên vào tất cả-hoặc-không, N job độc lập — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.2, T-9.3 ✅, Q-P10-3, Q-P10-8 · **Ước lượng:** 4 h
+- **KH:** §24.2c P10-7, ADR-18, §10.2, §10.6, §11.4, C52, C53, S18
+- **Rủi ro:** chạm biên vào của chat (quota, trần đồng thời, idempotency) — sai ở đây là tiền thật hoặc lượt nửa vời
+- **Việc:**
+  - [ ] `alembic/versions/0017_messages_fanout.py`: `fanout_id UUID NULL`, `synthesis_of UUID[] NULL`, index `(parent_id, fanout_id)`
+  - [ ] Body `models: [{model_id, reasoning_effort?}]` (2…`FANOUT_MAX_MODELS`, không trùng; trộn với `model_id` ⇒ `400 FANOUT_INVALID`); `FANOUT_MAX_MODELS ≤ MAX_CONCURRENT_STREAMS` kiểm lúc boot
+  - [ ] Biên vào, **trước khi tạo hàng nào**: quyền từng model, capability (ảnh + model không `vision` ⇒ `422` cả lượt), `reasoning_effort` từng model, quota `Σ est_max`, giữ N slot đồng thời trong **một** thao tác nguyên tử (lối Lua của T-2.9)
+  - [ ] Một transaction: message user + N assistant (cùng `parent_id`, cùng `fanout_id`); enqueue N `generate`; `active_leaf_id` = cột đầu; response + `fanout_id`, `assistant_message_ids`; một `Idempotency-Key`
+  - [ ] Đường đi + `/siblings` trả `fanout_id`; `/auth/me` trả `fanout_max_models`; mỗi cột nhả slot của mình khi xong (lối B-85)
+- **Xong khi (DoD):**
+  - [ ] `curl` 3 model qua Nginx ⇒ `202`; `SELECT parent_id, fanout_id, model_id FROM messages WHERE fanout_id = '<id>'` ⇒ 3 hàng cùng `parent_id`, 3 `model_id` khác nhau; `active_leaf_id` = id đầu
+  - [ ] Cùng `Idempotency-Key` lần hai ⇒ cùng id, `count(*)` không đổi
+  - [ ] 4 model / trùng model / `model_id` + `models` ⇒ `400 FANOUT_INVALID`, 0 hàng mới
+  - [ ] C52: hạn mức user tạm đủ 2 cột không đủ 3 ⇒ `429`, `count(*)` của `messages` và `usage_events` trước = sau
+  - [ ] C53: hai `curl` song song, mỗi cái 3 model ⇒ đúng một `202`, một `429 TOO_MANY_STREAMS` (dán hai mã)
+  - [ ] pytest fixture `LLMClient` bắt request: chữ canary của cột 1 và 3 **không** có trong request của cột 2 (A2)
+  - [ ] pytest: job cột 2 ném ⇒ cột 2 `failed`, cột 1 và 3 `completed`
+  - [ ] `scripts/test_resume.py` mở rộng `--fanout 3` ⇒ S3 trên cả ba cột: 0 ký tự mất, 0 lặp
+  - [ ] Tiền ≤ 0.10 USD
+- **Cạm bẫy:** C52, C53. ③ `rebuild_quota` (§10.3) không cần nhánh riêng — N dòng `usage_events` là N dòng thường; test đã có phải xanh nguyên. ④ Idempotency lưu cả response (ADR-15) — response nay lớn hơn; kiểm trần thân của khoá `idem:` (B-145).
+
+### T-10.18 — 🔒 Tổng kết ở backend: `POST /messages/{id}/synthesize`, anh em có `synthesis_of`, `context.build` trải N câu làm dữ liệu nhãn A/B/C — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.17 · **Ước lượng:** 3.5 h
+- **KH:** §24.2c P10-7 (Tổng kết), ADR-19, §8.3, §9.6, C54
+- **Rủi ro:** ngoại lệ đầu tiên của `context.build` ngoài đường đi — phải có tên, có test, không lan
+- **Việc:**
+  - [ ] Route: id là message **user** có cột `fanout_id`; mọi cột ở trạng thái kết thúc, ≥ 2 `completed`, còn cột đang sinh ⇒ `409 FANOUT_IN_PROGRESS`; lọc `user_id` trong SQL (IDOR ⇒ `404`); `Idempotency-Key` bắt buộc (thiếu ⇒ `400`)
+  - [ ] Tạo anh em mới: `synthesis_of = [id các cột completed theo thứ tự fanout]`, cùng `fanout_id`; enqueue `generate`
+  - [ ] `llm/context.py`: message có `synthesis_of` ⇒ đường đi tới message user + **một** khối `untrusted_block` "Câu trả lời A / B / C" (không tên model, không `model_id`) + `config/prompts/synthesize.jinja`; ngân sách còn lại chia đều N câu, cắt kèm dòng báo (C54)
+  - [ ] Lượt sau nối từ lá tổng kết dựng context như mọi lượt (A2) — không đọc lại các cột
+- **Xong khi (DoD):**
+  - [ ] pytest bắt request: có ba khối nhãn A / B / C mang canary của từng cột, nằm trong vỏ untrusted; `grep` mọi `id` + `display_name` của catalog trong request ⇒ 0
+  - [ ] pytest: câu user nối sau lá tổng kết ⇒ request chứa chữ tổng kết, **không** chứa canary của ba cột
+  - [ ] Một cột đang `streaming` ⇒ `409`; message của user khác ⇒ `404`; thiếu khoá ⇒ `400`
+  - [ ] C54: ba cột × 40 000 ký tự ⇒ request ≤ ngân sách của model tổng kết, prompt có dòng "đã cắt"
+  - [ ] Stack: tổng kết thật trên ba cột `completed` ⇒ `completed`, `array_length(synthesis_of, 1) = 3`
+  - [ ] Tiền ≤ 0.10 USD
+- **Cạm bẫy:** C54. ② Lấy các cột bằng `get_path` là sai (chúng không nằm trên đường đi của nhau) — đọc theo `id = ANY(:ids) AND conversation_id = … AND user_id = …` trong SQL. ③ Nhãn theo thứ tự fanout, không theo thứ tự xong — không thì A/B/C đổi giữa hai lần tổng kết.
+
+### T-10.19 — FE: picker chế độ chọn nhiều (tối đa `fanout_max_models`), gửi `models`
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.17, **T-HD14** · **Ước lượng:** 2.5 h
+- **KH:** §24.2c P10-7 (Giao diện), T-S.14, C22
+- **Việc:**
+  - [ ] Picker theo T-HD14: bật chế độ chọn nhiều; model không khả dụng không chọn được; đủ trần thì các ô còn lại khoá kèm tooltip; ảnh đính kèm ⇒ model không `vision` khoá (cùng luật T-4.5)
+  - [ ] Composer gửi `models` khi chọn ≥ 2; `Idempotency-Key` theo lần soạn thảo (C22)
+  - [ ] Lựa chọn giữ theo hội thoại trong phiên (chuyển hội thoại rồi quay lại vẫn còn; F5 mất — không lưu server)
+- **Xong khi (DoD):**
+  - [ ] vitest: trần 3, chọn ô thứ tư ⇒ khoá; ảnh đính kèm ⇒ model không vision khoá
+  - [ ] Chromium qua Nginx: chọn 3, gửi ⇒ body request có `models` 3 phần tử (network log), `202`; chuyển hội thoại và quay lại ⇒ vẫn 3 model được chọn
+  - [ ] 375 px: picker không tràn ngang; `make audit` 0 vi phạm mới
+- **Cạm bẫy:** gửi lại sau lỗi mạng phải dùng **cùng** khoá — không thì lần thử lại tạo N cột thứ hai (C22).
+
+### T-10.20 — FE: màn cột song song (N `EventSource`, đồng hồ + Dừng mỗi cột), "Dùng câu này", "Tổng kết bằng…", mở lại hội thoại hiện lại cột (**M8**)
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.18, T-10.19, T-10.2, **T-HD14** · **Ước lượng:** 4 h
+- **KH:** §24.2c P10-7 (Giao diện), §7 (resume), R-P10-9, S18
+- **Việc:**
+  - [ ] Bố cục theo T-HD14: cột ≥ 1024 px; nhỏ hơn: tab / vuốt; mỗi cột một `EventSource` dùng lại `sse.ts` (resume, `Last-Event-ID`, `visibilitychange`)
+  - [ ] Mỗi cột: model · mức · đồng hồ (T-10.2) · Dừng (`/cancel` của cột ấy) · lỗi riêng của cột
+  - [ ] Xong: "Dùng câu này" ⇒ `PATCH /conversations/{id}` đổi `active_leaf_id`; "Tổng kết bằng…" ⇒ chọn một model ⇒ `synthesize` ⇒ cột tổng kết chảy
+  - [ ] Mở lại hội thoại: message trên đường đi có `fanout_id` ⇒ `/siblings` ⇒ dựng lại cột
+- **Xong khi (DoD):**
+  - [ ] Chromium qua Nginx 1440 px, 3 model: cả ba cột nhận `delta` **trước khi** cột chậm nhất `done` (dán mốc thời gian từng cột)
+  - [ ] F5 khi ba cột đang chảy ⇒ ba cột nối tiếp; chữ cuối mỗi cột = `messages.content` byte-by-byte (S18)
+  - [ ] Dừng cột 2 ⇒ chỉ cột 2 `cancelled` (SQL)
+  - [ ] "Dùng câu này" cột 3 rồi gửi câu tiếp ⇒ `parent_id` của câu mới = id cột 3 (SQL)
+  - [ ] "Tổng kết bằng…" ⇒ cột tổng kết chảy, xong có đồng hồ
+  - [ ] Request stream có `nextHopProtocol = "h2"` (Performance API) — R-P10-9
+  - [ ] 375 px: tab, không tràn ngang; `make audit` 0 vi phạm mới; `make test-artifact-origin` `S12 đạt`
+  - [ ] Tiền ≤ 0.10 USD
+- **Cạm bẫy:** ① Một `EventSource` hỏng gọi `onerror` — không được đóng hay làm hỏng cột khác (Phụ lục F: `error` không đóng). ② Mở lại hội thoại khi một cột còn `streaming` (tab khác) ⇒ cột ấy phải nối stream, không hiện như đã xong.
+
+### Khối X — Thí nghiệm có điều kiện dừng
+
+### T-10.21 — 🔒⭐ Thí nghiệm jev: ép mọi request qua đường đã kiểm SSRF? chạy được arm64 + amd64? khoá vào đường nào? độ trễ + chi phí thật — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** T-10.11 (P10-3 ④); ④ cần **T-H17** · **Ước lượng:** 3 h
+- **KH:** §24.2c P10-8, ADR-23, §12.2, §12.3, C24, R-P10-1
+- **Rủi ro:** quyết định có thêm một trình duyệt do agent lái vào stack hay không
+- **Việc:**
+  - [ ] jev ghim commit, clone vào scratchpad (**không** vào repo); container tạm `p10-jev-*` dựng từ image `fetcher` + jev, cùng netns / rào `iptables` của `fetcher`
+  - [ ] ① Trang thử (phục vụ trong container tạm) có request con tới `http://169.254.169.254/`, `http://litellm:4000/`, WebSocket `ws://redis:6379`, `<link rel=preconnect href="http://postgres:5432">`, một tên DNS rebinding ⇒ đọc log route / proxy và bộ đếm `iptables`
+  - [ ] ② Chạy trên arm64 (máy này) và amd64 (`--platform linux/amd64` hoặc người chạy trên EC2) — Chromium thay Chrome
+  - [ ] ③ Đề xuất đường vào cho `TYPESAFE_API_KEY` / `TEXT_MODEL_API_KEY` mà `fetcher` vẫn không `env_file` — bảng phương án
+  - [ ] ④ (sau T-H17) 5 trang mục tiêu (lọc / phân trang / form tra cứu chỉ đọc) × độ trễ + chi phí
+  - [ ] Kết luận ĐI TIẾP / DỪNG + NQ; dọn mọi container `p10-*`
+- **Xong khi (DoD):**
+  - [ ] ① Bảng 5 đích × "bị chặn ở đâu" + bộ đếm `iptables` của đích nội bộ không đổi — dán nguyên văn; **một** đích lọt ⇒ kết luận DỪNG, T-10.23 ⏭️
+  - [ ] ② `uname -m` + kết quả chạy trên cả hai kiến trúc
+  - [ ] ③ Bảng phương án kèm đề xuất
+  - [ ] ④ Bảng 5 trang × giây × USD (hoặc 🚧 kèm lý do nếu chưa có T-H17)
+  - [ ] `docker ps -a --format '{{.Names}}' | grep '^p10-'` ⇒ rỗng; `git status --short` chỉ còn `docs/tasks.md`
+- **Cạm bẫy:** ① jev mặc định dùng chung profile Chrome — thí nghiệm ① phải chạy với profile tạm, không thì cookie của lượt trước làm sai số đo. ② `DONE` của jev không chứng minh đã đọc đúng (README tự ghi) — ④ đo bằng chữ trích được, không bằng trạng thái.
+
+### T-10.22 — 🔒 Thí nghiệm mạng MCP: (a) qua `fetcher` vs (b) `worker` ghim IP — số đo cho Q-P10-5 — **KHÔNG ĐƯỢC GỘP**
+- **Trạng thái:** ☐ · **Phụ thuộc:** thứ tự P10-3 (không chặn kỹ thuật) · **Ước lượng:** 2.5 h
+- **KH:** §24.2c P10-9, ADR-21, A5, §12.2, ADR-09
+- **Việc:**
+  - [ ] Server MCP đồ chơi (streamable HTTP) trong container tạm `p10-mcp-*` ở `egress`
+  - [ ] Nguyên mẫu (a) — đường proxy POST + stream response qua `fetcher`, ghim IP, kiểm từng redirect; (b) — transport `httpx` ghim IP bằng `ssrf.py` trong `worker`. Cả hai ở nhánh nháp / scratchpad, **không** commit
+  - [ ] Đo cho mỗi phương án: `initialize` + `tools/list` + `tools/call` có stream, header `Mcp-Session-Id`; DNS rebinding; đích `postgres:5432`, `redis:6379`, `litellm:4000`, `169.254.169.254` từ URL do người dùng khai; độ trễ thêm; số dòng code
+  - [ ] Bảng kết luận cho người quyết Q-P10-5 + NQ
+- **Xong khi (DoD):**
+  - [ ] Bảng (a) / (b) × 6 phép đo trên — dán số
+  - [ ] (b) với một bug cố ý ở lớp ghim IP (kiểm ngược) ⇒ ghi đích nội bộ nào tới được; (a) cùng bug ⇒ ghi đích nào tới được — đây là con số quyết định lớp 1
+  - [ ] `docker ps -a | grep p10-mcp` rỗng; `git status --short` chỉ còn `docs/tasks.md`
+- **Cạm bẫy:** `fetcher` hôm nay chỉ GET (Playwright `route.fulfill` bằng GET đã kiểm) — MCP cần POST JSON-RPC **và** response SSE dài; đo được stream thật chảy qua, không chỉ "200 OK".
+
+### Khối G — Có điều kiện *(bảng — mở rộng bằng prompt META §7.4 khi cổng qua)*
+
+| ID | Task | Phụ thuộc (cổng) | KH | Ước lượng |
+|---|---|---|---|---|
+| **T-10.23** | Tool `browse(url, goal)` bằng jev — tách nhỏ khi mở: service / netns, quyền `can_use_browser` + `browse_per_day`, chip FE, bộ test cô lập lối T-7.4 | T-10.21 kết luận ĐI TIẾP, T-H17 | P10-8, ADR-23 | ~8 h |
+| **T-10.24** 🔒 | `MCPToolProvider` + bảng `user_mcp_servers` + kiểm `initialize` / `tools/list` trước khi lưu, theo đường mạng đã chốt | T-10.22, **Q-P10-5**, T-H18 | P10-9, ADR-21 | 4 h |
+| **T-10.25** | Cache danh sách tool (Redis, TTL) + trần schema / mô tả + `can_use_mcp` + `audit_logs` | T-10.24 | P10-9 | 3 h |
+| **T-10.26** | Màn cài đặt MCP: thêm / kiểm / xoá / bật tắt server | T-10.25, T-HD15 | P10-9 | 3 h |
+| **T-10.27** 🔒 | Trí nhớ bậc 2 — tách nhỏ khi mở: bảng `user_memories`, tool đề xuất, màn xác nhận + quản lý, công tắc, bộ test injection đỏ được | **Q-P10-6**, **Q-P10-7**, T-10.6 | P10-10, ADR-22, RR-15 | ~8 h |
+| **T-10.28** | Trí nhớ bậc 3: B-09 (Postgres FTS trên `messages`, lọc `user_id` trong SQL) + tool `search_conversations` | T-10.27 ✅ hoặc người quyết riêng | P10-10 | 5 h |
+
+---
+
 ## 14. Backlog
 
 Ý tưởng nảy ra giữa chừng. **KHÔNG code ngay.** Muốn đưa lên roadmap phải viết ADR hoặc thêm vào một phase cụ thể.
@@ -4183,16 +4657,16 @@ Quy luật: task viết code trên bề mặt đã quen về **25–50 %** (T-8.
 | B-02 | Chuyển sandbox sang gVisor/Firecracker nếu mở đăng ký rộng hơn | ADR-09, RR-2 |
 | B-03 | Chuyển model catalog vào DB, sửa qua admin panel | ADR-12 |
 | B-04 | Prometheus + Grafana thay bảng thống kê tự viết | §21.2 |
-| B-05 | MCP client | R21, §13.5 — interface đã sẵn sàng |
+| B-05 | *(NQ-152: → P10 — thí nghiệm mạng T-10.22, rồi T-10.24–26 khi Q-P10-5 chốt; connector OAuth tách ra B-431.)* MCP client | R21, §13.5 — interface đã sẵn sàng |
 | B-06 | RAG: collection, upload tài liệu, `search_knowledge` tool | R21, §21.4 |
 | B-07 | i18n thêm ngôn ngữ (hạ tầng `t()` đã có từ T-0.10) | §2.2 |
 | B-08 | **Phân trang/giới hạn khi một user có hàng nghìn hội thoại** — hiện chưa có gì chặn | Điểm yếu #4 trong rà soát §7.5 |
-| B-09 | Tìm kiếm toàn văn trong lịch sử hội thoại (Postgres FTS) | — |
+| B-09 | *(NQ-152: → T-10.28, trí nhớ bậc 3 — có điều kiện.)* Tìm kiếm toàn văn trong lịch sử hội thoại (Postgres FTS) | — |
 | B-10 | Thư mục/nhãn cho hội thoại | — |
 | B-11 | Prompt template dùng lại được | — |
 | B-12 | Thống kê cá nhân cho user: model hay dùng, chi tiêu theo tháng | — |
 | B-13 | *(Mở rộng P8, 2026-10-13: T-8.6 đặt hợp đồng JSON `format: "scarlet-conversation"` + `version` — import sau này đọc đúng nó; import vẫn ngoài P8.)* Import hội thoại từ ChatGPT/Claude export | Đối xứng với T-8.5/T-8.6 |
-| B-14 | So sánh hai model song song trong cùng một câu hỏi | — |
+| B-14 | *(NQ-152: → T-10.17–T-10.20, hỏi nhiều model + tổng kết — ADR-18, ADR-19.)* So sánh hai model song song trong cùng một câu hỏi | — |
 | B-15 | `.env.example` **không `source` được bằng shell**: `MAIL_FROM=Scarlet <no-reply@...>` bị shell hiểu là redirect. Docker compose đọc bình thường, nhưng dev chạy backend ngoài Docker cần `scripts/load-env.sh` hoặc direnv | T-0.3 — chép nguyên KH Phụ lục B nên không tự sửa |
 | B-17 | **→ T-9.4b (NQ-151): đóng ở đó — không thêm `CORS_ORIGINS`:** một origin, `core/origin.py` so `Origin` với `PUBLIC_BASE_URL` (NQ-36); lệch §22.6 ghi B-425 ②. KH §22.6 nhắc `CORS_ORIGINS` khi lên domain, nhưng biến này **không có trong Phụ lục B** | T-0.3 |
 | ~~B-18~~ | **ĐÃ ĐÓNG 2026-10-16 ở T-9.5a:** `settings.py::load_settings()` in `<tên>: <type> — <msg>` từ `errors(include_input=False)`, `SystemExit … from None`; đo trên container `api` tạm với `JWT_SECRET=short` ⇒ log 0 dòng chứa `short`. **Nội dung gốc:** **→ T-9.5a (NQ-151).** `ValidationError` in kèm giá trị bị từ chối (`input_value='short'`) — một secret yếu sẽ lọt vào log lúc app từ chối boot. Cân nhắc bọc `Settings()` để in bản tóm tắt đã che giá trị | T-0.3 |
@@ -4641,6 +5115,8 @@ P1 **nghiêng hẳn về nhóm B** (Redis stream, SSE qua Nginx, trình duyệt,
 | B-428 | **Năm điều T-9.5a để lại.** ① **`docker logs` dừng ở một dòng hỏng của tệp log json** (đo trên `fetcher`, Docker 29.5.2): tệp có một dòng hỏng từ 2026-10-08 (nghi lần tắt máy không sạch — họ B-275) ⇒ `docker logs` / `docker compose logs` đọc từ đầu tới dòng ấy là thôi, `--since` **mọi** cửa sổ ra 0 dòng, chỉ `--tail` (đọc từ cuối) thấy dòng mới — **không báo lỗi**. Mọi DoD "grep log từ mốc ⇒ 0" xanh giả được trên container bị như thế. Nhận ra: `docker logs -t <c> 2>&1 \| tail -1` cũ hơn `docker logs -t --tail 1 <c>`. Chữa: `up -d --force-recreate --no-deps <c>` (tệp log mới). Hôm nay chỉ `fetcher` bị (đã chữa); **cần chốt:** một dòng README (T-9.7, cạnh B-275) + `max-size` của overlay prod (T-9.4a, Cạm bẫy ⑥) làm nó hiếm hơn. *(T-9.4a: overlay prod có `json-file` `max-size: 10m` × `max-file: 5` cho cả 12 service; dev không đổi.)* ② **`error_log` của Nginx (mức `warn`) vẫn in request line kèm query** khi upstream lỗi (`… request: "GET /x?token=…"`) — `log_format` không chạm `error_log`. Hiếm (chỉ khi upstream hỏng) và không chỉnh định dạng được; **cần chốt:** chấp nhận, hay hạ `error_log` xuống `error`/`crit` ở prod. ③ **`logger.exception` vẫn mang thông điệp exception vào traceback** — đường chở nội dung thật (SQL `[parameters: …]`) đã đóng bằng `hide_parameters=True`; còn lại thông điệp do code/SDK tự dựng (`tool %s no` ở `registry.py:424` nếu một tool ném lỗi có tham số trong chữ; chữ lỗi provider trong `GenerationError` — khoá đã che, phần còn lại provider tự quyết). Không sửa: bỏ traceback là mất thứ người sửa cần đọc (lối `cli.py`). ④ **→ T-9.6:** những gì log giữ, để trang thông tin nói đúng — Nginx: IP, `request_id`, phương thức, đường dẫn **không query** (token chia sẻ che), mã trạng thái, kích thước, thời gian; backend: id (message, hội thoại, user), số đếm, mã lỗi, **email** khi gửi thư hỏng (`auth.py:336, 947`); **không** nội dung, câu hỏi, chữ tool, khoá. ⑤ **Chữ DoD lệch code:** "bỏ `install_log_redaction()`" — hàm được gọi ở `main.py` mức module **và** trong `setup_logging()`, nên phép phá làm hàm ấy thành `return` (một chỗ) thay vì xoá từng lời gọi | T-9.5a |
 | B-429 | **Năm điều T-9.5b để lại.** ① **`route` là mẫu tương đối của router con** (`/conversations/{conversation_id}/messages`, thiếu `/api/v1`): FastAPI 0.143 đặt `scope["route"]` là `APIRoute` gốc, đường đầy đủ chỉ nằm ở `scope["fastapi"]["effective_route_context"].path` — cấu trúc nội bộ, không dùng. Hai tầng route (`/api/v1/*`, `artifacts_render`) không trùng mẫu nên vẫn phân biệt được; **cần chốt** nếu muốn tiền tố. ② **Chữ DoD lệch hành vi của Starlette 1.7:** kiểm ngược "`BaseHTTPMiddleware` ⇒ `curl -N` dồn cục" **không** xảy ra — `curl -N` vẫn 51 event / 11 giây khác nhau; thứ hỏng là dòng log ghi lúc **mở** stream (`latency_ms: 1.7` cho stream 10 s) và ca SSE unit đỏ. Cạm bẫy C1 về đệm của `BaseHTTPMiddleware` đã cũ với bản này; lý do giữ ASGI thuần nay là "dòng log lúc đóng + phát hiện ngắt". ③ **`/health` mỗi 10 s ⇒ ~8 640 dòng / ngày** ở log `api` (healthcheck của Docker) — **cần chốt:** bỏ dòng request của `/health` hay giữ (hôm nay giữ: một mẫu route, lọc được). ④ **`worker: dung, khong nhan job moi` in đôi** mỗi lần dừng (có từ trước T-9.5b — log định dạng cũ cũng đôi): `on_shutdown` chạy hai lần? Chưa đào. Và arq không in dòng `→ job(…)` nào trong log `worker` (logger `arq` không có handler dưới `app.workers.run`) — "dòng arq đếm riêng" của DoD hôm nay là `0`. ⑤ **→ T-9.7:** README "xem log theo `request_id`": `x-request-id` có ở mọi response (và cột 2 của access log Nginx) ⇒ `docker compose logs api worker \| grep <id>`; dòng không phải JSON là của uvicorn / watchfiles / traceback của trình thông dịch khi `--reload` ngắt giữa lúc import (chỉ dev) | T-9.5b |
 | B-430 | **Năm điều T-9.4a để lại.** ① **`host.docker.internal` có thêm địa chỉ IPv6** trong `fetcher` (đo 2026-10-16, cả dev lẫn prod): `192.168.65.254` + `fdc4:f303:9324::254`. `socket.create_connection` ném lỗi của địa chỉ cuối ⇒ `OSError errno=101` (`egress` không có route IPv6) thay vì `ConnectionRefusedError`, còn IPv4 vẫn REJECT cả bốn cổng ⇒ rào vẫn đóng. Hệ quả: chữ DoD "`ConnectionRefusedError` cả sáu" (B-382, T-9.4a) không còn đúng nguyên văn. Nếu một ngày `egress` có IPv6 thì `ip6tables` (`fc00::/7`) là lớp chặn — đã có trong `entrypoint.sh`. **Cần chốt:** ở T-9.4b / T-9.7, phép thử đo từng họ địa chỉ (`AF_INET` / `AF_INET6`). ② **`minio --version` / `mc --version` in `DEVELOPMENT.GOGET`**: `go install` không nhúng phiên bản, release chỉ còn ở tag image + `ARG`. Muốn in đúng: `-ldflags "-X github.com/minio/minio/cmd.Version=…"` (tương tự cho `mc`). Chưa làm — không ảnh hưởng chạy. ③ **Dev vẫn `minio/minio:latest`** (base): một máy dev mới vẫn không dựng nổi stack **dev**. Chuyển base sang `build: ./minio` sẽ đổi bản MinIO của dev (bản cache 2025-09-07 → RELEASE.2025-10-15). Đã đo được là cùng volume chạy được cả hai chiều: prod chạy trên volume ấy rồi dev quay về vẫn `healthy`. **Cần chốt:** chuyển hẳn (một dòng trong base, `backup` của T-9.3 cũng hưởng), hay giữ. ④ **`grep -c 4000:4000` trên `docker compose config` không đỏ được**: `config` in cổng ở dạng dài (`target: 4000` / `published: "4000"`), dev cũng ra 0. Phép thật là `grep -c 'published: "4000"'` (dev 1, prod 0, bỏ `!reset` ⇒ 1). T-9.4b ("không cổng thừa": `5432`, `6379`, `9000`) nên dùng dạng này. ⑤ **Biên S8 mỏng:** Performance 88 nhờ nén mức 6 (mức 1: 80–84), với một bundle 1 034 kB (gzip 304 kB truyền), LCP ~3.1 s mô phỏng. Một tính năng nặng thêm là có thể rơi < 80. Nút kế tiếp: tách chunk theo route (Cạm bẫy ⑦ — admin, cài đặt, panel artifact, Prism) hoặc `gzip_static` (nén sẵn lúc build). Thêm: `make s8` / `test-artifact-origin` chạy trong `artifact-origin` của **override dev**, mount `certs/localhost+3.pem` — trên máy prod không có service ấy (T-9.4b đo từ ngoài, không ghim) | T-9.4a |
+| B-431 | **Connector OAuth cho MCP (file chuẩn bị P10 §2.3) — không vào P10 (P10-2 ⛔).** Drive / Gmail / Calendar… cần đăng ký app với từng nhà cung cấp, callback, lưu + làm tươi refresh token mã hoá, thu hồi khi người dùng ngắt. Mỗi connector là một server MCP (tự host hoặc của nhà cung cấp) — không viết tool riêng cho từng dịch vụ. Chỉ mở khi khối MCP (T-10.24–26) chạy ổn **và** có một connector cụ thể cần dùng | NQ-152, KE-HOACH §24.2c P10-2 |
+| B-432 | **`.env.bak-*` không bị `.gitignore` phủ.** Đo 2026-11-04: `.env.bak-20261029` (bản sao `.env`, có secret) nằm ở gốc repo, `.gitignore` chỉ có dòng `.env` ⇒ một `git add -A` / `git add .` là commit secret vào lịch sử. Rẻ: thêm `.env.bak*` (hoặc `.env.*` kèm `!.env.example`, `!.env.providers.example`) vào `.gitignore`; trong lúc chờ, `CLAUDE.md` cấm `git add -A` | NQ-152, đo trước khi lập P10 |
 
 **Ghi chú lệch nhỏ:** B-28 ghi "chưa nghiệm thu được vì `ANTHROPIC_API_KEY` rỗng" — **đã cũ**, key nay có giá trị (kiểm hôm nay, không in giá trị). T-1.3 không còn bị chặn vì lý do đó.
 
@@ -4946,6 +5422,8 @@ Không task nào được đánh ✅ nếu thiếu bất kỳ dòng nào dưới
 | **NQ-149** | 2026-10-13 | **Mở rộng Phase 8 — bảy câu Q-P8-1…7 chốt trước khi phase bắt đầu; giữ tám ID, không tách task (nút chờ `T-8.1` gắn ở T-8.2); P7 đóng (11/11); §2 sửa.** ① người dùng vẽ **T-HD12** gồm hộp thoại Chia sẻ, trang công khai, "Chat tiếp" **và** trạng thái mic + Đọc to (khác phương án đề xuất "voice dùng ngôn ngữ 'đang ấn' có sẵn") ⇒ T-8.4 chờ bản vẽ; bộ icon PWA cũng vào T-HD12 (agent không tự vẽ); ② **không service worker** — đo: Chromium 154 cài được chỉ với manifest; offline → B-413; ③ cài thật iOS / Android ⇒ **T-H13** sau T-9.4, T-8.8 đo bằng CDP; ④ snapshot + fork mang **ảnh + artifact `kind=file`** (chép sang `share/<token>/`, `GET` ký bản chép), tài liệu của user chỉ tên; ⑤ trang công khai là **SPA** `/s/:token` + `X-Robots-Tag` (lệch §16.1 "server render" → B-412); ⑥ artifact trên trang công khai **tĩnh + Tải**, không chạy (→ B-414); ⑦ cho sửa §2 (P7 ✅, P8 8 task / 20.5 h, Tổng 134 / 356 h) + tick DoD dòng 5 T-7.5 + ghi thực tế T-7.9. **Chọn theo tiền lệ, không hỏi:** chia sẻ lại ⇒ token mới; token 128 bit là hằng module; đường đi đang sinh ⇒ `409`; fork để `model_id` / `feedback` `NULL`; `.md` cho người, `.json` cho máy (`format` + `version` — B-13); menu con Xuất ba mục không chờ bản vẽ; `firefox-esr` vào image `audit`. **Đo trước:** cài được không cần SW; Lighthouse 12.8.2 không còn hạng PWA; `make audit` (`http://web:5173`) không có `/api`, không secure context; Firefox 153 ESR không có `SpeechRecognition` nhưng có `speechSynthesis`; header latin-1 của Starlette; FE không gọi `/auth/refresh` (→ B-415) | Người dùng giao "mở rộng T-8.1…T-8.8 đầy đủ 7 trường, DoD chạy được, cạm bẫy từ P0–P7 thật, gán Backlog, ước lượng theo tốc độ thật, giữ ID, đánh 🔒" và cho ghi đè Phase 8 + Backlog; bảy chỗ ngỏ hỏi trước khi viết (lối NQ-147); đổi được khi duyệt |
 | **NQ-150** | 2026-10-15 | **T-8.7 — hai câu trước dòng code đầu.** ① `api.me()` trả `401` lúc bấm Xuất: **không tải**, dòng `role=alert` ở sidebar "Phiên đăng nhập đã hết hạn nên chưa tải gì." + link "Đăng nhập lại" ⇒ `/dang-nhap?next=<đường đang mở>` (`safeNext` của T-8.3), không tự điều hướng (khác: chỉ câu; đăng xuất + về `/dang-nhap` như `AccountMenu` — câu sẽ không hiện được). ② DoD dòng 3 "375 px menu con không tràn": **đo ở 640 cả hai neo** + dán bằng chứng lớp sidebar `inert` ở 375 (khác: gập ba mục vào menu cha dưới 640 như T-HD12; ép mở menu hàng ở 375) | ① Việc ghi "đường phiên hết hạn có sẵn" nhưng FE không có đường nào như thế — chỉ `StatusGate` ⇒ `/dang-nhap` lúc mở trang khi `/auth/me` hỏng, và `?next=` của T-8.3. ② Từ T-S.19a dưới 640 đảo luôn neo `top` (`useIslandAnchor`) ⇒ hình "side" không bao giờ dựng, menu hàng không tới được ở 375; DoD viết ở NQ-149 chưa tính điều này. Người dùng chọn phương án đề xuất cả hai |
 | **NQ-151** | 2026-10-15 | **Đóng P8 (8/8 ✅) và mở rộng Phase 9 — bốn câu Q-P9-1…4 chốt trước khi phase bắt đầu, người dùng chọn phương án đề xuất cả bốn; giữ bảy ID, T-9.4 và T-9.5 tách a/b, thêm T-9.8 (10 task); §2 sửa (P8 ✅ 2026-10-15, P9 10 task / 27.5 h, Tổng 137 / 364.5 h).** ① production vào repo: overlay `docker-compose.prod.yml`, stage `prod` của FE, MinIO + `mc` build từ source; T-9.4a làm ngay trên localhost (+ S8 Performance — NQ-77), T-9.4b (domain, Let's Encrypt, HSTS) chờ T-H10; EC2 dùng lại tệp của repo, người dùng tự deploy ⇒ **T-H14** mới; ② eval: trần riêng **0.60 USD** cho T-9.1 (ngoại lệ NQ-122), model đỏ ⇒ `enabled: false` (§21.3) + Backlog; ③ B-415 ⇒ **T-9.8 🔒** (FE làm mới phiên một lần, khoá chéo tab, SSE mở lại); ④ **T-9.5a 🔒** rà + chặn rò / **T-9.5b** §21.1 (JSON + `request_id` tới `worker`). **Chọn theo tiền lệ, không hỏi:** runner eval qua Nginx với user tạm (lối `bench_ttft.py`), từ chối đè kết quả (B-106), ca tool `load_skill` + `fetch_url` tới `.invalid`, ca thiếu capability ⇒ `skip`; backup là service compose, env tối thiểu, khôi phục đo trên container tạm; MinIO + `mc` build từ source (lối `deploy-minio/`); thư qua job arq (B-135) + `app.cli mail-test`; không `CORS_ORIGINS` (B-17); Nginx prod bằng template `envsubst`, HSTS bật bằng biến sau khi chứng chỉ ổn; T-9.6 không chờ bản vẽ; T-9.8 không đổi backend; B-253 vào T-H13; `kq` / `nha_ghe_sinh` / `503` / `van` dọn ở T-9.7; B-388, B-349 gạch (sót sổ P8); lệch KH của P9 dồn vào B-425. **Đo trước:** STARTTLS của `Mailer` không kiểm chứng chỉ (`verify_mode 0`, `check_hostname False`); `minio/minio` hết pull (`denied`, cả digest); bundle FE một chunk 1 033 kB / 312 kB gzip; `litellm` publish `0.0.0.0:4000`, cổng 80 host trống; `DEBUG=true`; Nginx log cả query; backend không đọc `X-Request-Id`, `api` không có handler log; cookie phiên hết hạn ⇒ `UNAUTHENTICATED` (không `TOKEN_EXPIRED`); ngân sách §9.6 118 808 token ⇒ ca context-đầy `claude-haiku` ≈ 0.12 USD; `--preset=mobile` không có ở Lighthouse 12.8.2; `pg_dump -Fc` 390 602 B / 0.24 s; B-388 đã hết từ T-8.5. **Quyền người dùng cấp cho phiên (ngoại lệ luật "không sửa `docs/`"):** sửa §2 (dòng P8, P9, Tổng); ghi đè toàn bộ mục 13; sửa / thêm dòng Backlog liên quan; tick hoặc ghi thực tế cho task P8 còn sót (lối Q-P8-7) — dùng để gạch B-388, B-349; KE-HOACH vẫn là vùng cấm (lệch → B-425) | Người dùng giao "(A) rà và đóng P8, (B) mở rộng T-9.1…T-9.7 đủ 7 trường, DoD chạy được trên stack thật kèm kiểm ngược, cạm bẫy từ P0–P8 thật, gán Backlog, ước lượng theo tốc độ thật P7 / P8, giữ ID (được tách a/b), đánh 🔒"; bốn chỗ ngỏ hỏi một lần trước khi viết (lối NQ-149); đổi được khi duyệt |
+| **NQ-152** | 2026-11-04 | **Lập Phase 10 — Mở rộng sau v1 từ `docs/phase-10-preparation.md`; người dùng cho phép viết KE-HOACH cho P10** (§24.2c, dòng P10 ở §24.2 / §24.3, ADR-17…ADR-23, RR-15…RR-20, Q-13…Q-21, ghi chú §2.2 + Phụ lục G, dòng P10 ở Phụ lục H) — ngoại lệ có tên của "KH là vùng cấm" (B-412, B-425 giữ nguyên cho P8 / P9). 28 task: 22 sẵn sàng đủ 7 trường (59 h) + 6 khối G dạng bảng (31 h); §2 sửa (P9 🔄 5/10, P10 28 / 90 h, Tổng 165 / 454.5 h); mốc M7 (T-10.10), M8 (T-10.20). **P9 chưa đóng** — điều kiện mở P10: T-9.3 + T-9.6 ✅. Chín câu Q-P10-1…9 **chưa chốt**, Việc viết theo mặc định ghi trong bảng. Ba chỗ sửa so với file chuẩn bị: khoá DeepSeek Search là biến riêng `DEEPSEEK_SEARCH_API_KEY` (NQ-15); lối đo là `core/provider_health.py`, không `health_checks.py`; chỉ hai chỗ đặt mật khẩu (không có route đổi mật khẩu). Connector OAuth ⇒ B-431; `.env.bak-*` ⇒ B-432 | Người dùng giao "Đọc docs/phase-10-preparation.md, viết Phase 10, KE-HOACH.md, tasks.md, tuân thủ META". Khối có cổng theo META §4.4: browse / MCP / trí nhớ 2–3 chờ thí nghiệm hoặc quyết định — viết chi tiết bây giờ là viết hai lần. Mọi mặc định đổi được khi duyệt; đổi thì ghi NQ mới |
+| **NQ-153** | 2026-11-04 | **`CLAUDE.md` viết lại** theo bộ tài liệu sau P9 và lúc mở P10: môi trường dev hiện tại (macOS arm64 + Docker Desktop; WSL2 chỉ khi dev trên Windows), prod EC2 x86_64 qua overlay `docker-compose.prod.yml`, giao thức G1–G6, A1–A10, danh sách "không bao giờ" cộng các luật đã thành thói quen từ P5 → P9 (kiểm ngược, trần tiền NQ-122, không `down -v`, không SSH prod, `git add` từng file). Tệp vẫn trong `.gitignore` (78d4d82) | Người dùng giao "Viết lại CLAUDE.md mới theo các file trong docs". Bản cũ (git 78d4d82^) còn ghi WSL bắt buộc và thiếu mọi luật sinh sau P3 |
 
 ---
 
