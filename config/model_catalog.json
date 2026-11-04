@@ -1,6 +1,6 @@
 {
   "version": 4,
-  "title_model": { "model": "deepseek-flash", "reasoning": "off", "max_output": 64 },
+  "title_model": { "model": "nr-deepseek-v4.1-flash", "max_output": 512 },
   "manual_pricing": {
     "_huong_dan_1": "GIA UOC LUONG do nguoi van hanh TU DIEN TAY, cho model ma provider khong ban theo token hoac khong bao gia dang tin (9Router — xem KE-HOACH §9.5, tasks.md B-65). Gia NIEM YET cua provider thi dien o `models[].pricing`, KHONG dien o day.",
     "_huong_dan_2": "Khoa = `id` cua model trong `models[]`. Don vi: USD tren 1 TRIEU token, giong `models[].pricing`. De `null` = chua dien; luc nap catalog app se in mot dong WARNING liet ke dung ten nhung model chua co gia, va quota se KHONG tru cho chung.",
@@ -13,6 +13,38 @@
       "cache_write_per_1m": null,
       "prompt_overhead_tokens": null,
       "note": "9Router (B-65): prompt 15 token do duoc 2015/2032/2089/2092 prompt_tokens trong bon lan goi khac nhau — con so doi theo tung luot nen day la mot UOC LUONG, khong phai mot hop dong gia."
+    },
+    "nr-claude-opus-4.6-thinking": {
+      "input_per_1m": null,
+      "output_per_1m": null,
+      "cached_input_per_1m": null,
+      "cache_write_per_1m": null,
+      "prompt_overhead_tokens": null,
+      "note": "9Router: prompt ~30 token do duoc 2070 prompt_tokens (2026-10-29), cung co overhead ~2000 nhu nr-gemini-flash."
+    },
+    "nr-claude-sonnet-4.6": {
+      "input_per_1m": null,
+      "output_per_1m": null,
+      "cached_input_per_1m": null,
+      "cache_write_per_1m": null,
+      "prompt_overhead_tokens": null,
+      "note": "9Router: prompt ~30 token do duoc 2070 prompt_tokens (2026-10-29), cung co overhead ~2000 nhu nr-gemini-flash."
+    },
+    "nr-deepseek-v4-pro": {
+      "input_per_1m": null,
+      "output_per_1m": null,
+      "cached_input_per_1m": null,
+      "cache_write_per_1m": null,
+      "prompt_overhead_tokens": null,
+      "note": "9Router (cmc): prompt 5 token do duoc ~7600 prompt_tokens (2026-11-04) — overhead lon hon nhieu so voi nhanh ag/."
+    },
+    "nr-deepseek-v4.1-flash": {
+      "input_per_1m": null,
+      "output_per_1m": null,
+      "cached_input_per_1m": null,
+      "cache_write_per_1m": null,
+      "prompt_overhead_tokens": null,
+      "note": "9Router (cmc): prompt 5 token do duoc ~7600 prompt_tokens (2026-11-04) — overhead lon hon nhieu so voi nhanh ag/."
     }
   },
   "pricing_schedules": {
@@ -97,8 +129,8 @@
         }
       },
       "pricing_mode": "metered",
-      "enabled": true,
-      "default": true,
+      "enabled": false,
+      "default": false,
       "order": 10,
       "badge": "Mặc định · Rẻ",
       "reasoning": {
@@ -127,7 +159,7 @@
         "cache_write_per_1m": 1.25
       },
       "pricing_mode": "metered",
-      "enabled": true,
+      "enabled": false,
       "default": false,
       "order": 20,
       "badge": null,
@@ -142,7 +174,7 @@
     },
     {
       "id": "nr-gemini-flash",
-      "display_name": "Gemini Flash",
+      "display_name": "Gemini 3.8 Flash",
       "provider": "ninerouter",
       "display_provider": "Google AI",
       "upstream_model": "openai/ag/gemini-3.8-flash-low",
@@ -159,9 +191,74 @@
         "default": "low",
         "options": [
           { "id": "low", "params": {} },
+          { "id": "medium", "params": {}, "alias": "nr-gemini-flash-medium" },
           { "id": "high", "params": {}, "alias": "nr-gemini-flash-high" }
         ]
       }
+    },
+    {
+      "id": "nr-claude-opus-4.6-thinking",
+      "display_name": "Claude Opus 4.6 Thinking",
+      "provider": "ninerouter",
+      "display_provider": "Anthropic",
+      "upstream_model": "openai/ag/claude-opus-4-6-thinking",
+      "capabilities": ["tools"],
+      "context_window": 200000,
+      "max_output": 16384,
+      "pricing": null,
+      "pricing_mode": "unmetered",
+      "enabled": true,
+      "default": false,
+      "order": 32,
+      "badge": null
+    },
+    {
+      "id": "nr-claude-sonnet-4.6",
+      "display_name": "Claude Sonnet 4.6",
+      "provider": "ninerouter",
+      "display_provider": "Anthropic",
+      "upstream_model": "openai/ag/claude-sonnet-4-6",
+      "capabilities": ["tools"],
+      "context_window": 200000,
+      "max_output": 16384,
+      "pricing": null,
+      "pricing_mode": "unmetered",
+      "enabled": true,
+      "default": false,
+      "order": 34,
+      "badge": null
+    },
+    {
+      "id": "nr-deepseek-v4-pro",
+      "display_name": "Deepseek V4 Pro",
+      "provider": "ninerouter",
+      "display_provider": "Deepseek",
+      "upstream_model": "openai/cmc/deepseek/deepseek-v4-pro",
+      "capabilities": ["tools"],
+      "context_window": 128000,
+      "max_output": 8192,
+      "pricing": null,
+      "pricing_mode": "unmetered",
+      "enabled": true,
+      "default": false,
+      "order": 36,
+      "badge": null
+    },
+    {
+      "id": "nr-deepseek-v4.1-flash",
+      "display_name": "Deepseek V4.1 Flash",
+      "provider": "ninerouter",
+      "display_provider": "Deepseek",
+      "upstream_model": "openai/cmc/deepseek/deepseek-v4.1-flash",
+      "capabilities": ["tools", "vision"],
+      "context_window": 128000,
+      "max_output": 8192,
+      "pricing": null,
+      "pricing_mode": "unmetered",
+      "enabled": true,
+      "default": true,
+      "order": 38,
+      "badge": "Mặc định"
     },
     {
       "id": "ol-qwen-small",

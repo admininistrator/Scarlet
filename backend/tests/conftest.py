@@ -654,3 +654,30 @@ def all_catalog_models_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     for model in patched.models:
         model.enabled = True
     monkeypatch.setattr(catalog, "_catalog", patched)
+
+
+#: Model mặc định "bình thường" của catalog: có giá (metered) và có BYOK — nhiều
+#: test đo quota / ledger / BYOK bằng chính model mặc định.
+NOMINAL_DEFAULT_MODEL = "deepseek-flash"
+
+
+@pytest.fixture
+def api_key_models_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bản sao catalog thật với mọi model bật VÀ `deepseek-flash` làm mặc định.
+
+    Nhánh API Key (DeepSeek, Anthropic) có thể bị tắt tạm trong file — khi đó
+    `default` / `title_model` dời sang model 9Router (không giá, không BYOK).
+    Test về quota, ledger, BYOK cần model mặc định có giá ⇒ dựng lại cấu hình
+    bình thường thay vì sửa con số trong từng test. Tắt model không được làm
+    đỏ `make test` (T-9.1).
+    """
+    from app.config import catalog
+
+    patched = catalog.get_catalog().model_copy(deep=True)
+    for model in patched.models:
+        model.enabled = True
+        model.default = model.id == NOMINAL_DEFAULT_MODEL
+    patched.title_model = catalog.TitleModel(
+        model=NOMINAL_DEFAULT_MODEL, reasoning="off", max_output=64
+    )
+    monkeypatch.setattr(catalog, "_catalog", patched)

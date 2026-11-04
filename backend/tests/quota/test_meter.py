@@ -40,6 +40,10 @@ from app.quota.meter import (
 )
 from app.quota.windows import COST_DECIMALS, parse_member, windows
 
+# `deepseek-flash` / `claude-haiku` có thể đang tắt (2026-11-04: tạm tắt nhánh
+# API Key) — test hỏi hình dạng model, không hỏi hôm nay model nào bật (T-9.1).
+pytestmark = pytest.mark.usefixtures("api_key_models_enabled")
+
 #: `metered`, có giá niêm yết, và **bán theo khung giờ** (B-35) — model duy
 #: nhất trong catalog kiểm được cả A7 lẫn phép tách peak/off-peak.
 MODEL_METERED = "deepseek-flash"

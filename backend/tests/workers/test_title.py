@@ -46,6 +46,10 @@ from app.streaming.producer import FIELD_DATA, FIELD_TYPE, title_stream_key
 from app.workers.generate import CTX_LLM_CLIENT
 from app.workers.title import clean_title, generate_title
 
+# `deepseek-flash` / `claude-haiku` có thể đang tắt (2026-11-04: tạm tắt nhánh
+# API Key) — test hỏi hình dạng model, không hỏi hôm nay model nào bật (T-9.1).
+pytestmark = pytest.mark.usefixtures("api_key_models_enabled")
+
 QUESTION = "Làm sao nấu phở bò cho 4 người, nước dùng trong?"
 
 # ─────────────────────────── hai thứ giả ───────────────────────────

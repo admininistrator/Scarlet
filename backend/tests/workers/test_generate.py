@@ -65,6 +65,10 @@ from app.streaming.cancel import FINISH_REASON_CANCELLED, cancel_key
 from app.streaming.producer import FIELD_DATA, FIELD_TYPE
 from app.workers.generate import CANCEL_CHECK_EVERY_N_CHUNKS, CTX_LLM_CLIENT, generate
 
+# `deepseek-flash` / `claude-haiku` có thể đang tắt (2026-11-04: tạm tắt nhánh
+# API Key) — test hỏi hình dạng model, không hỏi hôm nay model nào bật (T-9.1).
+pytestmark = pytest.mark.usefixtures("api_key_models_enabled")
+
 #: Model THẬT trong `config/model_catalog.json` — `generate` tra catalog bằng
 #: `messages.model_id`, nên một id bịa sẽ đi thẳng vào nhánh `MODEL_UNKNOWN`.
 MODEL_ID = "deepseek-flash"

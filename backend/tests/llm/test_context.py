@@ -49,6 +49,10 @@ from app.llm.context import (
 from app.llm.tokens import count_message, count_messages, count_text
 from app.quota.estimator import check_quota
 
+# `deepseek-flash` / `claude-haiku` có thể đang tắt (2026-11-04: tạm tắt nhánh
+# API Key) — test hỏi hình dạng model, không hỏi hôm nay model nào bật (T-9.1).
+pytestmark = pytest.mark.usefixtures("api_key_models_enabled")
+
 #: Model giả lập. Không phải model OpenAI ⇒ đi đúng nhánh "xấp xỉ" của §9.6.
 MODEL_ID = "model-thu-nghiem"
 DISPLAY_NAME = "Model Thử Nghiệm"

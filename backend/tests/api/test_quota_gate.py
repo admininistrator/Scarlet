@@ -37,6 +37,10 @@ from app.db.repositories import ConversationRepository, MessageRepository, Provi
 from app.main import app
 from app.quota.windows import LimitType, Window, encode_member
 
+# `deepseek-flash` / `claude-haiku` có thể đang tắt (2026-11-04: tạm tắt nhánh
+# API Key) — test hỏi hình dạng model, không hỏi hôm nay model nào bật (T-9.1).
+pytestmark = pytest.mark.usefixtures("api_key_models_enabled")
+
 CREATE_PATH = "/api/v1/conversations/{}/messages"
 RETRY_PATH = "/api/v1/messages/{}/retry"
 EDIT_PATH = "/api/v1/messages/{}"

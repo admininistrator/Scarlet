@@ -46,6 +46,10 @@ from app.db.repositories import ConversationRepository
 from app.db.repositories.users import UserRepository
 from app.main import app
 
+# `deepseek-flash` / `claude-haiku` có thể đang tắt (2026-11-04: tạm tắt nhánh
+# API Key) — test hỏi hình dạng model, không hỏi hôm nay model nào bật (T-9.1).
+pytestmark = pytest.mark.usefixtures("api_key_models_enabled")
+
 LOGIN_PATH = "/api/v1/auth/login"
 ME_PATH = "/api/v1/auth/me"
 CONVERSATION_PATH = "/api/v1/conversations/{}"

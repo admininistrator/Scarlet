@@ -37,6 +37,10 @@ from app.core.deps import SESSION_COOKIE_NAME
 from app.db.models import UserRole, UserStatus
 from app.main import app
 
+# `deepseek-flash` / `claude-haiku` có thể đang tắt (2026-11-04: tạm tắt nhánh
+# API Key) — test hỏi hình dạng model, không hỏi hôm nay model nào bật (T-9.1).
+pytestmark = pytest.mark.usefixtures("api_key_models_enabled")
+
 client = TestClient(app)
 
 
@@ -171,7 +175,9 @@ def test_get_models_has_exactly_one_default_deepseek_flash() -> None:
 
 def test_reload_takes_effect_without_restart(tmp_path: Path) -> None:
     raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
-    raw["models"][0]["display_name"] = "DeepSeek Flash (test reload)"
+    # Model đang bật đầu tiên — model bị tắt không có mặt trong `/models`.
+    first_enabled = next(m for m in raw["models"] if m.get("enabled", True))
+    first_enabled["display_name"] = "DeepSeek Flash (test reload)"
     fixture = tmp_path / "model_catalog.json"
     fixture.write_text(json.dumps(raw), encoding="utf-8")
 
@@ -457,7 +463,9 @@ def test_reasoning_exposes_only_ids_and_default() -> None:
         "omit_temperature",
         "alias",
     ):
-        assert leak not in resp.text
+        # Dạng KHOÁ JSON: id model như `nr-claude-opus-4.6-thinking` chứa chữ
+        # `thinking` một cách hợp lệ, không phải rò `params`.
+        assert f'"{leak}"' not in resp.text
     by_id = {m["id"]: m for m in body}
     # T-S.6 (NQ-126): bốn mức theo tài liệu DeepSeek.
     assert [o["id"] for o in by_id["deepseek-flash"]["reasoning"]["options"]] == [

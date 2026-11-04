@@ -177,8 +177,11 @@ def test_real_catalog_file_valid_with_exactly_one_default() -> None:
     cat = catalog._read_and_validate(catalog.CATALOG_PATH)
     defaults = [m for m in cat.models if m.default]
     assert len(defaults) == 1
-    assert defaults[0].id == "deepseek-flash"
-    assert defaults[0].provider == "deepseek"
+    # 2026-11-04: nhánh API Key (DeepSeek, Anthropic) tạm tắt ⇒ mặc định dời
+    # sang DeepSeek qua 9Router. Bật lại thì trả về `deepseek-flash`/`deepseek`.
+    assert defaults[0].id == "nr-deepseek-v4.1-flash"
+    assert defaults[0].provider == "ninerouter"
+    assert defaults[0].enabled
 
 
 def test_reload_rereads_disk_and_replaces_cache(tmp_path: Path) -> None:
@@ -861,6 +864,11 @@ def test_real_catalog_reasoning_matches_t_s_2_table() -> None:
     `off` đi qua `extra_body` trên đường system và `byok_params` trên BYOK (đo:
     0 token suy luận cả hai đường). low·high·max khai theo tài liệu DeepSeek —
     số đo không tách được chúng, người dùng chốt khai.
+
+    `nr-gemini-flash` thêm `medium` (docs/add-model.md, 2026-10-29): đo trực
+    tiếp 9Router trên câu `hard` — `-low` 551, `-medium` 2245, `-high` 1606
+    `reasoning_tokens`, một lượt mỗi mức. Hai Claude qua 9Router KHÔNG khai:
+    mức nằm sẵn trong tên model.
     """
     raw = json.loads(catalog.CATALOG_PATH.read_text(encoding="utf-8"))
     blocks = {m["id"]: m.get("reasoning") for m in raw["models"]}
@@ -898,9 +906,19 @@ def test_real_catalog_reasoning_matches_t_s_2_table() -> None:
         "default": "low",
         "options": [
             {"id": "low", "params": {}},
+            {"id": "medium", "params": {}, "alias": "nr-gemini-flash-medium"},
             {"id": "high", "params": {}, "alias": "nr-gemini-flash-high"},
         ],
     }
+    assert blocks["nr-claude-opus-4.6-thinking"] is None
+    assert blocks["nr-claude-sonnet-4.6"] is None
+    # DeepSeek qua 9Router (2026-11-04): chưa đo tham số suy luận nào.
+    assert blocks["nr-deepseek-v4-pro"] is None
+    assert blocks["nr-deepseek-v4.1-flash"] is None
+    caps = {m["id"]: m["capabilities"] for m in raw["models"]}
+    # Đo 2026-11-04: V4.1 Flash nhận ảnh qua 9Router; V4 Pro không khai vision.
+    assert "vision" in caps["nr-deepseek-v4.1-flash"]
+    assert "vision" not in caps["nr-deepseek-v4-pro"]
     # T-S.2: Grok (Sub2API bỏ im lặng tham số) và Qwen (không có suy luận) KHÔNG khai.
     assert blocks["grok-4.6"] is None
     assert blocks["ol-qwen-small"] is None
@@ -920,10 +938,16 @@ def test_real_catalog_hides_intermediate_routes() -> None:
             assert m.display_provider is not None
 
 
-def test_real_catalog_title_model_is_deepseek_flash_with_reasoning_off() -> None:
+def test_real_catalog_title_model_is_deepseek_v4_1_flash() -> None:
+    """Tạm thời (2026-11-04) — nhánh API Key tắt nên `title_model` dời sang 9Router.
+
+    V4.1 Flash qua 9Router luôn suy luận, không tham số nào tắt được (đo:
+    `thinking`, `reasoning_effort`, `enable_thinking` đều không tác dụng) và
+    tiêu tốn 162–248 token cho một tiêu đề ⇒ 64 token cũ ra tiêu đề RỖNG.
+    """
     title = catalog.get_catalog().title_model
-    assert (title.model, title.reasoning) == ("deepseek-flash", "off")
-    assert title.max_output > 0
+    assert (title.model, title.reasoning) == ("nr-deepseek-v4.1-flash", None)
+    assert title.max_output >= 512
 
 
 # ─────────────── Giá dạng chuỗi và khung giá (§24.2b·S3c, NQ-120) ───────────────

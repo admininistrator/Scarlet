@@ -31,6 +31,10 @@ from app.db.repositories import ConversationRepository, MessageRepository
 from app.quota.estimator import check_quota, estimate, estimate_from_tokens
 from app.quota.windows import LimitType, Window, encode_member
 
+# `deepseek-flash` / `claude-haiku` có thể đang tắt (2026-11-04: tạm tắt nhánh
+# API Key) — test hỏi hình dạng model, không hỏi hôm nay model nào bật (T-9.1).
+pytestmark = pytest.mark.usefixtures("api_key_models_enabled")
+
 PRICED_MODEL = "deepseek-flash"
 UNPRICED_MODEL = "nr-gemini-flash"
 

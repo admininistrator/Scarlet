@@ -43,6 +43,10 @@ from app.db.repositories import (
 )
 from app.main import app
 
+# `deepseek-flash` / `claude-haiku` có thể đang tắt (2026-11-04: tạm tắt nhánh
+# API Key) — test hỏi hình dạng model, không hỏi hôm nay model nào bật (T-9.1).
+pytestmark = pytest.mark.usefixtures("api_key_models_enabled")
+
 CREATE_MESSAGE = "/api/v1/conversations/{}/messages"
 RETRY = "/api/v1/messages/{}/retry"
 EDIT_MESSAGE = "/api/v1/messages/{}"

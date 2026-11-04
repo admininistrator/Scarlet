@@ -31,13 +31,49 @@ model_list:
       api_base: os.environ/NINEROUTER_BASE_URL
       api_key: os.environ/NINEROUTER_API_KEY
 
-  # Mức `high` của `nr-gemini-flash` (`reasoning.options[].alias` trong
-  # model_catalog.json): 9Router chọn mức suy luận bằng TÊN model, tham số
-  # `reasoning_effort` bị bỏ qua (đo ở T-S.2). Không phải một model riêng
-  # trong Model Picker — chỉ backend gọi tên này khi người dùng chọn High.
+  # Mức `medium` / `high` của `nr-gemini-flash` (`reasoning.options[].alias`
+  # trong model_catalog.json): 9Router chọn mức suy luận bằng TÊN model, tham
+  # số `reasoning_effort` bị bỏ qua (đo ở T-S.2). Không phải model riêng trong
+  # Model Picker — chỉ backend gọi tên này khi người dùng chọn Medium / High.
+  - model_name: nr-gemini-flash-medium
+    litellm_params:
+      model: openai/ag/gemini-3.8-flash-medium
+      api_base: os.environ/NINEROUTER_BASE_URL
+      api_key: os.environ/NINEROUTER_API_KEY
+
   - model_name: nr-gemini-flash-high
     litellm_params:
       model: openai/ag/gemini-3.8-flash-high
+      api_base: os.environ/NINEROUTER_BASE_URL
+      api_key: os.environ/NINEROUTER_API_KEY
+
+  # Claude qua 9Router. Tên upstream viết bằng GẠCH NGANG (`4-6`), không phải
+  # dấu chấm: `ag/claude-opus-4.6-thinking` trả 404. Sonnet 4.6 không có bản
+  # `-thinking` trên 9Router (404) nên dùng bản thường. Không khối `reasoning`:
+  # mức suy luận nằm sẵn trong tên model, không gửi tham số nào.
+  - model_name: nr-claude-opus-4.6-thinking
+    litellm_params:
+      model: openai/ag/claude-opus-4-6-thinking
+      api_base: os.environ/NINEROUTER_BASE_URL
+      api_key: os.environ/NINEROUTER_API_KEY
+
+  - model_name: nr-claude-sonnet-4.6
+    litellm_params:
+      model: openai/ag/claude-sonnet-4-6
+      api_base: os.environ/NINEROUTER_BASE_URL
+      api_key: os.environ/NINEROUTER_API_KEY
+
+  # DeepSeek qua 9Router (nhánh `cmc/`). V4.1 Flash nhận ảnh (đo 2026-11-04:
+  # PNG đỏ ⇒ "Red."). Không khối `reasoning`: chưa đo tham số nào.
+  - model_name: nr-deepseek-v4-pro
+    litellm_params:
+      model: openai/cmc/deepseek/deepseek-v4-pro
+      api_base: os.environ/NINEROUTER_BASE_URL
+      api_key: os.environ/NINEROUTER_API_KEY
+
+  - model_name: nr-deepseek-v4.1-flash
+    litellm_params:
+      model: openai/cmc/deepseek/deepseek-v4.1-flash
       api_base: os.environ/NINEROUTER_BASE_URL
       api_key: os.environ/NINEROUTER_API_KEY
 
