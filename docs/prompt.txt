@@ -1,0 +1,34 @@
+Task: T-9.4a — 🔒 Production trong repo, chạy được ở localhost: stage build FE + `dist/` qua Nginx, overlay `docker-compose.prod.yml`, MinIO + `mc` build từ source, không cổng thừa; S8 đo ở đây
+
+Để xử lí các Backlog chặn hoặc gặp phải, hãy xử lí theo phương án tối ưu, nếu bí hoặc thiếu thông tin, hãy hỏi tôi để ra quyết định
+
+Trước khi viết dòng code đầu tiên:
+1. Đọc mục KH tham chiếu ghi trong task, task phụ thuộc và đọc kĩ phần Cạm bẫy nếu có
+2. Đọc lại các luật A1-A10 trong CLAUDE.md.
+3. Nếu bí hoặc thiếu thông tin để quyết định:
+→ DỪNG, đặt trạng thái 🚧 BLOCKED, ghi rõ vướng gì và cần tôi quyết định gì.
+   Không đoán, không chọn bừa.
+
+Rồi làm đúng phần "Việc cần làm".
+Rồi chạy đúng từng dòng DoD và DÁN OUTPUT THẬT.
+
+Báo cáo theo 4 phần ở tasks.md §0.4.
+Chỉ làm task này. Không làm task khác dù thấy dễ.
+
+Sau cùng đánh trạng thái của task và commit lên nhánh riêng của phase 9 nếu mark complete (tạo nếu chưa tồn tại), và nói rõ nếu có thể chuyển sang task tiếp theo hay cần người thực hiện gì trước (check cả mục 9 Backlog xem nếu task tiếp theo cần giải quyết Backlog nào)
+
+Làm task T-S.19c — Tab BYOK (T-HD10) + Model Picker + admin
+Đọc mục "KH tham chiếu" của task (KE-HOACH §24.2b và các mục nó trỏ tới) trước khi viết dòng code đầu tiên.
+Nếu bí hoặc thiếu thông tin, hãy hỏi tôi để ra quyết định cuối cùng
+Sau cùng hãy commit lên nhánh riêng của Phase S nếu mark complete (tạo nếu chưa tồn tại)
+
+
+Làm task T-S.19c — Tab BYOK (T-HD10) + Model Picker + admin
+
+Bản thiết kế: T-HD10 — đã ghi ở design/README.md, mục v3:
+<dán nguyên đoạn "Use the claude_design MCP (…) to import this project: … Implement: …">
+Design System: Đã đính kèm Artifact 'Scarlet Design System'
+- Màu, spacing, bố cục đã chốt. Thấy sai thì BÁO LẠI, không sửa.
+- Nếu một chỗ trong bản vẽ làm một dòng DoD không đạt được, dừng và hỏi — đừng chỉnh bản vẽ cho DoD xanh.
+- Đọc mục "KH tham chiếu" của task trước khi viết dòng code đầu tiên.
+Sau cùng hãy đánh trạng thái task và commit lên nhánh riêng của Phase S (tạo mới nếu chưa có) nếu task đã được mark complete
