@@ -17,3 +17,5 @@ evals/results/
 frontend/dist/
 # B-269: repo dung pnpm; lock cua npm la dap an thu hai cho "da cai ban nao".
 frontend/package-lock.json
+# Ban sao luu .env (vd. .env.bak-20261029) chua secret that.
+.env.bak*
